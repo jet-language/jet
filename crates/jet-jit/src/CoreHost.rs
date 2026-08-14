@@ -6,6 +6,7 @@
 //! parity: guard tests/dev.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
 
 use super::Concurrency;
+use crate::runtime_host::jit_result_parts;
 use std::cell::{Cell, RefCell};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 use std::sync::{mpsc, OnceLock};
@@ -1857,6 +1858,55 @@ extern "C" fn jet_jit_mod_on_tick(module: i64, dt: i64) -> i64 {
     }
 }
 
+#[derive(Clone)]
+struct JitCarrierReport {
+    partial: i64,
+    notes: Vec<i64>,
+}
+
+/// Marshal the error report into the shared Outcome readers. The result arena,
+/// record fields, and list handles are ABI facts; `jet_partial` and `jet_notes`
+/// remain the only owners of carrier meaning.
+extern "C" fn jet_jit_carrier_fact(result: i64, field: i64, notes: i8) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some((ok, bits)) = jit_result_parts(rt, result) else {
+            return 0;
+        };
+        let error = bits as i64;
+        let partial = rt.heap.record_get_int(error, field).unwrap_or(0);
+        let note_values = if notes != 0 {
+            let list = rt.heap.record_get_int(error, field).unwrap_or(0);
+            let len = rt.heap.list_len(list).unwrap_or(0);
+            (0..len)
+                .map(|index| rt.heap.list_get_int(list, index).unwrap_or(0))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let outcome: jet_foundation::Outcome::JetOutcome<(), JitCarrierReport> = if ok {
+            Ok(())
+        } else {
+            Err(JitCarrierReport {
+                partial,
+                notes: note_values,
+            })
+        };
+        if notes != 0 {
+            let values = jet_foundation::Outcome::jet_notes(&outcome, |report| report.notes.clone());
+            let list = rt.heap.alloc_empty_list();
+            for value in values {
+                let _ = rt.heap.list_push_int(list, value);
+            }
+            list
+        } else {
+            match jet_foundation::Outcome::jet_partial(&outcome, |report| report.partial) {
+                Ok(value) => value.saturating_add(1),
+                Err(_) => 0,
+            }
+        }
+    })
+}
+
 host_fns! {
     struct CoreHostFns;
     register: register_core_host_symbols;
@@ -1927,6 +1977,11 @@ host_fns! {
         sig_i8_i64_i64.params.push(AbiParam::new(types::I8));
         sig_i8_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i8_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i8 = Signature::new(cc);
+        sig_i64_i64_i8.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i8.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i8.params.push(AbiParam::new(types::I8));
+        sig_i64_i64_i8.returns.push(AbiParam::new(types::I64));
 
 
     }
@@ -2062,5 +2117,6 @@ host_fns! {
     env_unset: "jet_jit_env_unset" => jet_jit_env_unset: sig_unary_i64;
     env_vars: "jet_jit_env_vars" => jet_jit_env_vars: sig_i64;
     io_input: "jet_jit_io_input" => jet_jit_io_input: sig_i8_i64_i64;
+    carrier_fact: "jet_jit_carrier_fact" => jet_jit_carrier_fact: sig_i64_i64_i8;
     process_exit: "jet_jit_process_exit" => jet_jit_process_exit: sig_void_i64;
 }

@@ -13,6 +13,9 @@ mod loadable_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
 }
 
+#[allow(dead_code, unused_imports)]
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+
 /// Canonical reactive core (JetSignal / JetDerived / jet_reactive_effect*).
 #[allow(dead_code, unused_imports)]
 pub(crate) mod reactive_rt {
@@ -113,6 +116,96 @@ pub(crate) struct ReactiveState {
     pub(crate) event_traces: Vec<reactive_rt::JetEventTrace>,
     pub(crate) async_events: Vec<AsyncEventSlot>,
     pub(crate) dispatch_reports: Vec<DispatchReportSlot>,
+    pub(crate) live_queries: Vec<Option<JetLiveQuery>>,
+}
+
+fn live_index(handle: i64) -> Option<usize> {
+    usize::try_from(handle).ok()?.checked_sub(1)
+}
+
+fn live_query<'a>(rt: &'a crate::runtime_host::JitRuntime, handle: i64) -> Option<&'a JetLiveQuery> {
+    live_index(handle)
+        .and_then(|index| rt.reactive.live_queries.get(index))
+        .and_then(Option::as_ref)
+}
+
+extern "C" fn jet_jit_app_live(footprint: i64, initial: i64) -> i64 {
+    with_rt(|rt| {
+        let footprint = rt.heap.clone_string(footprint).unwrap_or_default();
+        let initial = rt.heap.clone_string(initial).unwrap_or_default();
+        rt.reactive.live_queries.push(Some(jet_app_live(footprint, initial)));
+        rt.reactive.live_queries.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_app_subscribe(source: i64) -> i64 {
+    with_rt(|rt| {
+        let source = rt.heap.clone_string(source).unwrap_or_default();
+        rt.reactive.live_queries.push(Some(jet_app_subscribe(source)));
+        rt.reactive.live_queries.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_app_invalidate(footprint: i64) -> i64 {
+    with_rt(|rt| {
+        let footprint = rt.heap.clone_string(footprint).unwrap_or_default();
+        jet_app_invalidate(footprint)
+    })
+}
+
+extern "C" fn jet_jit_app_transact_invalidate(write_set: i64) -> i64 {
+    with_rt(|rt| {
+        let write_set = rt.heap.clone_string(write_set).unwrap_or_default();
+        jet_app_transact_invalidate(write_set)
+    })
+}
+
+extern "C" fn jet_jit_app_signal_push(query: i64, payload: i64) -> i64 {
+    with_rt(|rt| {
+        let Some(index) = live_index(query) else {
+            return 0;
+        };
+        let Some(current) = rt
+            .reactive
+            .live_queries
+            .get(index)
+            .and_then(Option::as_ref)
+            .cloned()
+        else {
+            return 0;
+        };
+        let payload = rt.heap.clone_string(payload).unwrap_or_default();
+        let updated = jet_app_signal_push(&current, payload);
+        let Some(slot) = rt.reactive.live_queries.get_mut(index) else {
+            return 0;
+        };
+        *slot = Some(updated);
+        query
+    })
+}
+
+extern "C" fn jet_jit_app_live_get(query: i64) -> i64 {
+    with_rt(|rt| {
+        let Some(query) = live_query(rt, query).cloned() else {
+            return rt.heap.alloc_string("LiveError(live query is closed)".to_string());
+        };
+        rt.heap.alloc_string(jet_app_live_get(&query))
+    })
+}
+
+extern "C" fn jet_jit_app_live_show(query: i64) -> i64 {
+    with_rt(|rt| {
+        let Some(query) = live_query(rt, query).cloned() else {
+            return rt
+                .heap
+                .alloc_string("LiveQueryError(reason=live query is closed)".to_string());
+        };
+        rt.heap.alloc_string(jet_app_live_show(&query))
+    })
+}
+
+extern "C" fn jet_jit_app_live_stats() -> i64 {
+    with_rt(|rt| rt.heap.alloc_string(jet_app_live_stats()))
 }
 
 fn with_rt<F, R>(f: F) -> R
@@ -822,6 +915,14 @@ host_fns! {
     async_event_close: "jet_jit_async_event_close" => jet_jit_async_event_close: unary_void;
     dispatch_report_state: "jet_jit_dispatch_report_state" => jet_jit_dispatch_report_state: unary;
     dispatch_report_handlers: "jet_jit_dispatch_report_handlers" => jet_jit_dispatch_report_handlers: unary;
+    app_live: "jet_jit_app_live" => jet_jit_app_live: binary;
+    app_subscribe: "jet_jit_app_subscribe" => jet_jit_app_subscribe: unary;
+    app_invalidate: "jet_jit_app_invalidate" => jet_jit_app_invalidate: unary;
+    app_transact_invalidate: "jet_jit_app_transact_invalidate" => jet_jit_app_transact_invalidate: unary;
+    app_signal_push: "jet_jit_app_signal_push" => jet_jit_app_signal_push: binary;
+    app_live_get: "jet_jit_app_live_get" => jet_jit_app_live_get: unary;
+    app_live_show: "jet_jit_app_live_show" => jet_jit_app_live_show: unary;
+    app_live_stats: "jet_jit_app_live_stats" => jet_jit_app_live_stats: nullary;
 }
 
 

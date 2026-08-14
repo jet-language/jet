@@ -376,6 +376,11 @@ pub(super) fn core_call_args_in_subset(
                 label_ok && expr_in_subset(&arg.expr, cx, locals)
             });
     }
+    // D-WEB-CLICK-PORT1=D: the plain button form is a fixed direct call;
+    // only the optional labeled handler takes the closure route below.
+    if module == "core.ui" && method == "button" && args.len() == 1 {
+        return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
+    }
     if crate::Syntax::core_call(module, method).is_some() {
         return crate::Syntax::core_call_projection(
             module,

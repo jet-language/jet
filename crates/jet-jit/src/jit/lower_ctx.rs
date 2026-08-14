@@ -8228,6 +8228,27 @@ impl LowerCtx<'_, '_> {
                     }
                 }
             }
+            THostCall::CarrierFact { recv, field, notes } => {
+                let report_ty = match &recv.ty {
+                    Type::Result { err, .. } => err.as_ref(),
+                    other => {
+                        return Err(format!(
+                            "jit carrier fact receiver is not a Result: {other:?}"
+                        ))
+                    }
+                };
+                let type_name = record_type_key(report_ty)
+                    .ok_or_else(|| format!("jit carrier report is not a record: {report_ty:?}"))?;
+                let field_index = self
+                    .meta
+                    .struct_field_index(&type_name, field)
+                    .ok_or_else(|| format!("jit carrier report field unsupported: {type_name}.{field}"))?;
+                let result = self.lower_expr(recv)?;
+                let field = self.b.ins().iconst(types::I64, field_index as i64);
+                let notes = self.b.ins().iconst(types::I8, i64::from(*notes));
+                Ok(self
+                    .call_host(self.host.core.carrier_fact, &[result, field, notes]))
+            }
             THostCall::Method { method, .. } => {
                 Err(format!("jit host method unsupported: {method}"))
             }
@@ -11934,6 +11955,56 @@ impl LowerCtx<'_, '_> {
         self.lower_service_host_call(module_id, method, values, ret_ty)
     }
 
+    fn lower_compute_transform_call(
+        &mut self,
+        method: &str,
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        if args.len() < 2 {
+            return Err(format!("jit core.compute.{method} expects a function and targets"));
+        }
+        let callable = self.lower_expr(&args[0])?;
+        let Type::Fn { params, ret, .. } = &args[0].ty else {
+            return Err(format!("jit core.compute.{method} function argument is not callable"));
+        };
+        let base_arity = params.len();
+        let result_fields = match ret.as_deref() {
+            Some(Type::Tuple(fields)) => fields.len(),
+            _ => 0,
+        };
+        let targets = self.lower_expr(args.last().expect("transform target argument"))?;
+        let inputs = if args.len() == 2 {
+            self.b.ins().iconst(types::I64, 0)
+        } else {
+            let list = self.call_host(self.host.coll.list_new, &[]);
+            let push = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            for arg in &args[1..args.len() - 1] {
+                let value = self.lower_expr(arg)?;
+                self.b.ins().call(push, &[list, value]);
+            }
+            list
+        };
+        let method_handle = self.runtime.heap.alloc_string(method.to_string());
+        let method_handle = self.b.ins().iconst(types::I64, method_handle);
+        let base_arity = self.b.ins().iconst(types::I64, base_arity as i64);
+        let result_fields = self.b.ins().iconst(types::I64, result_fields as i64);
+        let value = self.call_host(
+            self.host.compute.transform,
+            &[
+                callable,
+                inputs,
+                targets,
+                method_handle,
+                base_arity,
+                result_fields,
+            ],
+        );
+        self.emit_trap_check()?;
+        Ok(value)
+    }
+
     /// Exhaustive match on every `TExprKind` variant (`TIR/mod.rs`) — the JIT
     /// half of the R12 two-consumer contract; `TIR/emit/expressions.rs::
     /// emit_tir_expr` is the AOT half. Each variant here is either lowered for
@@ -12246,6 +12317,14 @@ impl LowerCtx<'_, '_> {
                 {
                     return self.lower_service_core_call(module, method, args, &expr.ty);
                 }
+                if module == "core.compute"
+                    && matches!(
+                        method.as_str(),
+                        "gradient" | "value_and_gradient" | "vjp" | "jvp"
+                    )
+                {
+                    return self.lower_compute_transform_call(method, args);
+                }
                 if jet_foundation::Syntax::core_call(module, method).is_some() {
                     let row = jet_foundation::Syntax::core_call_projection(
                         module,
@@ -12260,6 +12339,32 @@ impl LowerCtx<'_, '_> {
                     })?;
                     if let Some(value) = self.lower_recorded_core_call(row, args, &expr.ty)? {
                         if module == "core.compute" && expr.ty.is_compute_tensor_family() {
+                            self.track_compute_tensor(value);
+                        }
+                        return Ok(value);
+                    }
+                }
+                if module == "core.compute" {
+                    let host_id = match method.as_str() {
+                        "sub" => Some(self.host.compute.sub),
+                        "div" => Some(self.host.compute.div),
+                        "maximum" => Some(self.host.compute.maximum),
+                        "minimum" => Some(self.host.compute.minimum),
+                        "negate" => Some(self.host.compute.negate),
+                        "abs" => Some(self.host.compute.abs),
+                        "exp" => Some(self.host.compute.exp),
+                        "log" => Some(self.host.compute.log),
+                        "sqrt" => Some(self.host.compute.sqrt),
+                        _ => None,
+                    };
+                    if let Some(host_id) = host_id {
+                        let values = args
+                            .iter()
+                            .map(|arg| self.lower_expr(arg))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let value = self.call_host(host_id, &values);
+                        self.emit_trap_check()?;
+                        if expr.ty.is_compute_tensor_family() {
                             self.track_compute_tensor(value);
                         }
                         return Ok(value);
@@ -14208,6 +14313,45 @@ impl LowerCtx<'_, '_> {
                         ("auth_show", [auth]) => (
                             self.host.crypto.app_auth_show,
                             vec![self.lower_expr(auth)?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+                    };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &arg_values);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if (module == "app" || module == "core.web")
+                    && matches!(
+                        method.as_str(),
+                        "live"
+                            | "subscribe"
+                            | "invalidate"
+                            | "transact_invalidate"
+                            | "signal_push"
+                    )
+                {
+                    let (host_id, arg_values): (FuncId, Vec<Value>) = match
+                        (method.as_str(), args.as_slice())
+                    {
+                        ("live", [footprint, initial]) => (
+                            self.host.reactive.app_live,
+                            vec![self.lower_expr(footprint)?, self.lower_expr(initial)?],
+                        ),
+                        ("subscribe", [source]) => (
+                            self.host.reactive.app_subscribe,
+                            vec![self.lower_expr(source)?],
+                        ),
+                        ("invalidate", [footprint]) => (
+                            self.host.reactive.app_invalidate,
+                            vec![self.lower_expr(footprint)?],
+                        ),
+                        ("transact_invalidate", [write_set]) => (
+                            self.host.reactive.app_transact_invalidate,
+                            vec![self.lower_expr(write_set)?],
+                        ),
+                        ("signal_push", [query, payload]) => (
+                            self.host.reactive.app_signal_push,
+                            vec![self.lower_expr(query)?, self.lower_expr(payload)?],
                         ),
                         _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
@@ -17409,6 +17553,19 @@ impl LowerCtx<'_, '_> {
                 let fn_ty = self
                     .meta
                     .struct_field_ty(&type_name, field)
+                    .or_else(|| match &recv.ty {
+                        Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => {
+                            (field == "pull").then(|| Type::Fn {
+                                params: vec![Type::Named("Tensor".to_string())],
+                                ret: Some(Box::new(args[0].clone())),
+                                effect_bound: None,
+                                param_contract: None,
+                                call_metadata: None,
+                                return_view_provenance: None,
+                            })
+                        }
+                        _ => None,
+                    })
                     .ok_or_else(|| format!("jit fn-field `{field}` on `{type_name}`"))?;
                 let callee = self.lower_record_field(handle, &type_name, field, &fn_ty)?;
                 self.lower_fn_call(callee, &fn_ty, args)
@@ -18604,9 +18761,6 @@ impl LowerCtx<'_, '_> {
                 let key = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.coll.map_remove, &[recv_val, key]))
             }
-            // D-LISTREMOVE1/F: the JIT list ABI only has an untagged scalar
-            // return and cannot carry the new Option<T> value/remove-by mode.
-            // Deopt keeps the same Prelude semantics as AOT and interpreter.
             TBuiltinOp::PriorityQueueRemove { mode, line } => match mode {
                 TIR::ListRemoveMode::Value => {
                     let value = self.lower_expr(&args[0])?;
@@ -27635,6 +27789,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "Series" | "DataSeries" => &["values", "missing"],
         "DataColumn" => &["name", "type_name"],
         "DataJoin" | "Join" => &["left", "right"],
+        "VjpRun" => &["value", "pull", "grads"],
         "DataPivotCell" => &["row_key", "column_key", "count", "sum", "mean"],
         "EncodingCause" => &["kind", "os_code", "message"],
         "EncodingError" => &[

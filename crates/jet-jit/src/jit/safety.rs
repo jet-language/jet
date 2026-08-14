@@ -39,8 +39,45 @@ fn resident_safe_compute_call(
     callees: &HashSet<String>,
 ) -> bool {
     match (method, args) {
+        ("gradient" | "value_and_gradient" | "vjp" | "jvp", args)
+            if args.len() >= 2
+                && matches!(args.last().map(|arg| &arg.ty), Some(Type::List(inner)) if matches!(inner.as_ref(), Type::Int)) =>
+        {
+            let function = &args[0];
+            let Type::Fn { params, ret, .. } = &function.ty else {
+                return false;
+            };
+            let valid_params = params
+                .iter()
+                .all(|param| param.is_compute_tensor_family());
+            let valid_result = ret.as_deref().is_some_and(|result| {
+                result.is_compute_tensor_family()
+                    || (method == "gradient"
+                        && matches!(result, Type::Tuple(fields) if fields
+                            .iter()
+                            .all(|(_, field)| field.is_compute_tensor_family())))
+            });
+            let value_count = args.len().saturating_sub(2);
+            let expected_values = if value_count == 0 {
+                0
+            } else if method == "jvp" {
+                params.len().saturating_mul(2)
+            } else {
+                params.len()
+            };
+            value_count == expected_values
+                && valid_params
+                && valid_result
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
         ("from_list", [values]) if jit_list_float_type(&values.ty) => {
             resident_safe_expr(values, callees)
+        }
+        ("vec", [len, fill])
+            if intish_ty(&len.ty)
+                && matches!(erase_runtime_qualifiers(&fill.ty), Type::Float | Type::Float32) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         ("matrix", [rows, cols, fill])
             if intish_ty(&rows.ty)
@@ -59,10 +96,69 @@ fn resident_safe_compute_call(
             args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         ("eye", [size]) if intish_ty(&size.ty) => resident_safe_expr(size, callees),
-        ("add" | "mul" | "sub" | "matmul", [left, right])
+        ("reshape", [tensor, shape])
+            if tensor.ty.is_compute_tensor_family() && jit_list_int_type(&shape.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("device_cpu" | "device_auto", []) => true,
+        ("on_device", [tensor, device])
+            if tensor.ty.is_compute_tensor_family() && jit_value_type(&device.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("broadcast_to", [tensor, shape])
+            if tensor.ty.is_compute_tensor_family() && jit_list_int_type(&shape.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("transpose" | "det" | "inv" | "fft", [tensor])
+            if tensor.ty.is_compute_tensor_family() =>
+        {
+            resident_safe_expr(tensor, callees)
+        }
+        ("solve", [left, right])
             if left.ty.is_compute_tensor_family() && right.ty.is_compute_tensor_family() =>
         {
             args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("stream_new", []) => true,
+        ("stream_sync" | "stream_show", [stream]) if jit_value_type(&stream.ty) => {
+            resident_safe_expr(stream, callees)
+        }
+        ("transfer", [tensor, device])
+            if tensor.ty.is_compute_tensor_family() && jit_value_type(&device.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("transfer_show", [tensor]) if tensor.ty.is_compute_tensor_family() => {
+            resident_safe_expr(tensor, callees)
+        }
+        ("kernel_bounds_ok", [shape, indices])
+            if jit_list_int_type(&shape.ty) && jit_list_int_type(&indices.ty) =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("to_sparse", [tensor]) if tensor.ty.is_compute_tensor_family() => {
+            resident_safe_expr(tensor, callees)
+        }
+        ("sparse_nnz" | "sparse_show", [sparse]) if jit_value_type(&sparse.ty) => {
+            resident_safe_expr(sparse, callees)
+        }
+        ("sparse_mv", [sparse, vector])
+            if jit_value_type(&sparse.ty) && vector.ty.is_compute_tensor_family() =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("add" | "mul" | "sub" | "div" | "maximum" | "minimum" | "matmul", [left, right])
+            if left.ty.is_compute_tensor_family() && right.ty.is_compute_tensor_family() =>
+        {
+            args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        ("negate" | "abs" | "exp" | "log" | "sqrt", [tensor])
+            if tensor.ty.is_compute_tensor_family() =>
+        {
+            resident_safe_expr(tensor, callees)
         }
         ("sum_axis", [tensor, axis])
             if tensor.ty.is_compute_tensor_family() && intish_ty(&axis.ty) =>
@@ -586,6 +682,12 @@ fn jit_compound_type(ty: &Type) -> bool {
         || jit_list_task_type(ty)
         || jit_list_record_type(ty)
         || jit_map_string_type(ty)
+        || jit_map_int_type(ty)
+        || matches!(
+            ty,
+            Type::List(inner) | Type::FixedList { elem: inner, .. }
+                if jit_map_string_type(inner)
+        )
         || jit_struct_type(ty)
         || jit_tuple_type(ty)
         || jit_enum_type(ty)
@@ -1309,6 +1411,16 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     _ => false,
                 };
             }
+            if module == "core.db" {
+                let supported = match method.as_str() {
+                    "open_memory" => args.is_empty(),
+                    "open" | "params" => args.len() == 1,
+                    "policy" | "row_int" | "row_text" => args.len() == 2,
+                    "migrate" | "transaction" => args.len() == 3,
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
             if module == "core.compute" {
                 return resident_safe_compute_call(method, args, callees);
             }
@@ -1400,16 +1512,37 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     _ => false,
                 };
             }
-            if module == "app"
-                || (module == "core.web"
-                    && matches!(
-                        method.as_str(),
-                        "live" | "subscribe" | "invalidate" | "live_get" | "live_show" | "live_stats"
-                    ))
+            if module == "app" {
+                let supported = match method.as_str() {
+                    "live" | "signal_push" => args.len() == 2,
+                    "subscribe" | "invalidate" | "transact_invalidate" | "live_get"
+                    | "live_show" => args.len() == 1,
+                    "live_stats" => args.is_empty(),
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if module == "core.web"
+                && matches!(
+                    method.as_str(),
+                    "live"
+                        | "subscribe"
+                        | "invalidate"
+                        | "transact_invalidate"
+                        | "signal_push"
+                        | "live_get"
+                        | "live_show"
+                        | "live_stats"
+                )
             {
-                // LiveQuery registry is interpreter-owned until Cranelift hosts
-                // marshal the same Prelude symbols (I9 deopt path).
-                return false;
+                let supported = match method.as_str() {
+                    "live" | "signal_push" => args.len() == 2,
+                    "subscribe" | "invalidate" | "transact_invalidate" | "live_get"
+                    | "live_show" => args.len() == 1,
+                    "live_stats" => args.is_empty(),
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
             if module == "core.tasks" && method == "channel" {
                 return args.len() <= 1 && args.iter().all(|a| resident_safe_expr(a, callees));
@@ -2139,6 +2272,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             // Sema emits this node only after proving the receiver is a live
             // Cell guard and every projected path is valid and disjoint.
             THostCall::CellGuardProject { .. } => true,
+            THostCall::CarrierFact { recv, .. } => {
+                matches!(&recv.ty, Type::Result { .. }) && resident_safe_expr(recv, callees)
+            }
             THostCall::Method {
                 recv,
                 method,

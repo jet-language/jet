@@ -2364,6 +2364,10 @@ pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue>
         .and_then(|index| rt.results.get(index).copied())
 }
 
+pub(crate) fn jit_result_parts(rt: &JitRuntime, handle: i64) -> Option<(bool, u64)> {
+    jit_result(rt, handle).map(|result| (result.ok, result.bits))
+}
+
 pub(crate) fn jit_result_i64(rt: &JitRuntime, handle: i64) -> Option<i64> {
     jit_result(rt, handle).map(|result| result.bits as i64)
 }
@@ -2443,6 +2447,17 @@ fn jit_callable_slot(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {
     jit_callable_index(handle).and_then(|index| rt.jit_callables.get(index).copied())
 }
 
+/// Read one checked resident function-value slot for a host adapter. The
+/// callable ABI remains opaque to Prelude code; resident adapters may inspect
+/// the already-validated pointer/environment pair when a shared Prelude
+/// operation returns a new function value.
+pub(crate) fn jit_callable_parts(
+    rt: &JitRuntime,
+    handle: i64,
+) -> Option<JitCallableSlot> {
+    jit_callable_slot(rt, handle)
+}
+
 pub(crate) fn register_jit_atexit(handler: i64) -> bool {
     Concurrency::with_runtime_mut(|rt| {
         let Some(slot) = jit_callable_slot(rt, handler) else {
@@ -2488,6 +2503,18 @@ fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) 
         has_env,
     });
     -(index as i64) - 1
+}
+
+/// Bind a resident adapter that implements a function-value ABI thunk. The
+/// thunk owns only marshalling; the operation it invokes remains in its shared
+/// Prelude seam.
+pub(crate) fn bind_jit_callable_handle(
+    rt: &mut JitRuntime,
+    fn_ptr: i64,
+    env: i64,
+    has_env: bool,
+) -> i64 {
+    bind_jit_callable(rt, fn_ptr, env, has_env)
 }
 
 extern "C" fn jet_jit_callable_bind(fn_ptr: i64, env: i64, has_env: i8) -> i64 {

@@ -292,7 +292,7 @@ pub(crate) fn clif_ty_with_distinct(
             Type::List(inner)
                 if matches!(
                     inner.as_ref(),
-                    Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
+                    Type::Map { key, .. } if matches!(key.as_ref(), Type::String | Type::Int)
                 )
         )
         || jit_list_task_type(&ty)
@@ -1286,6 +1286,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "Series" | "DataSeries" => &["values", "missing"],
         "DataColumn" => &["name", "type_name"],
         "DataJoin" | "Join" => &["left", "right"],
+        "VjpRun" => &["value", "pull", "grads"],
         "DataPivotCell" => &["row_key", "column_key", "count", "sum", "mean"],
         "EncodingCause" => &["kind", "os_code", "message"],
         "EncodingError" => &[

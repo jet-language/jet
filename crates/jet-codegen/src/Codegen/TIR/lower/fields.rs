@@ -1101,9 +1101,17 @@ pub(crate) fn call_return_type_with_args(
     }
     if let Some(sig) = cx.sigs.get(name) {
         for ((_, template), actual) in sig.iter().zip(args) {
+            let actual_ty = if actual.widen_to_vec {
+                match &actual.value.ty {
+                    Type::FixedList { elem, .. } => Type::List(elem.clone()),
+                    other => other.clone(),
+                }
+            } else {
+                actual.value.ty.clone()
+            };
             if !crate::Codegen::TIR::bind_generic_type(
                 template,
-                &actual.value.ty,
+                &actual_ty,
                 params,
                 &mut subst,
             ) {
