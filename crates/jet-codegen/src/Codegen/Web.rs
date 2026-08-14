@@ -3195,7 +3195,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "        match jet_wasm_{}({args}) {{\n            Ok(_) => 0,\n            Err(error) => {{\n                let report = error.to_string();\n                jet_wasm_store_rendered(&report);\n                1\n            }}\n        }}\n    }})\n}}\n\n",
+            "        match jet_wasm_{}({args}) {{\n            Ok(_) => {{ jet_wasm_store_ok(); 0 }},\n            Err(error) => {{ jet_wasm_store_error(&error); 1 }}\n        }}\n    }})\n}}\n\n",
             f.key
         ));
     }
@@ -5172,6 +5172,22 @@ fn emit_js_app(
         out.push_str("  _wasm = instance.exports;\n");
         out.push_str("  return _wasm;\n");
         out.push_str("}\n\n");
+        out.push_str(
+            "function jet_web_wasm_text(wasm, name) {\n\
+               const length = Number(wasm[name + \"_len\"]?.() ?? 0);\n\
+               if (!length) return \"\";\n\
+               const ptr = Number(wasm[name + \"_ptr\"]?.() ?? 0);\n\
+               return new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, length));\n\
+             }\n\n\
+             function jet_web_wasm_edge(wasm) {\n\
+               const metadata = {\n\
+                 journey: jet_web_wasm_text(wasm, \"jet_wasm_error_journey\"),\n\
+                 frame: jet_web_wasm_text(wasm, \"jet_wasm_error_frame\"),\n\
+               };\n\
+               const outcome = jetDom.takeWasmError(wasm);\n\
+               return outcome ? { outcome, metadata } : null;\n\
+             }\n\n",
+        );
         for f in &exports {
             let args: Vec<String> = f.params.iter().map(|(n, _)| n.clone()).collect();
             out.push_str(&format!(
@@ -5193,8 +5209,9 @@ fn emit_js_app(
                 "  const raw = wasm.{sym}({});\n",
                 call_args.join(", ")
             ));
-            out.push_str("  const _edgeError = jetDom.takeWasmError(wasm);\n");
-            out.push_str("  if (_edgeError) return jetDom.raiseRuntimeError(_edgeError);\n");
+            out.push_str("  const _edge = jet_web_wasm_edge(wasm);\n");
+            out.push_str("  if (_edge?.outcome?.tag === \"Err\") return jet_web_edge_result(_edge.outcome, _edge.metadata);\n");
+            out.push_str("  if (_edge?.outcome?.tag === \"Ok\") return _edge.outcome.value;\n");
             let ret_kind = match f.return_type.as_ref() {
                 Some(ty) if is_default_int(ty) => "int",
                 Some(ty) if is_string_like(ty) => "string",
@@ -5281,7 +5298,7 @@ fn emit_js_app(
             }
             if fallible_main {
                 out.push_str("  } catch (error) {\n");
-                out.push_str("    if (error instanceof JetWebPropagation) return jet_web_edge_result({ tag: \"Err\", values: [error.report] });\n");
+                out.push_str("    if (error instanceof JetWebPropagation) return jet_web_edge_result({ tag: \"Err\", error: error.wire }, { journey: error.journey, frame: error.frame });\n");
                 out.push_str("    throw error;\n");
             }
             out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
@@ -5297,8 +5314,9 @@ fn emit_js_app(
             out.push_str("export async function jet_main() {\n");
             out.push_str("  const wasm = await loadWasm();\n");
             out.push_str(&format!("  const raw = wasm.{}();\n", wasm_export_symbol("run")));
-            out.push_str("  const _edgeError = jetDom.takeWasmError(wasm);\n");
-            out.push_str("  if (_edgeError) return jetDom.raiseRuntimeError(_edgeError);\n");
+            out.push_str("  const _edge = jet_web_wasm_edge(wasm);\n");
+            out.push_str("  if (_edge?.outcome?.tag === \"Err\") return jet_web_edge_result(_edge.outcome, _edge.metadata);\n");
+            out.push_str("  if (_edge?.outcome?.tag === \"Ok\") return _edge.outcome.value;\n");
             out.push_str("  return raw;\n");
             out.push_str("}\n");
             if auto_start {
@@ -5402,7 +5420,7 @@ fn emit_js_fn(
     out.push_str(&bind_inline_handler_symbols(&body, f, handlers));
     if matches!(f.return_type.as_ref(), Some(Type::Result { .. })) {
         out.push_str("  } catch (error) {\n");
-        out.push_str("    if (error instanceof JetWebPropagation) return { tag: \"Err\", values: [error.report] };\n");
+        out.push_str("    if (error instanceof JetWebPropagation) return { tag: \"Err\", values: [{ wire: error.wire, journey: error.journey, frame: error.frame }] };\n");
         out.push_str("    throw error;\n");
     }
     out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
@@ -7326,8 +7344,8 @@ fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
 
 /// D-EXPOP1=A / D-EXPSEM1=A / D-FLOORDIV1=A: the wasm module runs the same
 /// arithmetic source as the native Prelude — the very same files, included
-/// verbatim. The two adapter doors below marshal a rendered report into the
-/// host's termination mechanism; they do not create a second report shape.
+/// verbatim. The adapter doors below marshal one tagged error wire into the
+/// host's edge slot; journey and frame remain adapter metadata.
 const WASM_ARITH_PRELUDE: &str = concat!(
     "#[link(wasm_import_module = \"env\")]\nunsafe extern \"C\" { fn jet_web_print(ptr: u32, len: u32); }\n\n",
     "fn jet_wasm_print(value: impl std::fmt::Display) {\n",
@@ -7335,8 +7353,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    unsafe { jet_web_print(text.as_ptr() as u32, text.len() as u32); }\n",
     "}\n\n",
     "#[derive(Debug)]\n",
-    "struct JetWasmRuntimeFailure { report: String }\n\n",
-    "struct JetWasmHostError { json: String }\n\n",
+    "struct JetWasmRuntimeFailure { error: JetErr, frame: String }\n\n",
+    "struct JetWasmHostError { json: String, journey: String, frame: String }\n\n",
     "thread_local! {\n",
     "    static JET_WASM_ERROR: std::cell::RefCell<Option<JetWasmHostError>> = const { std::cell::RefCell::new(None) };\n",
     "}\n\n",
@@ -7373,24 +7391,30 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    out.push('\\\"');\n",
     "    out\n",
     "}\n\n",
-    "fn jet_wasm_report_code(report: &str) -> String {\n",
-    "    report.split_once('[').and_then(|(_, rest)| rest.split_once(']')).map(|(code, _)| code.to_string()).unwrap_or_default()\n",
+    "fn jet_wasm_err_wire(error: &JetErr) -> String {\n",
+    "    let code = match jet_err_code(error) { Ok(code) => jet_wasm_json(&code), Err(_) => \"null\".to_string() };\n",
+    "    let cause = match jet_err_cause(error) { Ok(cause) => jet_wasm_err_wire(&cause), Err(_) => \"null\".to_string() };\n",
+    "    format!(\"{{\\\"schema\\\":\\\"jet.err/v1\\\",\\\"message\\\":{},\\\"code\\\":{},\\\"cause\\\":{}}}\", jet_wasm_json(&jet_err_message(error)), code, cause)\n",
     "}\n\n",
-    "fn jet_wasm_report_message(report: &str) -> String {\n",
-    "    report.lines().next().and_then(|line| line.split_once(\": \")).map(|(_, message)| message.to_string()).unwrap_or_else(|| report.to_string())\n",
+    "fn jet_wasm_store(json: String, journey: String, frame: String) {\n",
+    "    JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = Some(JetWasmHostError { json, journey, frame }));\n",
     "}\n\n",
-    "fn jet_wasm_report_cause(report: &str) -> String {\n",
-    "    report.lines().filter_map(|line| line.trim_start().strip_prefix(\"cause: \")).collect::<Vec<_>>().join(\"\\n\")\n",
+    "fn jet_wasm_store_ok() {\n",
+    "    jet_wasm_store(\"{\\\"tag\\\":\\\"Ok\\\",\\\"value\\\":null}\".to_string(), String::new(), String::new());\n",
     "}\n\n",
-    "fn jet_wasm_store_rendered(report: &str) {\n",
-    "    let code = jet_wasm_report_code(report);\n",
-    "    let message = jet_wasm_report_message(report);\n",
-    "    let cause = jet_wasm_report_cause(report);\n",
+    "fn jet_wasm_store_error(error: &JetErr) {\n",
     "    let journey = jet_journey_take();\n",
-    "    let frame = format!(\"{journey}{report}\");\n",
-    "    let journey = journey.trim_end();\n",
-    "    let json = format!(\"{{\\\"code\\\":{},\\\"message\\\":{},\\\"cause\\\":{},\\\"journey\\\":{},\\\"frame\\\":{}}}\", jet_wasm_json(&code), jet_wasm_json(&message), jet_wasm_json(&cause), jet_wasm_json(journey), jet_wasm_json(&frame));\n",
-    "    JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = Some(JetWasmHostError { json }));\n",
+    "    let frame = format!(\"{journey}{}\", jet_render_err(error));\n",
+    "    let journey = journey.trim_end().to_string();\n",
+    "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error));\n",
+    "    jet_wasm_store(json, journey, frame);\n",
+    "}\n\n",
+    "fn jet_wasm_store_runtime_error(error: &JetErr, rendered: &str) {\n",
+    "    let journey = jet_journey_take();\n",
+    "    let frame = format!(\"{journey}{rendered}\");\n",
+    "    let journey = journey.trim_end().to_string();\n",
+    "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error));\n",
+    "    jet_wasm_store(json, journey, frame);\n",
     "}\n\n",
     "fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {\n",
     "    if r.is_err() { let _ = jet_journey_frame(file, line, fn_name, || String::new()); }\n",
@@ -7408,14 +7432,23 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "pub extern \"C\" fn jet_wasm_error_ptr() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.json.as_ptr() as u32).unwrap_or(0)) }\n\n",
     "#[no_mangle]\n",
     "pub extern \"C\" fn jet_wasm_error_clear() { JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = None); }\n\n",
+    "#[no_mangle]\n",
+    "pub extern \"C\" fn jet_wasm_error_journey_len() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.journey.len() as u32).unwrap_or(0)) }\n\n",
+    "#[no_mangle]\n",
+    "pub extern \"C\" fn jet_wasm_error_journey_ptr() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.journey.as_ptr() as u32).unwrap_or(0)) }\n\n",
+    "#[no_mangle]\n",
+    "pub extern \"C\" fn jet_wasm_error_frame_len() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.frame.len() as u32).unwrap_or(0)) }\n\n",
+    "#[no_mangle]\n",
+    "pub extern \"C\" fn jet_wasm_error_frame_ptr() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.frame.as_ptr() as u32).unwrap_or(0)) }\n\n",
     "fn jet_wasm_call<T: Default>(run: impl FnOnce() -> T) -> T {\n",
     "    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {\n",
     "        Ok(value) => value,\n",
     "        Err(payload) => {\n",
     "            if let Some(failure) = payload.downcast_ref::<JetWasmRuntimeFailure>() {\n",
-    "                jet_wasm_store_rendered(&failure.report);\n",
+    "                jet_wasm_store_runtime_error(&failure.error, &failure.frame);\n",
     "            } else {\n",
-    "                jet_wasm_store_rendered(\"Stop [E3001]: wasm host call failed\\n Why: the program reached a panic stop and cannot continue\\n Fix: check the source location and handle the failing condition\\n\");\n",
+    "                let error = jet_err(\"wasm host call failed\".to_string(), Ok(\"E3001\".to_string()), Err(JetAbsent));\n",
+    "                jet_wasm_store_runtime_error(&error, \"Stop [E3001]: wasm host call failed\\n\");\n",
     "            }\n",
     "            T::default()\n",
     "        }\n",
@@ -7423,7 +7456,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "}\n\n",
     "fn jet_runtime_stop(code: &'static str, file: &str, line: u32, message: &str) -> ! {\n",
     "    let report = jet_render_runtime_stop(code, file, line, \"\", \"\", 1, 1, message, \"\");\n",
-    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { report: report.rendered }))\n",
+    "    let error = jet_err(message.to_string(), Ok(code.to_string()), Err(JetAbsent));\n",
+    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: report.rendered }))\n",
     "}\n\n",
     "fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {\n",
     "    jet_runtime_stop(\"E3010\", file, line, message)\n",

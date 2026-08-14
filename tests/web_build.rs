@@ -1592,9 +1592,34 @@ try {
 } catch (error) {
   console.log("kind=" + (error.constructor?.name ?? ""));
   console.log("instance=" + (error instanceof Error));
+  console.log("name=" + error.name);
   console.log("code=" + error.code);
   console.log("message=" + error.message);
   console.log("cause=" + (error.cause?.message ?? error.cause ?? ""));
+  console.log("wire=" + JSON.stringify(error.toJSON()));
+  console.log("journey=" + (error.journey ?? ""));
+  console.log("frame=" + JSON.stringify(error.frame));
+}
+"#;
+
+    let wasm_harness = r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const wasm = await instantiateWasm("./app.wasm");
+const status = wasm.jet_export_run();
+console.log("rawStatus=" + status);
+console.log("raw=" + JSON.stringify(takeWasmError(wasm)));
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  console.log("unexpected success");
+} catch (error) {
+  console.log("kind=" + (error.constructor?.name ?? ""));
+  console.log("instance=" + (error instanceof Error));
+  console.log("name=" + error.name);
+  console.log("code=" + error.code);
+  console.log("message=" + error.message);
+  console.log("cause=" + (error.cause?.message ?? error.cause ?? ""));
+  console.log("wire=" + JSON.stringify(error.toJSON()));
   console.log("journey=" + (error.journey ?? ""));
   console.log("frame=" + JSON.stringify(error.frame));
 }
@@ -1626,6 +1651,10 @@ try {
     let wasm_js = fs::read_to_string(wasm_dir.join("build/app.js")).unwrap();
     assert!(wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"), "{wasm}");
     assert!(wasm.contains("jet_wasm_error_len"), "{wasm}");
+    assert!(wasm.contains("jet.err/v1"), "{wasm}");
+    assert!(wasm.contains("\"tag\\\":\\\"Err\""), "{wasm}");
+    assert!(!wasm.contains("jet_wasm_report_"), "human report parsing survived:\n{wasm}");
+    assert!(!wasm.contains("error.to_string()"), "JetErr was stringified at the edge:\n{wasm}");
     assert!(
         !wasm.contains("panic_any(report.rendered)"),
         "raw Wasm panic survived:\n{wasm}"
@@ -1633,7 +1662,7 @@ try {
     assert!(wasm_js.contains("jetDom.takeWasmError"), "{wasm_js}");
     assert!(wasm_js.contains("const JET_EDGE_TARGET = \"web\";"), "{wasm_js}");
     assert!(!wasm_js.contains("_isMain") && !wasm_js.contains("process.argv[1]"), "{wasm_js}");
-    fs::write(wasm_dir.join("build/failure_edge_harness.mjs"), harness).unwrap();
+    fs::write(wasm_dir.join("build/failure_edge_harness.mjs"), wasm_harness).unwrap();
     let wasm_run = Command::new("node")
         .current_dir(wasm_dir.join("build"))
         .arg("failure_edge_harness.mjs")
@@ -1646,8 +1675,11 @@ try {
         String::from_utf8_lossy(&wasm_run.stderr)
     );
     let wasm_stdout = String::from_utf8_lossy(&wasm_run.stdout);
-    assert!(wasm_stdout.contains("kind=Object"), "{wasm_stdout}");
-    assert!(wasm_stdout.contains("instance=false"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("rawStatus=1"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("raw={\"tag\":\"Err\",\"error\":{\"schema\":\"jet.err/v1\",\"message\":\"unhandled default error\",\"code\":\"RUNFAIL\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":null,\"cause\":null}}}"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("kind=JetError"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("instance=true"), "{wasm_stdout}");
+    assert!(wasm_stdout.contains("name=JetError"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("code=RUNFAIL"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("message=unhandled default error"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("cause=disk offline"), "{wasm_stdout}");
@@ -1664,7 +1696,9 @@ try {
         "tests/fixtures/failure_edge_js.jet",
     );
     let js = fs::read_to_string(js_dir.join("build/app.js")).unwrap();
-    assert!(js.contains("class JetWebRuntimeError"), "{js}");
+    assert!(js.contains("class JetError extends Error"), "{js}");
+    assert!(js.contains("toJSON()"), "{js}");
+    assert!(!js.contains("class JetWebRuntimeError"), "replaced JS error survived:\n{js}");
     assert!(js.contains("jet_web_edge_result"), "{js}");
     assert!(!js.contains("_isMain") && !js.contains("process.argv[1]"), "{js}");
     fs::write(js_dir.join("build/failure_edge_harness.mjs"), harness).unwrap();
@@ -1680,11 +1714,13 @@ try {
         String::from_utf8_lossy(&js_run.stderr)
     );
     let js_stdout = String::from_utf8_lossy(&js_run.stdout);
-    assert!(js_stdout.contains("kind=JetWebRuntimeError"), "{js_stdout}");
+    assert!(js_stdout.contains("kind=JetError"), "{js_stdout}");
     assert!(js_stdout.contains("instance=true"), "{js_stdout}");
+    assert!(js_stdout.contains("name=JetError"), "{js_stdout}");
     assert!(js_stdout.contains("code=RUNFAIL"), "{js_stdout}");
     assert!(js_stdout.contains("message=unhandled default error"), "{js_stdout}");
     assert!(js_stdout.contains("cause=disk offline"), "{js_stdout}");
+    assert!(js_stdout.contains("wire={\"schema\":\"jet.err/v1\",\"message\":\"unhandled default error\",\"code\":\"RUNFAIL\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":null,\"cause\":null}}"), "{js_stdout}");
     assert!(js_stdout.contains("journey="), "{js_stdout}");
     assert!(
         js_stdout.lines().any(|line| line == expected_frame_line.as_str()),
