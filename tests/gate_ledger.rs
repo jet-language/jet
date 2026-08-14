@@ -77,7 +77,7 @@ fn knowledge_tier_source() -> &'static str {
     r#"#Numeric Severity :: distinct Int(0..10)
 
 @answer :: 40 + 2
-@gated_answer :: wrapping(Severity.from_int(4) + Severity.from_int(5))
+@gated_answer :: wrapping(4 + 5)
 
 fn run() {
     left :: Severity.from_int(4)
