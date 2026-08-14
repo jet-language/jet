@@ -46,8 +46,12 @@ scripts/agent/jet-env jet run examples/features/basics/hello.jet
 ```bash
 scripts/agent/jet-env jet check examples/features/basics/functions.jet
 scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
-  cargo test --test golden examples_compile_and_run -- --nocapture
+cargo test --test golden examples_compile_and_run -- --nocapture
 ```
+
+For the first user journey after installation, follow the
+[first-hour guide](docs/first-hour.md). It includes the shared terminal REPL,
+the browser notebook, save/reopen, merge, and stated-loss exports.
 
 The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified syntax decisions are in [docs/spec/syntax-decisions.md](docs/spec/syntax-decisions.md).
 
