@@ -9348,59 +9348,11 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(host_ref, &[buf_id, lit_const]);
                 }
                 TStrPart::Interp(e, fmt) => {
-                    let push_ty = Self::recover_core_return_ty(e)
-                        .unwrap_or_else(|| {
-                            // CORE struct fields (Stat.kind / is_file, …): TIR may
-                            // leave Int; recover String/Bool so str_push_* matches AOT.
-                            // parity: guard tests/dev.rs::fixed_interpolation_matches_interpreter_and_resident_jit_rounding
-                            if let TExprKind::Field { recv, field, .. } = &e.kind {
-                                if let Some(name) = record_type_key(&recv.ty) {
-                                    if let Some(ty) = self
-                                        .meta
-                                        .struct_field_ty(&name, field)
-                                        .or_else(|| core_struct_field_type(&name, field))
-                                    {
-                                        let erased = self.erase_distinct_ty(&ty);
-                                        // Unspecialized generic field (`Named("T")`):
-                                        // prefer the concrete expression type.
-                                        if matches!(&erased, Type::Named(n) if n.len() == 1)
-                                            && !matches!(
-                                                &e.ty,
-                                                Type::Named(n) if n.len() == 1
-                                            )
-                                        {
-                                            return self.erase_distinct_ty(&e.ty);
-                                        }
-                                        return erased;
-                                    }
-                                }
-                            }
-                            let erased = self.erase_distinct_ty(&e.ty);
-                            if matches!(&erased, Type::Named(n) if n == "Unit") {
-                                self.print_result_ty(e)
-                            } else {
-                                erased
-                            }
-                        });
+                    // Direct print and interpolation share the display ABI.
+                    let push_ty = self.display_abi_ty(e);
                     if matches!(&push_ty, Type::Named(n) if n == "Unit") {
                         continue;
                     }
-                    // Generic param leftovers (`Named("T")`) — use concrete expr ty.
-                    let push_ty = if matches!(&push_ty, Type::Named(n) if n.len() == 1) {
-                        let concrete = self.erase_distinct_ty(&e.ty);
-                        if !matches!(&concrete, Type::Named(n) if n.len() == 1) {
-                            concrete
-                        } else {
-                            push_ty
-                        }
-                    } else {
-                        push_ty
-                    };
-                    let push_ty = if Self::is_string_abi_ty(&push_ty) {
-                        Type::String
-                    } else {
-                        push_ty
-                    };
                     if let Type::Named(type_name) = &push_ty {
                         if matches!(
                             type_name.as_str(),
@@ -23534,17 +23486,21 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// Normalize the type used by all display surfaces to the resident ABI.
+    fn display_abi_ty(&self, expr: &TExpr) -> Type {
+        let ty = self.print_result_ty(expr);
+        if Self::is_string_abi_ty(&ty) {
+            Type::String
+        } else {
+            ty
+        }
+    }
+
     /// Print dispatch type — recover Bool/Float/Int when TIR left `Unit` on
-    /// compare results or Rng draws (same hole as `expr_arith_type`).
+    /// compare results or Rng draws (same hole as `expr_arith_type`), and
+    /// recover record field declarations when TIR erased the field expression.
     fn print_result_ty(&self, expr: &TExpr) -> Type {
-        if matches!(
-            &expr.ty,
-            Type::Apply { name, args }
-                if name == "View"
-                    && args.len() == 1
-                    && (matches!(&args[0], Type::String)
-                        || matches!(&args[0], Type::Named(name) if name == "str"))
-        ) {
+        if Self::is_string_abi_ty(&expr.ty) {
             return Type::String;
         }
         if let TExprKind::Local(local) = &expr.kind {
@@ -23618,21 +23574,27 @@ impl LowerCtx<'_, '_> {
         if let Some(ty) = self.expr_arith_type_from_op(expr) {
             return ty;
         }
-        // CORE struct fields (ProcessResult.output, …) — TIR may say Int.
+        // User and CORE struct fields — TIR may retain a generic declaration
+        // or erase the field expression to Int/Unit. Recover the slot type
+        // once so direct print and interpolation take the same path.
         if let TExprKind::Field { recv, field, .. } = &expr.kind {
             if let Some(name) = record_type_key(&recv.ty) {
-                if matches!(
-                    self.meta.struct_field_ty(&name, field),
-                    Some(Type::Apply { name, args })
-                        if name == "View"
-                            && args.len() == 1
-                            && (matches!(&args[0], Type::String)
-                                || matches!(&args[0], Type::Named(name) if name == "str"))
-                ) {
-                    return Type::String;
-                }
-                if let Some(ty) = core_struct_field_type(&name, field) {
-                    return self.erase_distinct_ty(&ty);
+                if let Some(ty) = self
+                    .concrete_struct_field_ty(&recv.ty, field)
+                    .or_else(|| self.meta.struct_field_ty(&name, field))
+                    .or_else(|| core_struct_field_type(&name, field))
+                {
+                    let recovered = self.erase_distinct_ty(&ty);
+                    // Unspecialized generic field (`Named("T")`): prefer the
+                    // concrete expression type from this monomorphic demand.
+                    if matches!(&recovered, Type::Named(n) if n.len() == 1)
+                        && !matches!(&expr.ty, Type::Named(n) if n.len() == 1)
+                    {
+                        return self.erase_distinct_ty(&expr.ty);
+                    }
+                    if !matches!(&recovered, Type::Named(n) if n == "Unit") {
+                        return recovered;
+                    }
                 }
             }
         }
@@ -24369,7 +24331,7 @@ impl LowerCtx<'_, '_> {
             }
             _ => {
                 let val = self.lower_expr(inner)?;
-                let print_ty = self.print_result_ty(inner);
+                let print_ty = self.display_abi_ty(inner);
                 // Some method chains type `list.join(sep)` as Unit in TIR even though
                 // the lowered value is a String handle (seen on Url.path_segments().join).
                 if matches!(&print_ty, Type::Named(n) if n == "Unit") {
