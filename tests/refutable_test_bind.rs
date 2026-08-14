@@ -1,5 +1,11 @@
 //! D-CHOOSE-TEST1=A: subject-first refutable test-bind.
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+mod common;
+
+const EXAMPLE_OUTPUT: &str = "7\n7\ninvalid\ninvalid\n";
+
 const VALID: &str = r#"
 fn parse_age() => Int ? String {
     return .Ok(42)
@@ -49,6 +55,22 @@ fn run() {
 }
 
 #[test]
+fn a_test_without_a_route_does_not_bind_pattern_names() {
+    let source = r#"
+fn parse_age() => Int ? String { return .Ok(42) }
+fn run() {
+    matched :: parse_age() == .Ok(age)
+    print(age)
+}
+"#;
+    let diagnostics = jet::check_for_eval(source, "refutable_test_bind_no_route.jet");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        "a pattern test without `??` must not bind `age`: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn optional_shape_test_does_not_make_ambient_err_available() {
     let source = r#"
 fn maybe() => Int? { return null }
@@ -60,5 +82,13 @@ fn run() {
     assert!(
         diagnostics.iter().any(|diagnostic| diagnostic.code == "E0408"),
         "optional shape miss must reject ambient err with E0408: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn example_matches_aot_default_jit_and_interpreter() {
+    tir_support::assert_example_cli_tiers_agree(
+        "patterns/refutable_test_bind",
+        EXAMPLE_OUTPUT,
     );
 }

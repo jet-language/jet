@@ -1,0 +1,29 @@
+// D-CHOOSE-TEST1=A: test the subject first; the route leaves on a miss.
+fn good() => Int ? String {
+    return .Ok(7)
+}
+
+fn bad() => Int ? String {
+    return .Err("invalid")
+}
+
+fn take_good() => Int {
+    good() == .Ok(value) ?? return 0
+    return value
+}
+
+fn take_error() => String {
+    bad() == .Ok(value) ?? return err
+    return "value:{value}"
+}
+
+// The same statement runs while these constants are folded and at runtime.
+@compiled_good :: take_good()
+@compiled_error :: take_error()
+
+fn run() {
+    print(@compiled_good)
+    print(take_good())
+    print(@compiled_error)
+    print(take_error())
+}

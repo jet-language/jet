@@ -571,12 +571,13 @@ destructure structs, tuples, and lists:
 .{ kind, .. } :: event                  // partial needs mandatory `..` (E0326)
 (x, y) :: point                         // named tuple, canonical order
 [a, b] :: xs                            // list, runtime length check (E0315)
-Val(n) :: maybe_port() ?? return      // refutable bind needs ?? fallback
 ```
 
-Redundant `..` on a full pattern is E0327. Nesting one level. Dispatch-arm
-struct-pattern heads (`.{ kind: "page", target, .. } -> …`) are source-shipped;
-#341 owns the remaining user-facing dispatch/pattern wording audit.
+Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
+statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
+the route must diverge. Dispatch-arm struct-pattern heads
+(`.{ kind: "page", target, .. } -> …`) are source-shipped; #341 owns the
+remaining user-facing dispatch/pattern wording audit.
 
 **D-BINPAT1=A — binary patterns** *(ratified by owner 2026-07-12, card
 #506; spelling amended by D-UNIFYLIT1=A 2026-07-28)*: `[U8].{"…"}` binary
@@ -7047,7 +7048,9 @@ finite-source finding form above. This section records the other outcomes.
   heads, and the exact-length list bind do not change.
 - **D-CHOOSE-TEST1=A** — the statement gives the subject, its expected shape,
   and the route for a miss. The route must leave the surrounding flow, so the
-  bound names are safe afterward. A test with no route binds nothing.
+  bound names are safe afterward. A test with no route binds nothing. This
+  retires S74's unbuilt pattern-left refutable binding; no pattern-left parser
+  path exists.
 - **D-CHOOSE-HEADS1=A** — the table proofs check multi-head coverage and
   overlap: E0307 reports a hole, and the unreachable-arm lint reports a
   shadowed head. The surface does not change. A named follow-up owns any later
