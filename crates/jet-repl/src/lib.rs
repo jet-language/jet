@@ -1399,8 +1399,19 @@ pub(crate) fn update_core_imports_from_ledger(
                     .name_ledger
                     .effective_alias(module_idx, &local)
                 {
-                    if binding.target == "core" || binding.target.starts_with("core.") {
-                        map.insert(local, binding.target.clone());
+                    let target = binding.target.as_str();
+                    let module = if target == "core"
+                        || crate::Syntax::is_known_core_module(target)
+                    {
+                        Some(target.to_string())
+                    } else {
+                        target
+                            .rsplit_once('.')
+                            .filter(|(module, _)| crate::Syntax::is_known_core_module(module))
+                            .map(|(module, _)| module.to_string())
+                    };
+                    if let Some(module) = module {
+                        map.insert(local, module);
                     }
                 }
             }
@@ -1410,8 +1421,17 @@ pub(crate) fn update_core_imports_from_ledger(
         let Some(binding) = bundle.name_ledger.effective_alias(module_idx, &alias) else {
             continue;
         };
-        if binding.target == "core" || binding.target.starts_with("core.") {
-            map.insert(alias, binding.target.clone());
+        let target = binding.target.as_str();
+        let module = if target == "core" || crate::Syntax::is_known_core_module(target) {
+            Some(target.to_string())
+        } else {
+            target
+                .rsplit_once('.')
+                .filter(|(module, _)| crate::Syntax::is_known_core_module(module))
+                .map(|(module, _)| module.to_string())
+        };
+        if let Some(module) = module {
+            map.insert(alias, module);
         }
     }
 }

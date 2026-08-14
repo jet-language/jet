@@ -163,6 +163,16 @@ pub fn core_fixed_sig(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if is_polymorphic_core_special(module, name) {
+        return None;
+    }
+    core_fixed_sig_impl(module, name)
+}
+
+fn core_fixed_sig_impl(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
     let read = AccessConvention::Read;
     let moved = AccessConvention::Move;
     let string = Type::String;
