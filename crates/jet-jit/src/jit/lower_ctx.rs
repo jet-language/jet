@@ -7931,7 +7931,7 @@ impl LowerCtx<'_, '_> {
             THostCall::EnvSet { name, value, .. } => {
                 let name_v = self.lower_expr(name)?;
                 let value_v = self.lower_expr(value)?;
-                let _ = self.call_host(self.host.core.sys_set, &[name_v, value_v]);
+                let _ = self.call_host(self.host.core.env_set, &[name_v, value_v]);
                 self.emit_trap_check()?;
                 let _ = ty;
                 Ok(self.b.ins().iconst(types::I8, 0))
@@ -12505,7 +12505,7 @@ impl LowerCtx<'_, '_> {
                             self.lower_expr(&args[0])?,
                         )
                     };
-                    return Ok(self.call_host(self.host.core.term_input, &[has_prompt, prompt]));
+                    return Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt]));
                 }
                 if module == "core.term" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -12607,89 +12607,89 @@ impl LowerCtx<'_, '_> {
                 }
                 if module == "core.sys" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "name" if args.is_empty() => (self.host.core.sys_name, vec![]),
-                        "family" if args.is_empty() => (self.host.core.sys_family, vec![]),
-                        "arch" if args.is_empty() => (self.host.core.sys_arch, vec![]),
-                        "cpu_count" if args.is_empty() => (self.host.core.sys_cpu_count, vec![]),
-                        "temp_dir" if args.is_empty() => (self.host.core.sys_temp_dir, vec![]),
-                        "executable" if args.is_empty() => (self.host.core.sys_executable, vec![]),
-                        "pid" | "getpid" if args.is_empty() => (self.host.core.sys_pid, vec![]),
-                        "hostname" if args.is_empty() => (self.host.core.sys_hostname, vec![]),
-                        "username" if args.is_empty() => (self.host.core.sys_username, vec![]),
-                        "release" if args.is_empty() => (self.host.core.sys_release, vec![]),
-                        "version" if args.is_empty() => (self.host.core.sys_version, vec![]),
-                        "getppid" if args.is_empty() => (self.host.core.sys_getppid, vec![]),
-                        "getuid" if args.is_empty() => (self.host.core.sys_getuid, vec![]),
-                        "geteuid" if args.is_empty() => (self.host.core.sys_geteuid, vec![]),
-                        "getgid" if args.is_empty() => (self.host.core.sys_getgid, vec![]),
-                        "getegid" if args.is_empty() => (self.host.core.sys_getegid, vec![]),
-                        "getpgrp" if args.is_empty() => (self.host.core.sys_getpgrp, vec![]),
-                        "getgroups" if args.is_empty() => (self.host.core.sys_getgroups, vec![]),
-                        "uptime" if args.is_empty() => (self.host.core.sys_uptime, vec![]),
-                        "loadavg" if args.is_empty() => (self.host.core.sys_loadavg, vec![]),
-                        "times" if args.is_empty() => (self.host.core.sys_times, vec![]),
-                        "sync" if args.is_empty() => (self.host.core.sys_sync, vec![]),
-                        "setpgrp" if args.is_empty() => (self.host.core.sys_setpgrp, vec![]),
-                        "pipe" if args.is_empty() => (self.host.core.sys_pipe, vec![]),
+                        "name" if args.is_empty() => (self.host.core.os_name, vec![]),
+                        "family" if args.is_empty() => (self.host.core.os_family, vec![]),
+                        "arch" if args.is_empty() => (self.host.core.os_arch, vec![]),
+                        "cpu_count" if args.is_empty() => (self.host.core.os_cpu_count, vec![]),
+                        "temp_dir" if args.is_empty() => (self.host.core.os_temp_dir, vec![]),
+                        "executable" if args.is_empty() => (self.host.core.os_executable, vec![]),
+                        "pid" | "getpid" if args.is_empty() => (self.host.core.os_pid, vec![]),
+                        "hostname" if args.is_empty() => (self.host.core.os_hostname, vec![]),
+                        "username" if args.is_empty() => (self.host.core.os_username, vec![]),
+                        "release" if args.is_empty() => (self.host.core.os_release, vec![]),
+                        "version" if args.is_empty() => (self.host.core.os_version, vec![]),
+                        "getppid" if args.is_empty() => (self.host.core.os_getppid, vec![]),
+                        "getuid" if args.is_empty() => (self.host.core.os_getuid, vec![]),
+                        "geteuid" if args.is_empty() => (self.host.core.os_geteuid, vec![]),
+                        "getgid" if args.is_empty() => (self.host.core.os_getgid, vec![]),
+                        "getegid" if args.is_empty() => (self.host.core.os_getegid, vec![]),
+                        "getpgrp" if args.is_empty() => (self.host.core.os_getpgrp, vec![]),
+                        "getgroups" if args.is_empty() => (self.host.core.os_getgroups, vec![]),
+                        "uptime" if args.is_empty() => (self.host.core.os_uptime, vec![]),
+                        "loadavg" if args.is_empty() => (self.host.core.os_loadavg, vec![]),
+                        "times" if args.is_empty() => (self.host.core.os_times, vec![]),
+                        "sync" if args.is_empty() => (self.host.core.os_sync, vec![]),
+                        "setpgrp" if args.is_empty() => (self.host.core.os_setpgrp, vec![]),
+                        "pipe" if args.is_empty() => (self.host.core.os_pipe, vec![]),
                         "success" if args.len() == 1 => {
-                            (self.host.core.sys_success, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_success, vec![self.lower_expr(&args[0])?])
                         }
                         "exitcode" if args.len() == 1 => {
-                            (self.host.core.sys_exitcode, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_exitcode, vec![self.lower_expr(&args[0])?])
                         }
                         "expand" if args.len() == 1 => {
-                            (self.host.core.sys_expand, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_expand, vec![self.lower_expr(&args[0])?])
                         }
                         "getpgid" if args.len() == 1 => {
-                            (self.host.core.sys_getpgid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_getpgid, vec![self.lower_expr(&args[0])?])
                         }
                         "getsid" if args.len() == 1 => {
-                            (self.host.core.sys_getsid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_getsid, vec![self.lower_expr(&args[0])?])
                         }
                         "umask" if args.len() == 1 => {
-                            (self.host.core.sys_umask, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_umask, vec![self.lower_expr(&args[0])?])
                         }
                         "getpriority" if args.len() == 1 => {
-                            (self.host.core.sys_getpriority, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_getpriority, vec![self.lower_expr(&args[0])?])
                         }
                         "close_fd" if args.len() == 1 => {
-                            (self.host.core.sys_close_fd, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_close_fd, vec![self.lower_expr(&args[0])?])
                         }
                         "setpgid" if args.len() == 2 => (
-                            self.host.core.sys_setpgid,
+                            self.host.core.os_setpgid,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "setpriority" if args.len() == 2 => (
-                            self.host.core.sys_setpriority,
+                            self.host.core.os_setpriority,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "kill" if args.len() == 2 => (
-                            self.host.core.sys_kill,
+                            self.host.core.os_kill,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "mkfifo" if args.len() == 2 => (
-                            self.host.core.sys_mkfifo,
+                            self.host.core.os_mkfifo,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
-                        "fork" if args.is_empty() => (self.host.core.sys_fork, vec![]),
+                        "fork" if args.is_empty() => (self.host.core.os_fork, vec![]),
                         "setuid" if args.len() == 1 => {
-                            (self.host.core.sys_setuid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_setuid, vec![self.lower_expr(&args[0])?])
                         }
                         "setgid" if args.len() == 1 => {
-                            (self.host.core.sys_setgid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_setgid, vec![self.lower_expr(&args[0])?])
                         }
-                        "setsid" if args.is_empty() => (self.host.core.sys_setsid, vec![]),
+                        "setsid" if args.is_empty() => (self.host.core.os_setsid, vec![]),
                         "initgroups" if args.len() == 2 => (
-                            self.host.core.sys_initgroups,
+                            self.host.core.os_initgroups,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
-                        "wait" if args.is_empty() => (self.host.core.sys_wait, vec![]),
+                        "wait" if args.is_empty() => (self.host.core.os_wait, vec![]),
                         "waitpid" if args.len() == 2 => (
-                            self.host.core.sys_waitpid,
+                            self.host.core.os_waitpid,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "utime" if args.len() == 3 => (
-                            self.host.core.sys_utime,
+                            self.host.core.os_utime,
                             vec![
                                 self.lower_expr(&args[0])?,
                                 self.lower_expr(&args[1])?,
@@ -12697,10 +12697,10 @@ impl LowerCtx<'_, '_> {
                             ],
                         ),
                         "atexit" if args.len() == 1 => {
-                            (self.host.core.sys_atexit, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_atexit, vec![self.lower_expr(&args[0])?])
                         }
                         "stop" if args.len() == 1 => {
-                            (self.host.core.sys_stop, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.os_stop, vec![self.lower_expr(&args[0])?])
                         }
                         _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
@@ -13791,7 +13791,7 @@ impl LowerCtx<'_, '_> {
                 if module == "core.sys" && method == "get" && args.len() == 1 {
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.sys_get, self.b.func);
+                        .declare_func_in_func(self.host.core.env_get, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     let call = self.b.ins().call(host_ref, &[a0]);
                     return Ok(self.b.inst_results(call)[0]);
@@ -13799,7 +13799,7 @@ impl LowerCtx<'_, '_> {
                 if module == "core.sys" && method == "set" && args.len() == 2 {
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.sys_set, self.b.func);
+                        .declare_func_in_func(self.host.core.env_set, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     let a1 = self.lower_expr(&args[1])?;
                     let call = self.b.ins().call(host_ref, &[a0, a1]);
@@ -13810,13 +13810,13 @@ impl LowerCtx<'_, '_> {
                 if module == "core.sys" && method == "unset" && args.len() == 1 {
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.sys_unset, self.b.func);
+                        .declare_func_in_func(self.host.core.env_unset, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     let call = self.b.ins().call(host_ref, &[a0]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.sys" && method == "vars" && args.is_empty() {
-                    return Ok(self.call_host(self.host.core.sys_vars, &[]));
+                    return Ok(self.call_host(self.host.core.env_vars, &[]));
                 }
                 if module == "core.process" && method == "exit" && args.len() == 1 {
                     let host_ref = self
@@ -15713,7 +15713,7 @@ impl LowerCtx<'_, '_> {
                     let callback = self.lower_interrupt_callback_value(callback)?;
                     let host = self
                         .module
-                        .declare_func_in_func(self.host.core.sys_on_interrupt, self.b.func);
+                        .declare_func_in_func(self.host.core.os_on_interrupt, self.b.func);
                     self.b.ins().call(host, &[callback]);
                     self.emit_trap_check()?;
                     Ok(self.b.ins().iconst(types::I64, 0))
@@ -17108,7 +17108,7 @@ impl LowerCtx<'_, '_> {
                     ),
                     Some(p) => (self.b.ins().iconst(types::I8, 1), self.lower_expr(p)?),
                 };
-                Ok(self.call_host(self.host.core.term_input, &[has_prompt, prompt_v]))
+                Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt_v]))
             }
             TExprKind::RequireStop {
                 kind,
