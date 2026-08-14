@@ -76,49 +76,68 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     let entry = root.join("examples/features/modules/fact_value_arguments.jet");
     let expected = std::fs::read(root.join("examples/features/expected/modules/fact_value_arguments.out"))
         .expect("fact-value module golden");
-    for (profile, output) in [("compact", b"2\n".as_slice()), ("spacious", b"5\n".as_slice())] {
-        let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+    for (profile, setting, expected_output) in [
+        ("compact", "2", b"2\n".as_slice()),
+        ("spacious", "5", b"5\n".as_slice()),
+    ] {
+        let profile_arg = format!("--profile={profile}");
+        let setting_arg = format!("cache_slots={setting}");
+        let profile_run = Command::new(env!("CARGO_BIN_EXE_jet"))
             .arg("run")
-            .arg(format!("--profile={profile}"))
+            .arg(&profile_arg)
             .arg(&entry)
             .env("NO_COLOR", "1")
             .output()
             .expect("run fact-value module under named profile");
-        assert!(
-            run.status.success(),
+        assert_eq!(
+            profile_run.status.code(),
+            Some(0),
             "named profile `{profile}` failed:\n{}",
-            String::from_utf8_lossy(&run.stderr)
+            String::from_utf8_lossy(&profile_run.stderr)
         );
-        assert_eq!(run.stdout, output, "named profile `{profile}` size drifted");
+        assert_eq!(profile_run.stdout, expected_output, "named profile `{profile}` size drifted");
 
-        let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .arg("run")
-            .arg(format!("--profile={profile}"))
-            .arg("--interpret")
-            .arg(&entry)
-            .env("NO_COLOR", "1")
-            .output()
-            .expect("interpret fact-value module under named profile");
-        assert!(
-            interpreted.status.success(),
-            "interpreted profile `{profile}` failed: {}",
-            String::from_utf8_lossy(&interpreted.stderr)
-        );
-        assert_eq!(interpreted.stdout, output, "interpreted profile `{profile}` drifted");
-
-        let dev = Command::new(env!("CARGO_BIN_EXE_jet"))
+        let profile_dev = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(["dev", entry.to_str().expect("fact-value module path")])
-            .arg(format!("--profile={profile}"))
+            .arg(&profile_arg)
             .args(["--interpret", "--watch=off"])
             .env("NO_COLOR", "1")
             .output()
             .expect("dev-interpret fact-value module under named profile");
-        assert!(
-            dev.status.success(),
-            "dev profile `{profile}` failed: {}",
-            String::from_utf8_lossy(&dev.stderr)
-        );
-        assert_eq!(dev.stdout, output, "dev profile `{profile}` drifted");
+
+        // `--release` wins over `--profile`; `--set` keeps each named
+        // profile's folded setting value while covering the release/AOT and
+        // default lenses explicitly. The dev row keeps the named profile.
+        let release = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", "--release", "--set"])
+            .arg(&setting_arg)
+            .arg(&entry)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run fact-value module through release AOT");
+        let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", "--set"])
+            .arg(&setting_arg)
+            .arg(&entry)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run fact-value module through default JIT");
+        for (tier, process) in [
+            ("jet run --release", release),
+            ("jet run", default),
+            ("jet dev --interpret", profile_dev),
+        ] {
+            assert_eq!(
+                process.status.code(),
+                Some(0),
+                "{tier} failed for `{profile}`: {}",
+                String::from_utf8_lossy(&process.stderr)
+            );
+            assert_eq!(
+                process.stdout, expected_output,
+                "{tier} output drifted for `{profile}`"
+            );
+        }
     }
 
     let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -144,6 +163,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     );
 
     for args in [
+        vec!["run", "--release", entry.to_str().expect("fact-value module path")],
         vec!["run", entry.to_str().expect("fact-value module path")],
         vec!["run", "--interpret", entry.to_str().expect("fact-value module path")],
         vec![
@@ -158,8 +178,9 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
             .env("NO_COLOR", "1")
             .output()
             .expect("run fact-value module through execution tier");
-        assert!(
-            run.status.success(),
+        assert_eq!(
+            run.status.code(),
+            Some(0),
             "execution tier failed: {}",
             String::from_utf8_lossy(&run.stderr)
         );
