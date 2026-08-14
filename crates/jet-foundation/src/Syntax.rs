@@ -35,6 +35,13 @@
 // E0432 teaching diagnostic; it never resolves as a type.
 // D-FAIL-BIND1=A: core_surface::AMBIENT_ERR owns the contextual lowercase
 // `err` binder inside a fallible `??` fallback. It is not a lexer keyword.
+// Card #1641, ratified 2026-08-07: D-RUN-LAW1=A names one run/one claim;
+// D-CLAIM-WORD1=B names `assert`/`assert_eq`; D-CLAIM-BENCH1=A and
+// D-CLAIM-CASES1=B add `.measure`/`.cases` to the D-DOTSCOPE1 member menu;
+// D-RUN-WATCH1=A adds `--watch`; D-RUN-RECORD1=A adds `--record=` and
+// `--replay=`; D-RUN-SESSION1=A claims the exact `r/R/t/f/q` session keys.
+// Their canonical rows live in the private surface modules below and are
+// re-exported through this file; no parser or execution engine owns a copy.
 // D-FAIL-EXIT1=A / D-FAIL-EDGE1=A (ratified 2026-08-06, cards #1533/#1536)
 // add no token: `fn run()` is the default-fallible entry, and the build target
 // selects the final report boundary. CLI, web, wasm, and service adapters

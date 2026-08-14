@@ -7152,3 +7152,44 @@ container roster is `Set`, `Rank`, `Queue`, `PriorityQueue`, `Tally`, `Cache`,
 path: formatter and fix edits are mechanical, the notice names this decision,
 and the retirement ratchet remains at zero after migration. No aliases or
 fallback type-resolution paths remain.
+
+**2026-08-07 — D-RUN-LAW1=A** *(card #1641)*: one program, one meaning, one
+claim. Verbs choose the observer of a run; claims choose their inputs and
+evidence grade. Nothing else may vary. The later rows in this slate use one
+harness, one report frame, and one watch choreography.
+
+**2026-08-07 — D-CLAIM-WORD1=B** *(card #1641)*: `assert` and `assert_eq` are
+the one assertion family in code, tests, and scripts. `require` and
+`require_eq` migrate to these spellings and are deleted; the rich diff and the
+one stop family remain. This amends S43, the D-PRELUDE-LAW1=A ambient registry,
+and the D-FAIL-BREACH1=A wording.
+
+**2026-08-07 — D-CLAIM-BENCH1=A** *(card #1641)*: `.measure` is a `#Test`
+member and `jet test --measure` is measurement mode. `#Bench` and `jet bench`
+retire. The member rides D-DOTSCOPE1; plain `jet test` still runs the measured
+claim once as a correctness claim, with typed budgets and the one report frame.
+
+**2026-08-07 — D-CLAIM-CASES1=B** *(card #1641)*: `.cases` takes a row list,
+as `.cases([ ... ])`, and may take an explicit row parameter name, as
+`.cases(row, [ ... ])`. The name is optional: omitted means the ambient name
+`case`; a supplied name overwrites that default. The member rides D-DOTSCOPE1
+and the D-FAIL-BIND1 ambient-binding precedent; each row is one claim.
+
+**2026-08-07 — D-RUN-WATCH1=A** *(card #1641)*: `--watch` attaches to `run`,
+`test`, `bench`, and `check`, while `jet dev` remains the resident session
+verb. All four use one watch engine; affected-only reruns identify their
+partial scope beside the full-suite command, and `--watch=off` keeps its
+meaning.
+
+**2026-08-07 — D-RUN-SESSION1=A** *(card #1641)*: the resident `jet dev`
+session owns the exact keys `r` re-run, `R` restart fresh, `t` tests, `f`
+failed claims only, and `q` quit. The REPL and stepper attach to that session;
+the action labels use the owner's Title Case/Pascal Case casing note while the
+key bytes stay exact.
+
+**2026-08-07 — D-RUN-RECORD1=A** *(card #1641)*: `--record=NAME` is available
+on `run`, `dev`, and `test`, and writes the ratified `.jetproof-replay`
+artifact. `jet debug --replay=NAME` consumes it through the ratified replay
+adapters. This amends the two named D-JREPLAY1 clauses; the capture preflight,
+closed `=NAME` grammar, and the deferral of reverse-step and per-variable
+history do not change.

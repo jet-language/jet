@@ -258,6 +258,26 @@ pub const CMD_SCHEMA: &str = "schema"; // D-MIGRATE2C
 pub const SCHEMA_VERB_STATUS: &str = "status"; // D-MIGRATE2C
 pub const SCHEMA_VERB_SQUASH: &str = "squash"; // D-MIGRATE2C
 
+/// D-CLAIM-BENCH1=A (ratified 2026-08-07, card #1641): measurement mode on
+/// the one test verb.
+pub const TEST_FLAG_MEASURE: &str = "--measure";
+/// D-RUN-WATCH1=A (ratified 2026-08-07, card #1641): one watch modifier on
+/// every runnable verb named by the ballot.
+pub const RUN_FLAG_WATCH: &str = "--watch";
+/// D-RUN-RECORD1=A (ratified 2026-08-07, card #1641): named replay recording
+/// producer on `run`, `dev`, and `test`.
+pub const RUN_FLAG_RECORD: &str = "--record=";
+/// D-RUN-RECORD1=A (ratified 2026-08-07, card #1641): named replay consumer
+/// on `jet debug`.
+pub const DEBUG_FLAG_REPLAY: &str = "--replay=";
+/// D-RUN-SESSION1=A (ratified 2026-08-07, card #1641): exact resident-session
+/// key bytes. The owner casing note applies to action labels, not these keys.
+pub const SESSION_KEY_RERUN: &str = "r";
+pub const SESSION_KEY_RESTART: &str = "R";
+pub const SESSION_KEY_TESTS: &str = "t";
+pub const SESSION_KEY_FAILED_CLAIMS: &str = "f";
+pub const SESSION_KEY_QUIT: &str = "q";
+
 /// D-DBG1 (ratified 2026-06-19 = A): `jet debug <file>` — the dedicated
 /// source-level debugger entry verb, parallel to `jet run`/`jet test`. The
 /// editor launches the same command.

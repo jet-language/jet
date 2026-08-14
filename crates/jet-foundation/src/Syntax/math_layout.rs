@@ -632,6 +632,11 @@ pub const BUILTIN_CHECKED: &str = "checked";
 /// D-NUMWIDEN-CROSS1=E (ratified 2026-07-28): accept a possibly inexact
 /// integer-to-float crossing at one use site.
 pub const BUILTIN_APPROX: &str = "approx";
+/// D-CLAIM-WORD1=B (ratified 2026-08-07, card #1641): the one assertion
+/// family for code, tests, and scripts. `require`/`require_eq` migrate to
+/// these spellings; the rich diff and one stop family remain.
+pub const BUILTIN_ASSERT: &str = "assert";
+pub const BUILTIN_ASSERT_EQ: &str = "assert_eq";
 pub const BUILTIN_REQUIRE: &str = "require";
 /// S43 (ratified M6): equality assertion in test blocks.
 pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
@@ -673,11 +678,19 @@ pub const KW_BENCH: &str = "Bench";
 /// `.name(args) { … }` (I8: the ONE spelling for scope vocabulary) resolves
 /// against this list. `.setup` runs first (init region), `.expect_fail` marks
 /// a region that must fail, `.timeout(dur)` bounds a region's elapsed time,
-/// `.skip` skips a region (or the whole test when it is the first statement).
+/// `.skip` skips a region (or the whole test when it is the first statement),
+/// `.measure` selects measurement, and `.cases(rows)` supplies per-row claims.
 pub const SCOPE_TEST_SETUP: &str = "setup";
 pub const SCOPE_TEST_EXPECT_FAIL: &str = "expect_fail";
 pub const SCOPE_TEST_TIMEOUT: &str = "timeout";
 pub const SCOPE_TEST_SKIP: &str = "skip";
+/// D-CLAIM-BENCH1=A (ratified 2026-08-07, card #1641): measurement is a
+/// test member, selected by `jet test --measure`.
+pub const SCOPE_TEST_MEASURE: &str = "measure";
+/// D-CLAIM-CASES1=B (ratified 2026-08-07, card #1641): table-driven claims
+/// use the same member grammar; the optional explicit row name is handled by
+/// the member head and defaults to `AMBIENT_CASE`.
+pub const SCOPE_TEST_CASES: &str = "cases";
 
 /// D-DOTSCOPE1: recognized duration suffixes for `.timeout(<dur>)` and their
 /// nanosecond multiplier. `.timeout` reads a bare unit literal directly, so its
@@ -722,13 +735,15 @@ pub const JOB_RESERVED_CLI: &[&str] = &[
     "codemod", "audit", "sbom", "bind", "logs", "search", "info", "outdated", "push", "bridge",
     "services", "config", "toolchain", "upgrade", "doctor",
     // Global flags, normalized to the spelling a function name can carry.
+    // Card #1641: `measure`/`record`/`replay` are D-CLAIM-BENCH1=A and
+    // D-RUN-RECORD1=A rows; `watch` is the existing D-RUN-WATCH1=A row.
     "attach", "once", "observe", "gc_trace", "structural", "out", "report", "repo",
     "json", "quiet", "h", "v", "color", "no_color", "restore_role_files", "diff", "changed",
     "skipped", "stdin_path", "small", "output", "locked", "lock", "p", "annotated",
     "force", "no_sign", "registry", "pkg", "clang", "ar", "from", "to", "message",
     "before", "spdx", "cyclonedx", "advisory_db", "vendor_dir", "sbom", "verbose",
     "online", "dry_run", "edition", "try_anyway", "interpret", "trace_tiers",
-    "restart", "swap", "watch", "project", "pure", "freestanding", "gate", "target",
+    "restart", "swap", "watch", "measure", "record", "replay", "project", "pure", "freestanding", "gate", "target",
     "preset", "explain_partition", "capabilities_json", "update_snapshots",
     "coverage", "rust", "emit_generated", "u", "release", "profile", "builder", "a11y",
     "scope", "filter", "shuffle", "serial", "iterations", "time", "seed", "corpus",
@@ -772,6 +787,8 @@ pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {
             SCOPE_TEST_EXPECT_FAIL,
             SCOPE_TEST_TIMEOUT,
             SCOPE_TEST_SKIP,
+            SCOPE_TEST_MEASURE,
+            SCOPE_TEST_CASES,
         ]),
         _ => None,
     }

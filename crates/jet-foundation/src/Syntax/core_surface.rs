@@ -193,6 +193,10 @@ pub const TYPE_ERR: &str = "Err";
 /// fallible `??` fallback. This is an ordinary contextual identifier, not a
 /// lexer keyword.
 pub const AMBIENT_ERR: &str = "err";
+/// D-CLAIM-CASES1=B (ratified 2026-08-07, card #1641): the optional-name
+/// `.cases` member uses this ambient binding when the author gives no name;
+/// an explicit member-head name overwrites it inside that member's rows.
+pub const AMBIENT_CASE: &str = "case";
 /// Retired S80 type spelling. Parser keeps it only for E0432 teaching.
 pub const RETIRED_TYPE_ERROR: &str = "Error";
 /// D-VOID1: the public no-information result spelling is `()`.
