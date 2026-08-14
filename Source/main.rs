@@ -1,5 +1,5 @@
 //! jet CLI: check / build / run / test / new / fmt / lsp +
-//!          add / remove / fetch / update / store (M12.1 package manager).
+//!          add / remove / fetch / update / hangar (M12.1 package manager).
 //!
 //! The driver owns invariant I2: rustc's voice never reaches the user as
 //! if it were their fault. A rustc failure on generated code is reported
@@ -436,137 +436,7 @@ impl BuildProfile {
 }
 
 pub(crate) fn usage() -> String {
-    // #1659 criterion 1: rendered from jet::CLI's one COMMAND_GROUPS table.
-    let inspect_commands = jet::CLI::command_group_usage("inspect");
-    let registry_commands = jet::CLI::command_group_usage("registry");
-    let effect_roots = BuildEffect::ALL
-        .iter()
-        .map(|effect| effect.flag())
-        .collect::<Vec<_>>()
-        .join("/");
-    format!(
-        "\
-Welcome to {lang}! (v{ver})
-
-usage:
-  {bin} check <file.{ext}>          look for problems, build nothing
-  {bin} build <file.{ext}>          compile to a native binary in ./build/
-  {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
-  {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
-  {bin} run   <file.{ext}> -- <job>  invoke a `#Job` argv subcommand
-  {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
-  {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
-  {bin} jobs  [-p member]           list project `#Job` functions
-  {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
-  {bin} test  <file|dir> --release  compile the test harness with the release AOT profile
-  {bin} test  <file|dir> --trace-tiers  print the test harness execution tier marker
-  {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
-  {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
-  {bin} test  <file> --shuffle      run tests in a random (printed) order
-  {bin} test  <file> --serial       run one test at a time (default: parallel)
-  {bin} test  <file> --coverage     show function and branch coverage
-  {bin} bench <file|dir>            benchmark regions/programs (recurses into subdirs)
-  {bin} bench <file|dir> --filter=foo   only run benchmark regions whose name contains `foo`
-  {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
-  {bin} new   <name>                create a new project folder with package.jet
-  {bin} new   <name> --annotated    same, with commented example deps
-  {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
-  {bin} env   -- cmd                run a command in the project dev shell, then exit
-  {bin} cache bind <role> <mirror>  bind host-owned binary-cache mirrors (D-JPK-CACHECONFIG1)
-  {bin} shared-store install       install the optional socket-activated shared Hangar broker
-  {bin} trust list                  show package/build/env/service/image/fleet/jetos grants
-  {bin} trust explain [<grant>]      explain exact trust authority
-  {bin} trust grant <grant>          add a reviewed trust grant
-  {bin} trust revoke <grant>         drop a trust grant
-  {bin} dev   <file.{ext}>          watch and re-run on every save (c77 auto-detects mode)
-  {bin} serve <file.{ext}>          watch a resident program; hot-swap type-stable edits (c77)
-  {bin} debug <file.{ext}>          step through a program at the Jet source level (D-DBG3)
-  {bin} repl                         start an interactive session (E2-M18)
-  {bin} repl  --project <dir>        same, with access to a project's imports
-  {bin} repl  --allow-<root>         pre-authorize one Core effect root ({effect_roots})
-  {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts ({effect_roots})
-  {bin} inspect bind <schema> ...     generate Jet bindings from a foreign schema
-  {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
-  {bin} fmt                         rewrite all .jet files in the project to canonical style
-  {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
-  {bin} fmt   -                     read from stdin, write formatted source to stdout
-  {bin} fmt   --check               exit 1 if any file would change; list paths (CI gate)
-  {bin} fmt   --check --diff        same, also print unified diffs
-  {bin} fmt   --dry-run             show formatting changes, write nothing
-  {bin} fmt   --changed             format only VCS-changed .jet files (requires git)
-  {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
-  {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
-  {bin} self doctor                 diagnose the toolchain and offer fixes
-  {bin} self completions <shell>    print shell completions
-  {bin} self man                    print the jet self man page (roff)
-  {bin} self lsp                    language server (stdio JSON-RPC)
-  {bin} gc report                   explain automatic-GC promotions and ownership rewrites
-  {bin} self devtools <verb>        run checked developer generators
-  {bin} report                      write a private local report bundle
-  {bin} version                     print compiler version
-  {bin} help                        print this help text
-  {bin} ?                           same as help
-  {bin}                             start the interactive REPL (same as repl)
-  {bin} <file.{ext}>                run a file (same as run)
-  {bin} self upgrade                how to download a newer release
-
-package management (M12.1):
-  {bin} add   <dep> --path <dir>    add a path dependency and fetch
-  {bin} add   <dep> --git <url> --tag <tag>   add a git dependency
-  {bin} remove <dep>                remove a dependency
-  {bin} store fetch                 download and link all dependencies
-  {bin} store fetch --locked        verify lock only, no network
-  {bin} update                      refresh @latest / branch selectors
-  {bin} update <dep>                update one moving selector
-  {bin} store verify                re-check all store entry hashes
-  {bin} store generations           list recorded store generations (D-PURE3)
-  {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
-  {bin} store gc                    remove unreferenced store entries
-  {bin} store lock <script.jet>     write a script dependency lock
-  {bin} clean                       optimize and collect stale Jetpack hangar entries
-
-inspect commands:
-{inspect_commands}
-registry commands:
-{registry_commands}
-supply chain (E2-M8):
-  {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
-
-flags:
-  emit --rust <file.{ext}>     print generated Rust source
-  --check                      with fmt: exit 1 if file would change (CI)
-  --dry-run                    with rewrite commands: preview changes without writing
-  --sbom                       with build: write an SPDX SBOM beside the binary
-  --vendor-dir <path>          with vendor: directory to copy dependencies into
-  --small                      with build/run: smallest binary (S15)
-  --job <name>                 with run: run a named `#Job fn`
-  --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
-  --profile=<name>             how hard to optimize: release, debug, ci (D-BUILDPROFILE1)
-  --release                    with build/run/test: optimize for release
-  --set <key=value>            with build/run: set one declared package setting (D-CONF-KEY1)
-  --target=<triple|machine>    what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)
-  --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
-  --locked                     with fetch: verify only, refuse network
-  --verbose, -v                with build: print the bridge steps
-  --json                       emit machine-readable diagnostics
-  --gc-trace                   with run/dev: record automatic-GC promotion evidence
-  --trace-tiers                with run/dev: print per-function tier, reason, timing; with test: print AOT marker
-  --color=auto|always|never    control color (auto: only on a terminal)
-  --filter=<substr>            with test/bench: only run regions whose name contains it
-  --shuffle, --shuffle=<seed>  with test: run tests in random (or given-seed) order
-  --serial                     with test: one test at a time (default: parallel)
-  --iterations=<n>             with fuzz: case budget (default 1000)
-  --time=<seconds>             with fuzz: wall-clock budget
-  --seed=<n>                   with fuzz: base PRNG seed (default: fixed, reproducible)
-  --corpus=<dir>               with fuzz: corpus directory (default: .jet/fuzz/<file>[/<test>])
-",
-        bin = jet::Syntax::BINARY_NAME,
-        lang = jet::Syntax::LANG_NAME,
-        ver = env!("CARGO_PKG_VERSION"),
-        ext = jet::Syntax::FILE_EXT,
-        inspect_commands = inspect_commands,
-        registry_commands = registry_commands,
-    )
+    jet::CLI::usage_page(env!("CARGO_PKG_VERSION"))
 }
 
 /// #1659 criterion 2: `jet <cmd> --help`/`-h`. Rendered from the same
@@ -574,9 +444,8 @@ flags:
 /// a hand-duplicated per-command help string.
 fn command_help(cmd: &str) -> String {
     let bin = jet::Syntax::BINARY_NAME;
-    // A bare group name (`registry`/`inspect`/`hangar`/`project`/`self`/`gc`)
-    // reaches here only for a non-exhaustive group (`os`) — the exhaustive
-    // ones are already handled by `normalize_frequency_ring_argv`.
+    // A bare group name reaches here only for a non-exhaustive front door
+    // (`os` or `env`) — exhaustive groups are handled by normalization.
     if let Some(group) = jet::CLI::command_group(cmd) {
         return format!(
             "{bin} {cmd} — {}\n\n{}",
@@ -595,26 +464,20 @@ fn command_help(cmd: &str) -> String {
             group.name, action.summary
         );
     }
-    // A canonical flat top-level command: pull its summary and the matching
-    // usage lines straight out of `usage()` so the two never drift.
-    let summary = jet::CLI::COMMANDS.iter().find(|c| c.name == cmd).map(|c| c.summary);
-    let full = usage();
-    let matched: Vec<&str> = full
-        .lines()
-        .filter(|line| {
-            let mut words = line.trim_start().split_whitespace();
-            words.next() == Some(bin) && words.next() == Some(cmd)
-        })
-        .collect();
-    let header = match summary {
-        Some(s) => format!("{bin} {cmd} — {s}\n\n"),
-        None => format!("{bin} {cmd}\n\n"),
+    // A canonical flat top-level command: summary, usage, and flags all come
+    // from the live registry. No parsing of a second usage string.
+    let Some(command) = jet::CLI::COMMANDS.iter().find(|command| command.name == cmd) else {
+        return format!("{bin} {cmd}\n\nRun `{bin} help` to see every command.\n");
     };
-    if matched.is_empty() {
-        format!("{header}Run `{bin} help` to see every command.\n")
-    } else {
-        format!("{header}{}\n", matched.join("\n"))
+    let mut output = format!(
+        "{bin} {cmd} — {}\n\n  {}\n",
+        command.summary,
+        jet::CLI::command_usage(cmd),
+    );
+    for (long, help) in jet::CLI::flags_for_command(cmd) {
+        output.push_str(&format!("  {long:<28} {help}\n"));
     }
+    output
 }
 
 /// True when `arg` names a Jet source file or project directory (c6vz465 sugar:
@@ -773,6 +636,17 @@ fn first_cli_positional(raw: &[String]) -> Option<&str> {
 }
 
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
+    if let Some(retired) = jet::CLI::retired_command(raw) {
+        let category = retired.category;
+        let rewrite = retired.rewrite;
+        if category == jet::CLI::RetirementCategory::Semantic {
+            teach_retired(retired, raw, raw.iter().any(|arg| arg == "--json"));
+        }
+        let rewrite = rewrite.expect("rename retirement needs a rewrite rule");
+        let replacement = (retired.fix)(raw);
+        *raw = rewrite(raw);
+        eprintln!("Notice: `{}` is now `{}`.", retired.spelling, replacement);
+    }
     let Some(first) = raw.first().map(String::as_str) else { return };
     if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
         let group = group_spec.name;
@@ -788,13 +662,14 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         exit(ExitCodes::USAGE);
     }
     if first_cli_positional(raw) == Some("bind") {
-        let replacement = format!("{} inspect bind", jet::Syntax::BINARY_NAME);
-        teach_retired(
-            "bind",
-            &replacement,
-            "the binding tool is owned by the `inspect` command group",
+        emit_cli_report(
+            "E2101",
+            "`bind` moved under `jet inspect`.".to_string(),
+            "infrequent commands live in a named area so daily Jet commands stay easy to scan.".to_string(),
+            format!("run `{} inspect bind`.", jet::Syntax::BINARY_NAME),
             raw.iter().any(|arg| arg == "--json"),
         );
+        exit(ExitCodes::USAGE);
     }
     let Some(group) = raw.first().cloned() else { return };
     // D-CLI-SURFACE3=B: `os` is not exhaustive — jetos's own native verbs
@@ -807,10 +682,15 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         // #1659 criterion 2: `--help`/`-h` are real help requests here, not
         // an unmodeled subword — retiring the E2101 that used to fire for
         // e.g. `jet hangar --help`.
-        let asks_help = raw.len() == 1
-            || matches!(raw.get(1).map(String::as_str), Some("help"))
-            || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a));
-        if exhaustive && asks_help {
+        let asks_help = if group == "env" {
+            matches!(raw.get(1).map(String::as_str), Some("help"))
+                || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a))
+        } else {
+            raw.len() == 1
+                || matches!(raw.get(1).map(String::as_str), Some("help"))
+                || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a))
+        };
+        if (exhaustive || group == "env") && asks_help {
             println!("jet {group} — {}", spec.summary);
             print!("{}", jet::CLI::command_group_usage(&group));
             exit(ExitCodes::OK);
@@ -920,17 +800,15 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
     });
 }
 
-/// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: E2101 teaching error
-/// for a word retired with **no** single `jet <group> <same-word>` rename (so
-/// the generic `moved_command` mechanism in `normalize_frequency_ring_argv`
-/// doesn't apply) — `verb` renamed outright to `replacement`, a full `jet …`
-/// command line the caller has already composed for this exact invocation.
-fn teach_retired(verb: &str, replacement: &str, why: &str, json: bool) -> ! {
+/// D-ONCE-RETIRE1=C: semantic retirement rows hard-error with their registry
+/// owned fix. Pure rename rows are rewritten by the caller before dispatch.
+fn teach_retired(spec: &jet::CLI::RetiredCommandSpec, raw: &[String], json: bool) -> ! {
+    debug_assert_eq!(spec.category, jet::CLI::RetirementCategory::Semantic);
     emit_cli_report(
-        "E2101",
-        format!("`{verb}` isn't a jet command"),
-        why.to_string(),
-        format!("run `{replacement}`"),
+        spec.error_code,
+        format!("`{}` isn't a jet command", spec.spelling),
+        spec.why.to_string(),
+        format!("run `{}`", (spec.fix)(raw)),
         json,
     );
     exit(ExitCodes::USAGE);
@@ -1793,22 +1671,6 @@ fn main() {
         "init" => run_init(args.get(1).map(|s| s.as_str()), &raw, mode),
         "split" => run_split(&args, &raw, mode),
         "fold" => run_fold(&args, &raw, mode),
-        // D-CLI-STORE2=A: `jet lock`/`jet store lock` retired — script locking
-        // is a `jet fetch` flag, not a separate verb.
-        "lock" => {
-            let rest = raw.get(1..).map(|s| s.join(" ")).unwrap_or_default();
-            let replacement = if rest.is_empty() {
-                "jet fetch --lock <script.jet>".to_string()
-            } else {
-                format!("jet fetch --lock {rest}")
-            };
-            teach_retired(
-                "lock",
-                &replacement,
-                "script locking is a `jet fetch` flag, not a separate command",
-                json,
-            );
-        }
         // D-OPTGC1=A: the grouped report is active; the old bare cleanup alias
         // still teaches `jet clean`.
         "gc" => {
@@ -1817,12 +1679,16 @@ fn main() {
                     CmdGc::run(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
                     return;
                 }
-                None => teach_retired(
-                    "gc",
-                    "jet clean",
-                    "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)",
-                    json,
-                ),
+                None => {
+                    emit_cli_report(
+                        "E2101",
+                        "`gc` isn't a jet command".to_string(),
+                        "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)".to_string(),
+                        "run `jet clean`".to_string(),
+                        json,
+                    );
+                    exit(ExitCodes::USAGE);
+                }
                 Some(other) => {
                     emit_cli_report(
                         "E2101",
@@ -2237,22 +2103,6 @@ fn main() {
             );
             return;
         }
-        // D-CLI-DEVSERVE1=A: `jet serve` is deleted — `jet dev` is the only dev
-        // loop (it auto-detects rerun vs resident hot-swap; `--swap` forces
-        // hot-swap). The word stays unclaimed for a future ratified job.
-        "serve" => {
-            let file = args.get(1).map(|s| s.as_str());
-            let replacement = match file {
-                Some(f) => format!("jet dev {f} --swap"),
-                None => "jet dev <file.jet> --swap".to_string(),
-            };
-            teach_retired(
-                "serve",
-                &replacement,
-                "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)",
-                json,
-            );
-        }
         "debug" => {
             // D-DBG1/D-DBG3: `jet debug <file>` — the source-level step
             // debugger. Loads + checks the file, then steps it in the dev
@@ -2289,42 +2139,6 @@ fn main() {
                 exit(jet::Debug::run_debug(&resolved));
             }
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
-        }
-        // D-CLI-STORE2=A: `jet store` is dissolved — physical verbs moved to
-        // `jet hangar`, GC+optimize is the sole `jet clean` intent, and
-        // dependency fetch is the flat `jet fetch` (script locking is `jet
-        // fetch --lock <script.jet>`). No single group-prepend rename fits
-        // every former `store` subcommand, so this names the real spelling
-        // per subcommand instead of using the generic `moved_command` path.
-        "store" => {
-            let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
-            let tail = |from: usize| -> String {
-                args.get(from..)
-                    .map(|rest| rest.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" "))
-                    .unwrap_or_default()
-            };
-            let replacement = match sub {
-                "verify" => "jet hangar verify".to_string(),
-                "rollback" => {
-                    let rest = tail(2);
-                    if rest.is_empty() { "jet hangar rollback <gen>".to_string() } else { format!("jet hangar rollback {rest}") }
-                }
-                "generations" => "jet hangar generations".to_string(),
-                "gc" => "jet clean".to_string(),
-                "fetch" => "jet fetch".to_string(),
-                "lock" => {
-                    let rest = tail(2);
-                    if rest.is_empty() { "jet fetch --lock <script.jet>".to_string() } else { format!("jet fetch --lock {rest}") }
-                }
-                "" => "jet hangar / jet clean / jet fetch".to_string(),
-                other => format!("jet hangar {other}"),
-            };
-            teach_retired(
-                "store",
-                &replacement,
-                "the store group is dissolved into `jet hangar`, `jet clean`, and `jet fetch` (D-CLI-STORE2=A)",
-                json,
-            );
         }
         // D-CLI-STORE2=A / D-JPK-STORECLI1=D: `jet hangar` owns every physical
         // store verb. `verify`/`rollback`/`generations` reuse the existing

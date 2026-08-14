@@ -266,17 +266,40 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
     assert!(stdout.contains("jet self lsp --json"));
 }
 
-/// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: words retired with
-/// **no** `jet <group> <same-word>` rename — `teach_retired`'s bespoke path
-/// (`RETIRED_BARE` in `crates/jet-cli/src/CLI.rs`), not the generic `moved_command` one.
+/// D-ONCE-RETIRE1=C / D-CLI-STORE2=A / D-CLI-DEVSERVE1=A: semantic retirements
+/// have zero rows in every generated CLI surface but still reach their one
+/// registry-owned teaching refusal.
 #[test]
-fn retired_bespoke_words_teach_real_spelling() {
+fn retired_cli_routes_are_absent_but_teach_real_spelling() {
+    let surfaces = [
+        jet::CLI::usage_page("0.0.0"),
+        jet::CLI::man_page("0.0.0"),
+        jet::CLI::completions_bash(),
+        jet::CLI::completions_zsh(),
+        jet::CLI::completions_fish(),
+        jet::CLI::completions_powershell(),
+    ];
+    let top_help = Command::new(jet()).arg("--help").output().unwrap();
+    assert!(top_help.status.success(), "jet --help failed: {:?}", top_help);
+    let top_help = String::from_utf8_lossy(&top_help.stdout);
+    for retired in jet::CLI::RETIRED_COMMANDS {
+        let needle = format!("jet {}", retired.spelling);
+        assert!(
+            surfaces.iter().all(|surface| !surface.contains(&needle)),
+            "retired route leaked into generated surface: {needle}"
+        );
+        assert!(!top_help.contains(&needle), "retired route leaked into `jet --help`: {needle}");
+    }
     for (argv, replacement) in [
         (vec!["gc"], "jet clean"),
+        (vec!["serve"], "jet dev <file.jet> --swap"),
+        (vec!["store"], "jet hangar / jet clean / jet fetch"),
+        (vec!["store", "fetch"], "jet fetch"),
         (vec!["store", "verify"], "jet hangar verify"),
         (vec!["store", "generations"], "jet hangar generations"),
+        (vec!["store", "rollback", "2"], "jet hangar rollback 2"),
         (vec!["store", "gc"], "jet clean"),
-        (vec!["store", "fetch"], "jet fetch"),
+        (vec!["store", "lock", "stats.jet"], "jet fetch --lock stats.jet"),
         (vec!["serve", "main.jet"], "jet dev main.jet --swap"),
         (vec!["lock", "stats.jet"], "jet fetch --lock stats.jet"),
     ] {
@@ -293,7 +316,8 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
     let mut declared = Vec::new();
     for group in jet::CLI::command_groups() {
         for action in group.actions {
-            let dispatch_exempts = jet::CLI::moved_command(action.name).is_none();
+            let dispatch_exempts = jet::CLI::moved_command(action.name).is_none()
+                && action.name != "install";
             assert_eq!(
                 action.also_canonical_top_level,
                 dispatch_exempts,
@@ -302,11 +326,14 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
                 action.name
             );
             if action.also_canonical_top_level {
-                declared.push(action.name);
+                declared.push(format!("{} {}", group.name, action.name));
             }
         }
     }
-    assert_eq!(declared, vec!["import", "report", "run", "test", "bench"]);
+    assert_eq!(
+        declared,
+        vec!["hangar import", "gc report", "env test", "perf run", "perf test", "perf bench"]
+    );
 }
 
 #[test]

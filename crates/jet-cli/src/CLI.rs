@@ -133,7 +133,8 @@ pub struct CommandSpec {
     /// Only meaningful when `actions` is non-empty: true when every subword of
     /// this group is modeled by `actions` — the bare group form and `<group>
     /// help` print the CLI-owned summary, and an unmodeled subword is E2101.
-    /// False for `os`/`gc` (D-CLI-SURFACE3=B): `os` exposes a wider native verb
+    /// False for `os`/`gc`/`env` (D-CLI-SURFACE3=B): these front doors expose a
+    /// wider downstream verb surface
     /// surface (`check`/`build`/`switch`/…) that stays opaque to this
     /// registry, so only the migrated verbs (`push`/`bridge`/`services`/
     /// `config`) are modeled and everything else — including bare `jet os` and
@@ -174,6 +175,8 @@ pub enum HandlerKey {
     ProjectParts,
     Push, Bridge, Services, Config,
     Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
+    Env,
+    SharedStore,
     Perf,
     Reserved,
     Facts,
@@ -197,6 +200,8 @@ impl HandlerKey {
             Self::Toolchain => "toolchain",
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
             Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
+            Self::Env => "env",
+            Self::SharedStore => "shared-store",
             Self::Perf => "perf",
             Self::Reserved => "reserved",
             Self::Facts => "facts",
@@ -204,7 +209,7 @@ impl HandlerKey {
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Hangar | Self::GcReport | Self::Perf)
+        matches!(self, Self::Hangar | Self::GcReport | Self::Perf | Self::Env)
     }
 }
 
@@ -277,6 +282,19 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
     NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
 ];
+// D-ENVHOOK1=A: these are the shipped `jetpack enter` subverbs exposed through
+// Jet's environment front door. `env` stays non-exhaustive because `export` is
+// a private callback used by the shell hook and must continue downstream.
+const ENV_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "test", usage: "test [-- command]", summary: "Run environment checks in a clean environment", handler: HandlerKey::Env, also_canonical_top_level: true },
+    NestedCommandSpec { name: "hook", usage: "hook <bash|zsh|fish>", summary: "Print the shell auto-activation hook", handler: HandlerKey::Env, also_canonical_top_level: false },
+];
+const SHARED_STORE_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "install", usage: "install", summary: "Install the optional shared Hangar broker", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
+    NestedCommandSpec { name: "enroll", usage: "enroll <uid> [--read-only]", summary: "Grant a user shared-store broker access", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
+    NestedCommandSpec { name: "status", usage: "status", summary: "Show shared-store broker configuration", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
+    NestedCommandSpec { name: "broker", usage: "broker [--fd <n>]", summary: "Serve one shared-store broker request", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
+];
 // D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
 // This group is *not* exhaustive (see `CommandSpec::exhaustive`) — jetos's
 // own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
@@ -341,7 +359,11 @@ pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandSpec
 pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
     command_groups().find_map(|group| {
         group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
-    }).filter(|(_, action)| !action.also_canonical_top_level)
+    }).filter(|(_, action)| {
+        // E0043 reserves bare `install` for its teaching diagnostic even though
+        // the real shared-store action is `jet shared-store install`.
+        !action.also_canonical_top_level && action.name != "install"
+    })
 }
 
 pub fn moved_command_group(name: &str) -> Option<&'static str> {
@@ -379,7 +401,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "jobs",
-        summary: "List project jobs",
+        summary: "List project #Job functions (<file.jet> -- <job>)",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -415,13 +437,6 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "dev",
         summary: "Rerun a program whenever files change",
-        headline: false,
-        actions: &[],
-        exhaustive: false,
-    },
-    CommandSpec {
-        name: "serve",
-        summary: "Use `jet dev --swap` instead",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -493,8 +508,15 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "env",
         summary: "Open the project development shell",
         headline: false,
-        actions: &[],
+        actions: ENV_ACTIONS,
         exhaustive: false,
+    },
+    CommandSpec {
+        name: "shared-store",
+        summary: "Manage the optional shared Hangar broker",
+        headline: false,
+        actions: SHARED_STORE_ACTIONS,
+        exhaustive: true,
     },
     CommandSpec {
         name: "cache",
@@ -582,20 +604,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         actions: &[],
         exhaustive: false,
     },
-    CommandSpec {
-        name: "lock",
-        summary: "Use `jet fetch --lock <script.jet>` instead",
-        headline: false,
-        actions: &[],
-        exhaustive: false,
-    },
-    CommandSpec {
-        name: "store",
-        summary: "Use `jet hangar`, `jet clean`, or `jet fetch` instead",
-        headline: false,
-        actions: &[],
-        exhaustive: false,
-    },
     // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     CommandSpec {
         name: "gc",
@@ -679,18 +687,170 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
 ];
 
-/// D-CLI-STORE2=A / D-CLI-DEVSERVE1=A / D-CLI-SURFACE3=B: words with no
-/// group-prepend replacement — each is a bespoke teaching error (not a
-/// `jet <group> <word>` rename), so `moved_command_group` can't find them.
-/// Never advertise them in help/man/completions.
-const RETIRED_BARE: &[&str] = &["store", "serve", "lock"];
+/// D-ONCE-RETIRE1=C: the one registry for retired command routes. These are
+/// semantic retirements, so they hard-error with a teaching fix; they are not
+/// aliases, rewrites, or help rows. Longest matching spelling wins so a
+/// specific former subcommand can teach its exact current home.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RetirementCategory {
+    Rename,
+    Semantic,
+}
+
+pub struct RetiredCommandSpec {
+    pub spelling: &'static str,
+    pub category: RetirementCategory,
+    pub error_code: &'static str,
+    pub why: &'static str,
+    pub fix: fn(&[String]) -> String,
+    pub rewrite: Option<fn(&[String]) -> Vec<String>>,
+}
+
+fn retired_serve_fix(argv: &[String]) -> String {
+    match argv.get(1).map(String::as_str) {
+        Some(file) => format!("jet dev {file} --swap"),
+        None => "jet dev <file.jet> --swap".to_string(),
+    }
+}
+
+fn retired_lock_fix(argv: &[String]) -> String {
+    match argv.get(1).map(String::as_str) {
+        Some(script) => format!("jet fetch --lock {script}"),
+        None => "jet fetch --lock <script.jet>".to_string(),
+    }
+}
+
+fn retired_store_fix(_: &[String]) -> String {
+    "jet hangar / jet clean / jet fetch".to_string()
+}
+
+fn retired_store_fetch_fix(_: &[String]) -> String {
+    "jet fetch".to_string()
+}
+
+fn retired_store_verify_fix(_: &[String]) -> String {
+    "jet hangar verify".to_string()
+}
+
+fn retired_store_generations_fix(_: &[String]) -> String {
+    "jet hangar generations".to_string()
+}
+
+fn retired_store_rollback_fix(argv: &[String]) -> String {
+    match argv.get(2).map(String::as_str) {
+        Some(generation) => format!("jet hangar rollback {generation}"),
+        None => "jet hangar rollback <gen>".to_string(),
+    }
+}
+
+fn retired_store_gc_fix(_: &[String]) -> String {
+    "jet clean".to_string()
+}
+
+fn retired_store_lock_fix(argv: &[String]) -> String {
+    match argv.get(2).map(String::as_str) {
+        Some(script) => format!("jet fetch --lock {script}"),
+        None => "jet fetch --lock <script.jet>".to_string(),
+    }
+}
+
+pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
+    RetiredCommandSpec {
+        spelling: "serve",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "`jet dev` is the only dev loop now; `--swap` forces its hot-swap path (D-CLI-DEVSERVE1=A)",
+        fix: retired_serve_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "the store group is dissolved into `jet hangar`, `jet clean`, and `jet fetch` (D-CLI-STORE2=A)",
+        fix: retired_store_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store fetch",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "dependency fetching is the flat `jet fetch` command (D-CLI-STORE2=A)",
+        fix: retired_store_fetch_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store verify",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "package-store integrity checks belong to `jet hangar` (D-CLI-STORE2=A)",
+        fix: retired_store_verify_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store generations",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "package-store generations belong to `jet hangar` (D-CLI-STORE2=A)",
+        fix: retired_store_generations_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store rollback",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "package-store rollback belongs to `jet hangar` (D-CLI-STORE2=A)",
+        fix: retired_store_rollback_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store gc",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "package-store cleanup is the sole `jet clean` intent (D-CLI-STORE2=A)",
+        fix: retired_store_gc_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "store lock",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)",
+        fix: retired_store_lock_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "lock",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "script locking is a `jet fetch` flag, not a separate command (D-CLI-STORE2=A)",
+        fix: retired_lock_fix,
+        rewrite: None,
+    },
+];
+
+pub fn retired_command(argv: &[String]) -> Option<&'static RetiredCommandSpec> {
+    RETIRED_COMMANDS
+        .iter()
+        .filter(|spec| {
+            spec.spelling
+                .split_whitespace()
+                .enumerate()
+                .all(|(index, word)| argv.get(index).is_some_and(|arg| arg.as_str() == word))
+        })
+        .max_by_key(|spec| spec.spelling.split_whitespace().count())
+}
+
+pub fn is_retired_root(name: &str) -> bool {
+    RETIRED_COMMANDS.iter().any(|spec| spec.spelling.split_whitespace().next() == Some(name))
+}
 
 /// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: canonical top-level
 /// frequency ring. Moved handler names remain in the internal registry only so
-/// normalized grouped argv reaches the real dispatcher; generators must never
-/// advertise those retired bare spellings, nor the bespoke-retired words above.
+/// normalized grouped argv reaches the real dispatcher; generators never
+/// advertise moved, retired, or the E0043 teaching-only `install` spelling.
 pub fn is_canonical_top_level(name: &str) -> bool {
-    moved_command_group(name).is_none() && !RETIRED_BARE.contains(&name)
+    moved_command_group(name).is_none() && !is_retired_root(name) && name != "install"
 }
 
 fn leaked_cli_text(text: String) -> &'static str {
@@ -752,6 +912,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
+    FlagSpec { long: "--read-only", help: "with shared-store enroll: grant read-only broker access" },
+    FlagSpec { long: "--fd", help: "with shared-store broker: inherited broker socket descriptor" },
     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
     FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build/jobs: pick a workspace member by name" },
     FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
@@ -852,6 +1014,78 @@ pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| {
     flags
 });
 
+/// Render the generic usage shape for a live command. Argument-rich nested
+/// rows use their `NestedCommandSpec::usage`; flat commands keep one compact
+/// registry-owned shape for `jet <cmd> --help` and the help index.
+pub fn command_usage(name: &str) -> String {
+    if let Some(group) = command_group(name) {
+        return format!("{} {} <command>", BINARY_NAME, group.name);
+    }
+    if let Some((group, action)) = moved_command(name) {
+        return action
+            .usage
+            .lines()
+            .map(|usage| format!("{} {} {}", BINARY_NAME, group.name, usage))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    format!("{} {} [args]", BINARY_NAME, name)
+}
+
+/// Flags attached to one command, projected from the same rows used by flag
+/// validation, completions, and the man page.
+pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
+    FLAGS
+        .iter()
+        .filter(|flag| {
+            flag.help
+                .strip_prefix("with ")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(names, _)| {
+                    names
+                        .split(['/', ','])
+                        .map(str::trim)
+                        .any(|candidate| candidate == name)
+                })
+                .unwrap_or(false)
+        })
+        .map(|flag| {
+            let help = flag
+                .help
+                .strip_prefix("with ")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(_, help)| help.trim())
+                .unwrap_or(flag.help);
+            (flag.long, help)
+        })
+        .collect()
+}
+
+/// Full top-level help generated from the live command and flag registries.
+/// No command or retired route gets a hand-authored usage row.
+pub fn usage_page(version: &str) -> String {
+    let mut output = format!(
+        "Welcome to {lang}! (v{version})\n\nusage:\n",
+        lang = crate::Syntax::LANG_NAME,
+    );
+    for command in COMMANDS.iter().filter(|command| is_canonical_top_level(command.name)) {
+        output.push_str(&format!(
+            "  {:<36} {}\n",
+            command_usage(command.name),
+            command.summary
+        ));
+    }
+    for group in command_groups() {
+        output.push_str(&format!("\n{} commands:\n", group.name));
+        output.push_str(&command_group_usage(group.name));
+    }
+    output.push_str("\nflags:\n");
+    for flag in FLAGS.iter() {
+        output.push_str(&format!("  {:<28} {}\n", flag.long, flag.help));
+    }
+    output
+}
+
 /// Is `name` a built-in command?
 pub fn is_builtin(name: &str) -> bool {
     COMMANDS.iter().any(|c| c.name == name)
@@ -865,6 +1099,7 @@ pub fn is_builtin(name: &str) -> bool {
         // help/completions, but dispatch must reach its bespoke "use fetch"
         // diagnostic instead of generic unknown-command E2101.
         || name == "install"
+        || is_retired_root(name)
 }
 
 /// Commands that own a bespoke flag vocabulary or forward flags downstream.
@@ -875,9 +1110,9 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
         name,
             "env"
             | "remote"
+            | "shared-store"
             | "dev"
             | "devtools"
-            | "serve"
             | "push"
             | "trust"
             | "bridge"
@@ -1402,6 +1637,11 @@ mod tests {
     fn moved_command_registry_agrees_with_dispatch() {
         for group in command_groups() {
             for action in group.actions {
+                if action.name == "install" {
+                    assert_eq!(action.handler, HandlerKey::SharedStore);
+                    assert!(moved_command(action.name).is_none());
+                    continue;
+                }
                 if action.also_canonical_top_level {
                     assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
@@ -1484,6 +1724,11 @@ mod tests {
             ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
             ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),
             ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
+            ("env", "test", Env, "env", true), ("env", "hook", Env, "env", true),
+            ("shared-store", "install", SharedStore, "shared-store", true),
+            ("shared-store", "enroll", SharedStore, "shared-store", true),
+            ("shared-store", "status", SharedStore, "shared-store", true),
+            ("shared-store", "broker", SharedStore, "shared-store", true),
             ("os", "push", Push, "push", false), ("os", "bridge", Bridge, "bridge", false),
             ("os", "services", Services, "services", false), ("os", "config", Config, "config", false),
             ("perf", "run", Perf, "perf", true), ("perf", "test", Perf, "perf", true),
@@ -1599,5 +1844,40 @@ mod tests {
             }
         }
         assert_eq!(command_group_usage("no-such-group"), "");
+    }
+
+    #[test]
+    fn retired_routes_have_zero_live_registry_rows() {
+        let surfaces = [
+            usage_page("0.0.0"),
+            man_page("0.0.0"),
+            completions_bash(),
+            completions_zsh(),
+            completions_fish(),
+            completions_powershell(),
+        ];
+        for retired in RETIRED_COMMANDS {
+            assert_eq!(
+                COMMANDS.iter().filter(|command| command.name == retired.spelling).count(),
+                0,
+                "retired route {} remains a top-level row",
+                retired.spelling
+            );
+            assert_eq!(
+                command_groups()
+                    .flat_map(|group| group.actions.iter().map(move |action| (group.name, action.name)))
+                    .filter(|(group, action)| format!("{group} {action}") == retired.spelling)
+                    .count(),
+                0,
+                "retired route {} remains a nested row",
+                retired.spelling
+            );
+            let needle = format!("{} {}", BINARY_NAME, retired.spelling);
+            for surface in &surfaces {
+                assert!(!surface.contains(&needle), "retired route leaked into generated surface: {needle}\n{surface}");
+            }
+            assert_eq!(retired.category, RetirementCategory::Semantic);
+            assert_eq!(retired.error_code, "E2101");
+        }
     }
 }

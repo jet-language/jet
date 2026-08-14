@@ -295,7 +295,21 @@ fn top_level_help_flag_prints_full_usage() {
         assert!(stdout.contains("usage:"), "{flag} did not print full usage: {stdout}");
         assert!(stdout.contains("build"), "{flag} usage missing a real command: {stdout}");
         assert!(stdout.contains("inspect commands:"), "{flag} usage missing the inspect group: {stdout}");
+        assert!(stdout.contains("shared-store"), "{flag} usage missing the live shared-store command: {stdout}");
     }
+}
+
+#[test]
+fn env_help_lists_shipped_test_and_hook_actions() {
+    let out = Command::new(jet())
+        .args(["env", "--help"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "env help failed: {:?}", out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("env test [-- command]"), "env help omitted `env test`: {stdout}");
+    assert!(stdout.contains("env hook <bash|zsh|fish>"), "env help omitted `env hook`: {stdout}");
 }
 
 #[test]

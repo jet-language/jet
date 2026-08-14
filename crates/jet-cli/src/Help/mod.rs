@@ -29,7 +29,7 @@
 //! `crate::Term` raw-mode module (I8 — the same one the hybrid REPL uses).
 
 use crate::Explain::Explanation;
-use crate::Syntax::{BINARY_NAME, FILE_EXT};
+use crate::Syntax::BINARY_NAME;
 use crate::CLI;
 
 pub mod Interactive;
@@ -87,14 +87,14 @@ fn category_for(cmd: &str) -> &'static str {
         "run" | "check" | "test" | "build" | "debug" | "bench" | "eval" | "emit" => {
             "Build & Run"
         }
-        "dev" | "serve" => "Development Server",
+        "dev" => "Development Server",
         "devtools" => "Reference",
-        "new" | "fmt" | "fix" | "lint" | "env" | "init" | "lock" | "config" | "toolchain" => {
+        "new" | "fmt" | "fix" | "lint" | "env" | "init" | "config" | "toolchain" => {
             "Projects & Environments"
         }
         "add" | "remove" | "fetch" | "update" | "outdated" | "search" | "info" | "logs"
         | "clean" | "publish" | "yank" | "keygen" | "key" | "vendor" | "audit" | "sbom"
-        | "store" | "schema" | "gc" => "Packages",
+        | "schema" | "gc" | "shared-store" => "Packages",
         "os" | "image" | "bind" | "push" | "trust" | "bridge" | "services" => "Jetos",
         "semindex" | "dossier" | "impact" | "codemod" | "expand" => "Reference",
         // explain, doctor, repl, man, completions, version, upgrade, help, lsp,
@@ -103,30 +103,10 @@ fn category_for(cmd: &str) -> &'static str {
     }
 }
 
-/// Curated `<placeholder>` usage line for the commands whose argument shape
-/// isn't obvious from the summary alone. Everything else falls back to a
-/// generic `jet <cmd> [args]` — real command name, no invented flags.
+/// Usage comes from the live CLI registry. Help owns presentation, not a
+/// second command-shape table.
 fn usage_for(cmd: &str) -> String {
-    match cmd {
-        "run" | "check" | "test" | "build" => format!("jet {} <file.{}> [flags]", cmd, FILE_EXT),
-        "dev" => format!("jet {} <file.{}> [flags]", cmd, FILE_EXT),
-        "serve" => format!("jet {} <file.{}> [flags]", cmd, FILE_EXT),
-        "fmt" | "fix" => format!("jet {} <file.{}>", cmd, FILE_EXT),
-        "new" => "jet new <name>".to_string(),
-        "env" => "jet env".to_string(),
-        "add" => "jet add <dep>".to_string(),
-        "remove" => "jet remove <dep>".to_string(),
-        "fetch" => "jet store fetch".to_string(),
-        "update" => "jet update [dep]".to_string(),
-        "clean" => "jet clean".to_string(),
-        "explain" => "jet explain <CODE|FACT|module.member> [file.jet]".to_string(),
-        "doctor" => "jet self doctor".to_string(),
-        "repl" => "jet repl".to_string(),
-        "notebook" => "jet notebook [file.jetnb] [--protocol]".to_string(),
-        "help" => "jet help".to_string(),
-        "os" => "jet os <plan|import|build|vm> <host> …".to_string(),
-        _ => format!("jet {} [args]", cmd),
-    }
+    CLI::command_usage(cmd)
 }
 
 /// A short, real example line — only for commands with one worth showing.
@@ -146,7 +126,7 @@ fn example_for(cmd: &str) -> Option<String> {
 fn see_also_for(cmd: &str) -> Vec<&'static str> {
     match cmd {
         "run" => vec!["build", "test", "dev"],
-        "dev" => vec!["run", "serve"],
+        "dev" => vec!["run"],
         "build" => vec!["run", "check"],
         "test" => vec!["run", "check"],
         "add" => vec!["fetch", "update"],
@@ -182,25 +162,7 @@ fn keywords_for(cmd: &str) -> Vec<&'static str> {
 /// Flags with no `"with …:"` prefix are cross-command globals and aren't
 /// attached to any single entry here.
 fn flags_for(cmd: &str) -> Vec<(&'static str, &'static str)> {
-    CLI::FLAGS
-        .iter()
-        .filter(|f| {
-            f.help
-                .strip_prefix("with ")
-                .and_then(|rest| rest.split_once(':'))
-                .map(|(names, _)| names.split(['/', ',']).map(str::trim).any(|n| n == cmd))
-                .unwrap_or(false)
-        })
-        .map(|f| {
-            let help = f
-                .help
-                .strip_prefix("with ")
-                .and_then(|rest| rest.split_once(':'))
-                .map(|(_, help)| help.trim())
-                .unwrap_or(f.help);
-            (f.long, help)
-        })
-        .collect()
+    CLI::flags_for_command(cmd)
 }
 
 /// Build the full command index from the CLI's own registry (D-DX4) — one
@@ -228,7 +190,12 @@ pub fn build_index() -> Vec<Entry> {
             entries.push(Entry {
                 symbol: command_symbol(
                     format!("{} {}", group.name, action.name),
-                    format!("jet {} {} [args]", group.name, action.name),
+                    action
+                        .usage
+                        .lines()
+                        .map(|usage| format!("jet {} {}", group.name, usage))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                     action.summary,
                     None,
                 ),
