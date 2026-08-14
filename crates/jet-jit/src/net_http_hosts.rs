@@ -1953,119 +1953,159 @@ extern "C" fn jet_jit_http_shutdown_report_field(report: i64, field: i64) -> i64
     .unwrap_or(0)
 }
 
-/// Cleartext `http://` GET/POST for hermetic loopback stems (no TLS bridge).
-fn http_cleartext_exchange(
-    method: &str,
-    url: &str,
-    body: Option<&str>,
-) -> Result<JetHTTPResponse, String> {
-    let rest = url
-        .strip_prefix("http://")
-        .ok_or_else(|| format!("unsupported url scheme: {url}"))?;
-    let (authority, path) = match rest.split_once('/') {
-        Some((a, p)) => (a, format!("/{p}")),
-        None => (rest, "/".to_string()),
-    };
-    let host_port = if authority.contains(':') {
-        authority.to_string()
-    } else {
-        format!("{authority}:80")
-    };
-    let mut stream = std::net::TcpStream::connect(&host_port)
-        .map_err(|e| format!("http connect failed: {e}"))?;
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .ok();
-    stream
-        .set_write_timeout(Some(std::time::Duration::from_secs(5)))
-        .ok();
-    let body_bytes = body.unwrap_or("").as_bytes();
-    let mut req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n"
-    );
-    if body.is_some() {
-        req.push_str(&format!("Content-Length: {}\r\n", body_bytes.len()));
-    }
-    req.push_str("\r\n");
-    use std::io::{Read, Write};
-    stream
-        .write_all(req.as_bytes())
-        .map_err(|e| format!("http write failed: {e}"))?;
-    if !body_bytes.is_empty() {
-        stream
-            .write_all(body_bytes)
-            .map_err(|e| format!("http body write failed: {e}"))?;
-    }
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 4096];
-    loop {
-        match stream.read(&mut tmp) {
-            Ok(0) => break,
-            Ok(n) => {
-                buf.extend_from_slice(&tmp[..n]);
-                if let Some(header_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let header_bytes = header_end + 4;
-                    let head = String::from_utf8_lossy(&buf[..header_end]);
-                    let mut content_length = None;
-                    for line in head.lines().skip(1) {
-                        if let Some(v) = line
-                            .split_once(':')
-                            .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-                            .and_then(|(_, v)| v.trim().parse::<usize>().ok())
-                        {
-                            content_length = Some(v);
-                            break;
-                        }
-                    }
-                    if let Some(len) = content_length {
-                        while buf.len() < header_bytes + len {
-                            match stream.read(&mut tmp) {
-                                Ok(0) => break,
-                                Ok(n) => buf.extend_from_slice(&tmp[..n]),
-                                Err(_) => break,
-                            }
-                        }
-                        buf.truncate(header_bytes + len);
-                        break;
-                    }
-                }
+fn native_http_error(error: native_http::JetHTTPBridgeError) -> JetHTTPError {
+    match error {
+        native_http::JetHTTPBridgeError::InvalidUrl => JetHTTPError::InvalidUrl,
+        native_http::JetHTTPBridgeError::InvalidHeader => JetHTTPError::InvalidHeader,
+        native_http::JetHTTPBridgeError::InvalidFraming => JetHTTPError::InvalidFraming,
+        native_http::JetHTTPBridgeError::UnsupportedEncoding => JetHTTPError::UnsupportedEncoding,
+        native_http::JetHTTPBridgeError::Resolve => JetHTTPError::Resolve {
+            host: "<redacted>".into(),
+        },
+        native_http::JetHTTPBridgeError::Connect => {
+            JetHTTPError::Connect {
+                address: "<redacted>".into(),
             }
-            Err(_) => break,
+        }
+        native_http::JetHTTPBridgeError::TLS => JetHTTPError::TLS {
+            stage: "handshake".into(),
+        },
+        native_http::JetHTTPBridgeError::Timeout => {
+            JetHTTPError::Timeout {
+                phase: "transport".into(),
+            }
+        }
+        native_http::JetHTTPBridgeError::Proxy => JetHTTPError::Proxy {
+            stage: "transport".into(),
+        },
+        native_http::JetHTTPBridgeError::Redirect => {
+            JetHTTPError::Redirect {
+                reason: "limit".into(),
+            }
+        }
+        native_http::JetHTTPBridgeError::Protocol => {
+            JetHTTPError::Protocol {
+                version: "unsupported".into(),
+            }
+        }
+        native_http::JetHTTPBridgeError::IO => JetHTTPError::IO {
+            operation: "transport".into(),
+        },
+        native_http::JetHTTPBridgeError::ResourceUnavailable => JetHTTPError::ResourceUnavailable {
+            resource: "transport".into(),
+        },
+        native_http::JetHTTPBridgeError::Cancelled => JetHTTPError::Cancelled,
+        native_http::JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget {
+            operation: JetHTTPOperation::ClientConnect,
+        },
+        native_http::JetHTTPBridgeError::Internal => JetHTTPError::Internal {
+            incident_id: "http-transport".into(),
+        },
+    }
+}
+
+fn native_http_body_close(handle: i64) {
+    native_http::jet_http_client_body_close_impl(handle);
+}
+
+fn native_http_body_read(
+    handle: i64,
+    max_chunk: usize,
+) -> Result<Option<Vec<u8>>, JetHTTPError> {
+    match native_http::jet_http_client_body_read_impl(handle, max_chunk) {
+        Ok(Some(bytes)) => Ok(Some(bytes)),
+        Ok(None) => Ok(None),
+        Err(error) => {
+            native_http_body_close(handle);
+            Err(native_http_error(error))
         }
     }
-    let text = String::from_utf8_lossy(&buf);
-    let (head, body_text) = text.split_once("\r\n\r\n").unwrap_or((text.as_ref(), ""));
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0);
-    let mut resp = jet_http_srv_response(status, &body_text.to_string());
-    for line in head.lines().skip(1) {
-        if let Some((k, v)) = line.split_once(':') {
-            let _ = resp
-                .headers
-                .append(&k.trim().to_string(), &v.trim().to_string());
+}
+
+fn native_http_response(
+    result: Result<(i64, i64, Option<i64>, Vec<String>), native_http::JetHTTPBridgeError>,
+) -> Result<JetHTTPResponse, JetHTTPError> {
+    let (status, body, length, headers) = result.map_err(native_http_error)?;
+    let protocol = native_http::jet_http_client_response_protocol_impl(body);
+    let remote_address = native_http::jet_http_client_response_remote_address_impl(body);
+    let redirect_history = native_http::jet_http_client_response_redirect_history_impl(body);
+    let timings_ms = native_http::jet_http_client_response_timings_impl(body);
+    let reused_connection = native_http::jet_http_client_response_reused_impl(body);
+    let raw_content_encoding = native_http::jet_http_client_response_raw_encoding_impl(body);
+    native_http::jet_http_client_response_facts_drop_impl(body);
+    let length = match length.map(usize::try_from).transpose() {
+        Ok(length) => length,
+        Err(_) => {
+            native_http_body_close(body);
+            return Err(JetHTTPError::InvalidFraming);
         }
-    }
-    Ok(resp)
+    };
+    let headers = match JetHTTPHeaders::from_flat(headers) {
+        Ok(headers) => headers,
+        Err(_) => {
+            native_http_body_close(body);
+            return Err(JetHTTPError::InvalidHeader);
+        }
+    };
+    let mut response = jet_http_srv_response(status, &String::new());
+    response.body = JetHTTPBody::bridge(
+        body,
+        length,
+        native_http_body_read,
+        native_http_body_close,
+    );
+    response.headers = headers;
+    response.protocol = protocol;
+    response.remote_address = remote_address;
+    response.redirect_history = redirect_history;
+    response.timings_ms = timings_ms;
+    response.reused_connection = reused_connection;
+    response.raw_content_encoding = raw_content_encoding;
+    Ok(response)
+}
+
+fn native_http_request(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
+    let body = if req.body_set {
+        Some(req.body.bytes(8 * 1024 * 1024)?)
+    } else {
+        None
+    };
+    let headers = req.headers.to_flat();
+    native_http_response(native_http::jet_http_client_send_impl(
+        &req.method,
+        &req.url,
+        &headers,
+        body.as_deref(),
+        req.timeout_ms,
+        req.connect_timeout_ms,
+        req.read_timeout_ms,
+        req.total_timeout_ms,
+        req.dns_timeout_ms,
+        req.tls_timeout_ms,
+        req.write_timeout_ms,
+        req.first_byte_timeout_ms,
+        req.redirects,
+        req.proxy.as_deref(),
+        &req.cookies,
+        &req.form,
+        &req.multipart,
+    ))
 }
 
 extern "C" fn jet_jit_http_client_get(url: i64) -> i64 {
     let url = clone_string(url);
-    match http_cleartext_exchange("GET", &url, None) {
+    match native_http_response(native_http::jet_http_client_get_impl(&url)) {
         Ok(resp) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(resp))),
-        Err(e) => result_err(e),
+        Err(e) => http_err(e),
     }
 }
 
 extern "C" fn jet_jit_http_client_post(url: i64, body: i64) -> i64 {
     let url = clone_string(url);
     let body = clone_string(body);
-    match http_cleartext_exchange("POST", &url, Some(&body)) {
+    match native_http_response(native_http::jet_http_client_post_impl(&url, &body)) {
         Ok(resp) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(resp))),
-        Err(e) => result_err(e),
+        Err(e) => http_err(e),
     }
 }
 
@@ -2462,164 +2502,13 @@ extern "C" fn jet_jit_http_client_request_read_timeout(req: i64, ms: i64) -> i64
     ))
 }
 
-fn http_cleartext_request(req: &JetHTTPRequest) -> Result<JetHTTPResponse, String> {
-    let mut cookie = String::new();
-    for chunk in req.cookies.chunks(2) {
-        if chunk.len() == 2 {
-            if !cookie.is_empty() {
-                cookie.push_str("; ");
-            }
-            cookie.push_str(&chunk[0]);
-            cookie.push('=');
-            cookie.push_str(&chunk[1]);
-        }
-    }
-    let mut form_body = String::new();
-    for chunk in req.form.chunks(2) {
-        if chunk.len() == 2 {
-            if !form_body.is_empty() {
-                form_body.push('&');
-            }
-            form_body.push_str(&urlencoding_encode(&chunk[0]));
-            form_body.push('=');
-            form_body.push_str(&urlencoding_encode(&chunk[1]));
-        }
-    }
-    let form_set = !form_body.is_empty();
-    let body_text = if form_set {
-        Some(form_body)
-    } else if req.body_set {
-        Some(
-            req.body
-                .text(8 * 1024 * 1024)
-                .map_err(|e| format!("{e:?}"))?,
-        )
-    } else {
-        None
-    };
-    let rest = req
-        .url
-        .strip_prefix("http://")
-        .ok_or_else(|| format!("unsupported url scheme: {}", req.url))?;
-    let (authority, path) = match rest.split_once('/') {
-        Some((a, p)) => (a, format!("/{p}")),
-        None => (rest, "/".to_string()),
-    };
-    let host_port = if authority.contains(':') {
-        authority.to_string()
-    } else {
-        format!("{authority}:80")
-    };
-    let mut stream = std::net::TcpStream::connect(&host_port)
-        .map_err(|e| format!("http connect failed: {e}"))?;
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .ok();
-    stream
-        .set_write_timeout(Some(std::time::Duration::from_secs(5)))
-        .ok();
-    use std::io::{Read, Write};
-    let body_bytes = body_text.as_deref().unwrap_or("").as_bytes();
-    let mut msg = format!(
-        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
-        req.method, path, authority
-    );
-    if !cookie.is_empty() {
-        msg.push_str(&format!("Cookie: {cookie}\r\n"));
-    }
-    if form_set {
-        msg.push_str("Content-Type: application/x-www-form-urlencoded\r\n");
-    }
-    for (name, value) in &req.headers {
-        msg.push_str(&format!("{name}: {value}\r\n"));
-    }
-    if body_text.is_some() {
-        msg.push_str(&format!("Content-Length: {}\r\n", body_bytes.len()));
-    }
-    msg.push_str("\r\n");
-    stream
-        .write_all(msg.as_bytes())
-        .map_err(|e| format!("http write failed: {e}"))?;
-    if !body_bytes.is_empty() {
-        stream
-            .write_all(body_bytes)
-            .map_err(|e| format!("http body write failed: {e}"))?;
-    }
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 4096];
-    loop {
-        match stream.read(&mut tmp) {
-            Ok(0) => break,
-            Ok(n) => {
-                buf.extend_from_slice(&tmp[..n]);
-                if let Some(header_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let header_bytes = header_end + 4;
-                    let head = String::from_utf8_lossy(&buf[..header_end]);
-                    let mut content_length = None;
-                    for line in head.lines().skip(1) {
-                        if let Some(v) = line
-                            .split_once(':')
-                            .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-                            .and_then(|(_, v)| v.trim().parse::<usize>().ok())
-                        {
-                            content_length = Some(v);
-                            break;
-                        }
-                    }
-                    if let Some(len) = content_length {
-                        while buf.len() < header_bytes + len {
-                            match stream.read(&mut tmp) {
-                                Ok(0) => break,
-                                Ok(n) => buf.extend_from_slice(&tmp[..n]),
-                                Err(_) => break,
-                            }
-                        }
-                        buf.truncate(header_bytes + len);
-                        break;
-                    }
-                }
-            }
-            Err(_) => break,
-        }
-    }
-    let text = String::from_utf8_lossy(&buf);
-    let (head, body_text) = text.split_once("\r\n\r\n").unwrap_or((text.as_ref(), ""));
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0);
-    let mut resp = jet_http_srv_response(status, &body_text.to_string());
-    for line in head.lines().skip(1) {
-        if let Some((k, v)) = line.split_once(':') {
-            let _ = resp.headers.append(&k.trim().to_string(), &v.trim().to_string());
-        }
-    }
-    Ok(resp)
-}
-
-fn urlencoding_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 extern "C" fn jet_jit_http_client_request_send(req: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return result_err("invalid HTTPRequest".into());
     };
-    match http_cleartext_request(&req) {
+    match native_http_request(req) {
         Ok(resp) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(resp))),
-        Err(e) => result_err(e),
+        Err(e) => http_err(e),
     }
 }
 

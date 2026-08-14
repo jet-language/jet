@@ -246,4 +246,18 @@ include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 
+pub(crate) mod native_http {
+    #![allow(
+        dead_code,
+        unused_imports,
+        unused_variables,
+        unused_mut,
+        non_snake_case,
+        clippy::all
+    )]
+    const HTTP_PUBLIC_SUFFIX_LIST: &str =
+        include_str!("../../jet-pkg-model/src/Prelude/public_suffix_list.dat");
+    include!("../../jet-pkg-model/src/Prelude/HTTP.rs");
+}
+
 include!("net_http_hosts.rs");
