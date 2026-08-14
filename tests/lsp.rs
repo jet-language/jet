@@ -1231,19 +1231,19 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     }
     let _guard = lock_lsp_process();
 
-    let source = "#[Codable]\nstruct Widget {\n    label: String\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let source = "fn run() {\n    m :: [String:Int].{}\n    _ :: m.gett(\"a\")\n}\n";
     let path = PathBuf::from("/tmp/lsp_report_test.jet");
     let path_string = path.to_string_lossy().into_owned();
     std::fs::write(&path, source).expect("write tier-parity diagnostic fixture");
     let aot = jet::compile_with_path(source, &path_string)
-        .expect_err("AOT front end must reject a bare marker with brackets");
+        .expect_err("AOT front end must reject a missing method");
     let run = match jet::Interpreter::run_jit_once(&path_string) {
         jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
-        other => panic!("default resident JIT must reject E0999: {other:?}"),
+        other => panic!("default resident JIT must reject E0311: {other:?}"),
     };
     let interpreter = match jet::Interpreter::dev_iteration(&path_string, false, true) {
         jet_foundation::JitBackend::RunOutcome::Problems(diags) => diags,
-        other => panic!("interpreter must reject E0999: {other:?}"),
+        other => panic!("interpreter must reject E0311: {other:?}"),
     };
     let tiers = [
         ("AOT", aot.as_slice()),
@@ -1252,7 +1252,7 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     ];
     for (tier, diags) in tiers.iter().copied() {
         assert_eq!(diags.len(), 1, "{tier} must produce one canonical diagnostic");
-        assert_eq!(diags[0].code, "E0999", "{tier} diagnostic code drifted");
+        assert_eq!(diags[0].code, "E0311", "{tier} diagnostic code drifted");
     }
     let report_path = jet::Diagnostics::ReportPath::from_path(&path);
     let uri = "file:///tmp/lsp_report_test.jet";
@@ -1310,11 +1310,11 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         );
     }
     assert!(
-        diagnostics.contains(r#""message":"one marker is written without brackets""#),
+        diagnostics.contains(r#""message":"`gett` isn't a method on this value""#),
         "{diagnostics}"
     );
     assert!(
-        diagnostics.contains(r#""codeDescription":{"href":"jet://explain/E0999"}"#),
+        diagnostics.contains(r#""codeDescription":{"href":"jet://explain/E0311"}"#),
         "{diagnostics}"
     );
     assert!(
@@ -1322,20 +1322,21 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         "{diagnostics}"
     );
     assert!(
-        diagnostics.contains(r#""why":"brackets group two or more markers; one marker stays bare""#),
+        diagnostics.contains(r#""why":"this `Map` value has no instance method named `gett`""#),
         "{diagnostics}"
     );
     assert!(
-        diagnostics.contains(r#""fix":"replace `#[Codable]` with `#Codable`""#),
+        diagnostics.contains(r#""fix":"did you mean `get`?""#),
         "{diagnostics}"
     );
-    assert!(diagnostics.contains(r##""new_text":"#Codable""##), "{diagnostics}");
+    assert!(diagnostics.contains(r#""applicability":"suggested""#), "{diagnostics}");
+    assert!(diagnostics.contains(r##""new_text":"get""##), "{diagnostics}");
     assert!(diagnostics.contains(r#""moment":"compile""#), "{diagnostics}");
     assert!(diagnostics.contains(r#""severity":"error""#), "{diagnostics}");
-    assert!(diagnostics.contains(r#""code":"E0999""#), "{diagnostics}");
+    assert!(diagnostics.contains(r#""code":"E0311""#), "{diagnostics}");
     assert!(
         diagnostics.contains(
-            r##""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":0,"end":10},"new_text":"#Codable"}]"##
+            r##""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":47,"end":51},"new_text":"get"}]"##
         ),
         "{diagnostics}"
     );
@@ -1344,17 +1345,17 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     send_msg(
         &mut stdin,
         &format!(
-            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":10}}}},"context":{{"diagnostics":[]}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":2,"character":11}},"end":{{"line":2,"character":15}}}},"context":{{"diagnostics":[]}}}}}}"#,
             uri
         ),
     );
     let actions = read_msg(&mut stdout);
     assert!(actions.contains(r#""kind":"quickfix""#), "{actions}");
     assert!(
-        actions.contains(r#""title":"replace `#[Codable]` with `#Codable`""#),
+        actions.contains(r#""title":"did you mean `get`?""#),
         "{actions}"
     );
-    assert!(actions.contains(r##""newText":"#Codable""##), "{actions}");
+    assert!(actions.contains(r##""newText":"get""##), "{actions}");
     let actions_value = parse_json(&actions).expect("parse code-action response");
     let actions = json_array(json_object_field(&actions_value, "result"), "code-action result");
     let quickfix = actions
@@ -1375,6 +1376,15 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     let report_edits = json_array_field(editor_report, "fix_edits");
     assert_eq!(report_edits.len(), 1, "canonical report must carry one recovery edit");
     assert_eq!(action_edits.len(), 1, "canonical code action must carry one recovery edit");
+    let expected_action_range = parse_json(
+        r#"{"start":{"line":2,"character":11},"end":{"line":2,"character":15}}"#,
+    )
+    .expect("parse expected suggested-edit range");
+    assert_json_values_equal(
+        "code action range drifted from source span",
+        json_object_field(&action_edits[0], "range"),
+        &expected_action_range,
+    );
     assert_json_values_equal(
         "code action edit drifted from report fix_edits",
         json_object_field(&action_edits[0], "newText"),
