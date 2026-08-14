@@ -12,6 +12,12 @@ pub(crate) mod jet_encoding_json {
 }
 pub mod Codegen;
 mod BrowserHost;
+/// D-TESTFAULT1=A: the same fault schedule source used by emitted Prelude
+/// code, the TIR evaluator, and the resident JIT adapters.
+#[allow(dead_code)]
+pub mod fault_injection {
+    include!("Prelude/FaultInjection.rs");
+}
 /// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the
 /// generated program; this module compiles that same source for the Cranelift
 /// JIT and the interpreter's ambient host, so no tier can drift (I9).

@@ -488,24 +488,24 @@ extern "C" fn jet_jit_allocator_try_alloc(
             } else {
                 0
             };
-            if state.allocator == "Arena" {
-                let needed = state
-                    .used
-                    .saturating_add(requested.saturating_add(overhead));
-                while state.capacity < needed {
-                    let next = state.capacity.saturating_mul(2).max(needed);
-                    if next == state.capacity {
-                        break;
-                    }
-                    state.capacity = next;
-                }
-            }
             let result = if crate::fault_injection::jet_fault_should_fail_allocation() {
                 Err(jet_foundation::Outcome::jet_alloc_error(
                     requested,
                     state.allocator,
                 ))
             } else {
+                if state.allocator == "Arena" {
+                    let needed = state
+                        .used
+                        .saturating_add(requested.saturating_add(overhead));
+                    while state.capacity < needed {
+                        let next = state.capacity.saturating_mul(2).max(needed);
+                        if next == state.capacity {
+                            break;
+                        }
+                        state.capacity = next;
+                    }
+                }
                 jet_foundation::Outcome::jet_try_alloc_value(
                     value,
                     state.used,

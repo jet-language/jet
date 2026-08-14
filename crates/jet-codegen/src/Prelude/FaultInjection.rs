@@ -75,7 +75,7 @@ fn jet_fault_record(state: &mut JetFaultState, target_index: usize, inject: bool
 /// Called by Core operation adapters. An inactive schedule answers false.
 /// Operation paths are already canonicalized by sema and supplied by the
 /// shared AOT/JIT Prelude adapter code.
-pub(crate) fn jet_fault_should_fail(operation: &str) -> bool {
+pub fn jet_fault_should_fail(operation: &str) -> bool {
     JET_FAULT_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let active = state.active;
@@ -99,7 +99,7 @@ pub(crate) fn jet_fault_should_fail(operation: &str) -> bool {
 /// Called by every shared fallible-allocation rail. This is the final typed
 /// target in the same schedule as effect paths, so OOM recovery gets the same
 /// fail-nth loop without adding a fake `Alloc` effect root.
-pub(crate) fn jet_fault_should_fail_allocation() -> bool {
+pub fn jet_fault_should_fail_allocation() -> bool {
     JET_FAULT_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let Some(target_index) = state

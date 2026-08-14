@@ -180,9 +180,7 @@ mod Ffi;
 mod Memory;
 mod Mod;
 mod net_http_rt;
-pub(crate) mod fault_injection {
-    include!("../../jet-codegen/src/Prelude/FaultInjection.rs");
-}
+pub(crate) use jet_codegen::fault_injection;
 mod Net;
 mod Numeric;
 mod Parse;

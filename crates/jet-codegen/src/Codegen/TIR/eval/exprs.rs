@@ -1959,6 +1959,35 @@ impl<'a> EvalCtx<'a> {
         recv: &mut CtValue,
         value: CtValue,
     ) -> Result<CtValue, Diagnostic> {
+        let requested = Self::allocator_requested_bytes(&value);
+        let allocator = match recv {
+            CtValue::Struct { fields, .. } => fields.iter().find_map(|(name, value)| {
+                (name == "ctor").then(|| match value {
+                    CtValue::Str(ctor) => Self::allocator_from_ctor(ctor).0,
+                    _ => "Arena".to_string(),
+                })
+            }),
+            _ => None,
+        }
+        .unwrap_or_else(|| "Arena".to_string());
+
+        // D-ALLOCFAIL1=A: the evaluator observes the same shared fault rail
+        // before entering the plain allocator path. Plain `alloc` keeps its
+        // hosted abort behavior; only `try_alloc` can turn this into a value.
+        if crate::fault_injection::jet_fault_should_fail_allocation() {
+            let error = jet_foundation::Outcome::jet_alloc_error(requested, &allocator);
+            return Ok(CtValue::failed(Box::new(CtValue::Struct {
+                type_name: crate::Syntax::TYPE_ALLOC_ERROR.to_string(),
+                fields: vec![
+                    (
+                        "requested_bytes".to_string(),
+                        CtValue::Int(error.requested_bytes),
+                    ),
+                    ("allocator".to_string(), CtValue::Str(error.allocator)),
+                ],
+            })));
+        }
+
         match self.eval_allocator_alloc(recv, value.clone()) {
             Ok(view) => {
                 let value = self
@@ -1967,24 +1996,15 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Present(Box::new(value)))
             }
             Err(_) => {
-                let allocator = match recv {
-                    CtValue::Struct { fields, .. } => fields.iter().find_map(|(name, value)| {
-                        (name == "ctor").then(|| match value {
-                            CtValue::Str(ctor) => Self::allocator_from_ctor(ctor).0,
-                            _ => "Arena".to_string(),
-                        })
-                    }),
-                    _ => None,
-                }
-                .unwrap_or_else(|| "Arena".to_string());
+                let error = jet_foundation::Outcome::jet_alloc_error(requested, &allocator);
                 Ok(CtValue::failed(Box::new(CtValue::Struct {
                     type_name: crate::Syntax::TYPE_ALLOC_ERROR.to_string(),
                     fields: vec![
                         (
                             "requested_bytes".to_string(),
-                            CtValue::Int(Self::allocator_requested_bytes(&value) as i64),
+                            CtValue::Int(error.requested_bytes),
                         ),
-                        ("allocator".to_string(), CtValue::Str(allocator)),
+                        ("allocator".to_string(), CtValue::Str(error.allocator)),
                     ],
                 })))
             }
