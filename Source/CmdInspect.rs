@@ -1,10 +1,287 @@
 //! Read-only projections owned by `jet inspect`.
 
+use std::fmt::Write as _;
 use std::process::exit;
 
 use jet::Diagnostics::Diagnostic;
 use jet::Sema::GateLedger::{GateKind, GateLedger};
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Policy::{AppliedRule, PolicyScope, RuleResolution, RuleStatus};
+use jet_foundation::Registry;
+
+/// `jet inspect digest` — emit the one-file language surface used by agents.
+/// Every registry-shaped section is projected from the same typed rows used by
+/// the compiler's introspection and report surfaces.
+pub(crate) fn run_digest(json: bool) {
+    let digest = llm_digest();
+    if json {
+        println!(
+            "{{\"schema_version\":1,\"digest\":\"{}\"}}",
+            json_escape(&digest)
+        );
+    } else {
+        print!("{digest}");
+    }
+}
+
+fn llm_digest() -> String {
+    let marker_text = digest_marker_text();
+    let diagnostic_text = digest_diagnostic_text();
+    let core_text = digest_core_module_text();
+    let canonical = include_str!("../examples/canon.jet").trim();
+
+    let first_program_body = [
+        "A source file ends with one `fn run()` entry. `print` is a built-in.",
+        "",
+        "```jet",
+        "fn run() {",
+        "    greeting :: \"Hello, Jet\"",
+        "    print(greeting)",
+        "}",
+        "```",
+        "",
+        "No semicolons. Comments start with `//`. Strings use double quotes and interpolate `{name}`.",
+    ]
+    .join("\n");
+    let core_rules_body = [
+        "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
+        "Functions: `fn name(parameter: Type) => Return { ... }`; expression bodies use `:: expression`.",
+        "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
+        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ? E`.",
+        "Errors: handle `T?` or `T ? E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
+        "Control: `if condition { ... } else { ... }`; collecting loops use `loop name, source { ... }`; exit with `break` and advance with `next`.",
+        "Construction: use `Type.{ field: value }`; list literals use `[T].{ value1, value2 }`.",
+        "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
+        "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+    ]
+    .join("\n");
+    let canonical_body = [
+        "Read this as working source syntax. It is the checked executable showcase in `examples/canon.jet`.",
+        "",
+        "```jet",
+        canonical,
+        "```",
+    ]
+    .join("\n");
+    let marker_body = format!(
+        "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
+    );
+    let core_body = format!(
+        "Use a module alias, then call an indexed item: `use core.io as io`; `io.print(\"hi\")`.\n\n```text\n{core_text}\n```"
+    );
+    let diagnostic_body = format!(
+        "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked retired or reserved are not current syntax.\n\n```text\n{diagnostic_text}\n```"
+    );
+
+    let out = [
+        "# Jet LLM surface digest".to_string(),
+        String::new(),
+        "Generated. Current compiler registries own markers, diagnostics, syntax names, and Core items.".to_string(),
+        "Regenerate with `jet inspect digest`; CI compares the bytes.".to_string(),
+        "Use active rows only. Retired rows teach replacement; they are not valid current source.".to_string(),
+        "Write one current program. Do not invent aliases, legacy spellings, or library namespaces.".to_string(),
+        String::new(),
+        digest_section("First program", &first_program_body),
+        digest_section("Core source rules", &core_rules_body),
+        digest_section("Canonical compiling example", &canonical_body),
+        digest_section("Keywords", &digest_list(jet::Syntax::JET_KEYWORD_LIST)),
+        digest_section("Built-in type names", &digest_list(jet::Syntax::JET_TYPE_LIST)),
+        digest_section(
+            "Reserved first-party names",
+            &digest_list(jet::Syntax::FIRST_PARTY_RESERVED),
+        ),
+        digest_section("Markers", &marker_body),
+        digest_section("Core module index", &core_body),
+        digest_section("Diagnostics", &diagnostic_body),
+    ]
+    .join("\n");
+    format!("{}\n", out.trim_end())
+}
+
+fn digest_section(title: &str, body: &str) -> String {
+    format!("## {title}\n\n{}\n", body.trim())
+}
+
+fn digest_list(values: &[&str]) -> String {
+    let mut unique = Vec::new();
+    for value in values {
+        if !unique.iter().any(|seen| seen == value) {
+            unique.push(*value);
+        }
+    }
+    unique
+        .into_iter()
+        .map(|value| format!("- {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn digest_marker_text() -> String {
+    let mut out = String::from("status\tname\tregistered declaration");
+    for row in Registry::marker_rows() {
+        let rule = row
+            .rule
+            .expect("every marker registry row has an applied rule");
+        let status = match rule.status {
+            RuleStatus::Active => "active",
+            RuleStatus::Retired { .. } => "retired",
+        };
+        let _ = write!(
+            out,
+            "\n{}\t{}\t{}",
+            status,
+            row.name,
+            digest_marker_declaration(rule)
+        );
+    }
+    out
+}
+
+fn digest_marker_declaration(rule: &AppliedRule) -> String {
+    let mut fields = rule
+        .signature
+        .params
+        .iter()
+        .map(|param| {
+            let default = param
+                .default
+                .map_or(String::new(), |value| format!(" = {value}"));
+            format!("{}: {}{default}", param.name, param.source_type)
+        })
+        .collect::<Vec<_>>();
+    if let Some(source_type) = rule.signature.variadic_source_type {
+        fields.push(format!("{source_type}..."));
+    }
+    fields.push(format!(
+        "@sites: [{}]",
+        rule.sites
+            .iter()
+            .map(|site| format!(".{}", site.name()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    if rule.repeatable {
+        fields.push("@repeatable: true".to_string());
+    }
+    if rule.owns_menu {
+        fields.push("@owns_menu: true".to_string());
+    }
+    if rule.inherits {
+        fields.push("@inherits: true".to_string());
+    }
+    if rule.resolution != RuleResolution::SiteBound {
+        fields.push(format!(
+            "@resolution: .{}",
+            digest_resolution_name(rule.resolution)
+        ));
+    }
+    if !rule.policy_scopes.is_empty() {
+        fields.push(format!(
+            "@scopes: [{}]",
+            rule.policy_scopes
+                .iter()
+                .map(|scope| format!(".{}", digest_scope_name(*scope)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(companion) = rule.companion_site {
+        fields.push(format!(
+            "@companion: [{}, .{}]",
+            companion.rule,
+            companion.site.name()
+        ));
+    }
+    if let RuleStatus::Retired { replacement } = rule.status {
+        fields.push(format!(
+            "@retired: \"{}\"",
+            digest_quote(replacement)
+        ));
+    }
+    format!("marker {}({})", rule.name, fields.join(", "))
+}
+
+fn digest_scope_name(scope: PolicyScope) -> &'static str {
+    match scope {
+        PolicyScope::Organization => "Organization",
+        PolicyScope::Package => "Package",
+        PolicyScope::Module => "Module",
+        PolicyScope::Function => "Function",
+        PolicyScope::Block => "Block",
+    }
+}
+
+fn digest_resolution_name(resolution: RuleResolution) -> &'static str {
+    match resolution {
+        RuleResolution::SiteBound => "SiteBound",
+        RuleResolution::Override => "Override",
+        RuleResolution::Merge => "Merge",
+        RuleResolution::Tighten => "Tighten",
+    }
+}
+
+fn digest_quote(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn digest_diagnostic_text() -> String {
+    let mut out = String::from(
+        "code\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix",
+    );
+    for row in Registry::diagnostic_rows() {
+        let severity = match row.severity {
+            jet_foundation::Diagnostics::Severity::Error => "error",
+            jet_foundation::Diagnostics::Severity::Lint => "lint",
+        };
+        let structured_fix = row
+            .structured_fix
+            .map_or_else(|| "-".to_string(), |fix| fix.source_marker());
+        let _ = write!(
+            out,
+            "\n{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.code,
+            row.status.name(),
+            row.stage,
+            severity,
+            row.moment.as_str(),
+            digest_one_line(row.meaning),
+            digest_one_line(row.what),
+            digest_one_line(row.why),
+            digest_one_line(row.fix),
+            row.detail,
+            structured_fix,
+        );
+    }
+    out
+}
+
+fn digest_one_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn digest_core_module_text() -> String {
+    let mut out = String::from("module\titems");
+    for &module in jet::Syntax::KNOWN_CORE_MODULES {
+        let items = jet::Sema::core_module_items(module);
+        let rendered = digest_core_items(&items);
+        let _ = write!(out, "\n{module}\t{rendered}");
+    }
+    out
+}
+
+fn digest_core_items(items: &[String]) -> String {
+    let mut unique = Vec::new();
+    for item in items {
+        if !unique.iter().any(|seen| seen == item) {
+            unique.push(item.clone());
+        }
+    }
+    if unique.is_empty() {
+        "(no indexed item)".to_string()
+    } else {
+        unique.join(", ")
+    }
+}
 
 pub(crate) fn run_guarantees(
     args: &[String],

@@ -57,7 +57,7 @@ use CmdDevTools::{
 };
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExpand::run_expand;
-use CmdInspect::{run_guarantees, run_provenance};
+use CmdInspect::{run_digest, run_guarantees, run_provenance};
 use CmdImpact::run_impact;
 use CmdPkg::{
     run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_hangar_verify,
@@ -1800,6 +1800,10 @@ fn main() {
         "provenance" => {
             let provenance_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_provenance(&provenance_args, mode.json);
+            return;
+        }
+        "digest" => {
+            run_digest(mode.json);
             return;
         }
         "impact" => {

@@ -130,52 +130,67 @@ fn rustc_probe_scanner_detects_a_seeded_stray_probe() {
 #[test]
 fn llm_digest_regenerates_byte_identically() {
     let root = root();
-    let generator = root.join("scripts/agent/generate-llm-digest.mjs");
-    let generator_source = fs::read_to_string(&generator).unwrap();
-    for registry in [
-        "crates/jet-codegen/src/Prelude/Markers.jet",
-        "crates/jet-codegen/src/Prelude/Diagnostics.jet",
-        "crates/jet-foundation/src/Syntax/package_files.rs",
-        "crates/jet-foundation/src/Syntax/math_layout.rs",
-        "crates/jet-foundation/src/Syntax/predicates.rs",
-        "crates/jet-foundation/src/Syntax/core_surface.rs",
-        "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs",
-    ] {
-        assert!(
-            generator_source.contains(registry),
-            "digest generator lost registry authority: {registry}"
-        );
-    }
-
-    let output = Command::new("node")
-        .arg(&generator)
-        .arg("--stdout")
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "digest"])
         .current_dir(&root)
         .output()
-        .expect("node must run the digest generator");
+        .expect("jet must run the digest command");
     assert!(
         output.status.success(),
-        "digest generator failed:\n{}",
+        "jet inspect digest failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let generated = output.stdout;
+    assert!(
+        output.stderr.is_empty(),
+        "digest wrote unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generated = String::from_utf8(output.stdout).expect("digest is UTF-8");
     assert_eq!(
-        generated,
-        fs::read(root.join("llms.text")).unwrap(),
+        generated.as_bytes(),
+        fs::read(root.join("llms.text")).unwrap().as_slice(),
         "checked-in llms.text is stale"
     );
-    let digest = String::from_utf8(generated).expect("digest is UTF-8");
     for registry_row in [
         "- fn",
+        "- module",
         "active\tUnsafe\tmarker Unsafe",
         "E0001\tactive\tjet",
         "core.io\tReader, Writer",
     ] {
         assert!(
-            digest.contains(registry_row),
+            generated.contains(registry_row),
             "digest lost registry row: {registry_row}"
         );
     }
+
+    let machine = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "digest", "--json"])
+        .current_dir(&root)
+        .output()
+        .expect("jet must emit the digest machine form");
+    assert!(
+        machine.status.success(),
+        "jet inspect digest --json failed:\n{}",
+        String::from_utf8_lossy(&machine.stderr)
+    );
+    let report = jet_foundation::JSON::parse_json(
+        std::str::from_utf8(&machine.stdout)
+            .expect("digest machine output is UTF-8")
+            .trim(),
+    )
+    .expect("digest machine output is JSON");
+    assert_eq!(
+        jet_foundation::JSON::json_int(
+            jet_foundation::JSON::json_get(&report, "schema_version").unwrap()
+        ),
+        Some(1)
+    );
+    assert_eq!(
+        jet_foundation::JSON::json_get(&report, "digest")
+            .and_then(jet_foundation::JSON::json_str),
+        Some(generated.as_str())
+    );
 }
 
 // ---------------------------------------------------------------------------
