@@ -1381,6 +1381,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return false;
             }
             if (module == "app" || module == "core.web")
+                && matches!(method.as_str(), "sync_over" | "sync")
+            {
+                return args.len() == 2
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if (module == "app" || module == "core.web")
                 && matches!(
                     method.as_str(),
                     "auth" | "auth_oauth" | "auth_routes" | "auth_show"
