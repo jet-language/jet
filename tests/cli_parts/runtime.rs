@@ -73,6 +73,49 @@ fn already_migrated() {
     );
 }
 
+#[test]
+fn jet_fix_reports_one_print_family_migration_per_retired_spelling() {
+    let dir = isolated_cwd("print_family_fix");
+    let file = dir.join("run.jet");
+    let source = "use core.io as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
+    fs::write(&file, source).unwrap();
+
+    let preview = Command::new(jet())
+        .args(["fix", file.to_str().unwrap(), "--dry-run"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        preview.status.success(),
+        "jet fix --dry-run failed: {}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let report = String::from_utf8_lossy(&preview.stdout);
+    assert!(report.contains("would apply 3 fixes"), "{report}");
+    assert!(
+        report.contains("rewrote 3 retired print-family spellings (D-ONCE-PRINT1=A)"),
+        "{report}"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), source);
+
+    let applied = Command::new(jet())
+        .args(["fix", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        applied.status.success(),
+        "jet fix failed: {}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "use core.io as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
+    );
+}
+
 /// #1659 criterion 4: `jet perf` and `jet diff`/`jet merge` route every exit
 /// through the `jet_foundation::ExitCodes` table, never a raw literal. This
 /// guards the two files migrated for #1659; it is not a repo-wide sweep.

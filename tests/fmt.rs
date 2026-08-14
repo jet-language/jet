@@ -89,6 +89,30 @@ fn fixed_interpolation_selector_is_stable() {
 }
 
 #[test]
+fn fmt_migrates_each_retired_print_spelling_to_one_canonical_job() {
+    let source = "use core.io as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
+    let edits = jet::Formatter::retired_print_family_edits(source);
+    assert_eq!(edits.len(), 3, "one migration edit per retired spelling");
+
+    let once = jet::format_source(source).expect("retired print family should format");
+    assert_eq!(
+        once,
+        "use core.io as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
+    );
+    assert!(jet::Formatter::retired_print_family_edits(&once).is_empty());
+    assert_eq!(
+        jet::format_source(&once).expect("canonical print family should reformat"),
+        once
+    );
+}
+
+#[test]
+fn print_family_migration_ignores_unrelated_import_bindings() {
+    let source = "use helper as io\n\nfn run() {\n    io.sprint(value)\n}\n";
+    assert!(jet::Formatter::retired_print_family_edits(source).is_empty());
+}
+
+#[test]
 fn fmt_preserves_root_receiver_declarations() {
     let src = "fn show(#Root value: Int) { print(value) }\n";
     let once = jet::format_source(src).expect("#Root declaration should format");
