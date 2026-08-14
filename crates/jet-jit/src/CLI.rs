@@ -193,7 +193,8 @@ pub(crate) fn install_cli_run_ptr(ptr: *const u8) {
 
 pub(crate) fn install_cli_command_ptr(function: &str, ptr: *const u8) {
     CLI_PLAN.with(|slot| {
-        let Some(plan) = slot.borrow_mut().as_mut() else {
+        let mut plan_slot = slot.borrow_mut();
+        let Some(plan) = plan_slot.as_mut() else {
             return;
         };
         if let Some(command) = plan
@@ -208,7 +209,8 @@ pub(crate) fn install_cli_command_ptr(function: &str, ptr: *const u8) {
 
 pub(crate) fn cli_function_targets() -> Vec<String> {
     CLI_PLAN.with(|slot| {
-        let Some(plan) = slot.borrow().as_ref() else {
+        let plan_slot = slot.borrow();
+        let Some(plan) = plan_slot.as_ref() else {
             return Vec::new();
         };
         let mut targets = vec![plan.user_run.clone()];
@@ -259,7 +261,7 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
     ))
         .then(|| {
             if cli_module == bundle.entry {
-                entry_leaf.to_string()
+                Some(entry_leaf.to_string())
             } else {
                 bundle
                     .name_ledger
@@ -861,7 +863,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
                 .and_then(|name| {
                     command_specs
                         .iter()
-                        .find(|(candidate, _)| candidate.as_str() == name.as_str())
+                        .find(|(candidate, _)| candidate.as_str() == name)
                         .map(|(_, spec)| spec.clone())
                 })
                 .unwrap_or_else(|| spec.clone());
@@ -933,7 +935,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
                 .and_then(|name| {
                     command_specs
                         .iter()
-                        .find(|(candidate, _)| candidate.as_str() == name.as_str())
+                        .find(|(candidate, _)| candidate.as_str() == name)
                         .map(|(_, spec)| spec.clone())
                 })
                 .unwrap_or_else(|| spec.clone());

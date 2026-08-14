@@ -111,7 +111,8 @@ fn cli_frame_value(
         host.struct_get_i64
     };
     let getter = module.declare_func_in_func(getter, builder.func);
-    Ok(builder.ins().call(getter, &[frame, index])[0])
+    let call = builder.ins().call(getter, &[frame, index]);
+    Ok(builder.inst_results(call)[0])
 }
 
 fn cli_target_args(
