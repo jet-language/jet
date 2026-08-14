@@ -2,6 +2,7 @@
 
 use crate::Diagnostics::{span_line_col, Diagnostic, Severity, Span};
 use crate::AST::{CtValue, Type};
+use crate::Comptime::DevSink;
 use crate::Lexer::{TokKind, Token};
 use crate::{Lexer, Parser, AST};
 
@@ -29,7 +30,7 @@ pub fn eval_core_call(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    eval_core_call_with_type(module, method, args, span, None)
+    eval_core_call_with_type(module, method, args, span, None, None)
 }
 
 /// Ambient callback variant carrying the resolved return type for typed
@@ -41,6 +42,7 @@ pub fn eval_core_call_with_type(
     args: Vec<CtValue>,
     span: Span,
     _resolved_ret: Option<Type>,
+    _sink: Option<&mut DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if module != "core.compiler" {
         return None;
