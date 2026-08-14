@@ -127,6 +127,57 @@ fn rustc_probe_scanner_detects_a_seeded_stray_probe() {
     assert_eq!(findings, vec!["tests/seeded_probe.rs".to_string()]);
 }
 
+#[test]
+fn llm_digest_regenerates_byte_identically() {
+    let root = root();
+    let generator = root.join("scripts/agent/generate-llm-digest.mjs");
+    let generator_source = fs::read_to_string(&generator).unwrap();
+    for registry in [
+        "crates/jet-codegen/src/Prelude/Markers.jet",
+        "crates/jet-codegen/src/Prelude/Diagnostics.jet",
+        "crates/jet-foundation/src/Syntax/package_files.rs",
+        "crates/jet-foundation/src/Syntax/math_layout.rs",
+        "crates/jet-foundation/src/Syntax/predicates.rs",
+        "crates/jet-foundation/src/Syntax/core_surface.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs",
+    ] {
+        assert!(
+            generator_source.contains(registry),
+            "digest generator lost registry authority: {registry}"
+        );
+    }
+
+    let output = Command::new("node")
+        .arg(&generator)
+        .arg("--stdout")
+        .current_dir(&root)
+        .output()
+        .expect("node must run the digest generator");
+    assert!(
+        output.status.success(),
+        "digest generator failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generated = output.stdout;
+    assert_eq!(
+        generated,
+        fs::read(root.join("llms.text")).unwrap(),
+        "checked-in llms.text is stale"
+    );
+    let digest = String::from_utf8(generated).expect("digest is UTF-8");
+    for registry_row in [
+        "- fn",
+        "active\tUnsafe\tmarker Unsafe",
+        "E0001\tactive\tjet",
+        "core.io\tReader, Writer",
+    ] {
+        assert!(
+            digest.contains(registry_row),
+            "digest lost registry row: {registry_row}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ACKNOWLEDGED gaps (pre-existing doc debt, not regressions)
 // ---------------------------------------------------------------------------
