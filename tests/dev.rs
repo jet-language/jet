@@ -2439,19 +2439,21 @@ fn returned_string_view_field_matches_all_execution_tiers() {
     let file = dir.join("returned_string_view.jet");
     fs::write(
         &file,
-        r#"struct Domain { value: View<str> }
+        r#"struct Parsed { source: String, head: View<str> }
 
-fn domain(email: String) => Domain {
-    result :: email.after("@")
-    return Domain.{ value: result }
+fn parse(source: String) => Parsed {
+    head :: source.before(":")
+    return Parsed.{ source: source, head: head }
 }
 
 fn run() {
-    email := "user@example.com"
-    result :: domain(email)
-    print(result.value)
-    print("wrapped: {result.value}")
-    expected :: "example.com"
+    left := "name"
+    right := "value"
+    source := "{left}:{right}"
+    result :: parse(source)
+    print(result.head)
+    print("wrapped: {result.head}")
+    expected :: "name"
     print("wrapped: {expected}")
 }
 "#,
