@@ -376,3 +376,44 @@ fn main() {
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "40074\n");
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn unicode_text_audit_matches_golden_on_all_run_tiers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = root.join("examples/features/text/unicode_text_audit.jet");
+    let expected = fs::read(root.join("examples/features/expected/text/unicode_text_audit.out"))
+        .expect("read Unicode text audit golden");
+    let scratch = common::Scratch::new("unicode_text_audit_tiers");
+
+    for (tier, release, interpret) in [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command
+            .arg(&example)
+            .current_dir(root)
+            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_CACHE_DIR", scratch.join(&format!("{tier}-build")))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("spawn Unicode audit {tier} tier: {error}"));
+        assert!(
+            output.status.success(),
+            "Unicode audit {tier} tier failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout, expected,
+            "Unicode audit {tier} tier did not match golden"
+        );
+    }
+}
