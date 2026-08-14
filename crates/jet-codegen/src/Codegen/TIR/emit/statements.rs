@@ -134,7 +134,7 @@ fn emit_sparse_branch_tree(
         jet_format!("*{jet_prefix}switch_subject == {pivot}"),
         cx,
     );
-    out.push_str(&jet_format!("{pad}if {equals} {{\n"));
+    out.push_str(&format!("{pad}if {equals} {{\n"));
     emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
     let middle = arms.len() / 2;
     if middle > 0 {
@@ -142,7 +142,7 @@ fn emit_sparse_branch_tree(
             jet_format!("*{jet_prefix}switch_subject < {pivot}"),
             cx,
         );
-        out.push_str(&jet_format!("{pad}}} else if {less_than} {{\n"));
+        out.push_str(&format!("{pad}}} else if {less_than} {{\n"));
         emit_sparse_branch_tree(
             &arms[..middle],
             else_body,
@@ -2096,7 +2096,7 @@ fn emit_tir_stmt(
                     jet_format!("*{jet_prefix}switch_subject"),
                     cx,
                 );
-                out.push_str(&jet_format!("{}if {condition} {{\n", inner_pad));
+                out.push_str(&format!("{}if {condition} {{\n", inner_pad));
                 emit_tir_stmts_nested(
                     true_body,
                     cx,
