@@ -188,6 +188,63 @@ fn docs_referenced_examples_exist() {
     );
 }
 
+#[test]
+fn philosophy_agent_optimality_frame_is_complete() {
+    let root = root();
+    let philosophy = fs::read_to_string(root.join("docs/spec/philosophy.md"))
+        .expect("docs/spec/philosophy.md missing");
+    let frame_start = philosophy
+        .find("## Agent-facing design criteria")
+        .expect("philosophy must record the agent-facing design criteria");
+    let frame = &philosophy[frame_start..];
+    let frame = frame.split_once("\n## ").map_or(frame, |(frame, _)| frame);
+
+    let quantities = [
+        "Verdict fidelity",
+        "Verdict latency",
+        "Verdict actionability",
+        "Context economy",
+        "Repair determinism",
+    ];
+    let quantity_rows: Vec<_> = frame
+        .lines()
+        .filter(|line| line.starts_with("| **"))
+        .collect();
+    assert_eq!(quantity_rows.len(), quantities.len());
+    for quantity in quantities {
+        let marker = format!("| **{quantity}** |");
+        assert_eq!(
+            quantity_rows
+                .iter()
+                .filter(|row| row.starts_with(&marker))
+                .count(),
+            1,
+            "agent-optimality quantity must have one row: {quantity}"
+        );
+    }
+
+    for invariant in ["I3", "I4", "I8"] {
+        assert_eq!(
+            frame.matches(invariant).count(),
+            1,
+            "agent-optimality frame must link invariant {invariant} once"
+        );
+    }
+    assert_eq!(frame.matches("#1880").count(), 1);
+    assert!(frame.contains("architecture.md#incremental-compiler-service"));
+
+    let invariant_ids: Vec<_> = frame
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| {
+            let bytes = token.as_bytes();
+            bytes.len() > 1
+                && bytes[0] == b'I'
+                && bytes[1..].iter().all(|byte| byte.is_ascii_digit())
+        })
+        .collect();
+    assert_eq!(invariant_ids, vec!["I3", "I4", "I8"]);
+}
+
 fn extract_example_paths(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let prefixes = ["examples/features/", "examples/canon.jet"];
