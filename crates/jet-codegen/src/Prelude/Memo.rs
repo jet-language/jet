@@ -4,7 +4,7 @@
 // Engines only marshal keys, results, bounds, and invalidation calls here.
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::Mutex;
+use std::sync::Mutex as JetMemoMutex;
 
 #[derive(Clone)]
 struct JetLru<K, V> {
@@ -80,19 +80,19 @@ pub struct JetMemoStats {
 }
 
 pub struct JetMemo<K, V = K> {
-    state: Mutex<JetMemoState<K, V>>,
+    state: JetMemoMutex<JetMemoState<K, V>>,
 }
 
 impl<K, V> JetMemo<K, V> {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(JetMemoState::new(None)),
+            state: JetMemoMutex::new(JetMemoState::new(None)),
         }
     }
 
     pub fn with_bound(bound: Option<usize>) -> Self {
         Self {
-            state: Mutex::new(JetMemoState::new(bound)),
+            state: JetMemoMutex::new(JetMemoState::new(bound)),
         }
     }
 
@@ -176,7 +176,7 @@ impl<K, V> Default for JetMemo<K, V> {
 impl<K: Clone, V: Clone> Clone for JetMemo<K, V> {
     fn clone(&self) -> Self {
         Self {
-            state: Mutex::new(
+            state: JetMemoMutex::new(
                 self.state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
