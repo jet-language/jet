@@ -1298,6 +1298,8 @@ const APP_PRELUDE: &str = include_str!("../Prelude/App.rs");
 const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+/// D-MEM-SENTRY1: the one sentry kernel is shared verbatim with foundation.
+const MEM_SENTRY_PRELUDE: &str = include_str!("../../../jet-foundation/src/MemSentry.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
 
 fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<String>) {
@@ -1341,7 +1343,11 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str("mod jet_uninit_semantics {\n");
     out.push_str(UNINIT_PRELUDE);
     out.push_str("\n}\n");
+    out.push_str("mod jet_mem {\n    mod jet_sentry {\n");
+    out.push_str(MEM_SENTRY_PRELUDE);
+    out.push_str("\n    }\n");
     out.push_str(MEM_PRELUDE);
+    out.push_str("\n}\n");
 }
 /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
 const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
@@ -2878,6 +2884,7 @@ mod tests {
         for part in [
             ENV_INIT_PRELUDE,
             UNINIT_PRELUDE,
+            MEM_SENTRY_PRELUDE,
             MEM_PRELUDE,
             GC_RUNTIME_PRELUDE,
             LAYOUT_PRELUDE,

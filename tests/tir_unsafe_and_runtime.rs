@@ -6,6 +6,7 @@ mod common;
 mod tir_support;
 
 use std::fs;
+use std::path::PathBuf;
 
 use tir_support::{build_and_run, build_and_run_full, have_rustc};
 
@@ -244,6 +245,131 @@ fn run() {
         out.rust
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-MEM-SENTRY1 / I9: the AOT module embeds the exact Foundation kernel, and
+/// the memory Prelude contains adapters only. This prevents a second policy
+/// implementation from silently returning when the two tiers drift.
+#[test]
+fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let kernel = fs::read_to_string(root.join("crates/jet-foundation/src/MemSentry.rs"))
+        .expect("shared sentry kernel must be readable");
+    let prelude = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/Mem.rs"))
+        .expect("AOT memory Prelude must be readable");
+    for duplicate in [
+        "struct SentryGate",
+        "struct SentryAllocation",
+        "static SENTRY_ALLOCATIONS",
+        "static SENTRY_HARDENED",
+        "fn sentry_allocations",
+        "fn sentry_runtime_available",
+        "fn sentry_enabled",
+        "fn jet_sentry_scope_inner",
+    ] {
+        assert!(
+            !prelude.contains(duplicate),
+            "memory Prelude still owns duplicate sentry machinery: {duplicate}"
+        );
+    }
+    assert!(prelude.contains("sentry_kernel::jet_sentry_check"));
+    for code in ["R0801", "R0802", "R0803"] {
+        let row = jet_foundation::Registry::diagnostic(code)
+            .unwrap_or_else(|| panic!("missing registered sentry diagnostic {code}"));
+        assert!(!row.what.is_empty(), "{code} is missing What text");
+        assert!(!row.why.is_empty(), "{code} is missing Why text");
+        assert!(!row.fix.is_empty(), "{code} is missing Fix text");
+    }
+
+    let emitted = tir_support::compile(
+        "unsafe_sentries_shared_kernel",
+        include_str!("../examples/features/memory/unsafe_sentries_source_off.jet"),
+    );
+    assert!(emitted.contains("mod jet_sentry {"));
+    assert!(
+        emitted.contains(kernel.trim()),
+        "AOT must embed the exact Foundation sentry kernel"
+    );
+}
+
+/// D-MEM-SENTRY1: source policy-off keeps the same safe raw operation across
+/// default JIT, forced interpreter, and AOT. Only the witness is disabled.
+#[test]
+fn sentry_source_policy_off_is_tier_parity() {
+    tir_support::assert_tiers_agree(
+        "unsafe_sentries_source_off",
+        include_str!("../examples/features/memory/unsafe_sentries_source_off.jet"),
+        "41\n",
+    );
+}
+
+/// D-MEM-SENTRY1: provenance, quarantine, and alignment faults keep the same
+/// R08xx product facts on every applicable execution tier. Paths may differ by
+/// temporary runner, so the assertions pin the stable diagnostic contract.
+#[test]
+fn sentry_faults_are_tier_parity() {
+    let misaligned_source = "\
+use core.mem
+fn run() {
+    cell :: (x: 1, y: 2)
+    #Unsafe(\"the tuple storage is live but this raw Int is misaligned\") {
+        pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell) + 1)
+        print(pointer.*)
+    }
+}
+";
+    let cases = [
+        (
+            "unsafe_sentries_provenance",
+            include_str!("../examples/features/memory/unsafe_sentries_provenance.jet"),
+            "R0801",
+            "external address must be a live allocation",
+            "outside allocation provenance",
+        ),
+        (
+            "unsafe_sentries_quarantine",
+            include_str!("../examples/features/memory/unsafe_sentries.jet"),
+            "R0802",
+            "pointer is used only after arena reset to prove quarantine",
+            "quarantined and poisoned",
+        ),
+        (
+            "unsafe_sentries_alignment",
+            misaligned_source,
+            "R0803",
+            "the tuple storage is live but this raw Int is misaligned",
+            "misaligned raw read",
+        ),
+    ];
+    let aot_available = have_rustc();
+
+    for (name, src, code, gate, detail) in cases {
+        let mut tiers = vec![
+            ("default JIT", tir_support::jit_run(name, src)),
+            ("forced interpreter", tir_support::interpreter_run(name, src)),
+        ];
+        if aot_available {
+            tiers.push((
+                "AOT",
+                build_and_run_full("jet_tir_sentry", name, src),
+            ));
+        }
+        for (tier, (exit_code, stdout, stderr)) in tiers {
+            assert_eq!(exit_code, 70, "{tier} changed {code} exit status: {stderr}");
+            assert!(stdout.is_empty(), "{tier} leaked stdout for {code}: {stdout}");
+            for marker in [
+                format!("Runtime fault [{code}]"),
+                gate.to_string(),
+                detail.to_string(),
+                "obligation `valid_ptr` was not met on this run".to_string(),
+            ] {
+                assert!(
+                    stderr.contains(&marker),
+                    "{tier} missing `{marker}` for {code}: {stderr}"
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

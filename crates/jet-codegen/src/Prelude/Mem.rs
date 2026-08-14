@@ -1,4 +1,3 @@
-mod jet_mem {
     // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): real bump-allocated arena +
     // scope-bound regions. The c05 upgrade — replaces the owned-clone stub where
     // `alloc(v)` just returned `v` with a real shared bump buffer.
@@ -21,7 +20,6 @@ mod jet_mem {
     // helper module; it never leaks into user-visible generated code.
     use std::cell::{Cell, RefCell};
     use std::ptr::NonNull;
-    use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
 
     pub use super::AllocError;
     pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
@@ -31,198 +29,51 @@ mod jet_mem {
     const DEFAULT_POOL_SLOTS: usize = 64;
     const BASE_ALIGNMENT: usize = 4096;
 
-    // D-MEM-SENTRY1: runtime observation is a gate-scoped witness. It never
-    // discharges sema obligations. A hardened package keeps the same witness
-    // kernel active in release; a fenced dependency scope is the narrow form.
-    #[derive(Clone)]
-    struct SentryGate {
-        enabled: bool,
-        file: String,
-        line: u32,
-        reason: String,
-    }
+    // D-MEM-SENTRY1: policy and state live in the exact foundation source
+    // embedded by `Codegen::push_mem_prelude`; these wrappers only marshal Rust
+    // pointers and report facts into the generated runtime.
+    use self::jet_sentry as sentry_kernel;
 
-    #[derive(Clone, Copy)]
-    struct SentryAllocation {
-        start: usize,
-        len: usize,
-        live: bool,
-    }
-
-    static SENTRY_ALLOCATIONS: OnceLock<Mutex<Vec<SentryAllocation>>> = OnceLock::new();
-    static SENTRY_HARDENED: AtomicBool = AtomicBool::new(false);
-
-    thread_local! {
-        static SENTRY_GATE: RefCell<Option<SentryGate>> = const { RefCell::new(None) };
-        static SENTRY_FENCE_DEPTH: Cell<usize> = const { Cell::new(0) };
-    }
-
-    fn sentry_allocations() -> &'static Mutex<Vec<SentryAllocation>> {
-        SENTRY_ALLOCATIONS.get_or_init(|| Mutex::new(Vec::new()))
-    }
-
-    fn sentry_runtime_available() -> bool {
-        cfg!(not(jet_release))
-            || SENTRY_HARDENED.load(Ordering::Relaxed)
-            || SENTRY_FENCE_DEPTH.with(Cell::get) != 0
-    }
-
-    fn sentry_enabled() -> bool {
-        SENTRY_GATE.with(|gate| gate.borrow().as_ref().is_some_and(|gate| gate.enabled))
-    }
-
-    pub struct JetSentryGuard {
-        saved: Option<SentryGate>,
-        saved_fence_depth: usize,
-    }
-
-    impl Drop for JetSentryGuard {
-        fn drop(&mut self) {
-            SENTRY_GATE.with(|gate| *gate.borrow_mut() = self.saved.take());
-            SENTRY_FENCE_DEPTH.with(|depth| depth.set(self.saved_fence_depth));
-        }
-    }
-
-    fn jet_sentry_scope_inner(
-        enabled: bool,
-        fenced: bool,
-        file: &str,
-        line: u32,
-        reason: &str,
-    ) -> JetSentryGuard {
-        let saved_fence_depth = SENTRY_FENCE_DEPTH.with(|depth| {
-            let saved = depth.get();
-            if fenced {
-                depth.set(saved.saturating_add(1));
-            }
-            saved
-        });
-        let saved = SENTRY_GATE.with(|gate| {
-            gate.borrow_mut().replace(SentryGate {
-                enabled: enabled && sentry_runtime_available(),
-                file: file.to_string(),
-                line,
-                reason: reason.to_string(),
-            })
-        });
-        JetSentryGuard { saved, saved_fence_depth }
-    }
-
-    pub fn jet_sentry_scope(enabled: bool, file: &str, line: u32, reason: &str) -> JetSentryGuard {
-        jet_sentry_scope_inner(enabled, false, file, line, reason)
-    }
-
-    pub fn jet_sentry_fenced_scope(
-        enabled: bool,
-        file: &str,
-        line: u32,
-        reason: &str,
-    ) -> JetSentryGuard {
-        jet_sentry_scope_inner(enabled, true, file, line, reason)
-    }
-
-    pub fn jet_sentry_policy_scope(enabled: bool) -> JetSentryGuard {
-        let saved = SENTRY_GATE.with(|gate| {
-            let mut gate = gate.borrow_mut();
-            let mut current = (*gate).clone().unwrap_or(SentryGate {
-                enabled: false,
-                file: String::new(),
-                line: 0,
-                reason: String::new(),
-            });
-            current.enabled = enabled && sentry_runtime_available();
-            std::mem::replace(&mut *gate, Some(current))
-        });
-        let saved_fence_depth = SENTRY_FENCE_DEPTH.with(Cell::get);
-        JetSentryGuard { saved, saved_fence_depth }
-    }
-
-    pub fn jet_sentry_set_hardened(enabled: bool) {
-        SENTRY_HARDENED.store(enabled, Ordering::Relaxed);
-    }
+    pub use self::jet_sentry::{
+        jet_sentry_fenced_scope, jet_sentry_policy_scope, jet_sentry_reset, jet_sentry_scope,
+        jet_sentry_set_hardened, JetSentryGuard,
+    };
 
     pub fn jet_sentry_register_allocation(ptr: *mut u8, bytes: usize) {
-        if !sentry_runtime_available() || ptr.is_null() {
-            return;
-        }
-        sentry_allocations()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push(SentryAllocation {
-                start: ptr as usize,
-                len: bytes.max(1),
-                live: true,
-            });
+        sentry_kernel::jet_sentry_register_allocation(ptr as usize, bytes);
+    }
+
+    pub fn jet_sentry_register_owned_allocation(owner: usize, ptr: *mut u8, bytes: usize) {
+        sentry_kernel::jet_sentry_register_owned_allocation(owner, ptr as usize, bytes);
     }
 
     fn jet_sentry_quarantine(ptr: *mut u8, bytes: usize) {
-        if !sentry_runtime_available() || ptr.is_null() {
-            return;
-        }
-        let start = ptr as usize;
-        let mut allocations = sentry_allocations()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut poisoned = false;
-        for allocation in allocations.iter_mut().rev() {
-            if allocation.live && allocation.start == start {
-                allocation.live = false;
-                poisoned = true;
-            }
-        }
-        if poisoned && bytes != 0 {
-            // SAFETY: the allocation was registered with this exact payload
-            // start and is dead before poisoning begins.
-            unsafe { std::ptr::write_bytes(ptr, 0xDD, bytes) };
-        }
+        sentry_kernel::jet_sentry_quarantine(ptr as usize, bytes);
+    }
+
+    fn jet_sentry_quarantine_owner(owner: usize) {
+        sentry_kernel::jet_sentry_quarantine_owner(owner);
     }
 
     fn jet_sentry_check<T>(ptr: *const T, operation: &str, obligation: &str) {
-        if !sentry_enabled() {
+        let Some(fault) = sentry_kernel::jet_sentry_check(
+            ptr as usize,
+            std::mem::size_of::<T>(),
+            std::mem::align_of::<T>(),
+            operation,
+            obligation,
+        ) else {
             return;
-        }
-        let address = ptr as usize;
-        let bytes = std::mem::size_of::<T>().max(1);
-        let alignment = std::mem::align_of::<T>().max(1);
-        let end = address.checked_add(bytes);
-        let allocations = sentry_allocations()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let live = end.is_some_and(|end| allocations.iter().rev().any(|allocation| {
-            allocation.live
-                && address >= allocation.start
-                && end <= allocation.start.saturating_add(allocation.len)
-        }));
-        // Provenance classification precedes alignment: an untracked address is R0801.
-        let code = if live {
-            if address % alignment != 0 {
-                Some(("R0803", format!("address {address:#x} is not aligned to {alignment} bytes")))
-            } else {
-                None
-            }
-        } else {
-            let freed = allocations.iter().rev().any(|allocation| {
-                !allocation.live
-                    && address >= allocation.start
-                    && address < allocation.start.saturating_add(allocation.len)
-            });
-            Some(if freed {
-                ("R0802", "the address belongs to quarantined storage".to_string())
-            } else {
-                ("R0801", "no live allocation contains this address".to_string())
-            })
         };
-        let Some((code, detail)) = code else { return };
-        SENTRY_GATE.with(|gate| {
-            let gate = gate.borrow();
-            let gate = gate.as_ref().expect("sentry check requires an active gate");
-            let name = if gate.reason.is_empty() {
-                format!("{}:{}", gate.file, gate.line)
-            } else {
-                gate.reason.clone()
-            };
-            super::jet_sentry_runtime_stop(code, &gate.file, gate.line, &name, operation, obligation, &detail)
-        });
+        super::jet_sentry_runtime_stop(
+            fault.code,
+            &fault.file,
+            fault.line,
+            &fault.gate,
+            &fault.operation,
+            &fault.obligation,
+            &fault.detail,
+        );
     }
 
     pub fn jet_sentry_address_of<T>(ptr: *const T) -> i64 {
@@ -232,28 +83,28 @@ mod jet_mem {
 
     pub fn jet_sentry_read<T>(ptr: *const T, obligation: &str) -> T {
         jet_sentry_check(ptr, "read", obligation);
-        // SAFETY: the source gate owns the raw operation; sentry_check has
-        // already observed the active allocation when instrumentation is on.
+        // SAFETY: the source gate owns the raw operation; the shared sentry
+        // kernel has already observed the active allocation when on.
         unsafe { ptr.read() }
     }
 
     pub fn jet_sentry_write<T>(ptr: *mut T, value: T, obligation: &str) {
         jet_sentry_check(ptr.cast_const(), "write", obligation);
-        // SAFETY: the source gate owns the raw operation; sentry_check has
-        // already observed the active allocation when instrumentation is on.
+        // SAFETY: the source gate owns the raw operation; the shared sentry
+        // kernel has already observed the active allocation when on.
         unsafe { ptr.write(value) };
     }
 
     pub fn jet_sentry_volatile_read<T>(ptr: *const T, obligation: &str) -> T {
         jet_sentry_check(ptr, "volatile_read", obligation);
-        // SAFETY: the source gate owns the raw operation and the check above
+        // SAFETY: the source gate owns the raw operation and the shared kernel
         // applies the same provenance rule to volatile access.
         unsafe { std::ptr::read_volatile(ptr) }
     }
 
     pub fn jet_sentry_volatile_write<T>(ptr: *mut T, value: T, obligation: &str) {
         jet_sentry_check(ptr.cast_const(), "volatile_write", obligation);
-        // SAFETY: the source gate owns the raw operation and the check above
+        // SAFETY: the source gate owns the raw operation and the shared kernel
         // applies the same provenance rule to volatile access.
         unsafe { std::ptr::write_volatile(ptr, value) };
     }
@@ -1071,5 +922,3 @@ mod jet_mem {
         JET_CTX_ALLOC.with(|c| c.set(Some(ptr)));
         JetContextGuard { saved }
     }
-
-}

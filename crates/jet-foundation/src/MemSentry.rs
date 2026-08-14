@@ -1,9 +1,10 @@
 //! D-MEM-SENTRY1 runtime witness kernel.
 //!
 //! The kernel owns gate state, allocation provenance, quarantine, and the
-//! R08xx fault facts. AOT embeds the equivalent `jet_mem` Prelude because its
-//! generated binary cannot link the compiler seam crate; JIT and TIR call this
-//! Foundation Prelude directly. No adapter owns report wording or policy.
+//! R08xx fault facts. AOT embeds this exact source under its `jet_mem` Prelude
+//! because its generated binary cannot link the compiler seam crate; JIT and
+//! TIR call this Foundation Prelude directly. No adapter owns report wording
+//! or policy.
 
 use std::cell::{Cell, RefCell};
 use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
