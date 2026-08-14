@@ -2999,6 +2999,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 line: crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32,
                 reason: audit.clone().unwrap_or_default(),
                 enabled: env.sentries_enabled,
+                fenced: env.sentries_fenced,
             };
             return deferred_stmt(
                 vec![LowerBody::scoped(body, scoped)],

@@ -11,7 +11,7 @@ use crate::Lexer;
 use crate::Manifest;
 use crate::Parser;
 use crate::Syntax;
-use crate::AST::{ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
+use crate::AST::{ImportDecl, ImportKind, Item, LoadedModule, PackageGuarantees, ProgramBundle};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -413,6 +413,7 @@ fn load_entry_with_overlays_mode_with_sink(
         pkg_resolution,
         package_policy,
         package_lints_deny,
+        package_guarantees,
     ) = if let Some(manifest_dir) = manifest_root
     {
         // Found a Package root — validate it and collect dep source paths.
@@ -716,6 +717,10 @@ fn load_entry_with_overlays_mode_with_sink(
                 })?;
                 let mut policy = organization_policy.clone();
                 let package_lints_deny = package_manifest.policy.lints_deny.unwrap_or_default();
+                let package_guarantees = PackageGuarantees {
+                    contain: package_manifest.policy.contain.clone(),
+                    harden: package_manifest.policy.harden,
+                };
                 policy.extend(package_manifest.policy.memory);
                 let source = pack_path.display().to_string();
                 for declaration in policy.iter_mut().filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package) { declaration.source = source.clone(); }
@@ -729,7 +734,14 @@ fn load_entry_with_overlays_mode_with_sink(
                         ),
                     )
                 })?;
-                (manifest_dir, dep_dirs, resolution, policy, package_lints_deny)
+                (
+                    manifest_dir,
+                    dep_dirs,
+                    resolution,
+                    policy,
+                    package_lints_deny,
+                    package_guarantees,
+                )
             }
         }
     } else {
@@ -789,6 +801,7 @@ fn load_entry_with_overlays_mode_with_sink(
             resolution,
             organization_policy,
             Vec::new(),
+            PackageGuarantees::default(),
         )
     };
 
@@ -1027,6 +1040,7 @@ fn load_entry_with_overlays_mode_with_sink(
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots,
+        package_guarantees,
         // D-OSTARGET2=B: default to the host OS; the driver overrides this from
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
         active_os: Syntax::OSTarget::host(),

@@ -76,6 +76,7 @@ pub(crate) struct LowerEnv {
     /// D-MEM-SENTRY1: lexical instrumentation policy. Static obligations are
     /// independent; this fact only controls runtime observation.
     pub(super) sentries_enabled: bool,
+    pub(super) sentries_fenced: bool,
 }
 
 impl LowerEnv {
@@ -99,6 +100,7 @@ impl LowerEnv {
             txn_handle: None,
             txn_undo_needed: None,
             sentries_enabled: true,
+            sentries_fenced: false,
         }
     }
     /// Record the non-AOT handle type for a split-view local (see the field).

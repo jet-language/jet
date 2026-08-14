@@ -61,6 +61,46 @@ fn inspect_guarantees_harden_contains_every_dependency() {
 }
 
 #[test]
+fn hardened_release_sentry_reaches_a_foreign_dependency() {
+    let dir = isolated_cwd("inspect_guarantees_runtime_harden");
+    let app = dir.join("app");
+    let dependency = dir.join("dep");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&dependency).unwrap();
+    fs::write(
+        app.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\npolicy: .{ harden: true }\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("main.jet"),
+        "use dep\nfn run() {\n    #Unsafe(\"calls the audited dependency\") {\n        print(dep.read())\n    }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dependency.join("package.jet"),
+        "name: \"dep\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dependency.join("dep.jet"),
+        "use core.mem\n#Unsafe(\"intentionally invalid address\")\npub fn read() => Int {\n    p :: mem.Ptr<Int>.from_addr(1)\n    return mem.volatile_read(p)\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(jet())
+        .args(["run", "--release", "main.jet"])
+        .current_dir(&app)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "invalid dependency access must stop: {stderr}");
+    assert!(stderr.contains("R0801"), "hardened dependency sentry was not active: {stderr}");
+    assert!(stderr.contains("intentionally invalid address"), "dependency gate was not named: {stderr}");
+}
+
+#[test]
 fn inspect_guarantees_is_honest_for_single_file_and_freestanding() {
     let dir = isolated_cwd("inspect_guarantees_single_file");
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();

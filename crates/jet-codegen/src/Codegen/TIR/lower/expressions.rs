@@ -455,6 +455,7 @@ fn lower_pre_contracts_for_args(
         return (Vec::new(), Vec::new());
     }
     let mut contract_env = LowerEnv::new(caller_env.fn_name.clone());
+    contract_env.sentries_fenced = caller_env.sentries_fenced;
     let mut proof_bindings = HashMap::new();
     let mut bindings = Vec::new();
     for (index, arg) in args.iter_mut().enumerate() {

@@ -63,6 +63,7 @@ fn unsafe_gate(f: &Func, cx: &Cx, enabled: bool) -> Option<TUnsafeGate> {
             line: cov_line(cx, span.start) as u32,
             reason: f.unsafe_reason.clone().unwrap_or_default(),
             enabled,
+            fenced: cx.dependency_fenced,
         }
     })
 }
@@ -143,6 +144,7 @@ pub(crate) fn lower_error_conv(
     let from_ty = Type::Named(conversion.from_ty.clone());
     let to_ty = Type::Named(conversion.to_ty.clone());
     let mut env = LowerEnv::new(name.clone());
+    env.sentries_fenced = cx.dependency_fenced;
     env.ret_ty = Some(to_ty.clone());
     env.bind(
         Syntax::KW_SELF,
@@ -197,6 +199,7 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
+    env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty));
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
@@ -314,6 +317,7 @@ fn lower_contract_cond(
 ) -> TExpr {
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
+    env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
     for p in &f.params {
         let mut param_ty = if p.variadic {
@@ -542,6 +546,7 @@ fn wrap_contract_scope(
 /// both paths embed the same trailing function name in any `?`/panic frame).
 pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    env.sentries_fenced = cx.dependency_fenced;
     prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
@@ -559,6 +564,7 @@ pub(crate) fn emit_tir_property_test_body(
     out: &mut String,
 ) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    env.sentries_fenced = cx.dependency_fenced;
     for p in params {
         env.bind(&p.name, TLocal::user(&p.name), Some(p.ty.clone()));
     }
@@ -576,6 +582,7 @@ pub(crate) fn emit_tir_property_test_body(
 /// already inserted any wrapping); emitted at indent 1, the closing brace is the caller's.
 pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    env.sentries_fenced = cx.dependency_fenced;
     env.bind(
         Syntax::KW_SELF,
         // Error-conversion parameters are ordinary generated locals, not Rust
@@ -702,6 +709,7 @@ pub(crate) fn lower_method_for_owner(
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
     cx.current_type_params.replace(method_type_params);
     let mut env = LowerEnv::new(f.name.clone());
+    env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.clone();
     env.self_owner = Some(type_name.to_string());
@@ -846,6 +854,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     };
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
+    env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
     env.ret_ty = f.return_type.clone();
     env.self_owner = Some(type_name.to_string());

@@ -74,6 +74,7 @@
             web_partition_enforced: false,
             web_partition_report: None,
             dep_roots: std::collections::HashMap::new(),
+            package_guarantees: Default::default(),
             active_os: crate::Syntax::OSTarget::host(),
             build_facts: Default::default(),
             edition: "2027".to_string(),

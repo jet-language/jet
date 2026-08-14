@@ -214,6 +214,7 @@ fn dom_fn() {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: Default::default(),
+        package_guarantees: Default::default(),
         active_os: jet::Syntax::OSTarget::host(),
         build_facts: Default::default(),
         edition: "2026".to_string(),

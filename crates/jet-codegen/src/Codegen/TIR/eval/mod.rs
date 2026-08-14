@@ -2472,12 +2472,21 @@ impl<'a> EvalCtx<'a> {
         let guard_mark = self.scope_guards.len();
         self.local_cells.enter_frame();
         let _sentry = func.unsafe_gate.as_ref().map(|gate| {
-            jet_foundation::MemSentry::jet_sentry_scope(
-                gate.enabled,
-                &gate.file,
-                gate.line,
-                &gate.reason,
-            )
+            if gate.fenced {
+                jet_foundation::MemSentry::jet_sentry_fenced_scope(
+                    gate.enabled,
+                    &gate.file,
+                    gate.line,
+                    &gate.reason,
+                )
+            } else {
+                jet_foundation::MemSentry::jet_sentry_scope(
+                    gate.enabled,
+                    &gate.file,
+                    gate.line,
+                    &gate.reason,
+                )
+            }
         });
         for (i, (name, _, _)) in func.params.iter().enumerate() {
             let jet = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name.as_str());
@@ -3437,6 +3446,7 @@ pub fn run_program_with_structs_at_stage(
         struct_field_types,
         stage,
         None,
+        program.package_hardened,
     )
 }
 
@@ -3451,6 +3461,7 @@ fn run_program_with_structs_at_stage_and_cli(
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
     cli_bundle: Option<&ProgramBundle>,
+    package_hardened: bool,
 ) -> Result<CtValue, Diagnostic> {
     let cli_args = if let Some(bundle) = cli_bundle.filter(|_| {
         program.entry == crate::Codegen::mangle_generated("cli_main")
@@ -3499,6 +3510,7 @@ fn run_program_with_structs_at_stage_and_cli(
                         struct_field_types,
                         stage,
                         cli_args,
+                        package_hardened,
                     )
                 })
             })
@@ -3518,9 +3530,11 @@ fn run_program_with_structs_on_stack(
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
     cli_args: Option<CtValue>,
+    package_hardened: bool,
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
     jet_foundation::MemSentry::jet_sentry_reset();
+    jet_foundation::MemSentry::jet_sentry_set_hardened(package_hardened);
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
@@ -3639,6 +3653,7 @@ pub fn run_named_func_with_memos(
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
     jet_foundation::MemSentry::jet_sentry_reset();
+    jet_foundation::MemSentry::jet_sentry_set_hardened(program.package_hardened);
     let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let func = funcs.get(name).copied().ok_or_else(|| {
@@ -3815,6 +3830,7 @@ fn run_bundle_at_stage(
         collect_struct_field_types(bundle),
         stage,
         Some(bundle),
+        bundle.package_guarantees.harden,
     )
 }
 

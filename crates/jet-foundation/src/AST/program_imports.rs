@@ -544,6 +544,10 @@ pub struct ProgramBundle {
     /// loaded module's path back to the dependency that owns it. Empty for a
     /// single-file program with no `pkg.jet`.
     pub dep_roots: std::collections::HashMap<String, std::path::PathBuf>,
+    /// D-MEM-GUARANTEE1: the package-only guarantee dial carried from the
+    /// checked package seam into every execution tier. Single-file bundles
+    /// use the empty default; engines never rediscover package.jet.
+    pub package_guarantees: PackageGuarantees,
     /// D-OSTARGET2 (=B, ratified 2026-07-03): the active native OS bucket for
     /// this build — resolved from `--target=<triple>` (host OS when absent or a
     /// web/wasm pseudo-target). Seeded by the driver right after load; defaults
@@ -559,6 +563,15 @@ pub struct ProgramBundle {
     /// D-REL3 / card #712: resolved package edition (`"2026"`, `"2027"`, …).
     /// Single-file programs use the toolchain's newest stable edition.
     pub edition: String,
+}
+
+/// The typed package-only portion of D-MEM-GUARANTEE1. These facts are kept
+/// separate from source `PolicyDeclaration`s because `contain` and `harden`
+/// govern dependency boundaries and build profiles, not lexical scopes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackageGuarantees {
+    pub contain: std::collections::BTreeSet<String>,
+    pub harden: bool,
 }
 
 impl ProgramBundle {

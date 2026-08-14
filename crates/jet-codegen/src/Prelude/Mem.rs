@@ -19,9 +19,9 @@ mod jet_mem {
     // I6: zero external crates — plain std Rust only.
     // D-LL1: the one vetted lifetime-extension lives here, inside the core.mem
     // helper module; it never leaks into user-visible generated code.
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::ptr::NonNull;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
 
     pub use super::AllocError;
     pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
@@ -32,7 +32,8 @@ mod jet_mem {
     const BASE_ALIGNMENT: usize = 4096;
 
     // D-MEM-SENTRY1: runtime observation is a gate-scoped witness. It never
-    // discharges sema obligations and it is compiled out of release behavior.
+    // discharges sema obligations. A hardened package keeps the same witness
+    // kernel active in release; a fenced dependency scope is the narrow form.
     #[derive(Clone)]
     struct SentryGate {
         enabled: bool,
@@ -49,39 +50,75 @@ mod jet_mem {
     }
 
     static SENTRY_ALLOCATIONS: OnceLock<Mutex<Vec<SentryAllocation>>> = OnceLock::new();
+    static SENTRY_HARDENED: AtomicBool = AtomicBool::new(false);
 
     thread_local! {
         static SENTRY_GATE: RefCell<Option<SentryGate>> = const { RefCell::new(None) };
+        static SENTRY_FENCE_DEPTH: Cell<usize> = const { Cell::new(0) };
     }
 
     fn sentry_allocations() -> &'static Mutex<Vec<SentryAllocation>> {
         SENTRY_ALLOCATIONS.get_or_init(|| Mutex::new(Vec::new()))
     }
 
+    fn sentry_runtime_available() -> bool {
+        cfg!(not(jet_release))
+            || SENTRY_HARDENED.load(Ordering::Relaxed)
+            || SENTRY_FENCE_DEPTH.with(Cell::get) != 0
+    }
+
     fn sentry_enabled() -> bool {
-        cfg!(not(jet_release)) && SENTRY_GATE.with(|gate| gate.borrow().as_ref().is_some_and(|gate| gate.enabled))
+        SENTRY_GATE.with(|gate| gate.borrow().as_ref().is_some_and(|gate| gate.enabled))
     }
 
     pub struct JetSentryGuard {
         saved: Option<SentryGate>,
+        saved_fence_depth: usize,
     }
 
     impl Drop for JetSentryGuard {
         fn drop(&mut self) {
             SENTRY_GATE.with(|gate| *gate.borrow_mut() = self.saved.take());
+            SENTRY_FENCE_DEPTH.with(|depth| depth.set(self.saved_fence_depth));
         }
     }
 
-    pub fn jet_sentry_scope(enabled: bool, file: &str, line: u32, reason: &str) -> JetSentryGuard {
+    fn jet_sentry_scope_inner(
+        enabled: bool,
+        fenced: bool,
+        file: &str,
+        line: u32,
+        reason: &str,
+    ) -> JetSentryGuard {
+        let saved_fence_depth = SENTRY_FENCE_DEPTH.with(|depth| {
+            let saved = depth.get();
+            if fenced {
+                depth.set(saved.saturating_add(1));
+            }
+            saved
+        });
         let saved = SENTRY_GATE.with(|gate| {
             gate.borrow_mut().replace(SentryGate {
-                enabled: enabled && cfg!(not(jet_release)),
+                enabled: enabled && sentry_runtime_available(),
                 file: file.to_string(),
                 line,
                 reason: reason.to_string(),
             })
         });
-        JetSentryGuard { saved }
+        JetSentryGuard { saved, saved_fence_depth }
+    }
+
+    pub fn jet_sentry_scope(enabled: bool, file: &str, line: u32, reason: &str) -> JetSentryGuard {
+        jet_sentry_scope_inner(enabled, false, file, line, reason)
+    }
+
+    pub fn jet_sentry_fenced_scope(
+        enabled: bool,
+        file: &str,
+        line: u32,
+        reason: &str,
+    ) -> JetSentryGuard {
+        jet_sentry_scope_inner(enabled, true, file, line, reason)
     }
 
     pub fn jet_sentry_policy_scope(enabled: bool) -> JetSentryGuard {
@@ -93,14 +130,19 @@ mod jet_mem {
                 line: 0,
                 reason: String::new(),
             });
-            current.enabled = enabled && cfg!(not(jet_release));
+            current.enabled = enabled && sentry_runtime_available();
             std::mem::replace(&mut *gate, Some(current))
         });
-        JetSentryGuard { saved }
+        let saved_fence_depth = SENTRY_FENCE_DEPTH.with(Cell::get);
+        JetSentryGuard { saved, saved_fence_depth }
+    }
+
+    pub fn jet_sentry_set_hardened(enabled: bool) {
+        SENTRY_HARDENED.store(enabled, Ordering::Relaxed);
     }
 
     pub fn jet_sentry_register_allocation(ptr: *mut u8, bytes: usize) {
-        if !cfg!(not(jet_release)) || ptr.is_null() {
+        if !sentry_runtime_available() || ptr.is_null() {
             return;
         }
         sentry_allocations()
@@ -114,7 +156,7 @@ mod jet_mem {
     }
 
     fn jet_sentry_quarantine(ptr: *mut u8, bytes: usize) {
-        if !cfg!(not(jet_release)) || ptr.is_null() {
+        if !sentry_runtime_available() || ptr.is_null() {
             return;
         }
         let start = ptr as usize;

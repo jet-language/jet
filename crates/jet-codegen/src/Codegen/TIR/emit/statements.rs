@@ -1761,8 +1761,13 @@ fn emit_tir_stmt(
         // `emit_stmts`'s `Stmt::Unsafe` arm (the `#Audit` annotation emits nothing). I1:
         // emitted ONLY for a source `#Unsafe` gate.
         TStmt::Unsafe { gate, body } => {
+            let scope = if gate.fenced {
+                "jet_sentry_fenced_scope"
+            } else {
+                "jet_sentry_scope"
+            };
             let gate_guard = format!(
-                "{}jet_mem::jet_sentry_scope({}, {:?}, {}, {:?})",
+                "{}jet_mem::{scope}({}, {:?}, {}, {:?})",
                 cx.root_prefix,
                 gate.enabled,
                 gate.file,

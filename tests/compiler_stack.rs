@@ -243,6 +243,7 @@ fn nested_tir_program(
     JitProgram {
         source_file: "nested-tir.jet".to_string(),
         source_text: String::new(),
+        package_hardened: false,
         entry: "run".to_string(),
         instance_provenance: Vec::new(),
         funcs: vec![tir_func(

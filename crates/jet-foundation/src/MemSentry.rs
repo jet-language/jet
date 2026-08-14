@@ -5,8 +5,8 @@
 //! generated binary cannot link the compiler seam crate; JIT and TIR call this
 //! Foundation Prelude directly. No adapter owns report wording or policy.
 
-use std::cell::RefCell;
-use std::sync::{Mutex, OnceLock};
+use std::cell::{Cell, RefCell};
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
 
 #[derive(Clone)]
 struct Gate {
@@ -25,9 +25,11 @@ struct Allocation {
 }
 
 static ALLOCATIONS: OnceLock<Mutex<Vec<Allocation>>> = OnceLock::new();
+static HARDENED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     static GATE: RefCell<Option<Gate>> = const { RefCell::new(None) };
+    static FENCE_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 fn allocations() -> &'static Mutex<Vec<Allocation>> {
@@ -44,24 +46,58 @@ fn gate_name(gate: &Gate) -> String {
 
 pub struct JetSentryGuard {
     saved: Option<Gate>,
+    saved_fence_depth: usize,
 }
 
 impl Drop for JetSentryGuard {
     fn drop(&mut self) {
         GATE.with(|gate| *gate.borrow_mut() = self.saved.take());
+        FENCE_DEPTH.with(|depth| depth.set(self.saved_fence_depth));
     }
 }
 
-pub fn jet_sentry_scope(enabled: bool, file: &str, line: u32, reason: &str) -> JetSentryGuard {
+fn runtime_available() -> bool {
+    cfg!(not(jet_release))
+        || HARDENED.load(Ordering::Relaxed)
+        || FENCE_DEPTH.with(Cell::get) != 0
+}
+
+fn jet_sentry_scope_inner(
+    enabled: bool,
+    fenced: bool,
+    file: &str,
+    line: u32,
+    reason: &str,
+) -> JetSentryGuard {
+    let saved_fence_depth = FENCE_DEPTH.with(|depth| {
+        let saved = depth.get();
+        if fenced {
+            depth.set(saved.saturating_add(1));
+        }
+        saved
+    });
     let saved = GATE.with(|gate| {
         gate.borrow_mut().replace(Gate {
-            enabled: enabled && cfg!(not(jet_release)),
+            enabled: enabled && runtime_available(),
             file: file.to_string(),
             line,
             reason: reason.to_string(),
         })
     });
-    JetSentryGuard { saved }
+    JetSentryGuard { saved, saved_fence_depth }
+}
+
+pub fn jet_sentry_scope(enabled: bool, file: &str, line: u32, reason: &str) -> JetSentryGuard {
+    jet_sentry_scope_inner(enabled, false, file, line, reason)
+}
+
+pub fn jet_sentry_fenced_scope(
+    enabled: bool,
+    file: &str,
+    line: u32,
+    reason: &str,
+) -> JetSentryGuard {
+    jet_sentry_scope_inner(enabled, true, file, line, reason)
 }
 
 pub fn jet_sentry_policy_scope(enabled: bool) -> JetSentryGuard {
@@ -73,14 +109,21 @@ pub fn jet_sentry_policy_scope(enabled: bool) -> JetSentryGuard {
             line: 0,
             reason: String::new(),
         });
-        current.enabled = enabled && cfg!(not(jet_release));
+        current.enabled = enabled && runtime_available();
         std::mem::replace(&mut *gate, Some(current))
     });
-    JetSentryGuard { saved }
+    let saved_fence_depth = FENCE_DEPTH.with(Cell::get);
+    JetSentryGuard { saved, saved_fence_depth }
+}
+
+pub fn jet_sentry_set_hardened(enabled: bool) {
+    HARDENED.store(enabled, Ordering::Relaxed);
 }
 
 pub fn jet_sentry_reset() {
     GATE.with(|gate| *gate.borrow_mut() = None);
+    FENCE_DEPTH.with(|depth| depth.set(0));
+    HARDENED.store(false, Ordering::Relaxed);
     allocations()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -96,7 +139,7 @@ pub fn jet_sentry_register_owned_allocation(owner: usize, start: usize, bytes: u
 }
 
 fn jet_sentry_register_owned_allocation_inner(owner: Option<usize>, start: usize, bytes: usize) {
-    if !cfg!(not(jet_release)) || start == 0 {
+    if !runtime_available() || start == 0 {
         return;
     }
     allocations()
@@ -111,7 +154,7 @@ fn jet_sentry_register_owned_allocation_inner(owner: Option<usize>, start: usize
 }
 
 pub fn jet_sentry_quarantine(start: usize, bytes: usize) {
-    if !cfg!(not(jet_release)) || start == 0 {
+    if !runtime_available() || start == 0 {
         return;
     }
     let mut records = allocations()
@@ -132,7 +175,7 @@ pub fn jet_sentry_quarantine(start: usize, bytes: usize) {
 }
 
 pub fn jet_sentry_quarantine_owner(owner: usize) {
-    if !cfg!(not(jet_release)) {
+    if !runtime_available() {
         return;
     }
     let mut records = allocations()
@@ -163,9 +206,6 @@ pub fn jet_sentry_check(
     operation: &str,
     obligation: &str,
 ) -> Option<JetSentryFault> {
-    if !cfg!(not(jet_release)) {
-        return None;
-    }
     let gate = GATE.with(|gate| gate.borrow().clone())?;
     if !gate.enabled {
         return None;

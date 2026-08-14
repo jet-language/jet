@@ -30,8 +30,13 @@ fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
 fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     let Some(gate) = tir.unsafe_gate.as_ref() else { return };
     let pad = "    ".repeat(indent);
+    let scope = if gate.fenced {
+        "jet_sentry_fenced_scope"
+    } else {
+        "jet_sentry_scope"
+    };
     out.push_str(&format!(
-        "{pad}let _jet_sentry = {}jet_mem::jet_sentry_scope({}, {:?}, {}, {:?});\n",
+        "{pad}let _jet_sentry = {}jet_mem::{scope}({}, {:?}, {}, {:?});\n",
         cx.root_prefix, gate.enabled, gate.file, gate.line, gate.reason,
     ));
 }

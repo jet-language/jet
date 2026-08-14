@@ -135,6 +135,9 @@ pub struct JitProgram {
     pub source_file: String,
     /// Source text for the one runtime stop renderer's context box.
     pub source_text: String,
+    /// D-MEM-GUARANTEE1: package hardening is a checked bundle fact carried
+    /// into named deopt; the evaluator never reparses package.jet.
+    pub package_hardened: bool,
     /// Sema-selected callable name. The JIT compiles this exact function and
     /// never assumes the source spelling `run`.
     pub entry: String,
@@ -1978,6 +1981,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
         source_text: module.source.clone(),
+        package_hardened: bundle.package_guarantees.harden,
         entry: entry_name,
         funcs,
         spawn_lambdas,
@@ -2102,6 +2106,9 @@ pub struct TUnsafeGate {
     pub line: u32,
     pub reason: String,
     pub enabled: bool,
+    /// D-MEM-GUARANTEE1: this gate belongs to a contained dependency and
+    /// must activate the same Prelude witness even in release.
+    pub fenced: bool,
 }
 
 /// A lowered top-level function. `params` are already mangled to their Rust

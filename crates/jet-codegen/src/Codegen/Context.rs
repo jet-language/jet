@@ -291,6 +291,14 @@ pub(crate) struct Cx {
     pub(crate) current_fn: std::cell::RefCell<String>,
     /// D-MEM-SENTRY1: module/package policy facts carried into TIR lowering.
     pub(crate) policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-MEM-GUARANTEE1: package hardening is a build-profile fact, not a
+    /// source policy declaration. It enables the shared Prelude sentry in
+    /// release builds after the runtime entry initializes it.
+    pub(crate) package_hardened: bool,
+    /// D-MEM-GUARANTEE1: this module belongs to a dependency named by the
+    /// package `contain` dial, so its unsafe gates use the fenced Prelude
+    /// scope. The root package itself is never marked dependency-fenced.
+    pub(crate) dependency_fenced: bool,
     /// c148: struct name → its declared type-parameter names. Populated in
     /// `build_cx_items` from `StructDef.type_params`. Lets `struct_is_generic` and
     /// field-type checks recognize multi-char type params (`Kind`, `Elem`, …).
@@ -3097,6 +3105,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.policy_declarations = bundle.modules[module_idx].policy_declarations.clone();
+    populate_cx_guarantee_facts(cx, bundle, module_idx);
     cx.core_archive_source = bundle
         .modules
         .iter()
@@ -3139,6 +3148,31 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     cx.package_edition = bundle.edition.clone();
+}
+
+/// Carry the package-only guarantee facts into one module's codegen context.
+/// The dependency ownership projection uses the same longest-root rule as the
+/// sema effect-budget path; no emitter reparses package metadata.
+pub(crate) fn populate_cx_guarantee_facts(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) {
+    cx.package_hardened = bundle.package_guarantees.harden;
+    let Some(module) = bundle.modules.get(module_idx) else {
+        cx.dependency_fenced = false;
+        return;
+    };
+    let dependency = bundle
+        .dep_roots
+        .iter()
+        .filter(|(_, root)| module.path.starts_with(root))
+        .max_by_key(|(_, root)| root.components().count())
+        .map(|(name, _)| name);
+    cx.dependency_fenced = dependency.is_some_and(|name| {
+        bundle.package_guarantees.harden
+            || bundle.package_guarantees.contain.contains(name)
+    });
 }
 
 pub(crate) fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
@@ -3693,6 +3727,8 @@ pub(crate) fn build_cx_items(
         index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
         policy_declarations: Vec::new(),
+        package_hardened: false,
+        dependency_fenced: false,
         struct_type_params: HashMap::new(),
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),

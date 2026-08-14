@@ -2872,6 +2872,7 @@ mod tests {
             comptime_inputs: Vec::new(), name_ledger: crate::AST::NameLedger::default(), layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
+            package_guarantees: Default::default(),
             active_os: crate::Syntax::OSTarget::host(),
             build_facts: Default::default(),
             edition: "2027".to_string(),
@@ -2957,6 +2958,7 @@ mod tests {
             web_partition_enforced: false,
             web_partition_report: None,
             dep_roots: HashMap::new(),
+            package_guarantees: Default::default(),
             active_os: crate::Syntax::OSTarget::host(),
             build_facts: Default::default(),
             edition: "2027".to_string(),
@@ -3179,7 +3181,7 @@ fn emit_test_main_cov(
     out: &mut String,
     coverage: bool,
 ) {
-    emit_test_main_cov_mode(tests, checks, coverage_branches, out, coverage, false);
+    emit_test_main_cov_mode(tests, checks, coverage_branches, out, coverage, false, false);
 }
 
 fn emit_test_main_cov_mode(
@@ -3189,6 +3191,7 @@ fn emit_test_main_cov_mode(
     out: &mut String,
     coverage: bool,
     command_override: bool,
+    package_hardened: bool,
 ) {
     out.push_str("#[derive(Clone, Copy)]\n");
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
@@ -3199,6 +3202,9 @@ fn emit_test_main_cov_mode(
     } else {
         out.push_str("fn main() {\n");
         out.push_str("    jet_std_env_init();\n");
+        out.push_str(&format!(
+            "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
+        ));
         out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
         out.push_str("    jet_test_trace_tier();\n");
         out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
@@ -3301,6 +3307,9 @@ fn emit_test_main_cov_mode(
     if command_override {
         out.push_str("\nfn main() {\n");
         out.push_str("    jet_std_env_init();\n");
+        out.push_str(&format!(
+            "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
+        ));
         out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
         out.push_str("    jet_test_suite_install(jet_test_command_run);\n");
         out.push_str("    run();\n");
@@ -3579,6 +3588,7 @@ pub fn emit_bundle_dbg(
             link,
             &extern_funcs,
         );
+        populate_cx_guarantee_facts(&mut cx, bundle, i);
         cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
@@ -3634,6 +3644,7 @@ pub fn emit_bundle_dbg(
         link,
         &extern_funcs,
     );
+    populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
     cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
@@ -3865,6 +3876,7 @@ fn emit_bundle_tests_cov_inner(
             link,
             &extern_funcs,
         );
+        populate_cx_guarantee_facts(&mut cx, bundle, i);
         cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
@@ -3918,6 +3930,7 @@ fn emit_bundle_tests_cov_inner(
         link,
         &extern_funcs,
     );
+    populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
     cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
@@ -3970,6 +3983,7 @@ fn emit_bundle_tests_cov_inner(
         &mut out,
         coverage,
         command_override,
+        bundle.package_guarantees.harden,
     );
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
@@ -4128,6 +4142,7 @@ pub fn emit_bundle_fuzz(
             link,
             &extern_funcs,
         );
+        populate_cx_guarantee_facts(&mut cx, bundle, i);
         cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
@@ -4178,6 +4193,7 @@ pub fn emit_bundle_fuzz(
         link,
         &extern_funcs,
     );
+    populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
     cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
@@ -4260,6 +4276,10 @@ fn emit_fuzz_main(
 
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
+    out.push_str(&format!(
+        "    {}jet_mem::jet_sentry_set_hardened({});\n",
+        cx.root_prefix, cx.package_hardened
+    ));
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    let corpus_dir = std::env::var(\"JET_FUZZ_CORPUS\").unwrap_or_else(|_| \".jet-fuzz-corpus\".to_string());\n");
     out.push_str("    let _ = std::fs::create_dir_all(&corpus_dir);\n");
@@ -4448,6 +4468,7 @@ fn emit_bundle_benches_inner(
             link,
             &extern_funcs,
         );
+        populate_cx_guarantee_facts(&mut cx, bundle, i);
         cx.foreign_undos = bundle_foreign_undos(bundle);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
@@ -4499,6 +4520,7 @@ fn emit_bundle_benches_inner(
         link,
         &extern_funcs,
     );
+    populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
     cx.foreign_undos = bundle_foreign_undos(bundle);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
@@ -4598,6 +4620,10 @@ fn emit_bundle_benches_inner(
     } else {
         out.push_str("fn main() {\n");
         out.push_str("    jet_std_env_init();\n");
+        out.push_str(&format!(
+            "    jet_mem::jet_sentry_set_hardened({});\n",
+            cx.package_hardened
+        ));
         out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     }
     if command_override {
@@ -4633,6 +4659,10 @@ fn emit_bundle_benches_inner(
     if command_override {
         out.push_str("\nfn main() {\n");
         out.push_str("    jet_std_env_init();\n");
+        out.push_str(&format!(
+            "    jet_mem::jet_sentry_set_hardened({});\n",
+            cx.package_hardened
+        ));
         out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
         out.push_str("    jet_bench_suite_install(jet_bench_command_run);\n");
         out.push_str("    run();\n");

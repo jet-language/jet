@@ -744,6 +744,10 @@ pub(crate) fn emit_cli_entry_if_needed(
     } else {
         return;
     };
+    let sentry_init = format!(
+        "    {}jet_mem::jet_sentry_set_hardened({});\n",
+        cx.root_prefix, cx.package_hardened
+    );
     if params.is_empty() {
         let invoke = emit_entry_invocation(
             &callable,
@@ -757,7 +761,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             .as_deref()
             .map(|name| format!("    let __argv = jet_std_io_args();\n    if {name}(&__argv) {{ return; }}\n"))
             .unwrap_or_default();
-        out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{dispatch}{invoke}}}\n\n"));
+        out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{dispatch}{invoke}}}\n\n"));
         return;
     }
     if params.len() != 1 {
@@ -812,6 +816,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .as_deref()
                 .map(|name| format!("    if {name}(&__argv) {{ return; }}\n"))
                 .unwrap_or_default();
+            let dispatch = format!("{sentry_init}{dispatch}");
             out.push_str(&format!(
                 "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {helper_prefix}{spec_name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 spec_name = spec_name,
@@ -1156,6 +1161,10 @@ fn emit_cli_subcommand_entry(
     job_dispatch: Option<&str>,
     out: &mut String,
 ) {
+    let sentry_init = format!(
+        "    {}jet_mem::jet_sentry_set_hardened({});\n",
+        cx.root_prefix, cx.package_hardened
+    );
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
     let usage_lines = cmd_names
         .iter()
@@ -1213,31 +1222,30 @@ fn emit_cli_subcommand_entry(
             spec_init = spec_init,
         ));
     }
-    let _ = cx;
-
     let root_description = schema
         .description
         .as_deref()
         .map(|description| format!("{description}\n\n"))
         .unwrap_or_default();
-    let dispatch = job_dispatch
-        .map(|name| format!("    if {name}(&__argv) {{ return; }}\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n"))
-        .unwrap_or_default();
+    let dispatch = format!(
+        "{sentry_init}{}",
+        job_dispatch
+            .map(|name| format!("    if {name}(&__argv) {{ return; }}\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n"))
+            .unwrap_or_else(|| {
+                "    if __argv.len() < 2 || __argv[1] == \"--help\" {\n".to_string()
+            })
+    );
     let main = format!(
         "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        let __prog = jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"));\n        let __description = {root_description:?};\n        println!(\"Usage: {{}} <command> [options]\\n\\n{{}}Commands:\\n{usage}\", __prog, __description);\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),
     );
-    let main = if job_dispatch.is_some() {
-        main.replacen(
-            "    if __argv.len() < 2 || __argv[1] == \"--help\" {\n",
-            &dispatch,
-            1,
-        )
-    } else {
-        main
-    };
+    let main = main.replacen(
+        "    if __argv.len() < 2 || __argv[1] == \"--help\" {\n",
+        &dispatch,
+        1,
+    );
     out.push_str(&main);
 }
 
