@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::sync::OnceLock;
@@ -13,6 +14,17 @@ use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
 
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
+
+/// `RunOutcome` carries stdout and stderr separately. Flush the first stream
+/// before handing the second to the OS so the Prelude's write order survives
+/// the CLI adapter when both streams share a non-TTY sink.
+fn emit_run_output(stdout: &str, stderr: &str) {
+    print!("{stdout}");
+    if !stderr.is_empty() {
+        let _ = std::io::stdout().flush();
+        eprint!("{stderr}");
+    }
+}
 
 /// Preserve a child process failure when the OS reports termination by signal
 /// instead of an ordinary numeric exit status.
@@ -397,8 +409,7 @@ pub(crate) fn run_compile_cmd(
                 stderr,
                 exit_code,
             } => {
-                print!("{stdout}");
-                eprint!("{stderr}");
+                emit_run_output(&stdout, &stderr);
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
@@ -440,8 +451,7 @@ pub(crate) fn run_compile_cmd(
                 stderr,
                 exit_code,
             } => {
-                print!("{stdout}");
-                eprint!("{stderr}");
+                emit_run_output(&stdout, &stderr);
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {

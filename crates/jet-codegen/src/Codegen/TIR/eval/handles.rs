@@ -550,11 +550,10 @@ fn stream_write(
         super::term_semantics::jet_term_stdout_is_terminal()
     };
     if terminal {
-        use std::io::Write;
         let result = if to_stderr {
-            std::io::stderr().lock().write_all(text.as_bytes())
+            super::term_semantics::jet_term_write_stderr(text, false)
         } else {
-            std::io::stdout().lock().write_all(text.as_bytes())
+            super::term_semantics::jet_term_write_stdout(text, false)
         };
         result.map_err(|error| unsupported(&format!("write stream: {error}"), span))?;
     } else {
@@ -582,11 +581,10 @@ fn stream_flush(
         super::term_semantics::jet_term_stdout_is_terminal()
     };
     if terminal {
-        use std::io::Write;
         let result = if to_stderr {
-            std::io::stderr().lock().flush()
+            super::term_semantics::jet_term_write_stderr("", true)
         } else {
-            std::io::stdout().lock().flush()
+            super::term_semantics::jet_term_write_stdout("", true)
         };
         result.map_err(|error| unsupported(&format!("flush stream: {error}"), span))?;
     } else if sink.is_none() {

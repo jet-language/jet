@@ -8532,15 +8532,11 @@ impl<'a> EvalCtx<'a> {
             super::term_semantics::jet_term_stdout_is_terminal()
         };
         if tty {
-            use std::io::Write;
+            let frame = format!("{text}\n");
             if to_stderr {
-                let mut out = std::io::stderr().lock();
-                let _ = writeln!(out, "{text}");
-                let _ = out.flush();
+                let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
             } else {
-                let mut out = std::io::stdout().lock();
-                let _ = writeln!(out, "{text}");
-                let _ = out.flush();
+                let _ = super::term_semantics::jet_term_write_stdout(&frame, true);
             }
             return Ok(());
         }

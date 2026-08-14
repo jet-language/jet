@@ -420,14 +420,8 @@ pub(crate) fn write_jit_stdout(text: &str, flush: bool) -> Result<(), String> {
     let terminal = crate::IO::term_prelude::jet_term_stdout_is_terminal();
     let direct = terminal || Concurrency::active_runtime_ptr().is_none();
     if direct {
-        use std::io::Write;
-        let mut out = std::io::stdout().lock();
-        out.write_all(text.as_bytes())
+        crate::IO::term_prelude::jet_term_write_stdout(text, flush)
             .map_err(|error| format!("write stdout: {error}"))?;
-        if flush || terminal {
-            out.flush()
-                .map_err(|error| format!("flush stdout: {error}"))?;
-        }
     } else {
         with_runtime_mut(|rt| rt.stdout.push_str(text));
     }
@@ -438,14 +432,8 @@ pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
     let terminal = crate::IO::term_prelude::jet_term_stderr_is_terminal();
     let direct = terminal || Concurrency::active_runtime_ptr().is_none();
     if direct {
-        use std::io::Write;
-        let mut out = std::io::stderr().lock();
-        out.write_all(text.as_bytes())
+        crate::IO::term_prelude::jet_term_write_stderr(text, flush)
             .map_err(|error| format!("write stderr: {error}"))?;
-        if flush || terminal {
-            out.flush()
-                .map_err(|error| format!("flush stderr: {error}"))?;
-        }
     } else {
         with_runtime_mut(|rt| rt.stderr.push_str(text));
     }
@@ -2343,17 +2331,17 @@ pub(crate) fn alloc_io_error_result(
 }
 
 pub(crate) fn result_err_terminal(error: crate::IO::term_prelude::JetTermSecretError) -> i64 {
+    let projection = crate::IO::term_prelude::jet_term_secret_error_projection(&error);
     let cause = error.message();
-    let (variant_name, operation_name, resource) = match error {
-        crate::IO::term_prelude::JetTermSecretError::NonTerminal => {
-            ("InvalidInput", "Read", Some("stdin"))
-        }
-        crate::IO::term_prelude::JetTermSecretError::Echo => {
-            ("Other", "Read", Some("stdin"))
-        }
-        crate::IO::term_prelude::JetTermSecretError::Flush(_) => ("Other", "Flush", Some("stdout")),
-        crate::IO::term_prelude::JetTermSecretError::Read(_) => ("Other", "Read", Some("stdin")),
+    let variant_name = match projection.kind {
+        crate::IO::term_prelude::JetTermSecretErrorKind::InvalidInput => "InvalidInput",
+        crate::IO::term_prelude::JetTermSecretErrorKind::Other => "Other",
     };
+    let operation_name = match projection.operation {
+        crate::IO::term_prelude::JetTermSecretErrorOperation::Read => "Read",
+        crate::IO::term_prelude::JetTermSecretErrorOperation::Flush => "Flush",
+    };
+    let resource = Some(projection.resource);
     let variant = jet_foundation::Syntax::IO_ERROR_VARIANTS
         .iter()
         .position(|name| *name == variant_name)

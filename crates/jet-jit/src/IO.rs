@@ -30,6 +30,8 @@ mod progress_semantics {
 // nested `jet_std` mirrors only the IOError shape these functions construct
 // via `.other(...)`; it carries no behavior of its own.
 mod io_line_stream {
+    use super::term_prelude::jet_term_write_stdout;
+
     #[allow(dead_code)]
     mod jet_std {
         #[derive(Debug)]
@@ -207,14 +209,11 @@ pub(crate) fn prompt_confirm_with_sink(
     prompt: &str,
     sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> bool {
-    let prompt = term_prelude::jet_term_confirm_prompt(prompt);
     let mut sink = sink;
-    let answer = write_prompt_with_sink(&prompt, &mut sink)
-        .and_then(|_| read_line())
-        .unwrap_or_default();
-    matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
+    term_prelude::jet_term_confirm_with_io(
+        prompt,
+        |text| write_prompt_with_sink(text, &mut sink),
+        read_line,
     )
 }
 
@@ -227,23 +226,14 @@ pub(crate) fn prompt_choose_with_sink(
     values: &[String],
     sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Result<String, String> {
-    if values.is_empty() {
-        return Err(term_prelude::jet_term_choose_empty_error().to_string());
-    }
     let mut sink = sink;
-    write_prompt_with_sink(&term_prelude::jet_term_choose_menu(prompt, values), &mut sink)?;
-    loop {
-        let answer = write_prompt_with_sink("> ", &mut sink).and_then(|_| read_line())?;
-        if let Ok(index) = answer.trim().parse::<usize>() {
-            if let Some(item) = index.checked_sub(1).and_then(|index| values.get(index)) {
-                return Ok(item.clone());
-            }
-        }
-        write_prompt_with_sink(
-            &term_prelude::jet_term_choose_invalid(values.len()),
-            &mut sink,
-        )?;
-    }
+    term_prelude::jet_term_choose_with_io(
+        prompt,
+        values,
+        |text| write_prompt_with_sink(text, &mut sink),
+        read_line,
+        || term_prelude::jet_term_choose_empty_error().to_string(),
+    )
 }
 
 pub(crate) fn prompt_input_secret(

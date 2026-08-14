@@ -278,13 +278,8 @@ pub fn apply_impure_core_call_with_type(
                     let tty = super::term_semantics::jet_term_stdout_is_terminal();
                     let frame = super::term_semantics::jet_term_progress_frame(tty, text);
                     if tty {
-                        use std::io::Write;
-                        let mut out = std::io::stdout().lock();
-                        out.write_all(frame.as_bytes()).map_err(|error| {
+                        super::term_semantics::jet_term_write_stdout(&frame, true).map_err(|error| {
                             unsupported(&format!("write stdout: {error}"), span)
-                        })?;
-                        out.flush().map_err(|error| {
-                            unsupported(&format!("flush stdout: {error}"), span)
                         })?;
                     } else {
                         sink.stdout.push_str(&frame);
@@ -345,10 +340,7 @@ pub fn apply_impure_core_call_with_type(
             if let Some(s) = sink {
                 let frame = format!("{text}\n");
                 if super::term_semantics::jet_term_stdout_is_terminal() {
-                    use std::io::Write;
-                    let mut out = std::io::stdout().lock();
-                    let _ = out.write_all(frame.as_bytes());
-                    let _ = out.flush();
+                    let _ = super::term_semantics::jet_term_write_stdout(&frame, true);
                 } else {
                     s.stdout.push_str(&frame);
                 }
@@ -364,10 +356,7 @@ pub fn apply_impure_core_call_with_type(
             if let Some(s) = sink {
                 let frame = format!("{text}\n");
                 if super::term_semantics::jet_term_stderr_is_terminal() {
-                    use std::io::Write;
-                    let mut out = std::io::stderr().lock();
-                    let _ = out.write_all(frame.as_bytes());
-                    let _ = out.flush();
+                    let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
                 } else {
                     s.stderr.push_str(&frame);
                 }

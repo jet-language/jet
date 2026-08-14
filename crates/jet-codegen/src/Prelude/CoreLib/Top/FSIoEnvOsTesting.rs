@@ -261,75 +261,56 @@ fn jet_std_io_args() -> Vec<String> {
 
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
 fn jet_std_io_confirm(prompt: &String) -> bool {
-    let shown = jet_term_confirm_prompt(prompt);
-    matches!(
-        jet_std_io_input(Some(&shown))
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-            .as_str(),
-        "y" | "yes"
+    jet_term_confirm_with_io(
+        prompt,
+        |text| {
+            jet_term_write_stdout(text, true)
+                .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+        },
+        || jet_std_io_input(None),
     )
 }
 
 fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet_std::IOError> {
-    if items.is_empty() {
-        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            None,
-            Some(jet_term_choose_empty_error().to_string()),
-        )));
-    }
-    print!("{}", jet_term_choose_menu(prompt, items));
-    loop {
-        let answer = jet_std_io_input(Some(&"> ".to_string()))?;
-        if let Ok(index) = answer.trim().parse::<usize>() {
-            if let Some(item) = index.checked_sub(1).and_then(|index| items.get(index)) {
-                return Ok(item.clone());
-            }
-        }
-        print!("{}", jet_term_choose_invalid(items.len()));
-    }
+    jet_term_choose_with_io(
+        prompt,
+        items,
+        |text| {
+            jet_term_write_stdout(text, true)
+                .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+        },
+        || jet_std_io_input(None),
+        || {
+            jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Read,
+                Some("stdin".to_string()),
+                None,
+                Some(jet_term_choose_empty_error().to_string()),
+            ))
+        },
+    )
 }
 
 fn jet_std_io_secret_error(error: JetTermSecretError) -> jet_std::IOError {
+    let projection = jet_term_secret_error_projection(&error);
     let message = error.message();
-    match error {
-        JetTermSecretError::NonTerminal => jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            None,
-            Some(message),
-        )),
-        JetTermSecretError::Echo => jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            message,
+    let operation = match projection.operation {
+        JetTermSecretErrorOperation::Read => jet_std::IOOperation::Read,
+        JetTermSecretErrorOperation::Flush => jet_std::IOOperation::Flush,
+    };
+    let resource = Some(projection.resource.to_string());
+    match projection.kind {
+        JetTermSecretErrorKind::InvalidInput => jet_std::IOError::InvalidInput(
+            jet_std::IOContext::new(operation, resource, None, Some(message)),
         ),
-        JetTermSecretError::Flush(_) => jet_std::IOError::other(
-            jet_std::IOOperation::Flush,
-            Some("stdout".to_string()),
-            message,
-        ),
-        JetTermSecretError::Read(_) => jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            message,
-        ),
+        JetTermSecretErrorKind::Other => jet_std::IOError::other(operation, resource, message),
     }
 }
 
 fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> {
-    use std::io::Write;
     jet_term_input_secret(
         prompt,
-        |text| {
-            print!("{text}");
-            std::io::stdout()
-                .flush()
-                .map_err(|error| error.to_string())
-        },
+        |text| jet_term_write_stdout(text, true).map_err(|error| error.to_string()),
         || {
             let mut secret = String::new();
             std::io::stdin()
@@ -404,47 +385,41 @@ fn jet_std_io_stderr() -> JetStderr {
     JetStderr
 }
 fn jet_std_io_stdout_write(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    std::io::stdout()
-        .write_all(text.as_bytes())
+    jet_term_write_stdout(text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
 fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    let mut out = std::io::stdout();
-    out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-    out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+    let text = format!("{text}\n");
+    jet_term_write_stdout(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
 fn jet_std_io_stdout_write_bytes(_s: &mut JetStdout, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    std::io::stdout().write_all(bytes).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
+    jet_term_write_stdout_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
 fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    std::io::stdout().flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+    jet_term_write_stdout("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
 }
 fn jet_std_io_stdout_is_tty(_s: &JetStdout) -> bool {
     jet_term_stdout_is_terminal()
 }
 fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    std::io::stderr()
-        .write_all(text.as_bytes())
+    jet_term_write_stderr(text, false)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
 fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    let mut out = std::io::stderr();
-    out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))?;
-    out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+    let text = format!("{text}\n");
+    jet_term_write_stderr(&text, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
 fn jet_std_io_stderr_write_bytes(_s: &mut JetStderr, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    std::io::stderr().write_all(bytes).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
+    jet_term_write_stderr_bytes(bytes, false)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
 fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    std::io::stderr().flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
+    jet_term_write_stderr("", true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
 }
 fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
     jet_term_stderr_is_terminal()
@@ -574,23 +549,15 @@ fn jet_std_io_progress_list<T: 'static>(
 }
 
 fn jet_std_io_progress_emit(text: &str) -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    let mut out = std::io::stdout();
     let frame = jet_term_progress_frame(jet_term_stdout_is_terminal(), text);
-    out.write_all(frame.as_bytes())
-        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-    out.flush()
+    jet_term_write_stdout(&frame, true)
         .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
 }
 
 fn jet_std_io_progress_finish() -> Result<(), jet_std::IOError> {
-    use std::io::Write;
-    let mut out = std::io::stdout();
     let frame = jet_term_progress_finish(jet_term_stdout_is_terminal());
     if !frame.is_empty() {
-        out.write_all(frame.as_bytes())
-            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
-        out.flush()
+        jet_term_write_stdout(frame, true)
             .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))?;
     }
     Ok(())

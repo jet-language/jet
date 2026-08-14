@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
@@ -14,6 +14,16 @@ use jet_foundation::JSON::json_escape;
 use crate::CmdCompile::{build, collect_source_files_recursive, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
+
+/// Preserve the Prelude's stream order when a run outcome crosses the CLI
+/// adapter as separate stdout/stderr buffers.
+fn emit_run_output(stdout: &str, stderr: &str) {
+    print!("{stdout}");
+    if !stderr.is_empty() {
+        let _ = std::io::stdout().flush();
+        eprint!("{stderr}");
+    }
+}
 
 /// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
 /// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
@@ -195,8 +205,7 @@ fn run_due_tasks(
                 stderr,
                 exit_code,
             } => {
-                print!("{stdout}");
-                eprint!("{stderr}");
+                emit_run_output(&stdout, &stderr);
                 if exit_code != 0 {
                     eprintln!("job `{name}` exited with code {exit_code}");
                 }
@@ -544,10 +553,7 @@ fn render_dev_outcome(
 ) {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
-            print!("{stdout}");
-            if !stderr.is_empty() {
-                eprint!("{stderr}");
-            }
+            emit_run_output(stdout, stderr);
         }
         jet::Interpreter::RunOutcome::Problems(diags) => {
             let src = fs::read_to_string(file).unwrap_or_default();
@@ -628,10 +634,7 @@ fn render_outcome_timed(
 ) {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
-            print!("{}", stdout);
-            if !stderr.is_empty() {
-                eprint!("{}", stderr);
-            }
+            emit_run_output(&stdout, &stderr);
             if let Some(e) = elapsed {
                 if !mode.quiet {
                     println!("✓ ran in {} ms", e.as_millis());

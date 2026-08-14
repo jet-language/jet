@@ -1179,21 +1179,17 @@ fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
 }
 
 fn secret_io_error(error: IO::term_prelude::JetTermSecretError) -> CtValue {
+    let projection = IO::term_prelude::jet_term_secret_error_projection(&error);
     let cause = error.message();
-    match error {
-        IO::term_prelude::JetTermSecretError::NonTerminal => {
-            io_error_at("InvalidInput", "Read", "stdin", cause)
-        }
-        IO::term_prelude::JetTermSecretError::Echo => {
-            io_error_at("Other", "Read", "stdin", cause)
-        }
-        IO::term_prelude::JetTermSecretError::Flush(_) => {
-            io_error_at("Other", "Flush", "stdout", cause)
-        }
-        IO::term_prelude::JetTermSecretError::Read(_) => {
-            io_error_at("Other", "Read", "stdin", cause)
-        }
-    }
+    let kind = match projection.kind {
+        IO::term_prelude::JetTermSecretErrorKind::InvalidInput => "InvalidInput",
+        IO::term_prelude::JetTermSecretErrorKind::Other => "Other",
+    };
+    let operation = match projection.operation {
+        IO::term_prelude::JetTermSecretErrorOperation::Read => "Read",
+        IO::term_prelude::JetTermSecretErrorOperation::Flush => "Flush",
+    };
+    io_error_at(kind, operation, projection.resource, cause)
 }
 
 fn secret_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {

@@ -2,6 +2,7 @@
 
 #![cfg(unix)]
 
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -47,6 +48,92 @@ fn run_pty(mode: &str) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+struct NonPtyOutput {
+    stdout: String,
+    stderr: String,
+}
+
+fn run_non_pty(mode: &str) -> NonPtyOutput {
+    let jet = env!("CARGO_BIN_EXE_jet");
+    let example = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/features/io/terminal_parity.jet");
+    let mut args = vec!["run", "--quiet"];
+    match mode {
+        "default" => {}
+        "release" => args.push("--release"),
+        "interpret" => args.push("--interpret"),
+        _ => panic!("unknown non-PTY mode: {mode}"),
+    }
+    args.push(example);
+    let mut child = Command::new(jet)
+        .args(args)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("non-PTY jet run must start");
+    child
+        .stdin
+        .take()
+        .expect("non-PTY stdin")
+        .write_all(b"\nnot-a-number\n3\n2\n")
+        .expect("write non-PTY answers");
+    let output = child.wait_with_output().expect("collect non-PTY output");
+    assert!(
+        output.status.success(),
+        "non-PTY child failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    NonPtyOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+fn run_non_pty_merged(mode: &str) -> String {
+    let jet = env!("CARGO_BIN_EXE_jet");
+    let example = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/features/io/terminal_parity.jet");
+    let mut args = vec!["run", "--quiet"];
+    match mode {
+        "default" => {}
+        "release" => args.push("--release"),
+        "interpret" => args.push("--interpret"),
+        _ => panic!("unknown merged non-PTY mode: {mode}"),
+    }
+    args.push(example);
+    let path = std::env::temp_dir().join(format!(
+        "jet_terminal_parity_merged_{}_{}",
+        std::process::id(),
+        mode
+    ));
+    let sink = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&path)
+        .expect("merged output file");
+    let stderr = sink.try_clone().expect("clone merged output file");
+    let mut child = Command::new(jet)
+        .args(args)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(sink))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .expect("merged non-PTY jet run must start");
+    child
+        .stdin
+        .take()
+        .expect("merged non-PTY stdin")
+        .write_all(b"\nnot-a-number\n3\n2\n")
+        .expect("write merged non-PTY answers");
+    let status = child.wait().expect("collect merged non-PTY status");
+    assert!(status.success(), "merged non-PTY child failed: {status}");
+    let merged = fs::read_to_string(&path).expect("read merged non-PTY output");
+    let _ = fs::remove_file(path);
+    merged
+}
+
 fn marker_positions(transcript: &str) -> Vec<usize> {
     let transcript = transcript.replace('\r', "");
     [
@@ -88,6 +175,35 @@ fn terminal_parity_uses_tty_prompt_and_progress_order() {
         assert!(
             !transcript.contains("secret: non-tty"),
             "PTY secret read was treated as non-TTY: {transcript:?}"
+        );
+    }
+}
+
+#[test]
+fn terminal_parity_matches_non_tty_golden_and_stream_order() {
+    let expected_stdout = include_str!(
+        "../examples/features/expected/io/terminal_parity.out"
+    );
+    let expected_stderr = include_str!(
+        "../examples/features/expected/io/terminal_parity.stderr.out"
+    );
+    let mut expected_merged = expected_stdout.to_string();
+    expected_merged.push_str(expected_stderr);
+
+    for mode in ["default", "release", "interpret"] {
+        let output = run_non_pty(mode);
+        assert_eq!(
+            output.stdout, expected_stdout,
+            "non-PTY stdout drifted in {mode} mode"
+        );
+        assert_eq!(
+            output.stderr, expected_stderr,
+            "non-PTY stderr drifted in {mode} mode"
+        );
+        assert_eq!(
+            run_non_pty_merged(mode),
+            expected_merged,
+            "non-PTY stream order drifted in {mode} mode"
         );
     }
 }

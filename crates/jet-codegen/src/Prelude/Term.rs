@@ -1,6 +1,6 @@
 // D-IO-TERM1=A: terminal policy shared by AOT, resident JIT, and the
-// interpreter. Engines marshal its decisions and frames; terminal-specific
-// errors, prompts, and progress line endings live here.
+// interpreter. Engines marshal its decisions, frames, and errors; terminal
+// detection, stream flushing, prompts, and progress line endings live here.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum JetTermSecretError {
@@ -20,6 +20,52 @@ impl JetTermSecretError {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JetTermSecretErrorKind {
+    InvalidInput,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JetTermSecretErrorOperation {
+    Read,
+    Flush,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JetTermSecretErrorProjection {
+    pub(crate) kind: JetTermSecretErrorKind,
+    pub(crate) operation: JetTermSecretErrorOperation,
+    pub(crate) resource: &'static str,
+}
+
+pub(crate) fn jet_term_secret_error_projection(
+    error: &JetTermSecretError,
+) -> JetTermSecretErrorProjection {
+    match error {
+        JetTermSecretError::NonTerminal => JetTermSecretErrorProjection {
+            kind: JetTermSecretErrorKind::InvalidInput,
+            operation: JetTermSecretErrorOperation::Read,
+            resource: "stdin",
+        },
+        JetTermSecretError::Echo => JetTermSecretErrorProjection {
+            kind: JetTermSecretErrorKind::Other,
+            operation: JetTermSecretErrorOperation::Read,
+            resource: "stdin",
+        },
+        JetTermSecretError::Flush(_) => JetTermSecretErrorProjection {
+            kind: JetTermSecretErrorKind::Other,
+            operation: JetTermSecretErrorOperation::Flush,
+            resource: "stdout",
+        },
+        JetTermSecretError::Read(_) => JetTermSecretErrorProjection {
+            kind: JetTermSecretErrorKind::Other,
+            operation: JetTermSecretErrorOperation::Read,
+            resource: "stdin",
+        },
+    }
+}
+
 pub(crate) fn jet_term_stdin_is_terminal() -> bool {
     use std::io::IsTerminal;
     std::io::stdin().is_terminal()
@@ -33,6 +79,34 @@ pub(crate) fn jet_term_stdout_is_terminal() -> bool {
 pub(crate) fn jet_term_stderr_is_terminal() -> bool {
     use std::io::IsTerminal;
     std::io::stderr().is_terminal()
+}
+
+pub(crate) fn jet_term_write_stdout(text: &str, flush: bool) -> std::io::Result<()> {
+    jet_term_write_stdout_bytes(text.as_bytes(), flush)
+}
+
+pub(crate) fn jet_term_write_stdout_bytes(bytes: &[u8], flush: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    out.write_all(bytes)?;
+    if flush || jet_term_stdout_is_terminal() {
+        out.flush()?;
+    }
+    Ok(())
+}
+
+pub(crate) fn jet_term_write_stderr(text: &str, flush: bool) -> std::io::Result<()> {
+    jet_term_write_stderr_bytes(text.as_bytes(), flush)
+}
+
+pub(crate) fn jet_term_write_stderr_bytes(bytes: &[u8], flush: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::stderr().lock();
+    out.write_all(bytes)?;
+    if flush || jet_term_stderr_is_terminal() {
+        out.flush()?;
+    }
+    Ok(())
 }
 
 pub(crate) fn jet_term_width(get: impl Fn(&str) -> Option<String>) -> i64 {
@@ -101,8 +175,9 @@ pub(crate) fn jet_term_style_force(style: &str, text: &str) -> String {
 
 pub(crate) fn jet_term_secret_preflight(
     stdin_is_terminal: bool,
+    stdout_is_terminal: bool,
 ) -> Result<(), JetTermSecretError> {
-    stdin_is_terminal
+    (stdin_is_terminal && stdout_is_terminal)
         .then_some(())
         .ok_or(JetTermSecretError::NonTerminal)
 }
@@ -112,7 +187,10 @@ pub(crate) fn jet_term_input_secret(
     mut write: impl FnMut(&str) -> Result<(), String>,
     mut read: impl FnMut() -> Result<String, String>,
 ) -> Result<String, JetTermSecretError> {
-    jet_term_secret_preflight(jet_term_stdin_is_terminal())?;
+    jet_term_secret_preflight(
+        jet_term_stdin_is_terminal(),
+        jet_term_stdout_is_terminal(),
+    )?;
     write(prompt).map_err(JetTermSecretError::Flush)?;
     if !jet_term_mode_enter(false) {
         let _ = write("\n");
@@ -139,6 +217,21 @@ pub(crate) fn jet_term_confirm_prompt(prompt: &str) -> String {
     format!("{prompt} [y/N] ")
 }
 
+pub(crate) fn jet_term_confirm_with_io<E>(
+    prompt: &str,
+    mut write: impl FnMut(&str) -> Result<(), E>,
+    mut read: impl FnMut() -> Result<String, E>,
+) -> bool {
+    let prompt = jet_term_confirm_prompt(prompt);
+    let answer = write(&prompt)
+        .and_then(|_| read())
+        .unwrap_or_default();
+    matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    )
+}
+
 pub(crate) fn jet_term_choose_menu(prompt: &str, items: &[String]) -> String {
     let mut menu = format!("{prompt}\n");
     for (index, item) in items.iter().enumerate() {
@@ -149,6 +242,28 @@ pub(crate) fn jet_term_choose_menu(prompt: &str, items: &[String]) -> String {
 
 pub(crate) fn jet_term_choose_invalid(item_count: usize) -> String {
     format!("Enter a number from 1 to {item_count}.\n")
+}
+
+pub(crate) fn jet_term_choose_with_io<E>(
+    prompt: &str,
+    items: &[String],
+    mut write: impl FnMut(&str) -> Result<(), E>,
+    mut read: impl FnMut() -> Result<String, E>,
+    empty_error: impl FnOnce() -> E,
+) -> Result<String, E> {
+    if items.is_empty() {
+        return Err(empty_error());
+    }
+    write(&jet_term_choose_menu(prompt, items))?;
+    loop {
+        let answer = write("> ").and_then(|_| read())?;
+        if let Ok(index) = answer.trim().parse::<usize>() {
+            if let Some(item) = index.checked_sub(1).and_then(|index| items.get(index)) {
+                return Ok(item.clone());
+            }
+        }
+        write(&jet_term_choose_invalid(items.len()))?;
+    }
 }
 
 pub(crate) fn jet_term_choose_empty_error() -> &'static str {

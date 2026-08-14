@@ -233,10 +233,7 @@ pub(super) fn progress_emit(
     let tty = term_semantics::jet_term_stdout_is_terminal();
     let frame = term_semantics::jet_term_progress_frame(tty, text);
     if tty {
-        use std::io::Write;
-        let mut out = std::io::stdout().lock();
-        let _ = out.write_all(frame.as_bytes());
-        let _ = out.flush();
+        let _ = term_semantics::jet_term_write_stdout(&frame, true);
         return;
     }
     if let Some(sink) = sink {

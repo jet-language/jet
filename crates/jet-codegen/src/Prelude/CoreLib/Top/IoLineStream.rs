@@ -4,11 +4,8 @@
 // second time (I9 — semantics live only in Prelude/**; JIT hosts marshal
 // args/results and call the same Prelude function).
 fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError> {
-    use std::io::Write;
     if let Some(p) = prompt {
-        print!("{}", p);
-        std::io::stdout()
-            .flush()
+        jet_term_write_stdout(p, true)
             .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Flush, None, e))?;
     }
     let mut s = String::new();
