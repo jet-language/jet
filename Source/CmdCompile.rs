@@ -2168,31 +2168,36 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
         return;
     }
 
-    println!("\ncoverage for {}", file);
-    let mut covered_functions = 0usize;
-    for (name, line) in &by_line {
-        let hit = function_hits.contains(line);
-        if hit {
-            covered_functions += 1;
+    if funcs.is_empty() && branches.is_empty() {
+        println!("\ncoverage: no functions to measure");
+        return;
+    }
+
+    if funcs.is_empty() {
+        println!("\ncoverage: no functions to measure");
+    } else {
+        println!("\ncoverage for {}", file);
+        let mut covered_functions = 0usize;
+        for (name, line) in &by_line {
+            let hit = function_hits.contains(line);
+            if hit {
+                covered_functions += 1;
+            }
+            println!(
+                "  {:4}  {}  {}:{}",
+                if hit { "HIT " } else { "MISS" },
+                name,
+                file,
+                line
+            );
         }
+        let total = funcs.len();
+        let function_pct = (covered_functions as f64 / total as f64) * 100.0;
         println!(
-            "  {:4}  {}  {}:{}",
-            if hit { "HIT " } else { "MISS" },
-            name,
-            file,
-            line
+            "  {}/{} functions covered ({:.0}%)",
+            covered_functions, total, function_pct
         );
     }
-    let total = funcs.len();
-    let function_pct = if total == 0 {
-        100
-    } else {
-        (covered_functions * 100) / total
-    };
-    println!(
-        "  {}/{} functions covered ({}%)",
-        covered_functions, total, function_pct
-    );
 
     let mut covered_branches = 0usize;
     for branch in &branches {
