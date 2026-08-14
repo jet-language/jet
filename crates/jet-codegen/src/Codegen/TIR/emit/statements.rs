@@ -803,7 +803,7 @@ fn emit_tir_stmt(
                         cx.root_prefix, pointer
                     );
                     let next = match op {
-                        Some(op) => prelude_compound_call(op, &read, &v, &value.ty, &cx.file, *line)
+                        Some(op) => prelude_compound_call(*op, &read, &v, &value.ty, &cx.file, *line)
                             .unwrap_or_else(|| format!("({read}) {} {v}", op.rust_spell().expect(PRELUDE_CARRIED))),
                         None => v,
                     };

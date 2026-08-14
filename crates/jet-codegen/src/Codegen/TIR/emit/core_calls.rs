@@ -15,7 +15,7 @@ use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
-use crate::Codegen::TIR::{TExpr, TExprKind};
+use crate::Codegen::TIR::TExpr;
 
 fn reflect_field_type(cx: &Cx, owner_ty: &Type, declared: &Type) -> Type {
     let Type::Apply { name, args } = owner_ty else {
