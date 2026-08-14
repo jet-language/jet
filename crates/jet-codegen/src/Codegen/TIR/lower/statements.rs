@@ -2054,7 +2054,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 .expect("refutable unwrap pattern must carry one validated binding");
             env.bind(binding, TLocal::user(binding), Some(init.ty.clone()));
             ready_return!(TStmt::Let {
-                name: binding.clone(),
+                name: binding.to_owned(),
                 kw: "let",
                 let_ty: TLetTy::inferred(),
                 init,
