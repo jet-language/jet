@@ -1502,11 +1502,11 @@ fn cli_build_enforces_lint_policy_e1293() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success(),
-        "expected the build to fail once policy.lints denies L0504, stderr:\n{stderr}"
+        "expected the build to fail once policy.lints denies float_money, stderr:\n{stderr}"
     );
     assert!(
         stderr.contains("E1293") && stderr.contains("L0504"),
-        "expected E1293 naming L0504, got:\n{stderr}"
+        "expected E1293 naming float_money/L0504, got:\n{stderr}"
     );
     assert!(
         !stderr.contains("Warning [L0504]"),
@@ -1531,8 +1531,10 @@ fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0")
-            + "\npolicy: { lints: { deny: [L0302] } }\n"),
+        include_str!("ui/lint_policy_code_name.jet")
+            .lines()
+            .find_map(|line| line.strip_prefix("// @lint_policy_config "))
+            .expect("lint policy code fixture must carry a manifest sample"),
     );
     write(&tmp, "run.jet", "fn run() { print(\"hi\"); }\n");
 

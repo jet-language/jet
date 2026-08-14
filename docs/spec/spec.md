@@ -2640,7 +2640,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   dossier`, effect-budget provenance, build facts). Walls are team policy
   only: `package.jet`'s `policy: { lints: { deny: […] } }` joins `policy.trust`
   under the one `policy:` namespace (D-JPK-POLICYSURFACE1) — `deny:` lists
-  lint codes (e.g. `L0504`), and a lint that fires while its code is listed
+  stable lint names (e.g. `float_money`), and a lint that fires while its name is listed
   fails the build with E1293 instead of only warning. Absent entirely, every
   lint stays a warning (I1/D-LINTPOLICY1 default); host/org policy narrows,
   never widens (already law). This is the one policy surface for lint walls

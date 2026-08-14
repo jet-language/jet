@@ -91,6 +91,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         code: Some("E1206"),
     },
     Retirement {
+        id: "lint-policy-code",
+        retired: "policy.lints.deny: [L####]",
+        canonical: "policy.lints.deny: [lint_name]",
+        kind: RetirementKind::Semantic,
+        decision: "D-LINTPOLICY1",
+        since: "2026-08-07",
+        code: Some("E1206"),
+    },
+    Retirement {
         id: "package-ref-order",
         retired: "provider@target",
         canonical: "target@provider",

@@ -39,11 +39,12 @@ fn package_lints_deny(
     };
     let source = manifest.file.text().map_err(|error| error.diagnostic())?;
     let deny = jet_foundation::LintPolicy::parse_package_source(&source).map_err(|detail| {
+        let fix = jet_foundation::LintPolicy::policy_error_fix(&detail);
         Diagnostic::error(
             "E1206",
             "invalid package manifest".to_string(),
             detail,
-            "fix the fields in package.jet before loading the project".to_string(),
+            fix,
             None,
         )
     })?.unwrap_or_default();

@@ -177,7 +177,9 @@ fn doctor_failure_is_l2101_snapshot() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let start = stdout.find("Warning [L2101]:").expect("L2101 diagnostic");
+    let start = stdout
+        .find("Warning [L2101] (doctor_advisory):")
+        .expect("L2101 diagnostic");
     check_snapshot("doctor_l2101.txt", &stdout[start..]);
 }
 

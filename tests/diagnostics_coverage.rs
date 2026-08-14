@@ -118,6 +118,66 @@ fn registered_code_rows() -> Vec<(String, usize)> {
         .collect()
 }
 
+fn is_snake_case(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut previous_underscore = false;
+    for (index, character) in name.chars().enumerate() {
+        if character == '_' {
+            if index == 0 || previous_underscore {
+                return false;
+            }
+            previous_underscore = true;
+        } else if character.is_ascii_lowercase() || character.is_ascii_digit() {
+            previous_underscore = false;
+        } else {
+            return false;
+        }
+    }
+    !previous_underscore
+}
+
+#[test]
+fn every_registered_lint_has_a_unique_snake_case_name() {
+    let registered_codes: BTreeSet<&str> = jet_foundation::Registry::diagnostic_rows()
+        .iter()
+        .filter(|row| row.severity == jet_foundation::Diagnostics::Severity::Lint)
+        .map(|row| row.code)
+        .collect();
+    let lints = jet_foundation::LintPolicy::registered_lints();
+    let mut names = BTreeSet::new();
+    let mut codes = BTreeSet::new();
+
+    for lint in lints {
+        assert!(
+            is_snake_case(lint.name),
+            "lint `{}` is not a stable snake_case name",
+            lint.name
+        );
+        assert!(names.insert(lint.name), "lint name `{}` is duplicated", lint.name);
+        assert!(codes.insert(lint.code), "lint code `{}` is duplicated", lint.code);
+        assert_eq!(
+            jet_foundation::Registry::diagnostic(lint.code)
+                .map(|row| row.severity),
+            Some(jet_foundation::Diagnostics::Severity::Lint),
+            "lint `{}` is not a registered lint diagnostic row",
+            lint.code
+        );
+        assert_eq!(
+            jet_foundation::LintPolicy::name_for_code(lint.code),
+            Some(lint.name),
+            "lint `{}` does not round-trip through the name registry",
+            lint.code
+        );
+    }
+
+    assert_eq!(
+        codes, registered_codes,
+        "every registered lint row must carry exactly one stable name"
+    );
+}
+
 /// Whether a code is marked retired in the typed row source.
 fn is_retired(code: &str, _diag_md: &str) -> bool {
     jet_foundation::Registry::diagnostic(code).is_some_and(|row| {

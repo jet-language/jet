@@ -19,7 +19,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
@@ -267,6 +267,14 @@ fn ui_snapshots() {
         let retired_gate_flag = src
             .lines()
             .any(|line| line.trim() == "// @retired_gate_flag");
+        // Card #1748: this flat fixture carries a manifest sample in a test
+        // directive so the intentional retired spelling is not a live
+        // `package.jet` counted by the migration ratchet.
+        let lint_policy_config = src.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("// @lint_policy_config ")
+                .map(str::to_owned)
+        });
         // D-WORKSPACELOCK1 / E1202: persisted workspace identity failures
         // use the same registered diagnostic in tooling and CLI paths.
         let workspace_lock_e1202 = src
@@ -297,7 +305,11 @@ fn ui_snapshots() {
                 .map(|p| p.trim().to_string())
         });
         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
-        let actual = if jetpack_hangar_digest_mismatch {
+        let actual = if let Some(manifest_source) = lint_policy_config.as_deref() {
+            let diagnostic = jet::Manifest::parse(Path::new("package.jet"), manifest_source)
+                .expect_err("the lint-policy code fixture must be refused");
+            jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if jetpack_retired_environment_flag {
             run_jetpack_retired_environment_flag_snapshot()

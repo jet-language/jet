@@ -37,6 +37,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // remain until their owning migration slices land.
     ("manifest-file", 2),
     ("manifest-identity", 7),
+    ("lint-policy-code", 0),
     ("package-ref-order", 0),
     ("interpolation-selector-rail", 0),
     ("core-io-println", 0),
@@ -170,6 +171,43 @@ fn writes_canonical_ref(text: &str) -> bool {
         .any(|(_, right)| REF_PROVIDERS.contains(&right.as_str()))
 }
 
+/// Whether a line writes a package lint policy value, and whether its first
+/// value is a retired diagnostic code. Test fixtures under `tests/ui` are
+/// excluded by `content_files`; this only counts repository content that can
+/// become a live package/config source.
+fn lint_policy_value_is_code(line: &str) -> Option<bool> {
+    let lints = line.find("lints")?;
+    let deny = line[lints..].find("deny")? + lints;
+    let open = line[deny..].find('[')? + deny;
+    let value = line[open + 1..].trim_start();
+    let token = value
+        .split(|character: char| character == ',' || character == ']' || character.is_whitespace())
+        .next()
+        .unwrap_or("")
+        .trim_matches('"');
+    if token.is_empty() {
+        return None;
+    }
+    let mut chars = token.chars();
+    let code_shape = matches!(chars.next(), Some('E' | 'L' | 'W'))
+        && chars.count() == 4
+        && token[1..].chars().all(|character| character.is_ascii_digit());
+    Some(code_shape)
+}
+
+fn lint_policy_values(text: &str) -> (bool, bool) {
+    let mut retired = false;
+    let mut canonical = false;
+    for line in text.lines() {
+        match lint_policy_value_is_code(line) {
+            Some(true) => retired = true,
+            Some(false) => canonical = true,
+            None => {}
+        }
+    }
+    (retired, canonical)
+}
+
 fn writes_interpolation_selector(text: &str, retired: bool) -> bool {
     let (tokens, lex_diags) = jet::Lexer::lex(text);
     if !lex_diags.is_empty() {
@@ -273,6 +311,20 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 } else if file_name(&path).ends_with(".jet")
                     && text.lines().any(|line| line.starts_with("name:"))
                 {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "lint-policy-code" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                let Some(text) = read(&path) else { continue };
+                let (has_retired, has_canonical) = lint_policy_values(&text);
+                if has_retired {
+                    retired += 1;
+                } else if has_canonical {
                     canonical += 1;
                 }
             }

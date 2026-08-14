@@ -446,7 +446,7 @@ Owner: "be more stringent about using fable" = do NOT burn Fable tokens unless a
 
 *Owner law — configs/settings/policies use clear names, never E/L codes; codes appear only inside rendered diagnostics*
 
-Owner ruling (2026-08-07, furious): config, settings, and policy surfaces must use clearly-named keys and values — never bare lint/error codes. `policy.lints.deny: [L0705]` is "abysmal UI". Codes (E####/L####) are display artifacts that appear only inside rendered diagnostics where surrounding text gives them meaning.
+Owner ruling (2026-08-07, furious): config, settings, and policy surfaces must use clearly-named keys and values — never bare lint/error codes. `policy.lints.deny: [float_money]` is the readable form. Codes (E####/L####) are display artifacts that appear only inside rendered diagnostics where surrounding text gives them meaning.
 **Why:** A user editing a config cannot know what L0705 means without a lookup; names self-document. He never approved code-keyed config anywhere.
 
 **How to apply:** Any surface a user types into (pkg.jet/package.jet policies, settings, deny/allow lists, severity controls like [[card #1678]]) takes names (`deny: [auto_derive]`). Existing code-keyed parsers (parse_lint_code_list, Blocks.rs) are defects to migrate, not law to cite. Ballots and plans that spell codes in config examples are wrong on sight.

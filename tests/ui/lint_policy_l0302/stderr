@@ -1,7 +1,7 @@
-Error [E1293]: lint `L0302` is denied by policy: these arm heads all dispatch on `Choice`
+Error [E1293]: lint `same_enum_guard_table` (L0302) is denied by policy: these arm heads all dispatch on `Choice`
   --> tests/ui/lint_policy_l0302/main.jet:8:5
     |
   8 |     if {
     |     ^^
- Why: naming the subject makes one closed enum's cases explicit and exhaustively checked. This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in.
- Fix: write `if choice == { ... }` and put each variant pattern in an arm
+ Why: naming the subject makes one closed enum's cases explicit and exhaustively checked. This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in. The listed lint name matches.
+ Fix: Use the underlying lint fix (write `if choice == { ... }` and put each variant pattern in an arm), or remove `same_enum_guard_table` from `policy.lints.deny` if this team no longer wants the wall.

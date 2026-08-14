@@ -547,18 +547,7 @@ fn e1206(_file: &str, detail: &str) -> Diagnostic {
 }
 
 fn e1206_lint_policy(_file: &str, detail: &str) -> Diagnostic {
-    let fix = detail
-        .split_once("use `")
-        .and_then(|(_, rest)| rest.split_once('`'))
-        .map(|(name, _)| {
-            format!(
-                "use `{name}` in `policy.lints.deny` instead of the diagnostic code"
-            )
-        })
-        .unwrap_or_else(|| {
-            "use a registered lint name in `policy.lints.deny` instead of a diagnostic code"
-                .to_string()
-        });
+    let fix = jet_foundation::LintPolicy::policy_error_fix(detail);
     Diagnostic::error(
         "E1206",
         format!("`{}` has a shape error", Syntax::PACKAGE_FILE),

@@ -509,7 +509,15 @@ impl Diagnostic {
             Severity::Error => theme.error("Error"),
             Severity::Lint => theme.warn("Warning"),
         };
-        out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
+        if self.severity == Severity::Lint {
+            if let Some(name) = crate::LintPolicy::name_for_code(&self.code) {
+                out.push_str(&format!("{} [{}] ({}): {}\n", label, self.code, name, self.what));
+            } else {
+                out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
+            }
+        } else {
+            out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
+        }
         if let Some(span) = self.span {
             let (line, col) = line_col(src, span.start);
             let loc = format!("--> {}:{}:{}", file, line, col);

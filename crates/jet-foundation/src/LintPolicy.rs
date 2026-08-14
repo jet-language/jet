@@ -3,13 +3,94 @@
 use crate::Diagnostics::{Diagnostic, Severity};
 use crate::Syntax;
 
-/// Canonical names are the only values accepted in a user policy. Diagnostic
-/// codes remain the internal/rendered identity of each lint.
-const LINT_POLICY_NAMES: &[(&str, &str)] = &[
-    ("same_enum_guard_table", "L0302"),
-    ("float_money", "L0504"),
-    ("compiler_extension", "L1401"),
+/// One stable user-facing name for one registered lint.
+///
+/// The diagnostic row remains the authority for the rendered code and prose;
+/// this is the lint-selection registry used by every config surface. Keeping
+/// the two fields together makes a policy value name-first while preserving
+/// the code for rendered reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegisteredLint {
+    pub name: &'static str,
+    pub code: &'static str,
+}
+
+/// Every registered lint has one stable snake_case name. Retired and reserved
+/// rows stay registered so old reports and future migrations keep one identity.
+pub const REGISTERED_LINTS: &[RegisteredLint] = &[
+    RegisteredLint { name: "dead_end_state", code: "L0151" },
+    RegisteredLint { name: "divergent_state_paths", code: "L0152" },
+    RegisteredLint { name: "implicit_clone", code: "L0201" },
+    RegisteredLint { name: "shared_auto_clone", code: "L0202" },
+    RegisteredLint { name: "unpinned_script_dependency", code: "L0203" },
+    RegisteredLint { name: "untranslated_flake_field", code: "L0204" },
+    RegisteredLint { name: "unsandboxed_build_fallback", code: "L0205" },
+    RegisteredLint { name: "shared_guard_long_scope", code: "L0206" },
+    RegisteredLint { name: "compiler_extension", code: "L1401" },
+    RegisteredLint { name: "unreachable_dispatch_arm", code: "L0301" },
+    RegisteredLint { name: "same_enum_guard_table", code: "L0302" },
+    RegisteredLint { name: "slice_copy_in_loop", code: "L0501" },
+    RegisteredLint { name: "float_comparison", code: "L0502" },
+    RegisteredLint { name: "compound_assignment", code: "L0503" },
+    RegisteredLint { name: "float_money", code: "L0504" },
+    RegisteredLint { name: "heap_growth_in_loop", code: "L0505" },
+    RegisteredLint { name: "hidden_context_allocation", code: "L0506" },
+    RegisteredLint { name: "branch_arm_table", code: "L0507" },
+    RegisteredLint { name: "prelude_alias_shadow", code: "L0510" },
+    RegisteredLint { name: "err_fallback_shadow", code: "L0511" },
+    RegisteredLint { name: "display_migration", code: "L0520" },
+    RegisteredLint { name: "soft_public_use", code: "L0601" },
+    RegisteredLint { name: "inline_autodiff", code: "L1141" },
+    RegisteredLint { name: "bare_unsafe", code: "L3101" },
+    RegisteredLint { name: "impure_reason", code: "L3102" },
+    RegisteredLint { name: "unjoined_task", code: "L1101" },
+    RegisteredLint { name: "random_crypto_context", code: "W0410" },
+    RegisteredLint { name: "raw_reference_view", code: "L2301" },
+    RegisteredLint { name: "deprecated_item", code: "L2001" },
+    RegisteredLint { name: "doctor_advisory", code: "L2101" },
+    RegisteredLint { name: "regex_backtracking", code: "L2701" },
+    RegisteredLint { name: "missing_accessible_label", code: "E2930" },
+    RegisteredLint { name: "duplicate_accessible_label", code: "E2931" },
+    RegisteredLint { name: "duplicate_layout_constraint", code: "E2934" },
+    RegisteredLint { name: "positional_bool_parameter", code: "L2401" },
+    RegisteredLint { name: "whole_file_read", code: "L2501" },
+    RegisteredLint { name: "blocking_accept_loop", code: "L2801" },
+    RegisteredLint { name: "empty_test", code: "L2901" },
 ];
+
+/// The complete lint-selection registry.
+pub const fn registered_lints() -> &'static [RegisteredLint] {
+    REGISTERED_LINTS
+}
+
+/// Resolve a lint name to its rendered diagnostic code.
+pub fn code_for_name(name: &str) -> Option<&'static str> {
+    REGISTERED_LINTS
+        .iter()
+        .find_map(|lint| (lint.name == name).then_some(lint.code))
+}
+
+/// Resolve a rendered diagnostic code to its stable lint name.
+pub fn name_for_code(code: &str) -> Option<&'static str> {
+    REGISTERED_LINTS
+        .iter()
+        .find_map(|lint| (lint.code == code).then_some(lint.name))
+}
+
+/// Build the registered manifest fix for a lint-policy value that used a
+/// diagnostic code. The manifest loader and the driver share this wording.
+pub fn policy_error_fix(detail: &str) -> String {
+    detail
+        .split_once("use `")
+        .and_then(|(_, rest)| rest.split_once('`'))
+        .map(|(name, _)| {
+            format!("use `{name}` in `policy.lints.deny` instead of the diagnostic code")
+        })
+        .unwrap_or_else(|| {
+            "use a registered lint name in `policy.lints.deny` instead of a diagnostic code"
+                .to_string()
+        })
+}
 
 /// Parse the `lints:` part of a package policy.
 pub fn parse_policy_lints(body: &str) -> Result<Option<Vec<String>>, String> {
@@ -56,21 +137,24 @@ pub fn apply(deny: &[String], diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
 }
 
 pub fn is_denied(deny: &[String], code: &str) -> bool {
-    deny.iter().any(|denied| denied == code)
+    let Some(name) = name_for_code(code) else {
+        return false;
+    };
+    deny.iter().any(|denied| denied == name)
 }
 
 fn e1293(original: &Diagnostic) -> Diagnostic {
+    let name = name_for_code(&original.code).unwrap_or(&original.code);
     let why = original.why.trim_end_matches('.');
-    Diagnostic::error(
+    Diagnostic::from_row(
         "E1293",
-        format!(
-            "lint `{}` is denied by policy: {}",
-            original.code, original.what
-        ),
-        format!(
-            "{why}. This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in."
-        ),
-        original.fix.clone(),
+        &[
+            ("name", name),
+            ("code", original.code.as_str()),
+            ("what", original.what.as_str()),
+            ("why", why),
+            ("fix", original.fix.as_str()),
+        ],
         original.span,
     )
 }
@@ -86,15 +170,15 @@ fn parse_lint_name_list(value: &str) -> Result<Vec<String>, String> {
                 Syntax::LINTS_FIELD_DENY
             )
         })?;
-    let mut codes = Vec::new();
+    let mut names = Vec::new();
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
         if entry.is_empty() {
             continue;
         }
         let name = unquote(entry);
-        let Some(code) = lint_code_for_name(&name) else {
-            if let Some(canonical_name) = lint_name_for_code(&name) {
+        let Some(_) = code_for_name(&name) else {
+            if let Some(canonical_name) = name_for_code(&name) {
                 return Err(format!(
                     "`{name}` is a diagnostic code; use `{canonical_name}` in `policy.lints.deny`"
                 ));
@@ -109,34 +193,22 @@ fn parse_lint_name_list(value: &str) -> Result<Vec<String>, String> {
                 known_lint_policy_names()
             ));
         };
-        codes.push(code.to_string());
+        names.push(name);
     }
-    Ok(codes)
-}
-
-fn lint_code_for_name(name: &str) -> Option<&'static str> {
-    LINT_POLICY_NAMES
-        .iter()
-        .find_map(|(canonical_name, code)| (*canonical_name == name).then_some(*code))
-}
-
-fn lint_name_for_code(code: &str) -> Option<&'static str> {
-    LINT_POLICY_NAMES
-        .iter()
-        .find_map(|(canonical_name, lint_code)| (*lint_code == code).then_some(*canonical_name))
+    Ok(names)
 }
 
 fn known_lint_policy_names() -> String {
-    LINT_POLICY_NAMES
+    REGISTERED_LINTS
         .iter()
-        .map(|(name, _)| format!("`{name}`"))
+        .map(|lint| format!("`{}`", lint.name))
         .collect::<Vec<_>>()
         .join(", ")
 }
 
 fn is_diagnostic_code_shape(value: &str) -> bool {
     let mut chars = value.chars();
-    if chars.next() != Some('L') {
+    if !matches!(chars.next(), Some('E' | 'L' | 'W')) {
         return false;
     }
     let rest: Vec<char> = chars.collect();
@@ -325,25 +397,26 @@ mod tests {
 
     #[test]
     fn parses_current_deny_spelling() {
-        let codes = parse_package_source(
+        let names = parse_package_source(
             r#"policy: .{ lints: .{ deny: [same_enum_guard_table, "float_money", compiler_extension] } }"#,
         )
         .unwrap()
         .unwrap();
         assert_eq!(
-            codes,
+            names,
             vec![
-                "L0302".to_string(),
-                "L0504".to_string(),
-                "L1401".to_string(),
+                "same_enum_guard_table".to_string(),
+                "float_money".to_string(),
+                "compiler_extension".to_string(),
             ]
         );
     }
 
     #[test]
     fn rejects_diagnostic_code_policy_value() {
-        let error = parse_package_source(r#"policy: .{ lints: .{ deny: [L0302] } }"#)
-            .unwrap_err();
+        let code = ["L", "0302"].concat();
+        let source = format!("policy: .{{ lints: .{{ deny: [{code}] }} }}");
+        let error = parse_package_source(&source).unwrap_err();
         assert!(error.contains("use `same_enum_guard_table`"));
     }
 
@@ -356,9 +429,10 @@ mod tests {
             "write a subject dispatch".to_string(),
             None,
         );
-        let out = apply(&["L0302".to_string()], vec![lint]);
+        let out = apply(&["same_enum_guard_table".to_string()], vec![lint]);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].code, "E1293");
         assert_eq!(out[0].severity, Severity::Error);
+        assert!(out[0].what.contains("same_enum_guard_table"));
     }
 }

@@ -41,19 +41,19 @@ fn assert_denied(label: &str, output: &Output) {
     assert!(output.stdout.is_empty(), "{label} executed user code");
     assert!(
         stderr.contains(
-            "Error [E1293]: lint `L1401` is denied by policy: compiler-extension `no-x` (warning): prefer y"
+            "Error [E1293]: lint `compiler_extension` (L1401) is denied by policy: compiler-extension `no-x` (warning): prefer y"
         ),
         "{label} missing E1293 what:\n{stderr}"
     );
     assert!(
         stderr.contains(
-            "Why: a configured compiler-extension component reported this finding after type checking (D-DX5-HOOK1). This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in."
+            "Why: a configured compiler-extension component reported this finding after type checking (D-DX5-HOOK1). This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in. The listed lint name matches."
         ),
         "{label} missing E1293 why:\n{stderr}"
     );
     assert!(
         stderr.contains(
-            "Fix: address the finding, or unset JET_COMPILER_EXTENSION to skip the extension"
+            "Fix: Use the underlying lint fix (address the finding, or unset JET_COMPILER_EXTENSION to skip the extension), or remove `compiler_extension` from `policy.lints.deny` if this team no longer wants the wall."
         ),
         "{label} missing E1293 fix:\n{stderr}"
     );

@@ -80,8 +80,8 @@ pub const MARKER_UNDO: &str = "Undo"; // D-BOUND-UNDO1
 
 /// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
 /// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
-/// silences the default-on money lint L0504). Deliberately lowercase: it
-/// names a lint code, not a declaration-shaped feature, so it does not
+/// silences the default-on `float_money` lint). Deliberately lowercase: it
+/// names a lint, not a declaration-shaped feature, so it does not
 /// follow the PascalCase marker convention. Struct/field site collection:
 /// `collect_allow_markers` in `crates/jet-semindex/src/Build.rs`; the
 /// float-money check itself: `allows_float_money` in

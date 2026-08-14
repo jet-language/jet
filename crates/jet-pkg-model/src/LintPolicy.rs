@@ -13,7 +13,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::Package::PackageFacts;
 use jet_foundation::LintPolicy as FoundationLintPolicy;
 
-/// Whole-program enforcement: for every emitted lint whose code is listed in
+/// Whole-program enforcement: for every emitted lint whose name is listed in
 /// `package.jet`'s `policy.lints.deny`, fail the build with E1293 instead of only
 /// warning. `manifest.lints_deny` being `None` (no `policy.lints` block at
 /// all) is the default — the returned list is always empty and every lint

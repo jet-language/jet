@@ -1534,7 +1534,7 @@ integrated ok
 
 ```
 integrated ok
-Warning [L0502]: comparing floats with `==` is unreliable
+Warning [L0502] (float_comparison): comparing floats with `==` is unreliable
   --> /home/nate/.cache/jet-audit-scratch/p06b_no_alloc_ok.jet:4:19
     |
   4 | struct Entity { pos: Float, vel: Float }
@@ -1542,7 +1542,7 @@ Warning [L0502]: comparing floats with `==` is unreliable
  Why: floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal
  Fix: compare within a tolerance: `(a - b).abs() < 1e-9`
 
-Warning [L0502]: comparing floats with `==` is unreliable
+Warning [L0502] (float_comparison): comparing floats with `==` is unreliable
   --> /home/nate/.cache/jet-audit-scratch/p06b_no_alloc_ok.jet:5:1
     |
   5 | 

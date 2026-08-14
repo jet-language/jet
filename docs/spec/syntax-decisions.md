@@ -5005,8 +5005,9 @@ reserved for programs Jet cannot compile safely or unambiguously.
 hidden config, and lands in the audit record (`jet inspect dossier`,
 effect-budget provenance, build facts). (3) Walls are team policy only:
 the `policy:` namespace (D-JPK-POLICYSURFACE1) gains
-`lints: { deny: [...] }`, joining effect budgets and trust; host/org
-policy narrows, never widens. Memory/type safety (I1) has no override
+`lints: { deny: [...] }`, joining effect budgets and trust; the list takes
+stable snake_case lint names, never diagnostic codes. Host/org policy narrows,
+never widens. Memory/type safety (I1) has no override
 and is outside this law. Existing gates keep their spellings; behavior
 and audit become uniform.
 

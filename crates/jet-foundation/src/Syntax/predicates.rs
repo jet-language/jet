@@ -373,10 +373,11 @@ pub const POLICY_TRUST_DECISION_ALLOW: &str = "allow"; // D-JPK-GRANTSCHEMA1
 /// sub-block, joining `trust` under the one `policy:` namespace
 /// (D-JPK-POLICYSURFACE1). Warnings never fail a build by default (I1 memory/
 /// type safety is never in scope here); a team opts into a wall by naming
-/// lint codes here. Manifest keys only, no language grammar.
+/// stable lints here. Manifest keys only, no language grammar.
 pub const POLICY_FIELD_LINTS: &str = "lints"; // D-LINTPOLICY1
-/// D-LINTPOLICY1: the `deny:` field inside `policy.lints { … }` — lint codes
-/// (e.g. `L0504`) that fail the build when they fire, instead of warning.
+/// D-LINTPOLICY1: the `deny:` field inside `policy.lints { … }` — stable lint
+/// names (e.g. `float_money`) that fail the build when they fire, instead of
+/// warning.
 pub const LINTS_FIELD_DENY: &str = "deny"; // D-LINTPOLICY1
 
 /// Levenshtein edit distance between two strings (used for "did you mean?" suggestions).
