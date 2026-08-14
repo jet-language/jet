@@ -18,6 +18,20 @@ Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
 five agent-optimality quantities, the micro sweep, probe the running binary, and
 the honesty rules. The owner never has to ask for any of it.
 
+## First-session delight lens
+
+Measure the first useful visual result separately from the later project loop.
+For every persona, record these rows:
+
+| check | measure | honest result |
+| --- | --- | --- |
+| `time-to-first-window` | elapsed time from the first command to a usable first-party window | record milliseconds, backend, and input; use `not-applicable` until a windowed backend exists |
+| `first-pixel` | elapsed time from window creation to the first visible rendered pixel | record milliseconds, backend, and frame evidence; never infer it from a window handle |
+
+Keep `not-applicable`, `not-proven`, and `blocked` distinct. A missing windowed
+backend blocks the measurement. It does not justify an invented zero or a
+ship-ready verdict.
+
 ## One persona is always a coding agent
 
 Include an unattended agent among the personas every run. It is the reader Jet

@@ -1453,6 +1453,148 @@ fn concurrency_spec_states_deadlock_stance() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Epoch 3 audit guards: accessibility findings and first-session evidence.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn accessibility_audit_findings_have_live_cards() {
+    let root = root();
+    let path = root.join("docs/audits/cli-diagnostics-accessibility.md");
+    let text = fs::read_to_string(&path).expect("CLI accessibility audit is readable");
+    let lines: Vec<&str> = text.lines().collect();
+    let expected_header = ["id", "surface", "screen_reader", "state", "card"];
+    let header = lines
+        .iter()
+        .position(|line| {
+            markdown_table_cells(*line)
+                .iter()
+                .map(String::as_str)
+                .eq(expected_header)
+        })
+        .expect("accessibility audit must have the machine-readable findings header");
+    let separator = lines
+        .get(header + 1)
+        .expect("accessibility findings table needs a separator row");
+    assert_eq!(
+        markdown_table_cells(separator).len(),
+        expected_header.len(),
+        "accessibility findings table separator must match its five columns"
+    );
+
+    let mut rows = Vec::new();
+    for line in lines.iter().skip(header + 2) {
+        if !line.trim_start().starts_with('|') {
+            break;
+        }
+        let cells = markdown_table_cells(line);
+        assert_eq!(
+            cells.len(),
+            expected_header.len(),
+            "accessibility findings row must have id, surface, screen_reader, state, and card: {line}"
+        );
+        rows.push(cells);
+    }
+    assert!(!rows.is_empty(), "accessibility audit must list at least one finding");
+
+    for row in rows {
+        if row[3].trim().eq_ignore_ascii_case("pass") {
+            continue;
+        }
+        let cards = audit_card_refs(&row[4]);
+        assert!(
+            !cards.is_empty(),
+            "non-pass accessibility finding {} must name a live Tower card",
+            row[0]
+        );
+        for card in cards {
+            let output = Command::new("node")
+                .args([
+                    "plugins/tower/tower.mjs",
+                    "card",
+                    "show",
+                    card,
+                    "--json",
+                ])
+                .current_dir(&root)
+                .output()
+                .expect("Tower card lookup must run");
+            assert!(
+                output.status.success(),
+                "accessibility finding {} names missing Tower card {}:\n{}",
+                row[0],
+                card,
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let json = String::from_utf8_lossy(&output.stdout);
+            let num = &card[1..];
+            assert!(
+                json.contains(&format!("\"num\": {num}"))
+                    || json.contains(&format!("\"num\":{num}")),
+                "Tower lookup for {} did not resolve {}: {}",
+                row[0],
+                card,
+                json
+            );
+        }
+    }
+}
+
+#[test]
+fn persona_audit_skill_and_reports_have_first_session_lens() {
+    let root = root();
+    let skill = fs::read_to_string(root.join(".agents/skills/persona-audit/SKILL.md"))
+        .expect("persona-audit skill is readable");
+    for row in ["time-to-first-window", "first-pixel"] {
+        assert!(
+            skill.contains(row),
+            "persona-audit skill must define the `{row}` first-session check"
+        );
+    }
+
+    let mut reports = Vec::new();
+    for entry in fs::read_dir(root.join("docs/audits")).expect("docs/audits is readable") {
+        let path = entry.expect("audit entry is readable").path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name.starts_with("persona-audit-")
+            && path.extension().and_then(|ext| ext.to_str()) == Some("md")
+        {
+            reports.push(path);
+        }
+    }
+    reports.sort();
+    let report = reports
+        .last()
+        .expect("docs/audits must contain the next persona-audit report");
+    let report_text = fs::read_to_string(report).expect("next persona-audit report is readable");
+    for row in ["time-to-first-window", "first-pixel"] {
+        assert!(
+            report_text.contains(row),
+            "next persona-audit report {} must include `{row}`",
+            report.display()
+        );
+    }
+}
+
+fn markdown_table_cells(line: &str) -> Vec<String> {
+    let line = line.trim();
+    let line = line.strip_prefix('|').unwrap_or(line);
+    let line = line.strip_suffix('|').unwrap_or(line);
+    line.split('|').map(|cell| cell.trim().to_string()).collect()
+}
+
+fn audit_card_refs(cell: &str) -> Vec<&str> {
+    cell.split_whitespace()
+        .filter(|token| {
+            token.starts_with('#')
+                && token.len() > 1
+                && token[1..].chars().all(|ch| ch.is_ascii_digit())
+        })
+        .collect()
+}
+
 fn collect_markdown_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
