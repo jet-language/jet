@@ -1332,11 +1332,11 @@ fn mk() {
         assert!(core_call_covered("core.math", "min"));
         assert!(core_call_covered("core.math", "max"));
         assert!(core_call_covered("core.math", "clamp"));
-        assert!(core_call_covered("core.random", "pick"));
-        assert!(core_call_covered("core.random", "weighted_pick"));
-        assert!(core_call_covered("core.random", "sample"));
-        assert!(core_call_covered("core.random", "shuffle"));
-        assert!(core_call_covered("core.io", "eprint"));
+        assert!(core_call_covered("core.math.random", "pick"));
+        assert!(core_call_covered("core.math.random", "weighted_pick"));
+        assert!(core_call_covered("core.math.random", "sample"));
+        assert!(core_call_covered("core.math.random", "shuffle"));
+        assert!(core_call_covered("core.term", "eprint"));
         // c109 Phase 21 / D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer is
         // covered via the core-call shape (a fixed-string `jet_std::channel::<T>()`
         // emit; its `(Sender<T>, Receiver<T>)` return type rides on `resolved_ret`,
@@ -1355,8 +1355,8 @@ fn mk() {
         // `core_fixed_sig` (its `Result<String, IOError>` return lives in sema's bespoke
         // `infer_core_call` arm, reproduced in `core_call_return_ty`). Distinct from the
         // ambient bare `input()` (Phase 25), which is its own `Expr::Call` → `AmbientInput`.
-        assert!(core_call_covered("core.io", "input"));
-        assert!(!crate::Sema::core_fixed_sig("core.io", "input").is_some());
+        assert!(core_call_covered("core.term", "input"));
+        assert!(!crate::Sema::core_fixed_sig("core.term", "input").is_some());
     }
 
     #[test]
@@ -1364,7 +1364,7 @@ fn mk() {
         // c109 Phase 29: `core_call_return_ty` carries `io.input`'s fixed
         // `Result<String, IOError>` total (it is NOT in `core_fixed_sig`, so without this
         // arm the node's `ty` would fall back to Unit and break `?? return` composition).
-        let ty = core_call_return_ty("core.io", "input");
+        let ty = core_call_return_ty("core.term", "input");
         match ty {
             Type::Result { ok, err } => {
                 assert_eq!(*ok, Type::String);
@@ -1778,7 +1778,7 @@ fn consume(ch: Receiver<Int>) => Int {
         };
         let guard_args = lam("() => { print(\"x\") }");
         assert!(core_closure_call_in_subset(
-            "core.scope",
+            "core.mem.scope",
             "guard",
             &guard_args,
             &cx,

@@ -791,7 +791,7 @@ pub(crate) struct LocalInfo {
     /// Loop nesting depth where the name was declared (for move-in-loop).
     decl_loop_depth: usize,
     /// Whether a function value has the thread-safe representation required by
-    /// `core.os.on_interrupt`. Ordinary `fn` values use `Rc`; only named
+    /// `core.sys.on_interrupt`. Ordinary `fn` values use `Rc`; only named
     /// functions and already-proven callback-safe aliases may cross that
     /// boundary.
     interrupt_sendable: bool,
@@ -1515,7 +1515,7 @@ pub(crate) struct Checker<'a> {
     lambda_params_are_lending_views: bool,
     /// M11: when true, lambda is being passed to canonical `task` — stricter capture rules (E1101).
     is_task_spawn: bool,
-    /// True while checking the callback stored by `core.os.on_interrupt`.
+    /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.
     interrupt_callback_depth: usize,

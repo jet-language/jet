@@ -14,7 +14,7 @@
 //!   D-REPL-FUEL=A   ~10M steps/input; E1801 on overshoot
 //!   D-REPL-BANNER=A banner + `:help` hint on startup
 //!   D-REPL-COLOR=A  respect the shared Jet color policy
-//!   D-REPL-PRELOAD=A auto-import `core.io`; teaching note on first use
+//!   D-REPL-PRELOAD=A auto-import `core.term`; teaching note on first use
 //!
 //! Error codes (E18xx):
 //!   E1801  fuel cap hit — snippet ran too long
@@ -1438,7 +1438,7 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     // stays hard-rejected (basics / D-REPL6).
     if t.contains("#Unsafe")
         && !(t.contains("core.crypto.expert")
-            || t.contains("core.vault.expert")
+            || t.contains("core.crypto.vault")
             || t.contains("expert."))
     {
         return Some("`#Unsafe`");
@@ -1729,7 +1729,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
 
 /// Standard prelude import injected into every REPL program (D-REPL-PRELOAD=A).
 /// Note: `print`/`eprint` are builtins that don't require an import in Jet v1;
-/// the `use core.io` line is included for teaching purposes (the REPL shows a
+/// the `use core.term` line is included for teaching purposes (the REPL shows a
 /// note about it on first use) but the import itself is a no-op for the checker.
 const PRELOAD_SRC: &str = "";
 
@@ -2330,7 +2330,7 @@ pub(crate) fn execute_line(
         qprintln!(
             "{}",
             dim(
-                "note: `print` is from `use core.io` — imported automatically in the REPL",
+                "note: `print` is from `use core.term` — imported automatically in the REPL",
                 color
             )
         );
@@ -2897,7 +2897,7 @@ fn help_text(color: bool) -> String {
     writeln!(
         out,
         "  Tip: {} is auto-imported — type `print(\"hello\")` to try it.",
-        bold("core.io", color)
+        bold("core.term", color)
     ).unwrap();
     writeln!(
         out,

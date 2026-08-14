@@ -457,8 +457,8 @@ fn polymorphic_core_specials() {
     }
     let src = "\
 use core.math as math
-use core.random as random
-use core.io as io
+use core.math.random as random
+use core.term as io
 fn calc() => Int {
     a :: math.abs((-5))
     b :: math.min(3, 7)

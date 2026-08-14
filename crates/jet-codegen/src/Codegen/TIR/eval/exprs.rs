@@ -256,7 +256,7 @@ fn mark_unknown_progress_total(
         args.first()
             .is_some_and(progress_source_has_exact_total)
     });
-    if module == "core.io" && method == "progress" && is_iter && !known_total {
+    if module == "core.term" && method == "progress" && is_iter && !known_total {
         if let CtValue::Struct { type_name, fields } = &mut value {
             if type_name == "__JetProgressIter" {
                 if let Some((_, known_total)) = fields
@@ -2521,7 +2521,7 @@ impl<'a> EvalCtx<'a> {
         }
         // These two calls have dedicated ownership/authorization diagnostics
         // below; do not let the generic effect law replace them.
-        if (module == "core.net" && method == "fetch") || module == "core.vault" {
+        if (module == "core.net" && method == "fetch") || module == "core.crypto.vault" {
             return None;
         }
         if is_nondeterministic_core(module, method) {
@@ -4653,7 +4653,7 @@ impl<'a> EvalCtx<'a> {
             };
             return Ok(CtValue::Str(rendered));
         }
-        let progress_known_total = if module == "core.io" && method == "progress" {
+        let progress_known_total = if module == "core.term" && method == "progress" {
             if let Some((items, known_total)) = argv.first().and_then(progress_iter_parts) {
                 if let Some(source) = argv.first_mut() {
                     *source = CtValue::List(items);
@@ -4783,7 +4783,7 @@ impl<'a> EvalCtx<'a> {
         // or declines the opaque call. In particular, never turn `SigningKey`
         // into a CtValue::Int — ListLit and OrFallback must receive the
         // carrier produced by that adapter.
-        if module == "core.browser" && self.runtime_execution {
+        if module == "core.web.browser" && self.runtime_execution {
             return super::browser::core_call(method, argv, source_span);
         }
         if !self.runtime_execution && module == "core.net" && method == "fetch" {
@@ -4793,7 +4793,7 @@ impl<'a> EvalCtx<'a> {
                 source_span,
             );
         }
-        if !self.runtime_execution && module == "core.vault" {
+        if !self.runtime_execution && module == "core.crypto.vault" {
             return Err(crate::Comptime::vault_comptime_denied(
                 module,
                 method,
@@ -4804,7 +4804,7 @@ impl<'a> EvalCtx<'a> {
             return Ok(value);
         }
         let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
-        let is_shuffle = module == "core.random" && method == "shuffle";
+        let is_shuffle = module == "core.math.random" && method == "shuffle";
         if !is_tier2 {
             let value = apply_core_call_with_type(
                 module,
@@ -5177,7 +5177,7 @@ impl<'a> EvalCtx<'a> {
                                         .unwrap_or(self.show_value(&v, scope)?)
                                 }
                                 crate::AST::StrFormat::Fixed(_) => {
-                                    unreachable!("Fixed interpolation lowers to core.fmt.decimal")
+                                    unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                                 }
                                 crate::AST::StrFormat::Unit(_) => {
                                     unreachable!("Unit interpolation lowers to a String")
@@ -7852,7 +7852,7 @@ impl<'a> EvalCtx<'a> {
             TExprKind::AmbientInput { prompt } => {
                 // Ambient input is a runtime-only expression. The quick-run
                 // evaluator must decline it at build time, but runtime deopt
-                // uses the same Core I/O adapter as an ordinary `core.io.input`
+                // uses the same Core I/O adapter as an ordinary `core.term.input`
                 // call so default `jet run` does not turn the prelude into an
                 // AOT-only surface.
                 if !self.runtime_execution {
@@ -7869,7 +7869,7 @@ impl<'a> EvalCtx<'a> {
                     .as_ref()
                     .map(|sink| sink.lock().expect("evaluator sink poisoned"));
                 apply_impure_core_call_with_type(
-                    "core.io",
+                    "core.term",
                     "input",
                     argv,
                     self.span(),
@@ -8281,7 +8281,7 @@ impl<'a> EvalCtx<'a> {
                                 self.repl_mode,
                                 Some(&expr.ty),
                             )?;
-                            if module == "core.random" && method.name == "shuffle" {
+                            if module == "core.math.random" && method.name == "shuffle" {
                                 if let (Some(place), CtValue::List(items)) =
                                     (args.first(), &value)
                                 {

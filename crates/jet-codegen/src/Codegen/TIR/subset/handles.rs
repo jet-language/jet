@@ -129,7 +129,7 @@ pub(crate) fn tls_static_op(
     let Expr::Ident(alias, _) = &**inner else {
         return None;
     };
-    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.tls") {
+    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.net.tls") {
         return None;
     }
     match (static_type.as_str(), method) {
@@ -744,7 +744,7 @@ pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: T
             name: "Task".to_string(),
             args: vec![body_ty],
         },
-        ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
+        ("core.mem.scope", "guard") => Type::Named("ScopeGuard".to_string()),
         ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
         _ => unit_type(),
     }
@@ -765,17 +765,17 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
         // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
         // type is fixed (`Result<String, IOError>`) but lives in sema's bespoke
-        // `infer_core_call` arm (CheckerCoreLib.rs `("core.io", "input")`), NOT the table.
+        // `infer_core_call` arm (CheckerCoreLib.rs `("core.term", "input")`), NOT the table.
         // Same type the ambient bare `input(...)` (Phase 25 `AmbientInput`) carries, so it
         // composes with the Phase-8 `??`/`?? return <value>` fallback.
-        ("core.io", "input") => {
+        ("core.term", "input") => {
             return Type::Result {
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
             }
         }
         // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
-        ("core.science.measurement", "from") => {
+        ("core.units", "from") => {
             return Type::Apply {
                 name: Syntax::TYPE_MEASUREMENT.to_string(),
                 args: vec![Type::Float],
@@ -808,21 +808,21 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         // regardless of the arg's type.
         ("core.reflect", "of") => return Type::Named("Value".to_string()),
         // D-APPROX1=A: sketch constructors → opaque named types.
-        ("core.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
-        ("core.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),
-        ("core.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
-        ("core.sketch.reservoir", "new") => return Type::Named("ReservoirSampler".to_string()),
+        ("core.data.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
+        ("core.data.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),
+        ("core.data.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
+        ("core.data.sketch.reservoir", "new") => return Type::Named("ReservoirSampler".to_string()),
         // D-TIMEDEPTH1=A: civil-time constructors.
-        ("core.time.date", "new") | ("core.time.date", "today") => {
+        ("core.time", "new") | ("core.time", "today") => {
             return Type::Named("Date".to_string())
         }
-        ("core.time.date", "parse") => {
+        ("core.time", "parse") => {
             return Type::Result {
                 ok: Box::new(Type::Named("Date".to_string())),
                 err: Box::new(Type::String),
             }
         }
-        ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => {
+        ("core.time", "from_timestamp") => {
             return Type::Named("DateTime".to_string())
         }
         // D-CORE-SECRETS1=A: generic TTL constructor; T comes from argument 0.
@@ -875,31 +875,31 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.client", "request") => return Type::Named("HTTPRequest".to_string()),
         ("core.http.server", "mux") => return Type::Named("HTTPMux".to_string()),
-        ("core.ws", "connect") | ("core.ws", "upgrade") => {
+        ("core.net.ws", "connect") | ("core.net.ws", "upgrade") => {
             return Type::Result {
                 ok: Box::new(Type::Named("WsConn".to_string())),
                 err: Box::new(Type::Named("WsError".to_string())),
             };
         }
-        ("core.browser", "profile") => {
+        ("core.web.browser", "profile") => {
             return Type::Result {
                 ok: Box::new(Type::Named("BrowserProfile".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             };
         }
-        ("core.browser", "timeout") => {
+        ("core.web.browser", "timeout") => {
             return Type::Result {
                 ok: Box::new(Type::Named("BrowserTimeout".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             };
         }
-        ("core.browser", "locked") => {
+        ("core.web.browser", "locked") => {
             return Type::Result {
                 ok: Box::new(Type::Named("BrowserLocked".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             };
         }
-        ("core.browser", "connect" | "connect_profile") => {
+        ("core.web.browser", "connect" | "connect_profile") => {
             return Type::Result {
                 ok: Box::new(Type::Named("Browser".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),

@@ -1863,7 +1863,7 @@ fn public_client_tls_custom_only_trust() {
     std::thread::sleep(Duration::from_millis(250));
 
     let empty_src = r#"
-use core.tls as tls
+use core.net.tls as tls
 fn run() {
     empty :: [U8].{}
     if tls.RootCertificates.from_pem(empty) == {
@@ -1880,7 +1880,7 @@ fn run() {
     let wrong_src = format!(
         r#"
 use core.http.client as http
-use core.tls as tls
+use core.net.tls as tls
 use core.files as fs
 fn run() {{
     pem :: fs.read_bytes("{wrong}") ?? panic("wrong ca")
@@ -1904,7 +1904,7 @@ fn run() {{
     let pass_src = format!(
         r#"
 use core.http.client as http
-use core.tls as tls
+use core.net.tls as tls
 use core.files as fs
 fn run() {{
     pem :: fs.read_bytes("{ca}") ?? panic("ca")
@@ -2050,7 +2050,7 @@ fn public_client_tls_identity_and_version_bounds() {
     let version_src = format!(
         r#"
 use core.http.client as http
-use core.tls as tls
+use core.net.tls as tls
 use core.files as fs
 fn run() {{
     pem :: fs.read_bytes("{ca}") ?? panic("ca")
@@ -2110,7 +2110,7 @@ fn run() {{
     let mtls_src = format!(
         r#"
 use core.http.client as http
-use core.tls as tls
+use core.net.tls as tls
 use core.files as fs
 fn run() {{
     ca :: fs.read_bytes("{ca}") ?? panic("ca")

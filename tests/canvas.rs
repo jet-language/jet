@@ -1887,8 +1887,8 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"path\":\"core.http\"",
         "\"path\":\"core.http.client\"",
         "\"path\":\"core.files\"",
-        "\"path\":\"core.url\"",
-        "\"path\":\"core.mime\"",
+        "\"path\":\"core.net.url\"",
+        "\"path\":\"core.net.mime\"",
         "\"path\":\"core.crypto\"",
         "\"path\":\"core.event\"",
         "\"path\":\"core.web\"",
@@ -1907,9 +1907,9 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
     let sema_catalog =
         jet::Canvas::query_json_for_file(&path, &sema_query).expect("Canvas sema catalog query");
     for field in [
-        "\"path\":\"core.raylib\"",
+        "\"path\":\"core.game.raylib\"",
         "\"name\":\"window_open\"",
-        "\"signature\":\"core.raylib.window_open\"",
+        "\"signature\":\"core.game.raylib.window_open\"",
         "\"source\":\"crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs\"",
     ] {
         assert!(

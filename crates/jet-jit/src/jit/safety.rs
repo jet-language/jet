@@ -1282,7 +1282,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     _ => false,
                 };
             }
-            if module == "core.vault" || module == "core.vault.expert" {
+            if module == "core.crypto.vault" {
                 return !args.is_empty()
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
@@ -1310,12 +1310,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     _ => false,
                 };
             }
-            if module.starts_with("core.sketch.") {
+            if module.starts_with("core.data.sketch.") {
                 return match (module.as_str(), method.as_str(), args.len()) {
-                    ("core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms", "new", 0) => {
+                    ("core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms", "new", 0) => {
                         true
                     }
-                    ("core.sketch.reservoir", "new", 1) => {
+                    ("core.data.sketch.reservoir", "new", 1) => {
                         resident_safe_expr(&args[0], callees)
                     }
                     _ => false,
@@ -1324,7 +1324,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             if module == "core.args" && method == "spec" {
                 return args.is_empty();
             }
-            if module == "core.text.unicode" {
+            if module == "core.text" {
                 return matches!(args.as_slice(), [arg]
                     if matches!(
                         method.as_str(),
@@ -1337,7 +1337,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     ) && matches!(&arg.ty, Type::String)
                         && resident_safe_expr(arg, callees));
             }
-            if module == "core.io" {
+            if module == "core.term" {
                 return match method.as_str() {
                     "args" | "readline" | "buffered" => args.is_empty(),
                     "print" | "eprint" | "take"
@@ -1569,7 +1569,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && args.len() <= 3
                     && args.iter().all(|a| resident_safe_expr(a, callees));
             }
-            if module == "core.raylib" {
+            if module == "core.game.raylib" {
                 return match method.as_str() {
                     "window_open" => args.len() == 3,
                     "color" => args.len() == 4,
@@ -1581,7 +1581,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     _ => false,
                 } && args.iter().all(|a| resident_safe_expr(a, callees));
             }
-            if module == "core.random"
+            if module == "core.math.random"
                 && method == "weighted_pick"
                 && args.first().is_some_and(|items| jit_list_intn_type(&items.ty))
             {

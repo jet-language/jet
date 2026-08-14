@@ -125,7 +125,7 @@ def main():
             if is_class and name not in NO_TYPE_FLATTEN:
                 # Only a class's methods are operations. Its data attributes are
                 # fields: flattening them put os.terminal_size.columns and
-                # os.times_result.children_system into core.os as missing calls.
+                # os.times_result.children_system into core.sys as missing calls.
                 # Only what the class itself introduces. http.HTTPMethod is a
                 # StrEnum, so its inherited str members put istitle, isupper
                 # and capitalize into core.http as missing operations.

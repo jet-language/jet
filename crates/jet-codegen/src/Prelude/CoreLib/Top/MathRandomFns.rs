@@ -1,4 +1,4 @@
-// Math and random helpers for `core.math` and `core.random`.
+// Math and random helpers for `core.math` and `core.math.random`.
 //
 // These used to live in Top/Process.rs, which only emits for `core.process`
 // or the filesystem runtime. A math-only program therefore generated calls to

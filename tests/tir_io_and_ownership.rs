@@ -64,7 +64,7 @@ fn build_and_run_stdin(name: &str, src: &str, stdin: &str) -> (i32, String) {
 
 /// c109 Phase 29: qualified `io.input(prompt)` (surface (H), 34_parallel_scan
 /// `paths_from_prompt`). DISTINCT from the ambient bare `input()` (Phase 25 `AmbientInput`):
-/// this is a `MethodCall` on a `core.io` alias, lowered to a `CoreCall`
+/// this is a `MethodCall` on a `core.term` alias, lowered to a `CoreCall`
 /// (`jet_std_io_input(Some(&(prompt)))` → `Result<String, IOError>`). It composes with a
 /// `?? return <value>` fallback (the early-return form, already covered since Phase 8).
 /// The loop accumulates piped lines, a blank line breaks, EOF yields `Ok("")` (read_line on
@@ -76,7 +76,7 @@ fn qualified_io_input_or_return() {
         return;
     }
     let src = "\
-use core.io as io
+use core.term as io
 fn collect() => [String] {
     out := [String].{}
     loop true {

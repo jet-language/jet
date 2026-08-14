@@ -27,7 +27,7 @@ fn tls_call_diag(
     let extern_names = HashSet::new();
     let globals: HashMap<String, CtValue> = HashMap::new();
     let mut core_imports = HashMap::new();
-    core_imports.insert("tls".to_string(), "core.tls".to_string());
+    core_imports.insert("tls".to_string(), "core.net.tls".to_string());
 
     evaluate_owned_with_imports_opts(
         &expr,
@@ -39,7 +39,7 @@ fn tls_call_diag(
         gates,
         impure_depth,
     )
-    .expect_err("core.tls.client must not execute at comptime")
+    .expect_err("core.net.tls.client must not execute at comptime")
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn core_tls_follows_the_whole_tier2_comptime_gate() {
     assert_ne!(allowed.code, "E0956");
     assert_eq!(
         allowed.what,
-        "`core.tls.client()` is not available at comptime"
+        "`core.net.tls.client()` is not available at comptime"
     );
 }
 
@@ -142,7 +142,7 @@ fn core_tls_repl_requests_use_the_net_effect() {
     let mut scope = HashMap::new();
     let mut sink = DevSink::default();
     let mut core_imports = HashMap::new();
-    core_imports.insert("tls".to_string(), "core.tls".to_string());
+    core_imports.insert("tls".to_string(), "core.net.tls".to_string());
     let mut authorizer = RecordingAuthorizer::default();
 
     let error = run_repl_step(

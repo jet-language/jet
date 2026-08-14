@@ -119,14 +119,14 @@ impl<'a> Checker<'a> {
                 Type::Named(n) if self.registry.text_head(&n).is_some() => {
                     crate::Sema::checked_text_type(&n)
                 }
-                // D-LANGNS-NAME1=A: `core.lang` publishes compiler vocabulary as
+                // D-LANGNS-NAME1=A: `core.compiler.lang` publishes compiler vocabulary as
                 // ordinary generated enum declarations. Membership is decided by
                 // the rule table, not a fixed leaf list, so it can't join the
                 // generic Core-export table below.
                 Type::Named(n)
                     if n.split_once('.').is_some_and(|(alias, leaf)| {
                         self.core_imports.get(alias).is_some_and(|module| {
-                            module == "core.lang"
+                            module == "core.compiler.lang"
                                 && crate::Policy::rule_arg_declaration(leaf).is_some()
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),

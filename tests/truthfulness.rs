@@ -156,7 +156,7 @@ fn llm_digest_regenerates_byte_identically() {
         "- module",
         "active\tUnsafe\tmarker Unsafe",
         "E0001\tactive\tjet",
-        "core.io\tReader, Writer",
+        "core.term\tReader, Writer",
     ] {
         assert!(
             generated.contains(registry_row),

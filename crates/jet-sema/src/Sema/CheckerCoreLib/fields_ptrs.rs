@@ -23,13 +23,13 @@ impl<'a> Checker<'a> {
                 ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
                 ("core.mem", "AllocError") => Some(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
                 // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
-                ("core.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
+                ("core.compute.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
                 // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
                 // `game.Replay.record` and `game.Backend.headless`.
                 ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),
                 ("core.game", "Replay") => Some(Type::Named("GameReplayType".to_string())),
                 ("core.game", "Backend") => Some(Type::Named("GameBackendType".to_string())),
-                ("core.tls", "ClientConfig") => Some(Type::Named("TLSClientConfigType".to_string())),
+                ("core.net.tls", "ClientConfig") => Some(Type::Named("TLSClientConfigType".to_string())),
                 ("core.http.client", "Client") => Some(Type::Named("HTTPClientType".to_string())),
                 ("core.http.client", "Proxy") => Some(Type::Named("HTTPProxy".to_string())),
                 ("core.http.client", "RedirectPolicy") => {
@@ -38,9 +38,9 @@ impl<'a> Checker<'a> {
                 ("core.http.client", "CookieJar") => {
                     Some(Type::Named("HTTPCookieJar".to_string()))
                 },
-                ("core.tls", "RootCertificates") => Some(Type::Named("TLSRootCertificatesType".to_string())),
-                ("core.tls", "ClientIdentity") => Some(Type::Named("TLSClientIdentityType".to_string())),
-                ("core.tls", "TLSVersion") => Some(Type::Named("TLSVersion".to_string())),
+                ("core.net.tls", "RootCertificates") => Some(Type::Named("TLSRootCertificatesType".to_string())),
+                ("core.net.tls", "ClientIdentity") => Some(Type::Named("TLSClientIdentityType".to_string())),
+                ("core.net.tls", "TLSVersion") => Some(Type::Named("TLSVersion".to_string())),
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
                 ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
                 // D-ENCSTREAM-SURFACE1=A: shared encoding values are module fields on

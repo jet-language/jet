@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
                         got.show()
                     ),
                     "HTTP client calls accept raw strings or typed Url values".to_string(),
-                    "pass a String, or build a Url with core.url.parse".to_string(),
+                    "pass a String, or build a Url with core.net.url.parse".to_string(),
                     Some(arg.expr.span()),
                 ));
             }

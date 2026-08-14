@@ -934,7 +934,7 @@ pub fn apply_method(
         // than an error, matching the `?? panic(…)` call-site convention.
         // Guarded to an actual `JSON`-tagged value (`v @ CtValue::Enum { .. }`)
         // rather than matching any receiver — `.int`/`.float` in particular
-        // would otherwise shadow the `core.random` RNG struct's own same-named
+        // would otherwise shadow the `core.math.random` RNG struct's own same-named
         // methods further down (match arms are tried in order).
         (v @ CtValue::Enum { .. }, "field") => {
             let key = match args.into_iter().next() {

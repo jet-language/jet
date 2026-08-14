@@ -12,7 +12,7 @@ fn random_and_time_output_pins_with_seed_and_epoch() {
         &dir,
         "time_random",
         r#"
-use core.random as random
+use core.math.random as random
 use core.time as time
 
 fn run() {
@@ -30,7 +30,7 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// #1788/#1781: an immutable `::` binding of a `core.random` call must read
+/// #1788/#1781: an immutable `::` binding of a `core.math.random` call must read
 /// the runtime-seeded PRNG exactly like a mutable `:=` binding does. Before
 /// the fix, sema's D-VERDICT-1308-1 implicit fold treated `random.float()` as
 /// a foldable pure call and baked its value at compile time from a disjoint
@@ -51,7 +51,7 @@ fn immutable_binding_of_random_call_reads_the_seeded_stream() {
         &dir,
         "random_immutable",
         r#"
-use core.random as random
+use core.math.random as random
 
 fn run() {
     random.seed(11)
@@ -94,7 +94,7 @@ fn immutable_binding_of_random_normal_reads_the_seeded_stream() {
         &dir,
         "random_normal_immutable",
         r#"
-use core.random as random
+use core.math.random as random
 
 fn run() {
     random.seed(11)
@@ -118,7 +118,7 @@ fn run() {
 #[test]
 fn immutable_binding_of_date_today_reads_the_runtime_clock() {
     let src = r#"
-use core.time.date as date
+use core.time as date
 
 fn run() {
     a :: date.today()
@@ -216,7 +216,7 @@ fn random_distribution_surface_is_deterministic() {
         &dir,
         "random_dist",
         r#"
-use core.random as random
+use core.math.random as random
 
 fn run() {
     random.seed(7)
@@ -260,7 +260,7 @@ fn run() {
 #[test]
 fn nondeterministic_core_matrix_matches_all_execution_tiers() {
     let fold_src = r#"
-use core.random as random
+use core.math.random as random
 
 fn run() {
     values := [1, 2, 3]
@@ -273,7 +273,7 @@ fn run() {
         "implicit random.shuffle fold must report E3403: {fold_diagnostics:#?}"
     );
     let impure_fold_src = r#"
-use core.random as random
+use core.math.random as random
 
 fn run() {
     #Impure("the gate must not authorize nondeterministic folding") {
@@ -301,10 +301,10 @@ fn run() {
     fs::create_dir_all(&dir).unwrap();
     let source_name = "nondeterministic_matrix";
     let source = r#"
-use core.random as random
+use core.math.random as random
 use core.time as time
-use core.time.date as date
-use core.time.datetime as datetime
+use core.time as date
+use core.time as datetime
 use core.crypto.random as crypto_rand
 
 fn shuffle_unit() => Unit {
@@ -378,7 +378,7 @@ fn run() {
     stopwatch := time.start()
     print(stopwatch.elapsed_millis() >= 0)
     print(date.today().to_string().len() > 0)
-    print(datetime.now().to_timestamp() > 0)
+    print(time.now_utc().to_timestamp() > 0)
     print(crypto_rand.bytes(4).len())
 }
 "#;

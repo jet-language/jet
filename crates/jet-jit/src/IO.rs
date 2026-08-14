@@ -1,4 +1,4 @@
-//! `core.io` stdout/stderr/stdin + terminal hosts (#1219). TTY writes use the
+//! `core.term` stdout/stderr/stdin + terminal hosts (#1219). TTY writes use the
 //! real terminal; non-TTY writes use the resident capture buffers so
 //! ProgramOutput matches AOT under the process harness.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs

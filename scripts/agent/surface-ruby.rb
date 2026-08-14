@@ -45,7 +45,7 @@ INSTANCE = {
   "Queue" => [Thread::Queue],
   "core.time" => [Time, Date, DateTime],
   "core.regex" => [Regexp, MatchData],
-  "core.url" => [URI::Generic],
+  "core.net.url" => [URI::Generic],
   "core.path" => [Pathname],
   "core.net" => [Socket, TCPSocket],
   "core.log" => [Logger],
@@ -56,35 +56,35 @@ INSTANCE = {
 
 SINGLETON = {
   "core.math" => [Math],
-  "core.random" => [Random],
+  "core.math.random" => [Random],
   "core.crypto.random" => [SecureRandom],
   "core.encoding.json" => [JSON],
   "core.encoding.csv" => [CSV],
   "core.encoding.base64" => [Base64],
   "core.crypto" => [Digest],
-  "core.os" => [Process],
+  "core.sys" => [Process],
   "core.files" => [Dir],
   "core.path" => [File],
   "core.archive" => [Zlib],
-  "core.tls" => [OpenSSL::SSL],
+  "core.net.tls" => [OpenSSL::SSL],
   "core.http" => [Net::HTTP],
   "core.testing" => [Benchmark],
-  "core.io" => [IO],
+  "core.term" => [IO],
 }.freeze
 
 ABSENT = {
-  "core.fmt" => "formatting lives on Kernel#format and String#%, which Object and Kernel provide to every class",
+  "core.text.fmt" => "formatting lives on Kernel#format and String#%, which Object and Kernel provide to every class",
   "core.email" => "no Ruby standard-library email composer; Net::SMTP only sends",
   "core.reflect" => "reflection lives on Object and Module, which every class inherits",
-  "core.mime" => "no Ruby standard-library MIME database",
+  "core.net.mime" => "no Ruby standard-library MIME database",
   "core.encoding.yaml" => "Psych ships with Ruby but is not part of the core library surface recorded here",
   "core.mem" => "no Ruby standard-library memory module; ObjectSpace reports rather than manages",
   "core.term" => "no Ruby standard-library terminal control",
   "core.web" => "no Ruby standard-library web framework",
-  "core.binary" => "binary reading lives on IO, recorded under core.io",
+  "core.encoding" => "binary reading lives on IO, recorded under core.term",
 
-  "core.env" => "environment access lives on Process and ENV, recorded under core.os",
-  "core.process" => "process control lives on Process, recorded under core.os",
+  "core.sys" => "environment access lives on Process and ENV, recorded under core.sys",
+  "core.process" => "process control lives on Process, recorded under core.sys",
 
   "Rank" => "the ordered-set type left the Ruby standard library in Ruby 3.0",
   "PriorityQueue" => "no Ruby standard-library priority queue",
@@ -97,8 +97,8 @@ ABSENT = {
   "core.encoding.toml" => "no Ruby standard-library TOML decoder",
   "core.tasks" => "Thread and Fiber are core classes, but Ruby ships no task or async module",
   "core.text" => "String carries text handling; Ruby ships no separate text module",
-  "core.text.unicode" => "no Ruby standard-library Unicode property database",
-  "core.uuid" => "SecureRandom.uuid exists, but Ruby ships no UUID module",
+  "core.text" => "no Ruby standard-library Unicode property database",
+  "core.crypto.uuid" => "SecureRandom.uuid exists, but Ruby ships no UUID module",
 }.freeze
 
 INHERITED = (

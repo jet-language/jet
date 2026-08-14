@@ -133,12 +133,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
     // type (`Result<String, IOError>`) lives in sema's bespoke `infer_core_call` arm
     // (CheckerCoreLib.rs), carried total by `core_call_return_ty`. It is the DISTINCT
-    // qualified MethodCall on a `core.io` alias (the ambient bare `input()`, Phase 25, is
+    // qualified MethodCall on a `core.term` alias (the ambient bare `input()`, Phase 25, is
     // a separate `Expr::Call` node → `AmbientInput`). Emits the same fixed-string CoreCall
     // `{root}jet_std_io_input(None|Some(&(prompt)))` (reproduced in `emit_tir_core_call`),
     // byte-for-byte the TIR core-call encoding. Composes with the Phase-8 `?? return`.
     // parity: guard tests/tir_language_features.rs::ambient_input
-    if module == "core.io" && method == "input" {
+    if module == "core.term" && method == "input" {
         return true;
     }
     // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`. NOT in `core_fixed_sig` (the
@@ -151,7 +151,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     }
     // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `JetMeasurement<f64>`. NOT in
     // `core_fixed_sig` — the return type is `Measurement<Float>` (generic Apply).
-    if module == "core.science.measurement" && method == "from" {
+    if module == "core.units" && method == "from" {
         return true;
     }
     // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
@@ -162,7 +162,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
     if matches!(
         module,
-        "core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir"
+        "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir"
     ) && method == "new"
     {
         return true;
@@ -184,8 +184,8 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return true;
     }
     // D-TIMEDEPTH1=A: civil-time constructors. NOT in `core_fixed_sig`.
-    if matches!(module, "core.time.date" | "core.time.datetime")
-        && matches!(method, "new" | "today" | "parse" | "from_timestamp" | "now")
+    if module == "core.time"
+        && matches!(method, "new" | "today" | "parse" | "from_timestamp")
     {
         return true;
     }
@@ -220,12 +220,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     {
         return true;
     }
-    // D-WS1=B: WebSocket entry points live in core.ws (not core.http).
-    if module == "core.ws" && matches!(method, "connect" | "upgrade") {
+    // D-WS1=B: WebSocket entry points live in core.net.ws (not core.http).
+    if module == "core.net.ws" && matches!(method, "connect" | "upgrade") {
         return true;
     }
     // D-BROWSER-AUTO1=A: fixed native BiDi entry points.
-    if module == "core.browser"
+    if module == "core.web.browser"
         && matches!(
             method,
             "profile" | "timeout" | "locked" | "connect" | "connect_profile"
@@ -281,14 +281,14 @@ pub(super) fn core_call_args_in_subset(
                     && expr_in_subset(&arg.expr, cx, locals)
             });
     }
-    if module == "core.tls" && method == "client" && args.len() == 4 {
+    if module == "core.net.tls" && method == "client" && args.len() == 4 {
         let labels = [None, Some("server_name"), Some("config"), Some("deadline")];
         return args.iter().zip(labels).all(|(arg, expected)| {
             arg.label.as_ref().map(|(label, _)| label.as_str()) == expected
                 && expr_in_subset(&arg.expr, cx, locals)
         });
     }
-    if module == "core.tls" && method == "client" && args.len() == 3 {
+    if module == "core.net.tls" && method == "client" && args.len() == 3 {
         return args.iter().enumerate().all(|(idx, arg)| {
             let label_ok = if idx == 2 {
                 matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), Some("deadline"))
@@ -424,11 +424,11 @@ pub(crate) fn core_closure_call_in_subset(
                 && expr_in_subset(&args[0].expr, cx, locals)
                 && lambda_arg(1)
         }
-        ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
+        ("core.mem.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
         // D-OSINTERRUPT1: the callback itself is canonicalized by lowering;
         // admit all in-subset callback shapes so inline, named, and indirect
         // values use the same `CoreClosureCall` path in every tier.
-        ("core.os", "on_interrupt") => {
+        ("core.sys", "on_interrupt") => {
             args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
         }
         // D-DATA-SURFACE1=A: typed table selectors. Rows arg is in subset; selector

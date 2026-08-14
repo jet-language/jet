@@ -1022,7 +1022,7 @@ mod jet_os_interrupt {
     pub fn on_interrupt(handler: Arc<dyn Fn() + Send + Sync + 'static>) {
         let tx = dispatcher().unwrap_or_else(|message| {
             super::jet_panic(
-                "<core.os>",
+                "<core.sys>",
                 0,
                 &super::jet_interrupt_core_error(&message),
             )
@@ -1031,7 +1031,7 @@ mod jet_os_interrupt {
         tx.send(Command::Register(handler, ready_tx))
             .unwrap_or_else(|_| {
                 super::jet_panic(
-                    "<core.os>",
+                    "<core.sys>",
                     0,
                     &super::jet_interrupt_core_error(
                         super::jet_interrupt_dispatcher_stopped_error(),
@@ -1042,7 +1042,7 @@ mod jet_os_interrupt {
             .recv()
             .unwrap_or_else(|_| {
                 super::jet_panic(
-                    "<core.os>",
+                    "<core.sys>",
                     0,
                     &super::jet_interrupt_core_error(
                         super::jet_interrupt_dispatcher_stopped_error(),

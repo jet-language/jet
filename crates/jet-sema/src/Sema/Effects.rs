@@ -16,7 +16,7 @@
 //! D-WASM1=A amends D-EFF4 with `Browser` — DOM / browser API use (c123).
 //!
 //! U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates) amends D-EFF4/5 with
-//! `Secret` — reading a decrypted repo secret (`core.vault.get`). Modeled as a
+//! `Secret` — reading a decrypted repo secret (`core.crypto.vault.get`). Modeled as a
 //! bare root, not a leaf under an existing root: the compiler's own
 //! Core-call-to-effect inference (`core_effect`) only ever tags a call with a
 //! bare `Effect` (leaf precision is a user-declared-contract concept, never
@@ -1700,10 +1700,10 @@ pub fn check_trait_obligations(
 }
 
 /// U13 (D-JPK-SECRETCRYPTO1): unlike every other effect, `Secret` is denied
-/// even with no declared bound at all — `core.vault.get` demands an explicit
+/// even with no declared bound at all — `core.crypto.vault.get` demands an explicit
 /// `#(Secret)` (or a wider declared bound covering it) on the calling
 /// function; a bare `fn` with no `#(…)` list, or one that omits `Secret`, is
-/// E1264. A helper fn two calls deep from the actual `core.vault.get` still
+/// E1264. A helper fn two calls deep from the actual `core.crypto.vault.get` still
 /// requires the grant on itself — the same call-graph reach E0740 checks —
 /// but this deliberately uses the dedicated `secret` row rather than the
 /// general `effects` row: foreign calls seed every effect, but do not prove a
@@ -1785,7 +1785,7 @@ pub(crate) fn check_secret_grants(
     }
 }
 
-/// E1264 (U13, D-JPK-SECRETCRYPTO1): a function reaches `core.vault.get`
+/// E1264 (U13, D-JPK-SECRETCRYPTO1): a function reaches `core.crypto.vault.get`
 /// (transitively) without `Secret` in its own declared effect row.
 pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -1794,7 +1794,7 @@ pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
             "`{}` reads a secret but doesn't declare the `Secret` effect",
             fn_name
         ),
-        "reading a secret (`core.vault.get`) always requires an explicit grant — unlike other \
+        "reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other \
          effects, there is no silently-inferred default here, so a function must opt in even with \
          no other explicit effect row at all."
             .to_string(),

@@ -189,7 +189,7 @@ pub fn try_warm_run(entry: &Path, program_args: &[&str]) -> Option<jet_foundatio
     let artifact_path = dir.join("module.bin");
     let bytes = fs::read(&artifact_path).ok()?;
     // Install program argv exactly like the cold path (#1254): without it,
-    // `core.io.args()` in a warm run falls back to the raw CLI argv.
+    // `core.process.argv()` in a warm run falls back to the raw CLI argv.
     let mut argv = Vec::with_capacity(program_args.len() + 1);
     argv.push(entry.to_string_lossy().into_owned());
     argv.extend(program_args.iter().map(|arg| (*arg).to_string()));

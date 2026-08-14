@@ -747,7 +747,7 @@ fn live_crypto_entropy_and_uuid_match_interpreter_resident_jit_and_aot() {
     const SOURCE: &str = r#"
 use core.crypto.random as crypto
 use core.time as time
-use core.uuid as uuid
+use core.crypto.uuid as uuid
 
 fn run() {
     first :: crypto.bytes(32)

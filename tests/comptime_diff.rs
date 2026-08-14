@@ -163,17 +163,17 @@ const MODULE_CASES: &[&str] = &[
     "use core.math as math\n@comptime_value :: math.sin(0.0)\n\nfn run() {\n    r :: math.sin(0.0)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.math as math\n@comptime_value :: math.gcd(12, 18)\n\nfn run() {\n    r :: math.gcd(12, 18)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.math as math\n@comptime_value :: math.saturating_add(9223372036854775807, 1)\n\nfn run() {\n    r :: math.saturating_add(9223372036854775807, 1)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    // card #392 pass 3: `core.url` (D-URL1=A), ported verbatim from AOT's
+    // card #392 pass 3: `core.net.url` (D-URL1=A), ported verbatim from AOT's
     // `jet_url_*` (`UrlMime.rs` + `MathRandomTime.rs`, see `UrlLite.rs`).
     // Plain string-returning free functions use this differential. URL
     // structs retain their canonical typed metadata through the comptime
     // marshalled value path; tier-wide typed-head coverage lives in
     // `tests/tir_language_features.rs`.
     // parity: guard tests/repl.rs::repl_core_url_dispatch
-    "use core.url as url\n@comptime_value :: url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.url as url\n@comptime_value :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.url as url\n@comptime_value :: url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.url as url\n@comptime_value :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@comptime_value :: url.percent_encode(\"a b/c?d#e\")\n\nfn run() {\n    r :: url.percent_encode(\"a b/c?d#e\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@comptime_value :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n\nfn run() {\n    r :: url.percent_decode(\"a%20b%2Fc\") ?? panic(\"bad\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@comptime_value :: url.percent_decode(\"bad%\") ?? \"fallback\"\n\nfn run() {\n    r :: url.percent_decode(\"bad%\") ?? \"fallback\"\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.net.url as url\n@comptime_value :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n\nfn run() {\n    r :: url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 3: `core.data`'s fixed-signature stats surface, ported
     // verbatim from AOT's `jet_data_*` (`EncodingTraits.rs`, see
     // `DataLite.rs`). `describe`/`status`/`bar_text`/`bar_svg` return/take
@@ -372,7 +372,7 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
         eprintln!("note: rustc not found; skipping gzip comptime differential");
         return;
     }
-    let src = r#"use core.compress.gzip as gzip
+    let src = r#"use core.archive.gzip as gzip
 
 fn codec_probe() => String {
     bytes :: [U8].{ 72, 101, 108, 108, 111 }
@@ -403,7 +403,7 @@ fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
         eprintln!("note: rustc not found; skipping zstd comptime differential");
         return;
     }
-    let src = r#"use core.compress.zstd as zstd
+    let src = r#"use core.archive.zstd as zstd
 
 @bytes :: [U8].{ 72, 101, 108, 108, 111 }
 @encoded :: zstd.compress(@bytes)
@@ -424,7 +424,7 @@ fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
         eprintln!("note: rustc not found; skipping zstd window differential");
         return;
     }
-    let src = r#"use core.compress.zstd as zstd
+    let src = r#"use core.archive.zstd as zstd
 
 @expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8].{ 255 }
 

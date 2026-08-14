@@ -11,7 +11,7 @@ evidence, not proof that every broader law shipped.
 
 | Decision | status | production path | evidence path | successor/owner | boundary |
 |----------|--------|-----------------|---------------|-----------------|----------|
-| D-LIVEQUERY1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs`; `crates/jet-comptime/src/Comptime/AppLite.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs` | `examples/features/tooling/app_live.jet`; `examples/features/expected/tooling/app_live.out`; `tests/ui/db_read_query_hidden_write.jet` | `#1158` closeout; remote reconnect/app graph owners | The bounded registry stores a typed rerunner and canonical signal sink. Matching invalidations rerun outside the lock, commit only the newest generation, update `JetSignal<T>`, and publish through the existing `core.ws` writer with serialized frames. The transport replays the latest bounded event per topic on reconnect. Connection-scoped authentication/routing, browser protocol binding, and general app-query graph discovery remain unshipped. |
+| D-LIVEQUERY1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs`; `crates/jet-comptime/src/Comptime/AppLite.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs` | `examples/features/tooling/app_live.jet`; `examples/features/expected/tooling/app_live.out`; `tests/ui/db_read_query_hidden_write.jet` | `#1158` closeout; remote reconnect/app graph owners | The bounded registry stores a typed rerunner and canonical signal sink. Matching invalidations rerun outside the lock, commit only the newest generation, update `JetSignal<T>`, and publish through the existing `core.net.ws` writer with serialized frames. The transport replays the latest bounded event per topic on reconnect. Connection-scoped authentication/routing, browser protocol binding, and general app-query graph discovery remain unshipped. |
 | D-SCHEDULE1 | unshipped-law | `crates/jet-parser/src/Parser/Items/markers_contracts.rs`; `crates/jet-foundation/src/Syntax/math_layout.rs`; `crates/jet-foundation/src/AST/items.rs`; `crates/jet-sema/src/Sema/CheckerSchedule.rs` | `examples/features/devloop/schedule_every.jet`; `tests/dev.rs`; `tests/ui/schedule_*` | `#1157` verified child; `#1158` closeout; D-TYPE2-TIME1 substrate | The shared duration plane now accepts `2h` and `1d`, and one resolver feeds sema/dev. Scheduled lifecycle units use `#Job`; `task` remains the separate concurrency construct. The typed D-TYPE2-TIME1 `Duration`/wall-clock carrier and service-runtime/jetos timer consumers remain unshipped. |
 | D-LINTPOLICY1 | shipped | `crates/jet-pkg-model/src/LintPolicy.rs`; `Source/CmdCompile.rs`; `crates/jet-semindex/src/Build.rs`; `crates/jet-semindex/src/Types.rs`; `crates/jet-semindex/src/JSON.rs` | `tests/pkg.rs`; `tests/semindex.rs`; `docs/spec/diagnostics.md` | `#1158` closeout | Warnings stay non-blocking by default. Explicit `package.jet` `policy.lints.deny` removes matching findings from the warning stream and emits one E1293 per site. Memory/type safety has no override. |
 | D-BINPAT1 | shipped | `crates/jet-parser/src/Parser/Expressions/patterns.rs`; `crates/jet-sema/src/Sema/CheckerInfer/binary.rs`; `crates/jet-parser/src/Formatter/Expressions.rs` | `examples/features/parsing/binary_pattern.jet`; `examples/features/parsing/binary-reader.jet`; `tests/ui/binpat_*`; `tests/fmt.rs` | `#506` slice; no owner gate recorded | `[U8].{"…"}` is byte-mode in one pattern engine. Bit widths and endian rules are checked; retired `b"…"` spelling stays retired. |
@@ -34,7 +34,7 @@ shared Prelude registry. `DBScope.live` registers a policy-aware query rerun;
 the AOT emitter binds its result to the canonical `JetSignal<T>`, and the
 ambient/JIT adapter calls the same Prelude. Invalidation releases the registry
 lock before rerunning, rejects stale generations, and sends successful values
-through the existing `core.ws` writer. The transport replays the latest
+through the existing `core.net.ws` writer. The transport replays the latest
 bounded event for each topic when a connection registers. No local callback
 queue, second signal, or browser-only protocol was added.
 
@@ -43,6 +43,7 @@ scoped authentication/routing, and a client-side protocol that maps wire events
 to the browser's `Signal<T>`. Those require the still-unbuilt app graph and
 remote-transport substrate; the local production paths now close their
 truthful seam and replay the latest bounded topic event on reconnect.
+
 
 ### D-SCHEDULE1
 
@@ -74,7 +75,7 @@ runtime. The current path must not reinterpret a raw service extra as
   typed atom/LWW metadata or vector clocks. It is not an authenticated remote
   routing or network merge implementation.
 - The live path is a bounded typed registry with explicit errors, generation
-  checks, query rerun, canonical signal delivery, serialized native `core.ws`
+  checks, query rerun, canonical signal delivery, serialized native `core.net.ws`
   publication, and latest-topic replay on reconnect. It is not the browser
   protocol, connection-scoped authorization, general app-query graph, or
   remote authenticated reconnect implementation.

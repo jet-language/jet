@@ -218,7 +218,7 @@ fn note_typed_boundary_core_usage(
         return;
     };
     let key = match kind {
-        Syntax::TypedHeadKind::URL => "core.url::typed_head",
+        Syntax::TypedHeadKind::URL => "core.net.url::typed_head",
         Syntax::TypedHeadKind::Path => "core.files::typed_head",
         Syntax::TypedHeadKind::DateTime => "core.time::typed_head",
         _ => unreachable!("typed boundary usage descriptor is complete"),
@@ -279,7 +279,7 @@ pub(crate) fn apply_helper_layer_inference(
 }
 
 fn helper_import_chain(usage: &str, core_imports: &HashMap<String, String>) -> String {
-    if usage == "core.io::input" {
+    if usage == "core.term::input" {
         return format!("ambient `input()` (helper `{usage}`)");
     }
     if let Some((module, _)) = usage.split_once("::") {
@@ -699,10 +699,10 @@ pub(crate) fn collect_core_expr(
             }
         }
         Expr::Call(c) => {
-            // D-NAME-ALIAS1=A: bare `input(...)` is prelude-ambient; mark core.io so
+            // D-NAME-ALIAS1=A: bare `input(...)` is prelude-ambient; mark core.term so
             // CORELIB_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
             if c.name == Syntax::BUILTIN_INPUT {
-                note_core_usage(used, spans, "core.io::input", Some(c.name_span));
+                note_core_usage(used, spans, "core.term::input", Some(c.name_span));
             }
             // D-BOUND-HEAD1=A: sema rewrites typed boundary heads to their
             // ordinary alternating literal/hole call before this reachability

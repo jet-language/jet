@@ -1,4 +1,4 @@
-// ── core.text.unicode helpers (D-TEXTUNICODE1) ───────────────────────────────
+// ── core.text helpers (D-TEXTUNICODE1) ───────────────────────────────
 fn jet_text_unicode_scalar_count(s: &String) -> i64 {
     s.chars().count() as i64
 }

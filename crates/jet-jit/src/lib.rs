@@ -253,7 +253,7 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
     let previous =
         PROGRAM_ARGS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), args.to_vec()));
     let _guard = ProgramArgsGuard(previous);
-    // Keep impure `core.io.args` in lockstep for interpreter deopt (#778).
+    // Keep impure `core.process.argv` in lockstep for interpreter deopt (#778).
     jet_codegen::Comptime::with_runtime_argv(args, run)
 }
 

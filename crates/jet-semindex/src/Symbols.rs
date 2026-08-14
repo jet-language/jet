@@ -979,7 +979,7 @@ fn core_module_member_symbols(module: &str) -> Vec<SemanticSymbol> {
         .into_iter()
         .map(|name| {
             let qualified_name = format!("{module}.{name}");
-            let declaration = (module == "core.lang")
+            let declaration = (module == "core.compiler.lang")
                 .then(|| jet_foundation::Policy::rule_arg_declaration(&name))
                 .flatten();
             SemanticSymbol {

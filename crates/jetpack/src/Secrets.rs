@@ -66,7 +66,7 @@ fn default_keys_dir() -> PathBuf {
 }
 
 /// Build (or reuse from cache) the `jet-secrets-helper` binary and return its
-/// path. Reuses the exact hidden-cargo bridge the compiled-program `core.vault`
+/// path. Reuses the exact hidden-cargo bridge the compiled-program `core.crypto.vault`
 /// path already builds; the first call is a cold `cargo build`, every later
 /// call is an instant cache hit — same shape as `Source/Publish/Sign.rs`'s
 /// `ensure_bridge_helper`.

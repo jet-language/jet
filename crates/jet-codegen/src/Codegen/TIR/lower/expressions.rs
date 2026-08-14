@@ -1967,7 +1967,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let formatted = TExpr {
                             ty: Type::String,
                             kind: TExprKind::CoreCall {
-                                module: "core.fmt".to_string(),
+                                module: "core.text.fmt".to_string(),
                                 method: "decimal".to_string(),
                                 args: vec![
                                     lower_expr(e, cx, env),

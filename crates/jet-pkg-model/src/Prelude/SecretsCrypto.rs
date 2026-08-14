@@ -1,8 +1,8 @@
-// core.vault runtime (U13, D-JPK-SECRETCRYPTO1=A) — age-style crypto:
+// core.crypto.vault runtime (U13, D-JPK-SECRETCRYPTO1=A) — age-style crypto:
 // X25519 recipients, ChaCha20-Poly1305 payload, via the `age` crate.
 //
 // This file is emitted verbatim into the hidden FFI bridge crate (see
-// Source/FFI.rs) when a Jet program uses `core.vault`, and also backs the
+// Source/FFI.rs) when a Jet program uses `core.crypto.vault`, and also backs the
 // `jet-secrets-helper` binary that `jetpack secrets set/get/recipients/keygen`
 // shells out to (jetpack itself stays I6-zero-dependency). The compiler crate
 // (`Source/`, `crates/jet-driver`) never depends on `age`; only this text does.
@@ -139,10 +139,10 @@ fn identity_path() -> std::path::PathBuf {
         .join("secrets.identity")
 }
 
-/// `core.vault.get(name)` — the whole read path a compiled Jet program uses:
+/// `core.crypto.vault.get(name)` — the whole read path a compiled Jet program uses:
 /// read the local identity, read the project's encrypted store, decrypt,
 /// look up `name`. `None` on any failure (no identity, no store, wrong key,
-/// missing entry) — the same "may be missing" shape as `core.env.get`, never
+/// missing entry) — the same "may be missing" shape as `core.sys.get`, never
 /// a panic (I2: no path here may crash the program in place of a value).
 pub fn jet_vault_get_impl(name: &str) -> Option<String> {
     let (store, _, _, _) = vault_read_at(std::path::Path::new(".")).ok()?;

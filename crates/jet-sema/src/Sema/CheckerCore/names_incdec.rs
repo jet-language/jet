@@ -308,7 +308,7 @@ impl<'a> Checker<'a> {
 const CORE_DIAGNOSTIC_ALIASES: &[(&str, &str)] = &[
     ("fs", "core.files"),
     ("ar", "core.archive"),
-    ("gz", "core.compress.gzip"),
+    ("gz", "core.archive.gzip"),
     ("re", "core.regex"),
 ];
 

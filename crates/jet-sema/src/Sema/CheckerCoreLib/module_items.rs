@@ -2,7 +2,7 @@ use crate::Syntax;
 
 /// Canonical Core module member names (completion, help, diagnostics).
 pub fn core_module_items(module: &str) -> Vec<String> {
-    if module == "core.lang" {
+    if module == "core.compiler.lang" {
         return crate::Policy::RULE_ARG_DECLARATIONS
             .iter()
             .map(|declaration| declaration.name.to_string())
@@ -15,10 +15,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             .collect();
     }
     let items: &[&str] = match module {
-        "core.io" => &[
+        "core.term" => &[
             "Reader",
             "Writer",
-            "args",
             "input",
             "confirm",
             "choose",
@@ -40,9 +39,15 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "style",
             "style_force",
             "progress",
+            "read_key",
         ],
-        "core.env" => &["get", "set", "unset", "vars", "current_dir", "home_dir"],
-        "core.os" => &[
+        "core.sys" => &[
+            "get",
+            "set",
+            "unset",
+            "vars",
+            "current_dir",
+            "home_dir",
             "name",
             "family",
             "arch",
@@ -95,7 +100,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "close_fd",
             "mkfifo",
         ],
-        "core.process" => &["exit", "run", "cmd", "pipeline"],
+        "core.process" => &["exit", "run", "cmd", "pipeline", "argv"],
         "core.math" => &[
             "sqrt",
             "pow",
@@ -213,7 +218,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-DET1: `rng` builds a deterministic injected RNG capability.
         // D-RANDSPLIT1=A: `bytes(n)` returns n PRNG bytes — fast, NOT crypto-safe.
-        "core.random" => &[
+        "core.math.random" => &[
             "int",
             "float",
             "float_range",
@@ -244,7 +249,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "instant",
             "now_utc",
             "from_unix_ms",
+            "from_timestamp",
             "today",
+            "new",
+            "parse",
             "parse_rfc3339",
             "datetime",
             "local_time",
@@ -271,6 +279,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "EncodingFormat",
             "EncodingErrorKind",
             "DataEvent",
+            // D-SHIFT1: the byte reader belongs to the encoding/stream seam.
+            "Reader",
         ],
         // D-JSONVERB1: `to_string`/`to_string_pretty` (compact/pretty); `parse` → dynamic
         // JSON value; `decode` → lenient typed decode (D-JSON3). D-MIGRATE3=A:
@@ -325,19 +335,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.hex" => &["encode", "decode"],
         "core.encoding.base64" => &["encode", "decode", "encode_url", "decode_url"],
         "core.encoding.base32" => &["encode", "decode"],
-        // D-TEXTUNICODE1: std-only Unicode scalar helpers.
-        "core.text.unicode" => &[
-            "scalar_count",
-            "byte_count",
-            "is_ascii",
-            "lower",
-            "upper",
-            "scalars",
-        ],
         // #1481: `parse` validates/normalizes a UUID string (D-CORE-TREE1 keeps
         // UUIDs as `String`, no new nominal type); `v5` is the deterministic
         // namespace+name sibling of the already-shipped `v4`/`v7`.
-        "core.uuid" => &["v4", "v7", "v5", "parse"],
+        "core.crypto.uuid" => &["v4", "v7", "v5", "parse"],
         // Keep these literal module arms alongside the dynamic gate lookup
         // above so source-ledger tooling can see the complete inventory.
         "core.mem" => &[
@@ -353,12 +354,14 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             Syntax::MEM_POOL,
             Syntax::MEM_FIXED,
             Syntax::TYPE_ALLOC_ERROR,
+            "Arena",
+            "Bump",
+            "Pool",
+            "Fixed",
         ],
         // D-LIB-CALLGRANT1=A: pinned native Jet library loader.
         "core.mod" => &["load"],
-        // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
-        "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
-        "core.solve" => &["Solver"],
+        "core.compute.solve" => &["Solver"],
         "core.game" => &["Scene", "Replay", "Backend", "run"],
         "core.data" => &[
             "csv",
@@ -403,6 +406,14 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "group_mean",
             "status",
             "require_bridge",
+            "bar_text",
+            "bar_svg",
+            "line_text",
+            "line_svg",
+        ],
+        // D-CORE-TREE1=A: plotting is a data child, even when a call uses the
+        // parent facade. Keep the child discoverable without a second root.
+        "core.data.plot" => &[
             "bar_text",
             "bar_svg",
             "line_text",
@@ -590,7 +601,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "append",
         ],
         "core.watcher" => &["files", "process_pid", "port", "set"],
-        "core.url" => &[
+        "core.net.url" => &[
             "parse",
             "from_parts",
             "file",
@@ -599,7 +610,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "percent_encode",
             "percent_decode",
         ],
-        "core.mime" => &["parse", "from_extension", "extension"],
+        "core.net.mime" => &["parse", "from_extension", "extension"],
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         "core.email" => &[
             Syntax::TYPE_EMAIL_ADDRESS, Syntax::TYPE_EMAIL_MESSAGE, Syntax::TYPE_EMAIL_ATTACHMENT,
@@ -615,7 +626,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             Syntax::CORE_EMAIL_SMTP_FN, Syntax::CORE_EMAIL_SMTP_FROM_ENV_FN,
         ],
         // D-DEFER1 option B: scope-exit guard.
-        "core.scope" => &["guard"],
+        "core.mem.scope" => &["guard"],
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing.
         "core.args" => &["spec"],
         // D-ANY-JAI1 (c7jaiany §6): the runtime reflection floor.
@@ -627,7 +638,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-SHIFT1 (c7shift): `Reader.over(bytes)`/`Cursor.over(s)` are bare
         // static constructors (no import needed, D-PATHFS1's `Path.from`
         // shape) — these module entries exist for discoverability/docs only.
-        "core.binary" => &["Reader"],
         "core.text" => &[
             "Cursor",
             "nfc",
@@ -662,7 +672,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "inspect",
             "char_indices",
         ],
-        "core.fmt" => &[
+        "core.text.fmt" => &[
             "number",
             "decimal",
             "percent",
@@ -674,8 +684,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "pad_right",
             "pad_center",
         ],
-        // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
-        "core.term" => &["read_key"],
         "core" => &[],
         // D-CORENS-CANON1: ring packages use their canonical `core.*` keys.
         "core.log" => &[
@@ -869,7 +877,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "tls_write",
             "tls_close",
         ],
-        "core.tls" => &[
+        "core.net.tls" => &[
             "ClientConfig", "RootCertificates", "ClientIdentity", "TLSVersion",
             "client", "read", "read_text", "write", "write_all", "write_text", "close",
         ],
@@ -891,8 +899,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "split",
             "split_limit",
         ],
-        // D-CORE-COMPRESS1=A: archive owns containers; stream codecs live in
-        // core.compress with no archive re-export.
+        // D-CORE-COMPRESS1=A: archive owns containers and its gzip/zstd children.
         "core.archive" => &[
             "zip_compress",
             "zip_decompress",
@@ -913,7 +920,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "tar_names_json",
         ],
         // D-RAYLIB1=A: typed graphics bridge.
-        "core.raylib" => &[
+        "core.game.raylib" => &[
             "window_open",
             "window_should_close",
             "window_ready",
@@ -930,8 +937,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "play_sound",
         ],
         // D-CORE-COMPRESS1=A / D-CODECS1: canonical stream codecs.
-        "core.compress.gzip" => &["compress", "decompress"],
-        "core.compress.zstd" => &["compress", "decompress"],
+        "core.archive.gzip" => &["compress", "decompress"],
+        "core.archive.zstd" => &["compress", "decompress"],
         // D-DEP-DB1: SQLite ring package.
         // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
         // `rollback` are `DBConnection` instance methods, not module items.
@@ -964,7 +971,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "async_result",
         ],
         // D-HONESTNUM1=A: Measurement<T> constructor.
-        "core.science.measurement" => &["from"],
+        "core.units" => &["from"],
         // D-PENDING1=B: Loadable<T,E> constructors.
         "core.reactive.loadable" => &["idle", "loading", "loaded", "failed"],
         // D-FIDELITY-API1=A: runtime-global fidelity signal.
@@ -1028,13 +1035,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // c-devserver (owner-directed 2026-07-01): `jet dev` server builder.
         "core.web.devserver" => &["for_app", "app"],
         // D-APPROX1=A: approximate sketch data structures.
-        "core.sketch.hll" => &["new"],
-        "core.sketch.tdigest" => &["new"],
-        "core.sketch.cms" => &["new"],
-        "core.sketch.reservoir" => &["new"],
-        // D-TIMEDEPTH1=A: civil-time constructors.
-        "core.time.date" => &["new", "today", "parse"],
-        "core.time.datetime" => &["from_timestamp", "now"],
+        "core.data.sketch.hll" => &["new"],
+        "core.data.sketch.tdigest" => &["new"],
+        "core.data.sketch.cms" => &["new"],
+        "core.data.sketch.reservoir" => &["new"],
         // D-ONCE-LAYER1=B: the configurable rung is core.http.client; the one-shot rung is core.http.
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["Client", "Proxy", "RedirectPolicy", "get", "post", "request"],
@@ -1059,9 +1063,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "cors_policy",
         ],
         // D-WS1=B: standalone RFC6455 client/server entry points.
-        "core.ws" => &["connect", "upgrade"],
+        "core.net.ws" => &["connect", "upgrade"],
         // D-BROWSER-AUTO1=A: native BiDi profile/session entry points.
-        "core.browser" => &[
+        "core.web.browser" => &[
             "Browser", "BrowserContext", "BrowserPage", "BrowserFrame", "BrowserLocator",
             "BrowserIntercept",
             "BrowserEvent", "BrowserTrace", "BrowserReceipt", "BrowserPrivacy", "BrowserError",
@@ -1072,7 +1076,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
-        "core.vault" => &[
+        "core.crypto.vault" => &[
             "ExpiringSecret", "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "WrappedImportPlan",
             "KeyStatus", "VaultError", "WrappedVaultKey", "KeyUnlock", "KeyWrapError",
             "get", "current", "versions", "load", "status",
@@ -1080,8 +1084,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke",
             "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped",
             "authorize_wrapped_import", "commit_import_wrapped",
+            "prepare_import_signing", "prepare_import_x25519",
+            "commit_import_signing", "commit_import_x25519",
         ],
-        "core.vault.expert" => &["prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"],
         // D-AUTH1=A / D-AUTH2=A: token verify + session batteries.
         "core.auth" => &[
             "verify_jwt",
@@ -1140,7 +1145,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
 /// Ratified nominal types exported by a Core module. Separate from callable
 /// items so `alias.Type.method()` is a static type call, not a nested module.
 pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
-    if module == "core.lang" {
+    if module == "core.compiler.lang" {
         return crate::Policy::rule_arg_declaration(item).is_some();
     }
     matches!(
@@ -1151,13 +1156,13 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError" | "Session" | "Auth")
         | ("core.sync", "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy")
-        | ("core.vault", "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+        | ("core.crypto.vault", "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
             | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")
-        | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TLSVersion")
+        | ("core.net.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TLSVersion")
         | ("core.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HTTPError" | "Client" | "Proxy")
-        | ("core.browser",
+        | ("core.web.browser",
             "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
             | "BrowserIntercept"
             | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"

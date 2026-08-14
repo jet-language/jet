@@ -111,13 +111,13 @@ const CORE_MODULE_EXPORTS: &[(&str, &[(&str, CoreLeafKind)])] = &[
         ("CBORErrorKind", CoreLeafKind::Plain),
     ]),
     ("core.email", EMAIL_LEAVES),
-    ("core.env", ENV_LEAVES),
+    ("core.sys", ENV_LEAVES),
     ("core.mem", MEM_LEAVES),
 ];
 
 /// Look up how `module.leaf` should resolve, or `None` if that module/leaf
 /// pair isn't a registered Core export (the caller falls through to other
-/// resolution paths, e.g. the generic file-module registry or `core.lang`'s
+/// resolution paths, e.g. the generic file-module registry or `core.compiler.lang`'s
 /// dynamic rule check).
 pub fn core_leaf_kind(module: &str, leaf: &str) -> Option<CoreLeafKind> {
     lookup(CORE_MODULE_EXPORTS, module, leaf)
@@ -161,7 +161,7 @@ mod tests {
             Some(CoreLeafKind::CryptoNominal)
         );
         assert_eq!(core_leaf_kind("core.crypto", "VerifyKey"), Some(CoreLeafKind::Plain));
-        assert_eq!(core_leaf_kind("core.env", "EnvError"), Some(CoreLeafKind::Plain));
+        assert_eq!(core_leaf_kind("core.sys", "EnvError"), Some(CoreLeafKind::Plain));
         assert_eq!(core_leaf_kind("core.encoding.cbor", "CBORReader"), Some(CoreLeafKind::Plain));
         assert_eq!(core_leaf_kind("core.email", "NoSuchLeaf"), None);
         assert_eq!(core_leaf_kind("core.nonexistent", "Address"), None);

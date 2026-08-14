@@ -526,7 +526,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             let value_s = emit_tir_expr(value, cx);
             let locals = crate::Codegen::TIR::emit_panic_locals(loc, cx);
             jet_format!(
-                "{{ let {jet_prefix}env_name = ({name_s}); let {jet_prefix}env_value = ({value_s}); if let Err({jet_prefix}env_error) = {root}jet_std_env_set(&{jet_prefix}env_name, &{jet_prefix}env_value) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", {jet_prefix}env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                "{{ let {jet_prefix}env_name = ({name_s}); let {jet_prefix}env_value = ({value_s}); if let Err({jet_prefix}env_error) = {root}jet_std_env_set(&{jet_prefix}env_name, &{jet_prefix}env_value) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.sys.set: {{}}\", {jet_prefix}env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
                 root = cx.root_prefix,
                 cleanup = RESOURCE_CLEANUP_MARKER,
                 file = escape_rust_str(&loc.file),
@@ -5669,7 +5669,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             TFnValueKind::Interrupt { value } => {
                 let rendered = emit_tir_expr(value, cx);
-                // `core.os.on_interrupt` is a read-only registration. Local
+                // `core.sys.on_interrupt` is a read-only registration. Local
                 // callback values already carry the canonical Arc-backed
                 // Send + Sync representation, so registration clones the
                 // box instead of moving the caller's reusable alias. Lambda

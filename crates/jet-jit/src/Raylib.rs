@@ -1,4 +1,4 @@
-//! D-RAYLIB1 / D-FLAGSHIP-RAYLIB1: resident-JIT `core.raylib` bridge.
+//! D-RAYLIB1 / D-FLAGSHIP-RAYLIB1: resident-JIT `core.game.raylib` bridge.
 //! Mirrors prelude `HandlesRaylib.rs` — headless by default (`JET_RAYLIB_DISPLAY=1`
 //! enables native when the dynamic raylib API is available).
 

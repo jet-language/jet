@@ -14,7 +14,7 @@
 //!
 //! **Layer media type is uncompressed** (`application/vnd.oci.image.layer.v1.tar`,
 //! not the `+gzip` variant) — both are valid, spec-compliant OCI layer types.
-//! `core.compress.gzip`'s flate2 bridge (D-CORE-COMPRESS1) was evaluated for
+//! `core.archive.gzip`'s flate2 bridge (D-CORE-COMPRESS1) was evaluated for
 //! gzip compression here first, but that runtime is emitted only into generated
 //! user-program bridge crates, never linked into `jetpack` itself. Linking flate2 into
 //! `jet-driver` directly would violate I6 (zero external crates in the

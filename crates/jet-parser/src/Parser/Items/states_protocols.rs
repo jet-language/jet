@@ -879,7 +879,7 @@ fn run() {}
     /// fact about a rule, never a trailing word. A new fact about rules is a
     /// new named parameter, so the list stays open-ended and the grammar does
     /// not grow. `@sites` takes `[Site]`, the nineteen-member menu published in
-    /// `core.lang` (`Policy::SITE_VARIANTS`).
+    /// `core.compiler.lang` (`Policy::SITE_VARIANTS`).
     #[test]
     fn a_fact_about_the_rule_is_one_more_named_parameter() {
         let source = "marker Pre(condition: String, message: String, @sites: [.Function, .Method], @repeatable: true)\nfn run() {}\n";

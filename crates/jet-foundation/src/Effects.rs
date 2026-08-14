@@ -62,7 +62,7 @@ pub enum Effect {
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
-    /// (`core.vault.get`). Denied by default even with no declared bound at
+    /// (`core.crypto.vault.get`). Denied by default even with no declared bound at
     /// all — see `check_secret_grants` — and always denied in a comptime
     /// build-tier context (E1265), with no `#Impure` escape hatch.
     Secret,
@@ -184,10 +184,8 @@ pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
             "core.time",
             "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
         )
-            | ("core.time.date", "today")
-            | ("core.time.datetime", "now")
             | (
-                "core.random",
+                "core.math.random",
                 "int"
                     | "float"
                     | "float_range"
@@ -246,14 +244,14 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
                 | "utc"
                 | "zoned"
                 | "zoned_local"
-        ) | ("core.random", "rng")
+        ) | ("core.math.random", "rng")
     ) {
         return None;
     }
     if is_nondeterministic_core(module, method) {
         return Some(match module {
-            "core.time" | "core.time.date" | "core.time.datetime" => Effect::Time,
-            "core.random" | "core.crypto.random" => Effect::Rand,
+            "core.time" => Effect::Time,
+            "core.math.random" | "core.crypto.random" => Effect::Rand,
             _ => return None,
         });
     }
@@ -265,7 +263,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // belongs here, where the run tier reads it too.
     if matches!(
         (module, method),
-        ("core.io", "style_force")
+        ("core.term", "style_force")
             | (
                 "core.net",
                 "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip"
@@ -310,7 +308,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     }
     // D-BROWSER-AUTO1=A: profile/timeout validate pure values; locked reads the
     // project lock (FS). Connecting and handle I/O remain Net effects.
-    if module == "core.browser" {
+    if module == "core.web.browser" {
         return match method {
             "profile" | "timeout" => None,
             "locked" => Some(Effect::FS),
@@ -340,14 +338,14 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
-        "core.net" | "core.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
+        "core.net" | "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
-        "core.raylib" => Effect::GPU,
+        "core.game.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
-        "core.random" | "core.crypto.random" => Effect::Rand,
-        "core.env" => Effect::Env,
+        "core.math.random" | "core.crypto.random" => Effect::Rand,
+        "core.sys" => Effect::Env,
         "core.process" => Effect::Exec,
-        "core.io" => Effect::IO,
+        "core.term" => Effect::IO,
         "core.db" => Effect::DB,
         // D-AUTH1: the storeful session APIs read and write a live user store.
         // Declared here so the comptime tier reads the same fact the run tier
@@ -374,17 +372,18 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
             Effect::Browser
         }
-        // U13 (D-JPK-SECRETCRYPTO1): only `core.vault.get` reads the encrypted
+        // U13 (D-JPK-SECRETCRYPTO1): only `core.crypto.vault.get` reads the encrypted
         // store. D-CORE-SECRETS1=A also places pure in-memory lifecycle helpers
         // in this module; those do not acquire the ambient Secret effect.
-        "core.vault" if matches!(method,
+        "core.crypto.vault" if matches!(method,
             "get" | "current" | "versions" | "load" | "status"
             | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
             | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
             | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
             | "authorize_wrapped_import" | "commit_import_wrapped"
+            | "prepare_import_signing" | "prepare_import_x25519"
+            | "commit_import_signing" | "commit_import_x25519"
         ) => Effect::Secret,
-        "core.vault.expert" => Effect::Secret,
         _ => return None,
     })
 }

@@ -152,7 +152,7 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
         }
     }
     if let TExprKind::CoreCall { module, method, args, .. } = &init.kind {
-        if module == "core.random" {
+        if module == "core.math.random" {
             match method.as_str() {
                 "float_range" | "normal" | "exponential" => return Ok(types::F64),
                 "bool" => return Ok(types::I8),

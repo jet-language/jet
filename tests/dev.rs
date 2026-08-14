@@ -698,11 +698,11 @@ fn print_jit_op_report() {
 ///   - E0956: a construct not yet supported at comptime (hit during execution),
 ///   - E0953: a deliberate user-authored panic (`require(false, …)`), which is
 ///     the program legitimately failing, not a silent skip.
-///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.io`/
-///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
+///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.term`/
+///     `core.sys`/…) reached with no `#Impure` gate, or a gate present but
 ///     `--gate impure=allow` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.
-///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.vault.get` reached through the
+///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reached through the
 ///     same comptime/interpreter evaluation path — unconditionally denied
 ///     (no `#Impure` escape hatch), so an example exercising it always stops
 ///     here under the interpreter/JIT tiers even though the AOT-compiled
@@ -1689,7 +1689,7 @@ fn dev_default_reports_jit_gap_for_env_program() {
     let file = dir.join("env_gap.jet");
     fs::write(
         &file,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();
@@ -1701,7 +1701,7 @@ fn dev_default_reports_jit_gap_for_env_program() {
                 "interpreter mode should still name the boundary: {diags:?}"
             );
         }
-        RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.env program"),
+        RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.sys program"),
     }
 
     jet_jit::reset_jit_trace_for_test();
@@ -1721,7 +1721,7 @@ fn dev_default_reports_jit_gap_for_env_program() {
                 !diags.iter().any(|d| d.code == "E2211"),
                 "E2211 is retired: {diags:?}"
             );
-            panic!("default tiered run should deopt-run core.env, got {diags:?}");
+            panic!("default tiered run should deopt-run core.sys, got {diags:?}");
         }
     }
 }
@@ -2038,7 +2038,7 @@ fn one_shot_dev_deopts_on_jit_gap() {
     let file = dir.join("gap.jet");
     fs::write(
         &file,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -2095,7 +2095,7 @@ fn watching_dev_deopts_on_gap_edit_and_recovers() {
     std::thread::sleep(Duration::from_millis(800));
     fs::write(
         &file,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     std::thread::sleep(Duration::from_millis(800));
@@ -2694,7 +2694,7 @@ fn dev_default_tls_peer_identity_matches_aot_and_interpreter() {
     let source_for = |port: u16| {
         format!(
             r#"use core.net as net
-use core.tls as tls
+use core.net.tls as tls
 
 fn run() {{
     roots :: tls.RootCertificates.from_pem([U8].{{ {roots} }}) ?? panic("roots")
@@ -2965,7 +2965,7 @@ fn try_anyway_skips_the_boundary_scan() {
     ));
     fs::write(
         &path,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     let file = path.to_string_lossy().into_owned();
@@ -4014,7 +4014,7 @@ fn gzip_golden_matches_forced_interpreter_and_aot() {
         eprintln!("note: rustc not found; skipping gzip dev differential");
         return;
     }
-    let source = r#"use core.compress.gzip as gzip
+    let source = r#"use core.archive.gzip as gzip
 
 fn run() {
     bytes :: [U8].{ 72, 101, 108, 108, 111 }
@@ -4056,7 +4056,7 @@ fn zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape() {
         eprintln!("note: rustc not found; skipping zstd dev differential");
         return;
     }
-    let source = r#"use core.compress.zstd as zstd
+    let source = r#"use core.archive.zstd as zstd
 
 fn run() {
     frame :: zstd.compress([72, 101, 108, 108, 111])
@@ -6105,9 +6105,9 @@ fn core_os_examples_match_interpreter_jit_and_aot() {
     std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024)
         .spawn(core_os_examples_match_interpreter_jit_and_aot_inner)
-        .expect("spawn core.os parity worker")
+        .expect("spawn core.sys parity worker")
         .join()
-        .expect("core.os parity worker must not panic");
+        .expect("core.sys parity worker must not panic");
 }
 
 fn core_os_examples_match_interpreter_jit_and_aot_inner() {
@@ -6125,7 +6125,7 @@ fn io_style_raw_nonunicode_no_color_uses_presence_semantics() {
     std::thread::Builder::new()
         .spawn(|| {
             let src =
-                "use core.io as io\nfn run() {\n    print(io.style(\"red\", \"plain\"))\n}\n";
+                "use core.term as io\nfn run() {\n    print(io.style(\"red\", \"plain\"))\n}\n";
             let dir = common::unique_tmp("jet_raw_no_color");
             fs::create_dir_all(&dir).unwrap();
             let input = dir.join("raw_no_color.jet");
@@ -10064,7 +10064,7 @@ fn watching_dev_reruns_on_jit_gap_and_recovers() {
     std::thread::sleep(Duration::from_millis(800));
     fs::write(
         &file,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     std::thread::sleep(Duration::from_millis(800));
@@ -10084,7 +10084,7 @@ fn watching_dev_reruns_on_jit_gap_and_recovers() {
 
     fs::write(
         &file,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     let once = Command::new(env!("CARGO_BIN_EXE_jet"))

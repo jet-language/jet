@@ -1,4 +1,4 @@
-// ── D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 / core.uuid ───────
+// ── D-UUIDENC1=A: core.encoding.hex / core.encoding.base64 / core.crypto.uuid ───────
 // Pure std implementations; zero external crates (I6); memory-safe (I1).
 
 fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
@@ -481,7 +481,7 @@ fn jet_uuid_format(b: &[u8; 16]) -> String {
     )
 }
 
-// #1481 core.uuid: parse a hyphenated UUID string into its 16 raw bytes,
+// #1481 core.crypto.uuid: parse a hyphenated UUID string into its 16 raw bytes,
 // rejecting anything that is not exactly 8-4-4-4-12 hex digits.
 fn jet_uuid_bytes(s: &str) -> Result<[u8; 16], String> {
     let hex: String = s.chars().filter(|c| *c != '-').collect();
@@ -501,13 +501,13 @@ fn jet_uuid_bytes(s: &str) -> Result<[u8; 16], String> {
     Ok(bytes)
 }
 
-// #1481 core.uuid: validate and normalize (lowercase) a UUID string — the
+// #1481 core.crypto.uuid: validate and normalize (lowercase) a UUID string — the
 // String representation stays canonical (D-CORE-TREE1 area; no new UUID type).
 fn jet_std_uuid_parse(s: &String) -> Result<String, String> {
     jet_uuid_bytes(s).map(|bytes| jet_uuid_format(&bytes))
 }
 
-// #1481 core.uuid: RFC 4122 SHA-1 (version 5) — deterministic, no CSPRNG.
+// #1481 core.crypto.uuid: RFC 4122 SHA-1 (version 5) — deterministic, no CSPRNG.
 // Pure std, zero deps (I6); this is the one extra hash function UUID v5
 // needs and is not reused elsewhere, so it stays local instead of a shared
 // crypto primitive.
@@ -566,7 +566,7 @@ fn jet_uuid_sha1(data: &[u8]) -> [u8; 20] {
     out
 }
 
-// #1481 core.uuid: v5 (namespace + name, SHA-1) — deterministic sibling of
+// #1481 core.crypto.uuid: v5 (namespace + name, SHA-1) — deterministic sibling of
 // the already-shipped v4 (random) and v7 (time-ordered).
 fn jet_std_uuid_v5(namespace: &String, name: &String) -> Result<String, String> {
     let ns = jet_uuid_bytes(namespace)?;

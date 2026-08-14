@@ -79,7 +79,7 @@ const PYTHON_SOURCE_CONTAINER = {
   "type:bytes": "Bytes",
   "type:int": "core.math",
   "type:float": "core.math",
-  "mod:builtins": "core.io",
+  "mod:builtins": "core.term",
   "mod:itertools": "Iter",
   "mod:collections": "Queue",
   "mod:heapq": "PriorityQueue",
@@ -90,7 +90,7 @@ const PYTHON_SOURCE_CONTAINER = {
   "mod:math": "core.math",
   "mod:decimal": "core.math",
   "mod:fractions": "core.math",
-  "mod:random": "core.random",
+  "mod:random": "core.math.random",
   "mod:secrets": "core.crypto.random",
   "mod:hashlib": "core.crypto",
   "mod:hmac": "core.crypto",
@@ -102,19 +102,19 @@ const PYTHON_SOURCE_CONTAINER = {
   "mod:base64": "core.encoding.base64",
   "mod:binascii": "core.encoding.hex",
   "mod:re": "core.regex",
-  "mod:pathlib": "core.path",
-  "mod:os": "core.os",
-  "mod:sys": "core.os",
+  "mod:pathlib": "core.files",
+  "mod:os": "core.sys",
+  "mod:sys": "core.sys",
   "mod:shutil": "core.files",
   "mod:glob": "core.files",
   "mod:tempfile": "core.files",
   "mod:subprocess": "core.process",
   "mod:socket": "core.net",
-  "mod:ssl": "core.tls",
+  "mod:ssl": "core.net.tls",
   "mod:http": "core.http",
   "mod:http.server": "core.http",
-  "mod:urllib.parse": "core.url",
-  "mod:uuid": "core.uuid",
+  "mod:urllib.parse": "core.net.url",
+  "mod:uuid": "core.crypto.uuid",
   "mod:sqlite3": "core.db",
   "mod:asyncio": "core.tasks",
   "mod:threading": "core.sync",
@@ -122,18 +122,18 @@ const PYTHON_SOURCE_CONTAINER = {
   "mod:argparse": "core.args",
   "mod:email": "core.email",
   "mod:inspect": "core.reflect",
-  "mod:mimetypes": "core.mime",
+  "mod:mimetypes": "core.net.mime",
   "mod:xml.etree.ElementTree": "core.encoding.xml",
   "mod:copy": "core.mem",
   "mod:unittest": "core.testing",
   "mod:logging": "core.log",
-  "mod:struct": "core.binary",
+  "mod:struct": "core.encoding",
   "mod:zipfile": "core.archive",
   "mod:tarfile": "core.archive",
   "mod:gzip": "core.archive",
   "mod:zlib": "core.archive",
   "mod:statistics": "core.data",
-  "mod:unicodedata": "core.text.unicode",
+  "mod:unicodedata": "core.text",
 };
 
 // A recorded Python module with no container yet. Listing it keeps the gap
@@ -145,9 +145,9 @@ const PYTHON_UNASSIGNED = {
 const PYTHON_ABSENT = {
   Rank: "no Python standard-library ordered set",
   Bits: "no Python standard-library bit set; int carries bit operations",
-  "core.env": "environment access lives in the os module, recorded under core.os",
+  "core.sys": "environment and system facts share the sys module",
   "core.encoding.base32": "base32 lives in the base64 module, recorded under core.encoding.base64",
-  "core.fmt": "formatting lives on str.format, recorded under String",
+  "core.text.fmt": "formatting lives on str.format, recorded under String",
   "core.text": "text handling lives on str, recorded under String",
   "core.encoding.yaml": "no Python standard-library YAML codec",
   "core.term": "curses is platform-conditional, so it is not recorded here",
@@ -160,11 +160,9 @@ const PYTHON_ABSENT = {
 const CONTAINER_ALIASES = {
   "core.http.client": "core.http",
   "core.http.server": "core.http",
-  "core.time.date": "core.time",
-  "core.time.datetime": "core.time",
   "core.time.expiring": "core.time",
-  "core.compress.gzip": "core.archive",
-  "core.compress.zstd": "core.archive",
+  "core.archive.gzip": "core.archive",
+  "core.archive.zstd": "core.archive",
   "core.encoding": "core.encoding.json",
   "core.crypto.expert": "core.crypto",
   // Task, TaskList and Duration are Jet types, but their workflow is the Core
@@ -197,7 +195,7 @@ const CONTAINER_ALIASES = {
 //
 // Groups stay tight on purpose. Merging a name Jet lacks into a group Jet has
 // would hide a real gap, so is_subset is not a kind of contains.
-// A gap merges by domain, so `unlink` under core.os and under core.path is one
+// A gap merges by domain, so `unlink` under core.sys and under core.path is one
 // row. A name that recurs across *different* domains is a separate question,
 // and it has two different answers.
 //
@@ -450,21 +448,19 @@ for (const group of SYNONYM_GROUPS) {
 // Jet splits some workflows across Core modules where another language keeps
 // them on one type, and the reverse. Matching a Jet member only inside its own
 // container then scored one capability twice in opposite directions: Python
-// unlink sat unmatched in core.os while core.path.unlink was a loss and
+// unlink sat unmatched in core.sys while core.path.unlink was a loss and
 // core.files.remove was equal.
 //
 // Matching looks across a domain. Minting a gap stays per container, so a
 // missing operation is still reported once, in one place.
 const MATCH_DOMAIN = {
   "core.files": "filesystem",
-  "core.path": "filesystem",
-  "core.os": "filesystem",
-  "core.env": "filesystem",
+  "core.sys": "filesystem",
   Bytes: "bytes",
-  "core.binary": "bytes",
-  "core.io": "bytes",
+  "core.encoding": "bytes",
+  "core.term": "bytes",
   "core.net": "network",
-  "core.tls": "network",
+  "core.net.tls": "network",
   List: "sequence",
   Iter: "sequence",
   String: "text",
@@ -497,7 +493,7 @@ const TYPE_CONTAINER = {
   CompilerSyntaxTree: "core.compiler",
   CompilerNode: "core.compiler",
   BuildContext: "core.compiler",
-  Solver: "core.solve",
+  Solver: "core.compute.solve",
   Digest256: "core.crypto",
   Digest512: "core.crypto",
   Clock: "core.time",
@@ -511,15 +507,15 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
-  Url: "core.url",
-  Mime: "core.mime",
+  Url: "core.net.url",
+  Mime: "core.net.mime",
   Regex: "core.regex",
   Match: "core.regex",
   ExpiringValue: "core.time.expiring",
   Condition: "core.sync",
-  Secret: "core.vault",
-  WrappedVaultKey: "core.vault",
-  KeyUnlock: "core.vault",
+  Secret: "core.crypto.vault",
+  WrappedVaultKey: "core.crypto.vault",
+  KeyUnlock: "core.crypto.vault",
   SigningKey: "core.crypto",
   VerifyKey: "core.crypto",
   Signature: "core.crypto",
@@ -602,18 +598,18 @@ const COLLECTION_METHOD_FUNCTIONS = {
 const CLUSTER_OWNER = {
   // Pooling a recurring capability across domains gave these three their first
   // scored gaps; nothing in them had ever reached two witnesses per-domain.
-  "core.fmt": 1493,
+  "core.text.fmt": 1493,
   Bits: 1493,
-  "core.text.unicode": 1493,
+  "core.text": 1493,
   "core.math": 1464,
-  "core.os": 1465,
+  "core.sys": 1465,
   "core.time": 1466,
   Bytes: 1467,
   "core.tasks": 1468,
   "core.net": 1469,
   "core.archive": 1470,
   "core.regex": 1471,
-  "core.url": 1472,
+  "core.net.url": 1472,
   "core.crypto": 1725,
   "core.log": 1474,
   Queue: 1475,
@@ -622,12 +618,11 @@ const CLUSTER_OWNER = {
   Map: 1477,
   Set: 1584,
   Rank: 1584,
-  "core.io": 1480,
+  "core.term": 1480,
   "core.files": 288,
-  "core.path": 288,
   // #1481 shipped PriorityQueue.remove, Process.exited, and UUID parse/v5,
   // and ballot-declined the rest (D-CORESURF-SMALL1). #1590 applies that
-  // ratified outcome to this ledger and finishes core.tls's 2 open rows.
+  // ratified outcome to this ledger and finishes core.net.tls's 2 open rows.
   "core.sync": 1590,
   "core.encoding.xml": 1590,
   "core.process": 1590,
@@ -635,14 +630,14 @@ const CLUSTER_OWNER = {
   "core.testing": 1590,
   "core.reflect": 1590,
   "core.http": 1590,
-  // D-CORESURF-SMALL1's own text defers core.tls's last 2 rows (ciphersuites,
+  // D-CORESURF-SMALL1's own text defers core.net.tls's last 2 rows (ciphersuites,
   // tlsversion — the negotiated values) to a follow-up card, not this ballot:
   // a native TLS-bridge change, tracked separately from the decline sweep.
-  "core.tls": 1593,
-  "core.uuid": 1590,
-  "core.binary": 1590,
+  "core.net.tls": 1593,
+  "core.crypto.uuid": 1590,
+  "core.encoding": 1590,
   "core.encoding.csv": 1590,
-  "core.random": 1590,
+  "core.math.random": 1590,
   "core.args": 1590,
   "core.encoding.json": 1590,
   "core.mem": 1590,
@@ -761,16 +756,16 @@ const RATIFIED_DECLINES = {
   "gap.network.handshake": ["D-CORESURF-SMALL1", "happens inside tls.client() automatically, by design"],
   "gap.network.verifyhostname": ["D-CORESURF-SMALL1", "mandatory already — TLSPeerIdentity.verified_server_name, no opt-out"],
   "gap.network.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
-  "gap.core.uuid.join": ["D-CORESURF-SMALL1", "matches no real UUID operation in any compared language"],
-  "gap.core.uuid.uuid1": ["D-CORESURF-SMALL1", "declined — MAC-address-based, weaker than the already-shipped v7"],
-  "gap.core.uuid.uuid4": ["D-CORESURF-SMALL1", "uuid.v4 — same call, existing name"],
+  "gap.core.crypto.uuid.join": ["D-CORESURF-SMALL1", "matches no real UUID operation in any compared language"],
+  "gap.core.crypto.uuid.uuid1": ["D-CORESURF-SMALL1", "declined — MAC-address-based, weaker than the already-shipped v7"],
+  "gap.core.crypto.uuid.uuid4": ["D-CORESURF-SMALL1", "uuid.v4 — same call, existing name"],
   "gap.bytes.pipe": ["D-CORESURF-SMALL1", "declined — JetReader is a fixed in-memory parser (D-SHIFT1), not a stream"],
   "gap.bytes.readchar": ["D-CORESURF-SMALL1", "declined — character decoding belongs to core.text's Cursor, not a byte reader"],
   "gap.core.encoding.csv.flush": ["D-CORESURF-SMALL1", "CSVWriter.flush"],
   "gap.core.encoding.csv.read": ["D-CORESURF-SMALL1", "CSVReader.next"],
   "gap.core.encoding.csv.fieldsizelimit": ["D-CORESURF-SMALL1", "EncodingLimits.max_item_bytes"],
-  "gap.core.random.random": ["D-CORESURF-SMALL1", "core.random.float"],
-  "gap.core.random.uniform": ["D-CORESURF-SMALL1", "core.random.float_range"],
+  "gap.core.math.random.random": ["D-CORESURF-SMALL1", "core.math.random.float"],
+  "gap.core.math.random.uniform": ["D-CORESURF-SMALL1", "core.math.random.float_range"],
   "gap.core.args.parse": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
   "gap.core.args.parseargs": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
   "gap.core.encoding.json.dump": ["D-CORESURF-SMALL1", "to_string() + a file write, or the streaming JSONWriter"],
@@ -1062,17 +1057,17 @@ function moduleInventory() {
 
   const policy = read(POLICY_PATH);
   if (!source.includes("Policy::RULE_ARG_DECLARATIONS")) {
-    throw new Error("core.lang dynamic source anchor disappeared from module_items.rs");
+    throw new Error("core.compiler.lang dynamic source anchor disappeared from module_items.rs");
   }
   const appliedAt = policy.indexOf("pub const APPLIED_RULES");
   const applied = policy.slice(appliedAt, policy.indexOf("\n];", appliedAt) + 3);
   const langMembers = new Set(["Track"]);
   for (const match of applied.matchAll(/=>\s*"([^"]+)"/g)) langMembers.add(match[1]);
-  entries.set("core.lang", {
-    module: "core.lang",
-    rawModules: ["core.lang (Policy::RULE_ARG_DECLARATIONS)"],
+  entries.set("core.compiler.lang", {
+    module: "core.compiler.lang",
+    rawModules: ["core.compiler.lang (Policy::RULE_ARG_DECLARATIONS)"],
     members: langMembers,
-    sourceLine: lineAt(source, source.indexOf("core.lang")),
+    sourceLine: lineAt(source, source.indexOf("core.compiler.lang")),
   });
 
   // `core.mem` is gated by a typed table instead of a match arm. Resolve the
@@ -1696,7 +1691,7 @@ function competitorCells(surfaces, container, jetMember, keys) {
     }
     const exact = normalize(jetMember);
     // Look across the domain: Jet's core.files.remove is answered by Python's
-    // os.unlink, which the snapshot records under core.os.
+    // os.unlink, which the snapshot records under core.sys.
     let hit = null;
     for (const name of lookIn) {
       const sibling = entry.surface.containers[name];
@@ -1814,7 +1809,7 @@ function competitorRows(surfaces, jetRows) {
         const key = canonicalKey(operation, container);
         if (keys.has(key)) continue;
         // Merge on the matching domain, not the container. Python records
-        // unlink under core.os and Ruby under core.path; they are one missing
+        // unlink under core.sys and Ruby under core.path; they are one missing
         // capability with two witnesses, not two single-witness rows.
         const id = "gap." + domainFor(container) + "." + key;
         if (!gaps.has(id)) {
@@ -1848,7 +1843,7 @@ function competitorRows(surfaces, jetRows) {
   // container protocol transfers from a List to a Map because both are things
   // you hold; it does not transfer into a module namespace. `core.math` gains
   // no `clear` because a List has one, and reading it that way invented gaps
-  // like `core.os.hash` and `core.time.push`.
+  // like `core.sys.hash` and `core.time.push`.
   const pooledWitnesses = new Map();
   for (const gap of gaps.values()) {
     if (!CROSS_DOMAIN_POOLED.has(gap.key)) continue;
@@ -2218,7 +2213,7 @@ function validateSurfaces(ledger, surfaces) {
     }
     // One source feeds one container. This was asserted in prose and never
     // enforced, and R's base package really did feed core.math and
-    // core.random, so one function minted two gaps.
+    // core.math.random, so one function minted two gaps.
     const owner = new Map();
     for (const [name, record] of Object.entries(entry.surface.containers)) {
       if (!record.present) continue;

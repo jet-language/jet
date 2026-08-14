@@ -483,12 +483,12 @@ fn is_code(s: &str) -> bool {
 
 // ── D-CLI1: `--` separator passthrough (c11) ──────────────────────────────
 
-/// Write a Jet fixture that prints its argument count via `io.args()`.
+/// Write a Jet fixture that prints its argument count via `process.argv()`.
 fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(
         &p,
-        "use core.io as io\nfn run() {\n    args :: io.args()\n    print(args.len())\n}\n",
+        "use core.term as io\nfn run() {\n    args :: process.argv()\n    print(args.len())\n}\n",
     )
     .unwrap();
     p

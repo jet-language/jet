@@ -1188,7 +1188,7 @@ fn graph_query_denies_ambient_impure_effects_before_host_side_effects() {
         &format!(
             r#"
 use core.files as files
-use core.env as env
+use core.sys as env
 use core.process as process
 
 fn build(b: BuildContext) => BuildPlan ? {{
@@ -1229,7 +1229,7 @@ fn graph_query_denies_each_ambient_authority_class() {
         ),
         (
             "environment",
-            "core.env",
+            "core.sys",
             "api.set(\"JET_QUERY_BLOCKED\", \"owned\")",
         ),
         (
@@ -2200,7 +2200,7 @@ fn vault_is_denied_unconditionally_inside_impure_build_context() {
     write(
         &entry,
         r#"
-use core.vault as vault
+use core.crypto.vault as vault
 fn build(b: BuildContext) =[Secret]=> BuildPlan ? {
     #Impure("must not grant secret access") {
         secret :: vault.get("db_password")

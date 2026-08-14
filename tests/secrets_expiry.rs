@@ -10,7 +10,7 @@ fn expiring_secret_lends_then_zeroizes_on_expiry() {
     let src = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(100)
@@ -55,7 +55,7 @@ fn run() {
 fn expiring_secret_rejects_non_secret_values() {
     let src = r#"
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -72,7 +72,7 @@ fn expiring_secret_accepts_only_the_closed_secret_family() {
     let src = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -94,7 +94,7 @@ fn expiring_secret_loan_can_call_read_helpers() {
     let src = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn inspect_key(key: crypto.SigningKey) => VerifyKey {
     return key.public_key()
@@ -118,7 +118,7 @@ fn run() {
     let core_call = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -149,7 +149,7 @@ fn expiring_secret_loan_can_call_cross_file_read_helpers() {
 use "helper"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -177,7 +177,7 @@ fn run() {
 use "fake"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -226,7 +226,7 @@ fn run() {}
 fn expiring_secret_rejects_non_clock_observers_in_sema() {
     let src = r#"
 use core.crypto as crypto
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
@@ -248,7 +248,7 @@ fn run() {
 fn expiring_secret_system_observation_is_not_pure() {
     let src = r#"
 use core.crypto as crypto
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) =[]=> Bool {
     return secret.with((borrowed) => borrowed.public_key()) == .Ok(_)
@@ -270,7 +270,7 @@ fn expiring_secret_requires_ownership_and_rejects_loan_escape() {
     let no_move = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -288,7 +288,7 @@ fn run() {
     let escape = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -306,7 +306,7 @@ fn run() {
     let closure_escape = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -326,7 +326,7 @@ fn run() {
     let storage_escape = r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn run() {
     clock := Clock.new(0)
@@ -355,7 +355,7 @@ fn expiring_secret_loan_rejects_move_variadic_and_drop_paths() {
             r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 fn consume(value: ^crypto.SigningKey) {}
 fn run() {
     clock := Clock.new(0)
@@ -371,7 +371,7 @@ fn run() {
             r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 fn collect(values: ...crypto.SigningKey) {}
 fn run() {
     clock := Clock.new(0)
@@ -387,7 +387,7 @@ fn run() {
             r#"
 use core.crypto as crypto
 use core.time as time
-use core.vault as vault
+use core.crypto.vault as vault
 fn run() {
     clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")

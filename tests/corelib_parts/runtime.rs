@@ -754,7 +754,7 @@ fn solve_solver_records_bool_constraints_in_order() {
         &dir,
         "solve_runtime",
         r#"
-use core.solve as solve
+use core.compute.solve as solve
 
 fn run() {
     solver := solve.Solver.new(42)
@@ -777,7 +777,7 @@ fn run() {
 #[test]
 fn solve_require_needs_mutable_solver() {
     let src = r#"
-use core.solve as solve
+use core.compute.solve as solve
 
 fn run() {
     solver :: solve.Solver.new(1)
@@ -812,7 +812,7 @@ fn run() {}
 #[test]
 fn solve_constructor_is_static_only() {
     let src = r#"
-use core.solve as solve
+use core.compute.solve as solve
 
 fn run() {
     solver := solve.Solver.new(1)

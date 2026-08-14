@@ -30,8 +30,8 @@ impl SinkRow {
 
 /// One home for credential sinks.
 pub const SINK_ROWS: &[SinkRow] = &[
-    SinkRow::call("core.io", "print", SinkClass::Credential),
-    SinkRow::call("core.io", "eprint", SinkClass::Credential),
+    SinkRow::call("core.term", "print", SinkClass::Credential),
+    SinkRow::call("core.term", "eprint", SinkClass::Credential),
     SinkRow::call("core.log", "*", SinkClass::Credential),
     SinkRow::call("core.encoding.json", "to_string", SinkClass::Credential),
     SinkRow::call("core.encoding.json", "to_string_pretty", SinkClass::Credential),

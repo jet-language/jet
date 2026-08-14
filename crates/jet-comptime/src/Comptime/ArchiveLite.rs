@@ -35,7 +35,7 @@ pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
 
 // Dictionaryless, std-only Zstandard decoder used by the resident evaluator.
 pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
-    let fail = |reason: &str| format!("compress.zstd.decompress: {reason}");
+    let fail = |reason: &str| format!("archive.zstd.decompress: {reason}");
     let mut input = 0usize;
     let mut out = Vec::new();
     while input < data.len() {
@@ -213,7 +213,7 @@ pub(super) fn gzip_compress(data: &[u8]) -> Vec<u8> {
 }
 
 pub(super) fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
-    let fail = || "compress.gzip.decompress: invalid gzip data".to_string();
+    let fail = || "archive.gzip.decompress: invalid gzip data".to_string();
     if data.len() < 18 || data[..3] != [0x1f, 0x8b, 8] {
         return Err(fail());
     }

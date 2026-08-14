@@ -76,7 +76,7 @@ pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
     matches!(
         (module, method),
         (
-            "core.io",
+            "core.term",
             "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input"
         )
     )

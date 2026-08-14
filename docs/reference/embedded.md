@@ -31,10 +31,10 @@ permitted:
 | Allowed | Rejected |
 |---------|---------|
 | `core.math` | `core.files` |
-| `core.encoding.json` | `core.io` |
+| `core.encoding.json` | `core.term` |
 | `core.mem` | `core.net` |
-| `core.random` | `core.tasks` |
-| `core.env` | `core.time` |
+| `core.math.random` | `core.tasks` |
+| `core.sys` | `core.time` |
 | `Path` values | `core.http` |
 | `core.crypto` | `core.log` |
 |             | `core.time` |

@@ -366,7 +366,7 @@ impl<R: Read> KeyReader<R> {
 }
 
 /// Terminal column width, via `stty size` (falls back to 80 — the same
-/// fallback the codegen prelude's `core.io.terminal_width()` uses).
+/// fallback the codegen prelude's `core.term.terminal_width()` uses).
 pub fn terminal_width() -> usize {
     Command::new("stty")
         .arg("size")

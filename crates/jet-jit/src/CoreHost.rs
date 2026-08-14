@@ -1,5 +1,5 @@
-//! Host shims for `core.os`, `core.log`, `core.math`, and `core.files`,
-//! plus `core.env` and `core.process` CoreCalls (#729). Behavior
+//! Host shims for `core.sys`, `core.log`, `core.math`, and `core.files`,
+//! plus `core.sys` and `core.process` CoreCalls (#729). Behavior
 //! mirrors AOT helpers in the CoreLib prelude (`jet_std_os_*`, `jet_ring_log_*`,
 //! `jet_std_math_*`, `jet_std_fs_*`, `jet_std_path_*`, `jet_std_env_*`,
 //! `jet_std_process_*`) — thin std wrappers, not a third algorithm.
@@ -19,7 +19,7 @@ mod interrupt_queue {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs");
 }
 
-// The Prelude owns every core.os fact. This module supplies only the small
+// The Prelude owns every core.sys fact. This module supplies only the small
 // type/ambient surface needed to include that exact source; wrappers below
 // marshal its Rust values to the resident heap ABI.
 mod os_rt {
@@ -323,7 +323,7 @@ pub(crate) fn reset_jit_interrupts() {
     jit_os_interrupt::reset();
 }
 
-// ── core.os (Prelude facts; these functions only marshal values) ─────────────
+// ── core.sys (Prelude facts; these functions only marshal values) ─────────────
 
 fn alloc_i64_list(values: &[i64]) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -1715,7 +1715,7 @@ extern "C" fn jet_jit_math_ceil_f32(x: f64) -> f64 {
     ((x as f32).ceil()) as f64
 }
 
-// ── core.env / core.process (mirrors jet_std_env_get / jet_std_process_exit) ─
+// ── core.sys / core.process (mirrors jet_std_env_get / jet_std_process_exit) ─
 
 /// Option ABI: `0` = None, else string-handle+1 (same as list_get_opt).
 extern "C" fn jet_jit_env_get(name: i64) -> i64 {

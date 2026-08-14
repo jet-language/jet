@@ -19,11 +19,11 @@ fn importing_core_without_calls_is_free_in_codegen() {
         "core_import_only.jet",
         r#"
 use core.files as fs
-use core.io as io
-use core.env as env
+use core.term as io
+use core.sys as env
 use core.process as process
 use core.math as math
-use core.random as random
+use core.math.random as random
 use core.time as time
 use core.encoding.json as json
 
@@ -403,7 +403,7 @@ fn core_time_calendar_zone_and_dst_run() {
     fs::copy(&source_zone, tzdb.join("America/New_York")).unwrap();
     let src = r#"
 use core.time as time
-use core.time.date as date
+use core.time as date
 
 fn run() {
     zone :: time.zone("America/New_York") ?? panic("missing zone")
@@ -440,8 +440,8 @@ fn core_url_mime_parse_join_query_and_http_url_run() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-use core.mime as mime
-use core.url as url
+use core.net.mime as mime
+use core.net.url as url
 
 fn run() {
     base :: url.parse("https://Bücher.example:443/a/./b/../c?x=1#frag") ?? panic("bad url")

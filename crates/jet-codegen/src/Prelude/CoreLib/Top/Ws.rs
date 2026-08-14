@@ -1,4 +1,4 @@
-// D-WS1=B: native std-only WebSocket (RFC6455) for core.ws.
+// D-WS1=B: native std-only WebSocket (RFC6455) for core.net.ws.
 // Client connect and server upgrade share one frame codec. No external crates.
 thread_local! {
     static JET_WS_ACTIVE_STREAM: std::cell::RefCell<Option<*mut std::net::TcpStream>> =

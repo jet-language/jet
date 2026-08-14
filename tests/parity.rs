@@ -13,8 +13,8 @@
 //! ambient/native effects are named in `core_boundary` — never listed as
 //! PurePending gaps.
 //!
-//! Effectful modules (`core.files`/`core.env`/`core.io`/`core.exec`/
-//! `core.net`/`core.tls`/`core.process`) are explicit effect boundaries:
+//! Effectful modules (`core.files`/`core.sys`/`core.term`/`core.net`/
+//! `core.net.tls`/`core.process`) are explicit effect boundaries:
 //! comptime handles them as a whole via the `is_tier2` wildcard (E3410
 //! `#Impure` gate), not per-method.
 
@@ -29,11 +29,10 @@ use std::fs;
 /// cases) already cover.
 const EFFECT_GATED_MODULES: &[&str] = &[
     "core.files",
-    "core.env",
-    "core.io",
-    "core.exec",
+    "core.sys",
+    "core.term",
     "core.net",
-    "core.tls",
+    "core.net.tls",
     "core.process",
     // Not gated by the generic `is_tier2` list — denied unconditionally,
     // earlier in `eval_method`, with its own diagnostic (E1265): a build
@@ -41,7 +40,7 @@ const EFFECT_GATED_MODULES: &[&str] = &[
     // `#Impure` escape hatch at all here, unlike the effects above. Correctly
     // handled, just not through the per-method `apply_core_call` table this
     // audit reads — excluded so it isn't flagged as a silent gap.
-    "core.vault",
+    "core.crypto.vault",
 ];
 
 // The tuple extractor intentionally over-approximates alternation arms. JSON's
@@ -806,7 +805,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     // Wholly ambient modules — every discovered call is a named boundary.
     if matches!(
         module,
-        "core.os"
+        "core.sys"
             | "core.term"
             | "core.web"
             | "core.web.storage.local"
@@ -814,7 +813,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
             | "core.tasks"
             | "core.watcher"
             | "core.web.devserver"
-            | "core.uuid"
+            | "core.crypto.uuid"
     ) {
         return Some("named ambient/native boundary");
     }
@@ -829,7 +828,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     {
         return Some("named ambient/native boundary");
     }
-    if module == "core.raylib"
+    if module == "core.game.raylib"
         && matches!(
             method,
             "begin_drawing"
@@ -861,9 +860,9 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
             | "core.http.client"
             | "core.http.server"
             | "core.http.middleware"
-            | "core.ws"
+            | "core.net.ws"
             | "core.mem"
-            | "core.scope"
+            | "core.mem.scope"
     ) {
         return Some("named runtime/native boundary");
     }
@@ -885,11 +884,11 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if module == "core.crypto.expert" && matches!(method, "open_v1" | "migrate_v1") {
         return Some("named native/security boundary");
     }
-    if matches!(module, "core.vault" | "core.vault.expert") {
+    if module == "core.crypto.vault" {
         return Some("named native/security boundary");
     }
-    if (module == "core.time.date" && method == "today")
-        || (module == "core.time.datetime" && method == "now")
+    if (module == "core.time" && method == "today")
+        || (module == "core.time" && method == "now")
     {
         return Some("named clock boundary");
     }
@@ -1546,21 +1545,21 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     for method in ["compress", "decompress"] {
         assert_eq!(
-            record(&records, Surface::Fixed, "core.compress.gzip", method).class,
+            record(&records, Surface::Fixed, "core.archive.gzip", method).class,
             Class::Covered
         );
         assert_eq!(
-            record(&records, Surface::Fixed, "core.compress.zstd", method).class,
+            record(&records, Surface::Fixed, "core.archive.zstd", method).class,
             Class::Covered
         );
     }
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.game", "run").class, Class::Boundary);
     for (module, method) in [
-        ("core.sketch.hll", "new"),
-        ("core.sketch.tdigest", "new"),
-        ("core.sketch.cms", "new"),
-        ("core.sketch.reservoir", "new"),
+        ("core.data.sketch.hll", "new"),
+        ("core.data.sketch.tdigest", "new"),
+        ("core.data.sketch.cms", "new"),
+        ("core.data.sketch.reservoir", "new"),
     ] {
         assert_eq!(
             record(&records, Surface::Bespoke, module, method).class,
@@ -1591,8 +1590,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.vault.expert", "prepare_import_signing").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.vault.expert", "commit_import_x25519").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Fixed, "core.crypto.vault", "prepare_import_signing").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Fixed, "core.crypto.vault", "commit_import_x25519").class, Class::Boundary);
 
     // Exact per-call inventory: ported pure rows stay Covered; open pure gaps
     // stay PurePending; ambient backends stay Boundary (#721 / #392 C3).
@@ -1631,7 +1630,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         record(&records, Surface::Bespoke, "core.ui", "reactive_render").class,
         Class::Boundary
     );
-    assert_eq!(record(&records, Surface::Fixed, "core.raylib", "color").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.game.raylib", "color").class, Class::Covered);
     for method in [
         "ed25519_verify_strict",
         "ed25519_sign",

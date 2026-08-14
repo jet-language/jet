@@ -1132,7 +1132,7 @@ fn http_router_retired_bare_catchall_is_jet_runtime_error() {
     let src = "\
 use core.http as http
 use core.http.server as server
-use core.env as env
+use core.sys as env
 fn handle(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"ok\"))
 }

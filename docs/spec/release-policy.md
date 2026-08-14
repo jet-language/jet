@@ -38,15 +38,15 @@ A toolchain advertises the editions it supports in `jet --version`.
 
 ### Environment safety correction (D-ENV-MUTATE1)
 
-`core.env` mutations now change Jet's locked logical environment rather than
+`core.sys` mutations now change Jet's locked logical environment rather than
 the host process environment. Valid Jet behavior remains compatible: a later
-`core.env.get` observes the write, and every `core.process` child inherits it.
+`core.sys.get` observes the write, and every `core.process` child inherits it.
 Foreign code that calls libc `getenv` or reads the Windows environment block
 after a Jet mutation now sees the original host value. This is the ratified
 narrow safety exception to the normal compatibility promise: mutating a
 process-global host environment while foreign threads may read it cannot meet
 Jet's memory-safety guarantee. Pass changed values to foreign APIs explicitly.
-Existing editions keep `core.env.set => ()`; its fallible
+Existing editions keep `core.sys.set => ()`; its fallible
 `() ? EnvError` signature requires a future major release and edition opt-in.
 
 ## Deprecation policy + migration window
@@ -89,7 +89,7 @@ D-TLS1 makes `https://` work by default for the client path
 certificate roots. A native Jet TLS implementation may replace rustls as the
 default only after an external security audit and an interop battery against
 rustls and OpenSSL test vectors. Advanced client configuration lives under
-`core.tls`; server TLS is the D-TLSSERVE1 named option
+`core.net.tls`; server TLS is the D-TLSSERVE1 named option
 `Server.serve(addr, mux, tls: Server.tls(cert, key))`.
 
 ## `jet --version` contract (E2-D1)

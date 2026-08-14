@@ -447,7 +447,7 @@ impl<'a> TaintCtx<'a> {
             }
             Expr::Tainted(inner, _, _) => self.check_expr(inner),
             Expr::Call(c) => {
-                let credential_sink = crate::Syntax::credential_sink("core.io", &c.name);
+                let credential_sink = crate::Syntax::credential_sink("core.term", &c.name);
                 let destinations = if credential_sink {
                     vec!["Log".to_string()]
                 } else {

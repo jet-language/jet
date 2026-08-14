@@ -39,17 +39,18 @@ See S66 for acronym capitalization.
 
 ```jet
 use core.files as fs
-use core.io as io
-use core.env as env
+use core.term as term
+use core.sys as sys
+use core.process as process
 
 fn run() {
-    args :: io.args()
+    args :: process.argv()
     if args.len() < 2 {
-        io.eprint("usage: greet <name>")
+        term.eprint("usage: greet <name>")
         return
     }
     name :: args.get(1) ?? return
-    greeting :: env.get("GREETING") ?? "hello"
+    greeting :: sys.get("GREETING") ?? "hello"
     fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return
     print(fs.read("/tmp/greet.txt") ?? return)
 }
@@ -76,9 +77,9 @@ use core.encoding.json as json       // a nested submodule
 `use core.files` and `use core.encoding.json` each resolve to a
 compiler-known module under the `core` root.
 
-### `core.lang` — language declarations
+### `core.compiler.lang` — language declarations
 
-`core.lang` publishes the compiler vocabulary used by typed marker arguments.
+`core.compiler.lang` publishes the compiler vocabulary used by typed marker arguments.
 These are ordinary generated enums. The marker registry is their source, so
 diagnostics, `jet explain`, hover, completion, documentation, and reflection
 show the same declaration.
@@ -88,7 +89,7 @@ The generated enum types are `ABI`, `Capability`, `FfiLanguage`, `InlineMode`,
 `PolicySetting`, `State`, `TaintKind`, `Target`, and `Track`.
 
 ```jet
-use core.lang as lang
+use core.compiler.lang as lang
 
 #Inline(lang.InlineMode.Always)
 fn parse_fast(text: String) => Int :: text.parse() ?? 0
@@ -120,8 +121,8 @@ did-you-mean suggestion when possible.
 
 Failure-returning core functions return `T ? E` and must be handled with `?`, `??`, or
 a pattern test like any other Jet result. `core.files` has both whole-file
-helpers (`read`/`write`/…) and streaming handles (`open`/`create`); paths are
-plain `String`; binary APIs use `U8` and `[U8]`.
+helpers (`read`/`write`/…) and streaming handles (`open`/`create`); path
+arguments accept `String | Path`; binary APIs use `U8` and `[U8]`.
 
 ---
 
@@ -397,19 +398,19 @@ hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
 last handle drop. `Path` is the portable path value. Build one with
 `Path.from(value)`, compose it with `.join(part)`, and inspect it with
 `.parent()`, `.extension()`, `.stem()`, and `.normalize()`. The old
-`core.path` free functions are retired by D-CORE-PATH1. Examples:
+The old free path functions are retired by D-CORE-PATH1. Examples:
 `examples/features/io/dir_entry.jet` and `examples/features/io/files_depth.jet`.
 
-### `core.url` and `core.mime` — typed web addresses and media types
+### `core.net.url` and `core.net.mime` — typed web addresses and media types
 
-`core.url` parses, normalizes, joins, and renders typed `Url` values. Hosts are
+`core.net.url` parses, normalizes, joins, and renders typed `Url` values. Hosts are
 lowercased and IDNA labels are punycoded; paths remove dot segments; query
 pairs preserve repeated keys. `core.http.client` accepts either `String` or
 `Url` for URL arguments.
 
 ```jet
-use core.url as url
-use core.mime as mime
+use core.net.url as url
+use core.net.mime as mime
 
 fn run() {
     base :: url.parse("https://Bücher.example/a/./b/../c?x=1") ?? return
@@ -435,7 +436,7 @@ fn run() {
 | `u.normalize()` / `.join(relative)` | `Url` / `Url ? String` | Normalize or resolve a relative reference |
 | `u.set_query(k, v)` / `.add_query(k, v)` | `Url` | Return a new URL with query pairs changed; repeated keys are preserved by `add_query` |
 
-`core.mime` parses `type/subtype; param=value`, exposes typed accessors, and
+`core.net.mime` parses `type/subtype; param=value`, exposes typed accessors, and
 ships a small extension table for common web/static-file types. Sniffing is not
 implicit; callers choose an explicit MIME type or extension lookup.
 
@@ -446,14 +447,14 @@ implicit; callers choose an explicit MIME type or extension lookup.
 | `m.media_type()` / `.subtype()` / `.essence()` | `String` | Type/subtype accessors |
 | `m.param(name)` / `.params()` | `String?` / `[[String]]` | Parameter lookup and decoded key/value rows |
 
-### `core.uuid` — UUIDs (D-UUIDENC1=A)
+### `core.crypto.uuid` — UUIDs (D-UUIDENC1=A)
 
 A UUID stays a plain `String` — no separate nominal type. `v4` and `v7`
 generate; `parse` validates and normalizes; `v5` derives the same UUID every
 time from a namespace and a name.
 
 ```jet
-use core.uuid as uuid
+use core.crypto.uuid as uuid
 
 fn run() {
     id :: uuid.v4()                                  // random
@@ -587,7 +588,7 @@ Client surface:
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` / `.dns_timeout(ms)` / `.tls_timeout(ms)` / `.write_timeout(ms)` / `.first_byte_timeout(ms)` | `HTTPClientReq` | Set nonnegative global/per-phase deadlines; request overrides beat `Client.timeouts`; negative milliseconds fail before transport; an ambient `#Context(deadline: …)` remaining budget is converted to an absolute Instant at send entry and upper-bounds the request total |
 | `req.proxy(url)` | `HTTPClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
 | `Client.new().proxy(policy)` | `HTTPClient` | Typed client proxy policy: `.FromEnvironment` (default), `.None` (ignore env), or `.Url(proxy)` |
-| `Client.new().tls(config)` | `HTTPClient` | Apply a `core.tls.ClientConfig`; `CustomOnly` trust, mTLS client identity, and inclusive `.Tls12`/`.Tls13` version bounds are live-proven on HTTPS send (`http_client_law`) |
+| `Client.new().tls(config)` | `HTTPClient` | Apply a `core.net.tls.ClientConfig`; `CustomOnly` trust, mTLS client identity, and inclusive `.Tls12`/`.Tls13` version bounds are live-proven on HTTPS send (`http_client_law`) |
 | `Client.new().cookies(.Memory)` | `HTTPClient` | Opt into one clone-shared, bounded RFC6265bis memory jar; shortcuts stay stateless |
 | `Client.new().redirects(.Follow.{ max:, same_origin_credentials: })` | `HTTPClient` | Typed redirect policy (D-HTTP-CLIENT2); default unset is Follow(max:10, same_origin_credentials:true). Cross-origin always strips Authorization / Proxy-Authorization / Cookie; `same_origin_credentials: false` also strips them on same-origin hops |
 | `Client.new().allow_http_downgrade(true)` | `HTTPClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
@@ -656,16 +657,16 @@ Card 301 audit state:
 | Transparent Content-Encoding decoding | Partial across both facets: the native client advertises and decodes gzip by default, hides decoded Content-Encoding/Length while retaining `raw_content_encoding()`, supports `.raw_encoding()`, and fails closed on unsupported encodings (exact `http_client_law`). Plaintext and TLS HTTP/1.x server requests decode native gzip after transfer framing, remove the stale Content-Encoding/Length view, reject unsupported coding with 415 and malformed gzip with 400, and cap encoded plus decoded bodies at the server limit with 413. HTTP/2 request decoding and response compression middleware remain open. |
 | Graceful shutdown | Shipped for HTTP/1.x and HTTP/2 over cleartext or TLS: `Server.bind`/`serve`/`shutdown(grace)` stop accepts, send HTTP/2 GOAWAY with the accepted last-stream id, drain active work until grace, cancel stragglers, refuse new streams/requests (including TLS keep-alive reuse), and return bounded report counts |
 | Pooling and HTTP/2 | Shipped across both facets: shared native `Client` pools HTTP/1.1 keepalive after drained bodies and multiplexed HTTP/2 sessions (ALPN plus explicit h2c); concurrent streams open without holding the connection mutex across HEADERS waits, with exact `http_client_law` interop coverage for reuse, hostile HPACK, and TLS ALPN. Native HTTP/2 server serving runs over cleartext preface and rustls ALPN with flow control and graceful GOAWAY drain. |
-| WebSocket | Shipped as standalone `core.ws` (D-WS1=B): `ws.connect(url)` and `ws.upgrade(req)` share one RFC6455 codec with 1 MiB message bounds, masked client frames, ping/pong, close, and ambient-deadline cancellation. Live client↔server echo, hostile handshake rejection, and oversized-frame refusal are covered by `tests/ws_law.rs`. `wss://` TLS upgrade remains open behind the existing TLS bridge. |
+| WebSocket | Shipped as standalone `core.net.ws` (D-WS1=B): `ws.connect(url)` and `ws.upgrade(req)` share one RFC6455 codec with 1 MiB message bounds, masked client frames, ping/pong, close, and ambient-deadline cancellation. Live client↔server echo, hostile handshake rejection, and oversized-frame refusal are covered by `tests/ws_law.rs`. `wss://` TLS upgrade remains open behind the existing TLS bridge. |
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `first` already ships as
 `HTTPHeaders.first`. `postform` already ships as the request builder's
 `.form(...)` call. `cancelrequest` duplicates the deadline every request
 already takes.
 
-### `core.ws` — WebSocket client and server
+### `core.net.ws` — WebSocket client and server
 
-`core.ws` is the standalone WebSocket home (D-WS1=B). It imports HTTP request
+`core.net.ws` is the standalone WebSocket home (D-WS1=B). It imports HTTP request
 types for server upgrade and does not hide WebSocket APIs under `core.http`.
 
 | Function / method | Type | Notes |
@@ -681,10 +682,10 @@ Example: `examples/features/net/ws_echo.jet`.
 Examples: `examples/features/net/http_rest_service.jet` and
 `examples/features/net/http_server_trailers.jet`.
 
-### `core.browser` — WebDriver BiDi automation (D-BROWSER-AUTO1=A)
+### `core.web.browser` — WebDriver BiDi automation (D-BROWSER-AUTO1=A)
 
-`core.browser` is the portable browser automation home. It speaks versioned
-WebDriver BiDi over `core.ws`, with Jetpack-locked browser binaries and an
+`core.web.browser` is the portable browser automation home. It speaks versioned
+WebDriver BiDi over `core.net.ws`, with Jetpack-locked browser binaries and an
 explicit capability-checked CDP expert path. There is no Node or Playwright
 runtime dependency.
 
@@ -781,16 +782,16 @@ The RSA-shaped `new`, `generate_key`, `private_encrypt`, `private_decrypt`,
 keeps X25519 sealed-box as the one Core public-key mechanism; RSA belongs in an
 ordinary Jet package.
 
-### `core.vault` — repository secrets and typed key generations
+### `core.crypto.vault` — repository secrets and typed key generations
 
-`core.vault` keeps the existing `get(name) => String?` API and adds persistent
+`core.crypto.vault` keeps the existing `get(name) => String?` API and adds persistent
 typed `SigningKey` and `X25519SecretKey` generations. Every call below requires
 the `Secret` effect. `KeyRef<T>` is safe to clone, compare, hash, display, and
 persist; it contains public identity metadata, never key bytes.
 
 ```jet
 use core.crypto as crypto
-use core.vault as vault
+use core.crypto.vault as vault
 
 fn provision() =[Secret]=> ? vault.VaultError {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
@@ -840,7 +841,7 @@ revoked origins stay revoked. Cross-repository or renamed imports create the
 next local generation with a new identity and imported-origin audit metadata.
 Revocation is local bearer-copy state: already exported envelopes cannot be
 remotely erased. Expert raw imports are prepared and committed only through
-`core.vault.expert` inside `#Unsafe`; raw export remains the existing
+`core.crypto.expert` inside `#Unsafe`; raw export remains the existing
 `core.crypto.expert` operation.
 
 `ExpiringSecret<T>` is the one secret-lifetime wrapper. `T` is closed to
@@ -1000,19 +1001,19 @@ fn run() {
 
 ---
 
-### `core.io` — terminal and arguments
+### `core.term` — terminal
 
 Terminal stream buffering follows the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 
 ```jet
-use core.io as io
+use core.term as term
+use core.process as process
 
 fn run() {
-    args :: io.args()                    // [String]; index 0 is the program name
-    name :: io.input("your name? ") ?? return  // reads one line, strips newline
+    name :: term.input("your name? ") ?? return  // reads one line, strips newline
     print("hi, {name}")
-    io.eprint("(log) done")                 // like print, but to stderr
-    out :: io.stdout()
+    term.eprint("(log) done")                 // like print, but to stderr
+    out :: term.stdout()
     out.write("done") ?? return
     out.flush() ?? return
 }
@@ -1026,7 +1027,6 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `args()` | `[String]` | Command-line arguments |
 | `input([prompt])` | `String ? IOError` | Read one line from stdin; optional prompt |
 | `readline()` | `String ? IOError` | Same as `input()` with no prompt (peer free-function spelling) |
 | `read_until(delim)` | `String ? IOError` | Read stdin bytes until `delim` (excluded); empty delim errors |
@@ -1053,10 +1053,10 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `progress(text)` | `() ? IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
 | `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `List<T>` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
 
-`print` stays in the core prelude (no `use` needed). `io.print` is its
+`print` stays in the core prelude (no `use` needed). `term.print` is its
 qualified twin for `#NoPrelude` files — it has the same newline-per-value
 behavior. Use interpolation to build text and `:Debug` to select a debug
-representation. Use `io.eprint` for stderr. Use `input` or `readline` for
+representation. Use `term.eprint` for stderr. Use `input` or `readline` for
 public text and scripts. Use `input_secret` for passwords and tokens. It never
 falls back to an echoed read when stdin is redirected. `buffered()` is an
 alias of `stdin()` — Jet already buffers stdin. `core.term` still owns
@@ -1064,7 +1064,7 @@ alias of `stdin()` — Jet already buffers stdin. `core.term` still owns
 shipped raw-mode/key-event bridge under D-TERM1.
 
 `jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
-program arguments (`io.args()` sees them, argv[1..]); plain positional words
+program arguments (`process.argv()` sees them, argv[1..]); plain positional words
 with no separator also work (`jet run greet.jet Ada`). An unknown `--`-flag
 written before the `--` is **E2102**, which teaches the `--` form (D-CLI1).
 `jet test` also accepts `--`; `jet build` does not (no running process).
@@ -1073,7 +1073,7 @@ written before the `--` is **E2102**, which teaches the `--` form (D-CLI1).
 
 ### `core.args` — declarative CLI parsing (D-ARGS1)
 
-Build a flag/option/positional spec once and parse `io.args()` against it,
+Build a flag/option/positional spec once and parse `process.argv()` against it,
 instead of hand-walking `[String]`:
 
 ```jet
@@ -1084,7 +1084,7 @@ fn run() {
         .flag("verbose", "print extra detail")
         .option("output", "write result to FILE", "FILE")
         .positional("input", "file to read")
-    parsed :: spec.parse(io.args()) ?? panic(spec.help())
+    parsed :: spec.parse(process.argv()) ?? panic(spec.help())
     print(parsed.flag("verbose"))
     print(parsed.option("output") ?? "(default)")
 }
@@ -1211,18 +1211,18 @@ code loading, which a compiled, ahead-of-time language does not do.
 
 ---
 
-### `core.env` — environment and working directory
+### `core.sys` — environment, working directory, and system facts
 
 ```jet
-use core.env as env
+use core.sys as sys
 
 fn run() {
-    home :: env.home_dir()               // String? — may be None
-    mode :: env.get("MODE") ?? "dev"     // String? from the environment
-    env.set("MODE", "prod")              // set in Jet's process environment
-    removed :: env.unset("CI") ?? false
-    names :: env.vars() ?? []              // sorted names; never bulk values
-    here :: env.current_dir() ?? return  // current working directory
+    home :: sys.home_dir()               // String? — may be None
+    mode :: sys.get("MODE") ?? "dev"     // String? from the environment
+    sys.set("MODE", "prod")              // set in Jet's process environment
+    removed :: sys.unset("CI") ?? false
+    names :: sys.vars() ?? []              // sorted names; never bulk values
+    here :: sys.current_dir() ?? return  // current working directory
     print(home ?? "(no home)")
     print(mode)
     print(here)
@@ -1256,23 +1256,23 @@ to `() ? EnvError`.
 
 ---
 
-### `core.os` — system facts and interrupt hook (D-OSFACTS1)
+#### System facts and interrupt hook (D-OSFACTS1)
 
 ```jet
-use core.os as os
+use core.sys as sys
 
 fn run() {
-    print(os.name())           // linux, macos, windows, …
-    print(os.arch())           // x86_64, aarch64, …
-    print(os.cpu_count())      // logical CPU count
-    os.on_interrupt(() => {
+    print(sys.name())           // linux, macos, windows, …
+    print(sys.arch())           // x86_64, aarch64, …
+    print(sys.cpu_count())      // logical CPU count
+    sys.on_interrupt(() => {
         print("stopping")
     })
 }
 ```
 
-`core.env` owns environment variables and cwd/home. `core.os` owns facts about
-this process and machine.
+`core.sys` owns environment variables, cwd/home, and facts about this process
+and machine.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
@@ -1466,7 +1466,7 @@ separate backend slices of the same process mechanism.
 `interrupt()`, `.terminal`, a `.stdin` writer (`child.stdin.write(text)`), and
 `.stdout`/`.stderr` streaming readers consumed only via
 `loop line; child.stdout.lines() { ... }` (same loop-source-only shape as
-`FileReader.lines()`/`io.stdin().lines()` — storing the reader or the line
+`FileReader.lines()`/`term.stdin().lines()` — storing the reader or the line
 stream in a name is E2502). `exited()` is `Bool ? IOError`: a non-blocking
 companion to `wait()` that reports whether the child has already exited,
 without draining its output or blocking (#1481).
@@ -1660,10 +1660,10 @@ s: F32x4 :: v + w
 
 ---
 
-### `core.random` — random numbers
+### `core.math.random` — random numbers
 
 ```jet
-use core.random as random
+use core.math.random as random
 
 fn run() {
     random.seed(42)                         // make the sequence repeatable
@@ -1678,7 +1678,7 @@ fn run() {
 }
 ```
 
-`core.random` is deterministic PRNG randomness for games, simulations, tests,
+`core.math.random` is deterministic PRNG randomness for games, simulations, tests,
 and sampling. It is not for secrets; use `core.crypto.random.bytes` for keys,
 nonces, tokens, salts, and anything security-sensitive.
 
@@ -1738,15 +1738,15 @@ Every draw needs a `&Rng` receiver, and `shuffle` needs the list passed with
 **Ledger-declined names (D-CORESURF-SMALL1).** `random` and `uniform` both
 already ship above, as `float()` and `float_range(low, high)`.
 
-### `core.solve` — finite solver state
+### `core.compute.solve` — finite solver state
 
-`core.solve` gives constraint-style code an explicit state value instead of a
+`core.compute.solve` gives constraint-style code an explicit state value instead of a
 second execution model. The first slice accepts ordinary `Bool` constraints in
 the order you add them. Failed constraints are counted; queries are
 deterministic.
 
 ```jet
-use core.solve as solve
+use core.compute.solve as solve
 
 fn run() {
     solver := solve.Solver.new(42)
@@ -2324,7 +2324,7 @@ fn run() {
 }
 ```
 
-### `core.fmt` — human-readable formatting
+### `core.text.fmt` — human-readable formatting
 
 D-HUMANFMT1 keeps formatting as library calls, not a second syntax inside
 interpolation. The beginner path is the thing report and CLI authors need every
@@ -2344,7 +2344,7 @@ a `Float`, and `{value#Unit(name)}` or `{value#Unit(bare)}` selects a unit style
 | `pad_left` / `pad_right` / `pad_center` | `String` | Width padding by character count |
 
 ```jet
-use core.fmt as fmt
+use core.text.fmt as fmt
 
 fn run() {
     print("{fmt.bytes(1500000000)} in {fmt.duration(222000)}")
@@ -3363,7 +3363,7 @@ for one crossing. Narrowing is never implicit.
 | You wrote | Jet wants |
 |-----------|-----------|
 | `println(...)` | `print(...)` |
-| `eprintln(...)` | `io.eprint(...)` |
+| `eprintln(...)` | `term.eprint(...)` |
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
 | `import core.files` | `use core.files` |
@@ -3450,9 +3450,9 @@ truncated UDP answer over bounded TCP. It never falls back to a public resolver.
 
 ---
 
-## `core.tls`
+## `core.net.tls`
 
-`core.tls` upgrades a connected `core.net` TCP stream to a client TLS stream.
+`core.net.tls` upgrades a connected `core.net` TCP stream to a client TLS stream.
 The built module exposes only this byte/text stream surface:
 
 | Function | Returns | Notes |
@@ -3727,13 +3727,13 @@ D-CORE-COMPRESS1=A assigns each operation one public home:
 
 | Module | Job | API |
 |--------|-----|-----|
-| `core.compress.gzip` | gzip byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
-| `core.compress.zstd` | zstd byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
+| `core.archive.gzip` | gzip byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
+| `core.archive.zstd` | zstd byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
 | `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `crc32`, `adler32`, `deflate`, `inflate`, `zip_names_json`, `zip_open`, `zip_next`, `zip_read`, `zip_write`, `zip_close`, `zip_extract`, `unzip`, `tar_add`, `tar_get`, `tar_names_json` |
 
 `core.archive` has no standalone gzip helpers. Compose formats explicitly for
 containers such as `tar.gz`: build tar bytes with `core.archive`, then compress
-those bytes with `core.compress.gzip`.
+those bytes with `core.archive.gzip`.
 
 `zip_open` starts a reader or writer state. `zip_write` adds a named entry,
 `zip_close` produces the archive, and `zip_next`/`zip_read` walk and read named
@@ -3753,25 +3753,26 @@ collector is compiler-private: user code keeps ordinary bare values and opts in
 at package, module, function, or block scope. `jet gc report` identifies the
 exact automatic promotion sites to migrate back to ownership.
 
-`core.compiler`, `core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
-`core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`,
-`core.solve`, `core.data`, `core.compute`, `core.files`, `core.url`, `core.mime`,
-`core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
+`core.compiler`, `core.compiler.lang`, `core.term`, `core.sys`, `core.process`, `core.math`, `core.math.random`,
+`core.time`, `core.time.expiring`, `core.tasks`, `core.testing`, `core.mem`,
+`core.mem.scope`, `core.compute.solve`, `core.data`, `core.compute`, `core.files`,
+`core.net.url`, `core.net.mime`, `core.watcher`, `core.net`, `core.net.tls`, `core.net.ws`,
+`core.args`,
 `core.reflect`, `core.encoding`, `core.encoding.json`, `core.encoding.jsonl`,
 `core.encoding.csv`, `core.encoding.toml`, `core.encoding.yaml`,
 `core.encoding.xml`, `core.encoding.cbor`, `core.encoding.hex`,
-`core.encoding.base64`, `core.encoding.base32`, `core.text.unicode`,
-`core.binary`, `core.text`, `core.fmt`, `core.uuid`, `core.log`,
+`core.encoding.base64`, `core.encoding.base32`, `core.text`, `core.text.fmt`,
+`core.crypto.uuid`, `core.log`,
 `core.crypto`, `core.crypto.random`, `core.crypto.expert`, `core.http`,
-`core.regex`, `core.archive`, `core.raylib`, `core.game`,
-`core.compress.gzip`, `core.compress.zstd`, `core.db`, `core.plugin`,
-`core.reactive`, `core.event`, `core.science.measurement`,
+`core.regex`, `core.archive`, `core.archive.gzip`, `core.archive.zstd`,
+`core.game.raylib`, `core.game`, `core.db`, `core.plugin`,
+`core.reactive`, `core.event`, `core.units`,
 `core.reactive.loadable`, `core.perf`, `core.ui`, `core.web`,
 `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `app`,
-`core.sketch.hll`, `core.sketch.tdigest`, `core.sketch.reservoir`,
-`core.sketch.cms`, `core.time.date`, `core.time.datetime`,
-`core.time.expiring`, `core.http.client`,
-`core.http.server`, `core.web.devserver`, `core.vault`.
+`core.data.sketch.hll`, `core.data.sketch.tdigest`, `core.data.sketch.reservoir`,
+`core.data.sketch.cms`, `core.http.client`, `core.http.server`,
+`core.web.browser`, `core.web.devserver`, `core.crypto`, `core.crypto.vault`,
+`core.crypto.expert`.
 
 ---
 

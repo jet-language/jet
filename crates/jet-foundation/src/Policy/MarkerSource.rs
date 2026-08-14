@@ -119,7 +119,7 @@ fn declaration(line: &str) -> AppliedRule {
 }
 
 /// D-RULEARG-TYPES1=A: a parameter's written type names either one of the seven
-/// argument shapes the binder knows or a closed menu published in `core.lang`.
+/// argument shapes the binder knows or a closed menu published in `core.compiler.lang`.
 /// A menu name is written as a bare identifier, so anything that is not one of
 /// the remaining six reads as an identifier from that menu.
 ///

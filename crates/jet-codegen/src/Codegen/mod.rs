@@ -931,7 +931,7 @@ fn push_corelib_prelude_body(
             "core.encoding",
             "core.encoding.hex",
             "core.encoding.cbor",
-            "core.binary",
+            "core.encoding",
         ],
     );
     let _needs_regex = core_usage_matches(used_core, &["core.regex"]);
@@ -969,23 +969,22 @@ fn push_corelib_prelude_body(
     out.push_str("\n}\n");
 
     let needs_email = core_usage_matches(used_core, &["core.email"]);
-    let needs_raylib = core_usage_matches(used_core, &["core.raylib"]);
+    let needs_raylib = core_usage_matches(used_core, &["core.game.raylib"]);
     let needs_game = core_usage_matches(used_core, &["core.game"]) || needs_raylib;
     let needs_files = core_usage_matches(
         used_core,
         &[
             "core.files",
             "core.watcher",
-            "core.io",
-            "core.env",
-            "core.os",
+            "core.term",
+            "core.sys",
             "core.process",
         ],
     );
-    let needs_interrupt = core_usage_matches(used_core, &["core.os::on_interrupt"]);
+    let needs_interrupt = core_usage_matches(used_core, &["core.sys::on_interrupt"]);
     let needs_text = core_usage_matches(
         used_core,
-        &["core.text", "core.text.unicode", "core.fmt", "core.term"],
+        &["core.text", "core.text.fmt", "core.term"],
     );
     let needs_fs_runtime = needs_files
         || core_usage_matches(
@@ -995,7 +994,7 @@ fn push_corelib_prelude_body(
                 "core.process",
                 "core.testing",
                 "core.perf",
-                "core.scope",
+                "core.mem.scope",
             ],
         );
     let needs_crypto = core_usage_matches(
@@ -1004,15 +1003,14 @@ fn push_corelib_prelude_body(
             "core.crypto",
             "core.crypto.expert",
             "core.crypto.random",
-            "core.vault",
-            "core.vault.expert",
-            "core.uuid",
+            "core.crypto.vault",
+            "core.crypto.uuid",
         ],
     );
     let needs_process = core_usage_matches(used_core, &["core.process"]);
     let needs_math = core_usage_matches(
         used_core,
-        &["core.math", "core.random", "core.time", "core.time.date", "core.time.datetime", "core.time.expiring", "core.science.measurement"],
+        &["core.math", "core.math.random", "core.time", "core.time.expiring", "core.units"],
     );
     let needs_encoding = core_usage_matches(
         used_core,
@@ -1026,9 +1024,8 @@ fn push_corelib_prelude_body(
             "core.encoding.xml",
             "core.encoding.cbor",
             "core.encoding.hex",
-            "core.compress.gzip",
-            "core.compress.zstd",
-            "core.binary",
+            "core.archive.gzip",
+            "core.archive.zstd",
         ],
     ) || needs_xml
         || needs_base;
@@ -1036,30 +1033,30 @@ fn push_corelib_prelude_body(
         used_core,
         &[
             "core.data",
-            "core.sketch.hll",
-            "core.sketch.tdigest",
-            "core.sketch.cms",
-            "core.sketch.reservoir",
+            "core.data.sketch.hll",
+            "core.data.sketch.tdigest",
+            "core.data.sketch.cms",
+            "core.data.sketch.reservoir",
             "core.db",
         ],
     );
     // DataFmt.rs contains the data/codec helpers filed under `core.data`, but
     // its old `jet_fmt_*` helpers now live in the shared Fmt kernel. Keep the
     // two emission gates separate so a fmt-only program gets only Fmt.rs.
-    let needs_fmt = core_usage_matches(used_core, &["core.fmt"]);
+    let needs_fmt = core_usage_matches(used_core, &["core.text.fmt"]);
     let needs_data_fmt = needs_data || needs_encoding;
     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
     let needs_net = core_usage_matches(
         used_core,
         &[
             "core.net",
-            "core.tls",
+            "core.net.tls",
             "core.http",
             "core.http.client",
             "core.http.server",
-            "core.ws",
+            "core.net.ws",
             "core.email",
-            "core.browser",
+            "core.web.browser",
             "core.web",
             "core.web.devserver",
             "core.web.storage",
@@ -1077,26 +1074,26 @@ fn push_corelib_prelude_body(
             "core.web.devserver",
         ],
     );
-    // D-LIVEQUERY1: live results use the existing core.ws writer path. Keep
+    // D-LIVEQUERY1: live results use the existing core.net.ws writer path. Keep
     // the transport adapter in the same generated program whenever a live
     // surface can create or publish a query.
     let needs_ws = core_usage_matches(
         used_core,
         &[
-            "core.ws",
+            "core.net.ws",
             "app",
             "core.web",
             "core.db",
             "core.http",
             "core.http.client",
             "core.http.server",
-            "core.browser",
+            "core.web.browser",
         ],
     );
     let needs_browser = core_usage_matches(
         used_core,
         &[
-            "core.browser",
+            "core.web.browser",
             "core.web",
             "core.web.storage",
             "core.web.storage.local",
@@ -1104,7 +1101,7 @@ fn push_corelib_prelude_body(
         ],
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
-    let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
+    let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
@@ -1193,7 +1190,7 @@ fn push_corelib_prelude_body(
         // D-OSINTERRUPT1: pending-count, registration-order, and boundary
         // policy are shared by AOT, resident JIT, and the interpreter. Their
         // callback storage remains an engine adapter. Keep the whole
-        // interrupt Prelude out of ordinary `core.os` programs; FSIo's
+        // interrupt Prelude out of ordinary `core.sys` programs; FSIo's
         // dispatcher is stripped below when `on_interrupt` is unused.
         if needs_interrupt {
             out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
@@ -1421,13 +1418,13 @@ fn uses_native_scheduler(bundle: &ProgramBundle) -> bool {
             "core.process",
             "core.files",
             "core.watcher",
-            "core.io",
-            "core.env",
-            "core.os",
+            "core.term",
+            "core.sys",
+            "core.sys",
             "core.args",
             "core.testing",
             "core.perf",
-            "core.scope",
+            "core.mem.scope",
         ]
             .iter()
             .any(|module| {
@@ -1526,7 +1523,7 @@ fn strip_unused_gc_prelude(out: String) -> String {
 }
 
 /// D-FLAGSHIP-RAYLIB1=A: the raylib bridge carries vetted FFI `unsafe`.
-/// Programs that never call `core.raylib` must not inherit that unsafe prelude.
+/// Programs that never call `core.game.raylib` must not inherit that unsafe prelude.
 fn strip_unused_raylib_prelude(out: String) -> String {
     let prelude_end = [
         out.find("fn __jet_"),
@@ -1665,7 +1662,7 @@ fn strip_unused_term_prelude(out: String) -> String {
     s
 }
 
-/// D-OSFACTS1: `core.os.on_interrupt` uses vetted Unix/Windows platform FFI.
+/// D-OSFACTS1: `core.sys.on_interrupt` uses vetted Unix/Windows platform FFI.
 /// Keep ordinary programs `unsafe`-free by stripping the whole dispatcher
 /// unless generated user code actually calls it.
 fn strip_unused_os_signal_prelude(out: String) -> String {
@@ -2004,8 +2001,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             "impl __jet_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
         ));
     }
-    let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE)
-        || uses(crate::Syntax::CORE_MEM_ALLOC_MODULE);
+    let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE);
     let constructed_allocators = allocator_constructor_types(items, cx);
     for (name, ty) in [
         ("Arena", format!("{root}jet_mem::JetArena")),
@@ -2108,7 +2104,7 @@ let mut backend = JetDbScopeBackend {{ scope }};\n\
             ));
         }
     }
-    if uses("core.vault") {
+    if uses("core.crypto.vault") {
         if let Some(ffi) = &cx.ffi_crate {
             out.push_str(&format!(
                 "impl<T> JetDisplay for {ffi}::JetVaultKeyRef<T> {{ fn jet_display(&self) -> String {{ self.to_string() }} }}\nimpl<T> JetDebug for {ffi}::JetVaultKeyRef<T> {{ fn jet_debug(&self) -> String {{ format!(\"{{self:?}}\") }} }}\nimpl JetDisplay for {ffi}::JetWrappedVaultKey {{ fn jet_display(&self) -> String {{ self.to_string() }} }}\nimpl JetDebug for {ffi}::JetWrappedVaultKey {{ fn jet_debug(&self) -> String {{ format!(\"{{self:?}}\") }} }}\n"
@@ -3823,7 +3819,7 @@ pub fn emit_bundle_dbg(
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     emit_program_items(&cx, &entry.items, &mut out, true, false);
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
-    // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
+    // the Rust `fn main` wrapper that parses `process.argv()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
     let cli_items = jet_foundation::CLISchema::entry_type_module(bundle)
         .map(|module| bundle.modules[module].items.as_slice())

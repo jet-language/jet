@@ -1242,7 +1242,7 @@ fn repl_declared_types_survive_empty_and_absent_values() {
 
 #[test]
 fn repl_core_io_eprint_inline() {
-    let inputs = &["use core.io as io", "io.eprint(\"repl-err\")"];
+    let inputs = &["use core.term as io", "io.eprint(\"repl-err\")"];
     let out = run_transcript_with_flags(inputs, None, &[], &["io"]);
     assert!(
         out.contains("ok") && out.contains("repl-err"),
@@ -1259,7 +1259,7 @@ fn repl_core_io_eprint_inline() {
 #[test]
 fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
     let inputs = &[
-        "use core.random as random",
+        "use core.math.random as random",
         "xs := [1, 2, 3]",
         "#Grant(caps: Rand) { random.int(1, 10) }",
         "#Grant(caps: Rand) { random.shuffle(&xs) }",
@@ -1328,7 +1328,7 @@ fn repl_core_fs_read_inline() {
     std::fs::create_dir_all(&root).expect("create fixture root");
     std::fs::write(root.join("payload.txt"), "repl-fs-payload").expect("write fixture");
     let read_expr = "#Grant(caps: FS, IO) { io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
-    let inputs = &["use core.files as fs", "use core.io as io", read_expr];
+    let inputs = &["use core.files as fs", "use core.term as io", read_expr];
     let out = run_transcript_with_flags(inputs, root.to_str(), &["fs", "io"], &[]);
     std::fs::remove_dir_all(&root).ok();
     assert!(
@@ -1342,7 +1342,7 @@ fn repl_core_fs_read_inline() {
 fn repl_core_process_run_is_authorized_and_captured() {
     let inputs = &[
         "use core.process as process",
-        "use core.io as io",
+        "use core.term as io",
         "#Grant(caps: Exec, IO) { io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
     ];
     let out = run_transcript_with_flags(inputs, None, &["exec"], &["io"]);
@@ -2510,7 +2510,7 @@ fn repl_bigint_equality_is_numeric_not_identity() {
     assert!(!out.contains("E0956"), "got: {out:?}");
 }
 
-// ── card #392: `core.random` widened ambient draws now dispatch at comptime ──
+// ── card #392: `core.math.random` widened ambient draws now dispatch at comptime ──
 // (`bool`/`float_range`/`normal`/`exponential`/`bytes`/`pick`/`weighted_pick`/
 // `sample`/`shuffle`/`split` — same SplitMix64 stream as AOT's `jet_std_random_*`
 // (Process.rs), so a seeded transcript reproduces AOT's numbers exactly, R12).
@@ -2531,7 +2531,7 @@ fn repl_core_random_widened_draws_dispatch() {
     ];
     for call in calls {
         let out = run_transcript_with_flags(
-            &["use core.random as random", call],
+            &["use core.math.random as random", call],
             None,
             &["rand"],
             &[],
@@ -2540,7 +2540,7 @@ fn repl_core_random_widened_draws_dispatch() {
     }
     let shuffle = run_transcript_with_flags(
         &[
-            "use core.random as random",
+            "use core.math.random as random",
             "ys := [1, 2, 3, 4, 5]",
             "#Grant(caps: Rand) { random.shuffle(&ys) }",
         ],
@@ -2551,13 +2551,13 @@ fn repl_core_random_widened_draws_dispatch() {
     assert!(!shuffle.contains("error ["), "authorized shuffle failed: {shuffle}");
 }
 
-// ── card #392: `core.fmt` (pure text formatting) now dispatches at comptime,
+// ── card #392: `core.text.fmt` (pure text formatting) now dispatches at comptime,
 // byte-identical to AOT's `jet_fmt_*` (DataFmt.rs).
 
 #[test]
 fn repl_core_fmt_dispatch() {
     let inputs = &[
-        "use core.fmt as fmt",
+        "use core.text.fmt as fmt",
         "fmt.number(1234567)",
         "fmt.decimal(3.14159, 2)",
         "fmt.percent(0.4567, 1)",
@@ -2571,7 +2571,7 @@ fn repl_core_fmt_dispatch() {
         "fmt.pad_center(\"hi\", 6, \"*\")",
     ];
     let out = run_transcript(inputs, None);
-    assert!(!out.contains("E0956"), "core.fmt should dispatch at comptime, got: {out}");
+    assert!(!out.contains("E0956"), "core.text.fmt should dispatch at comptime, got: {out}");
     assert!(out.contains("\"1,234,567\" : String"), "got: {out}");
     assert!(out.contains("\"3.14\" : String"), "got: {out}");
     assert!(out.contains("\"45.7%\" : String"), "got: {out}");
@@ -2611,7 +2611,7 @@ fn repl_core_encoding_base32_and_base64url_dispatch() {
     assert!(out.contains("\"----\" : String"), "got: {out}");
 }
 
-// ── card #392 pass 3: `core.url` (D-URL1=A) now dispatches at comptime,
+// ── card #392 pass 3: `core.net.url` (D-URL1=A) now dispatches at comptime,
 // ported verbatim from AOT's `JetURL`/`jet_url_*` (`UrlMime.rs` +
 // `MathRandomTime.rs`, see `UrlLite.rs`). `Url` instance methods use the same
 // canonical marshalled value path, so this transcript also observes their
@@ -2619,7 +2619,7 @@ fn repl_core_encoding_base32_and_base64url_dispatch() {
 #[test]
 fn repl_core_url_dispatch() {
     let inputs = &[
-        "use core.url as url",
+        "use core.net.url as url",
         "url.percent_encode(\"a b/c\")",
         "url.percent_decode(\"a%20b\")",
         "url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])",
@@ -2631,7 +2631,7 @@ fn repl_core_url_dispatch() {
     let out = run_transcript(inputs, None);
     assert!(
         !out.contains("E0956"),
-        "core.url should dispatch at comptime, got: {out}"
+        "core.net.url should dispatch at comptime, got: {out}"
     );
     assert!(out.contains("\"a%20b%2Fc\" : String"), "got: {out}");
     assert!(out.contains("a b : Result"), "got: {out}");
@@ -2693,7 +2693,7 @@ fn repl_core_data_dispatch() {
 fn repl_zstd_compress_is_resident() {
     let out = run_transcript(
         &[
-            "use core.compress.zstd as zstd",
+            "use core.archive.zstd as zstd",
             "frame :: zstd.compress([72, 101, 108, 108, 111])",
             "frame.len() > 9",
             "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)",
@@ -2711,7 +2711,7 @@ fn repl_zstd_compress_is_resident() {
 fn repl_zstd_decompress_is_resident_and_typed() {
     let out = run_transcript(
         &[
-            "use core.compress.zstd as zstd",
+            "use core.archive.zstd as zstd",
             "zstd.decompress([40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111]) ?? []",
             "zstd.decompress([40, 181, 47]) ?? [255]",
         ],

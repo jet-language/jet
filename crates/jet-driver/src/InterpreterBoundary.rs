@@ -102,9 +102,9 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
     match name {
         "core.mem" => Some("uses the low-level `core.mem` tier"),
         "core.files" if debug_impure => Some("reads or writes files"),
-        "core.env" => Some("reads the environment"),
+        "core.sys" => Some("reads the environment"),
         "core.process" => Some("runs another process or exits early"),
-        // `core.time` / `core.random` are allowed: deterministic `Clock`/`Rng`
+        // `core.time` / `core.math.random` are allowed: deterministic `Clock`/`Rng`
         // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
         // fail at the expression if unsupported.
         _ => None,

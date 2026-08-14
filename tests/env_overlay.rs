@@ -47,7 +47,7 @@ fn build_rust(dir: &Path, name: &str, rust: &str) -> PathBuf {
 #[test]
 fn mutation_enumeration_and_child_snapshot_run() {
     let src = r#"
-use core.env as env
+use core.sys as env
 use core.process as process
 
 fn run() {
@@ -97,7 +97,7 @@ fn codegen_is_raw_locked_and_never_mutates_host_env() {
     let (_, out) = compile(
         "shape",
         r#"
-use core.env as env
+use core.sys as env
 use core.process as process
 
 fn remove(name: String) => Bool ? env.EnvError {
@@ -141,7 +141,7 @@ fn raw_non_unicode_value_survives_child_snapshot_and_vars_fails_whole_snapshot()
     use std::os::unix::ffi::OsStringExt;
 
     let src = r#"
-use core.env as env
+use core.sys as env
 use core.process as process
 
 fn run() {
@@ -203,7 +203,7 @@ fn main() {
 #[test]
 fn eager_snapshot_and_host_getenv_isolation_run_in_process() {
     let src = r#"
-use core.env as env
+use core.sys as env
 
 fn run() {
     print(env.get("JET_HOST_ISOLATION") ?? "missing")
@@ -238,7 +238,7 @@ fn run() {
 fn concurrent_mutation_and_real_child_spawns_take_untorn_snapshots() {
     let (dir, out) = compile(
         "atomic_spawn",
-        "use core.env as env\nfn run() { print(env.get(\"JET_PAIR_UNUSED\") ?? \"\") }\n",
+        "use core.sys as env\nfn run() { print(env.get(\"JET_PAIR_UNUSED\") ?? \"\") }\n",
     );
     let pair_probe_rs = dir.join("pair_probe.rs");
     fs::write(
@@ -408,7 +408,7 @@ fn jet_test_snapshot_entry() {
 fn fallible_set_runtime_hook_is_typed_for_next_edition() {
     let (dir, out) = compile(
         "fallible_set_hook",
-        "use core.env as env\nfn run() { print(env.get(\"JET_ENV_UNUSED\") ?? \"\") }\n",
+        "use core.sys as env\nfn run() { print(env.get(\"JET_ENV_UNUSED\") ?? \"\") }\n",
     );
     let probe = r#"    jet_std_env_init();
     let invalid_name: Result<(), jet_std::EnvError> =
@@ -433,7 +433,7 @@ fn fallible_set_runtime_hook_is_typed_for_next_edition() {
 #[test]
 fn windows_casefold_last_spelling_and_child_inheritance_run_natively() {
     let src = r#"
-use core.env as env
+use core.sys as env
 use core.process as process
 
 fn run() {
@@ -458,7 +458,7 @@ fn run() {
 #[test]
 fn old_edition_invalid_set_uses_exact_runtime_error() {
     let src = r#"
-use core.env as env
+use core.sys as env
 
 fn run() {
     env.set("", "value")
@@ -469,6 +469,6 @@ fn run() {
     let run = Command::new(bin).current_dir(&dir).output().unwrap();
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(run.status.code(), Some(70));
-    assert!(stderr.contains("panic: core.env.set: invalid environment variable name"));
+    assert!(stderr.contains("panic: core.sys.set: invalid environment variable name"));
     assert!(stderr.contains("invalid.jet:5 in run"), "missing call-site frame: {stderr}");
 }

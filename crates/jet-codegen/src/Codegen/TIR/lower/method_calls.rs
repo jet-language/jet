@@ -428,7 +428,7 @@ fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
 }
 
 fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
-    if module == "core.io"
+    if module == "core.term"
         && method == "progress"
         && matches!(args.first().map(|arg| &arg.ty), Some(Type::FixedList { .. }))
     {
@@ -2411,7 +2411,7 @@ fn lower_method_call_impl(
             if !env.locals.contains_key(alias)
                 && cx
                     .core_import_module_for_function(&env.fn_name, alias)
-                    .is_some_and(|module| module == "core.env")
+                    .is_some_and(|module| module == "core.sys")
             {
                 let name = lower_expr(&args[0].expr, cx, env);
                 let value = lower_expr(&args[1].expr, cx, env);
@@ -2464,7 +2464,7 @@ fn lower_method_call_impl(
                 }
                 // D-VERDICT-1321-1: variadic io.print/io.eprint — join the
                 // arguments with newlines so the engines keep one-value calls.
-                if module == "core.io"
+                if module == "core.term"
                     && matches!(method, "print" | "eprint")
                     && args.len() > 1
                 {                    let joined = crate::Codegen::TIR::lower::join_print_args(args, cx, env);
@@ -2552,7 +2552,7 @@ fn lower_method_call_impl(
                     })
                 } else if crate::Sema::is_polymorphic_core_special(&module, method) {
                     resolved_ret.cloned().unwrap_or_else(|| {
-                        if module == "core.io" && method == "progress" {
+                        if module == "core.term" && method == "progress" {
                             progress_return_ty(&targs)
                         } else {
                             unit_type()
@@ -2625,7 +2625,7 @@ fn lower_method_call_impl(
                 let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                 let ty = if crate::Sema::is_polymorphic_core_special(&submodule, method) {
                     resolved_ret.cloned().unwrap_or_else(|| {
-                        if submodule == "core.io" && method == "progress" {
+                        if submodule == "core.term" && method == "progress" {
                             progress_return_ty(&targs)
                         } else {
                             core_call_return_ty(&submodule, method)
@@ -5094,7 +5094,7 @@ fn lower_method_call_impl(
             return TExpr {
                 ty: Type::Named("Date".to_string()),
                 kind: TExprKind::CoreCall {
-                    module: "core.time.date".to_string(),
+                    module: "core.time".to_string(),
                     method: "today".to_string(),
                     args: Vec::new(),
                     source_span: method_span,

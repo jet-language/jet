@@ -4245,7 +4245,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A callback retained by `core.os.on_interrupt` needs a stronger fact than
+    /// A callback retained by `core.sys.on_interrupt` needs a stronger fact than
     /// an ordinary escaping closure. In particular, `Type::Fn` normally lowers
     /// to `Rc`, and moving that value is not enough for the native `Arc<dyn
     /// Fn() + Send + Sync>` boundary. Named functions and aliases that were
@@ -4294,7 +4294,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether an expression already has the one representation that may
-    /// cross `core.os.on_interrupt`. This is intentionally narrower than
+    /// cross `core.sys.on_interrupt`. This is intentionally narrower than
     /// ordinary function typing: arbitrary function-producing expressions
     /// must not reach codegen as an unexamined `Rc` value.
     pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
@@ -4919,7 +4919,7 @@ impl<'a> Checker<'a> {
             }
         };
         let why = if matches!(crossing, SendCrossing::InterruptCallback) {
-            "core.os.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe".to_string()
+            "core.sys.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe".to_string()
         } else {
             format!(
                 "{}; tasks and channels move owned values between threads",

@@ -913,7 +913,7 @@ impl<'a> Checker<'a> {
                 return None;
             }
             // #1465 / I1: POSIX process/session control is expert-tier.
-            if module == "core.os"
+            if module == "core.sys"
                 && matches!(
                     name,
                     "fork"
@@ -1020,7 +1020,7 @@ impl<'a> Checker<'a> {
                 super::net_text_time::require_exact_labels(
                     &format!("auth.{name}"), args, required, span, &mut self.diags,
                 );
-            } else if module == "core.tls" && name == "client" {
+            } else if module == "core.net.tls" && name == "client" {
                 let required = match args.len() {
                     3 => &[(1, "server_name"), (2, "deadline")][..],
                     4 => &[(1, "server_name"), (2, "config"), (3, "deadline")][..],
@@ -1069,7 +1069,7 @@ impl<'a> Checker<'a> {
                 if args.len() >= 6 { params.push((AccessConvention::Read, Type::List(Box::new(u8_ty())))); }
                 if args.len() >= 7 { params.push((AccessConvention::Read, Type::List(Box::new(u8_ty())))); }
                 Some((params, Some(result_ty(Type::Named("Claims".to_string()), Type::Named("AuthError".to_string())))))
-            } else if module == "core.tls" && name == "client" && args.len() == 4 {
+            } else if module == "core.net.tls" && name == "client" && args.len() == 4 {
                 Some((
                     vec![
                         (AccessConvention::Move, Type::Named("TcpStream".to_string())),
@@ -1082,7 +1082,7 @@ impl<'a> Checker<'a> {
                         Type::Named("NetError".to_string()),
                     )),
                 ))
-            } else if module == "core.tls" && name == "client" && args.len() == 3 {
+            } else if module == "core.net.tls" && name == "client" && args.len() == 3 {
                 Some((
                     vec![
                         (AccessConvention::Move, Type::Named("TcpStream".to_string())),
@@ -1152,7 +1152,7 @@ impl<'a> Checker<'a> {
                 self.register_binder_refs(args);
             }
             match (module, name) {
-                ("core.vault", "current" | "versions" | "load" | "status"
+                ("core.crypto.vault", "current" | "versions" | "load" | "status"
                     | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
                     | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
                     | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
@@ -2258,7 +2258,7 @@ impl<'a> Checker<'a> {
                     let _ = alias_span;
                     return Some(Type::Int);
                 }
-                ("core.io", "print") => {
+                ("core.term", "print") => {
                     // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
                     // D-VERDICT-1321-1: variadic — each argument prints on its own line.
                     if args.is_empty() {
@@ -2289,7 +2289,7 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                ("core.io", "progress") => {
+                ("core.term", "progress") => {
                     if args.is_empty() || args.len() > 3 {
                         self.diags.push(Diagnostic::error(
                             "E0112",
@@ -2338,7 +2338,7 @@ impl<'a> Checker<'a> {
                     }
                     return Some(crate::Collections::iter_ty(elem));
                 }
-                ("core.io", "eprint") => {
+                ("core.term", "eprint") => {
                     // D-VERDICT-1321-1: variadic — each argument prints on its own line.
                     if args.is_empty() {
                         self.diags.push(Diagnostic::error(
@@ -2411,7 +2411,7 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::Named("Value".to_string()));
                 }
-                ("core.io", "input") => {
+                ("core.term", "input") => {
                     if args.len() > 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }
@@ -2987,7 +2987,7 @@ impl<'a> Checker<'a> {
                     }
                     return Some(first);
                 }
-                ("core.random", "pick") => {
+                ("core.math.random", "pick") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }
@@ -3007,7 +3007,7 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-                ("core.random", "sample") => {
+                ("core.math.random", "sample") => {
                     if args.len() != 2 {
                         self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                     }
@@ -3043,7 +3043,7 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-                ("core.random", "weighted_pick") => {
+                ("core.math.random", "weighted_pick") => {
                     if args.len() != 2 {
                         self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                     }
@@ -3081,7 +3081,7 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-                ("core.random", "shuffle") => {
+                ("core.math.random", "shuffle") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }
@@ -3373,7 +3373,7 @@ impl<'a> Checker<'a> {
                 // D-DEFER1 option B: scope.guard(() => { … }) → ScopeGuard
                 // The argument must be a zero-parameter lambda. LIFO drop order is
                 // guaranteed by Rust's reverse-declaration semantics.
-                ("core.scope", "guard") => {
+                ("core.mem.scope", "guard") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("guard", 1, args.len(), span));
@@ -3989,7 +3989,7 @@ impl<'a> Checker<'a> {
                 }
                 // #1465: POSIX process/session control requires `#Unsafe` (I1).
                 (
-                    "core.os",
+                    "core.sys",
                     "fork"
                         | "setuid"
                         | "setgid"
@@ -4013,7 +4013,7 @@ impl<'a> Checker<'a> {
                     if !self.in_unsafe {
                         self.diags.push(Diagnostic::error(
                             "E3101",
-                            format!("`core.os.{name}` requires an audited `#Unsafe` region"),
+                            format!("`core.sys.{name}` requires an audited `#Unsafe` region"),
                             "POSIX process and session control can change credentials, signals, and process topology (I1)".to_string(),
                             format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `@if @build.os` / `#Target(OS.*)`"),
                             Some(span),
@@ -4022,7 +4022,7 @@ impl<'a> Checker<'a> {
                     // Continue into shared fixed-signature checking below.
                 }
                 // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
-                ("core.crypto.expert" | "core.vault.expert", _) => {
+                ("core.crypto.expert" | "core.crypto.vault", _) => {
                     let has_import = self
                         .core_imports
                         .values()
@@ -4119,7 +4119,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("HTTPRequest".to_string()));
                 }
                 // D-WS1=B: WebSocket entry points.
-                ("core.ws", "connect") => {
+                ("core.net.ws", "connect") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("connect", 1, args.len(), span));
@@ -4134,7 +4134,7 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("WsError".to_string())),
                     });
                 }
-                ("core.ws", "upgrade") => {
+                ("core.net.ws", "upgrade") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("upgrade", 1, args.len(), span));
@@ -4155,7 +4155,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 // D-BROWSER-AUTO1=A: versioned native BiDi protocol core.
-                ("core.browser", "profile") => {
+                ("core.web.browser", "profile") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("profile", 1, args.len(), span));
@@ -4170,7 +4170,7 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("BrowserError".to_string())),
                     });
                 }
-                ("core.browser", "timeout") => {
+                ("core.web.browser", "timeout") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("timeout", 1, args.len(), span));
@@ -4185,7 +4185,7 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("BrowserError".to_string())),
                     });
                 }
-                ("core.browser", "locked") => {
+                ("core.web.browser", "locked") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("locked", 1, args.len(), span));
@@ -4200,7 +4200,7 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("BrowserError".to_string())),
                     });
                 }
-                ("core.browser", "connect") => {
+                ("core.web.browser", "connect") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("connect", 1, args.len(), span));
@@ -4215,7 +4215,7 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("BrowserError".to_string())),
                     });
                 }
-                ("core.browser", "connect_profile") => {
+                ("core.web.browser", "connect_profile") => {
                     if args.len() != 3 {
                         self.diags.push(wrong_core_arity(
                             "connect_profile",
@@ -4656,7 +4656,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 // D-TIMEDEPTH1=A: civil-time constructors.
-                ("core.time.date", "new") => {
+                ("core.time", "new") => {
                     if args.len() != 3 {
                         self.diags
                             .push(wrong_core_arity("new", 3, args.len(), span));
@@ -4670,13 +4670,13 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("new", 2, &Type::Int, &mut args[2]);
                     return Some(Type::Named("LocalDate".to_string()));
                 }
-                ("core.time.date", "today") => {
+                ("core.time", "today") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
                     return Some(Type::Named("LocalDate".to_string()));
                 }
-                ("core.time.date", "parse") => {
+                ("core.time", "parse") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("parse", 1, args.len(), span));
@@ -4691,7 +4691,7 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::String),
                     });
                 }
-                ("core.time.datetime", "from_timestamp") => {
+                ("core.time", "from_timestamp") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("from_timestamp", 1, args.len(), span));
@@ -4703,32 +4703,26 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("from_timestamp", 0, &Type::Int, &mut args[0]);
                     return Some(Type::Named("DateTime".to_string()));
                 }
-                ("core.time.datetime", "now") => {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return Some(Type::Named("DateTime".to_string()));
-                }
                 // D-APPROX1=A: sketch constructors.
-                ("core.sketch.hll", "new") => {
+                ("core.data.sketch.hll", "new") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
                     return Some(Type::Named("HyperLogLog".to_string()));
                 }
-                ("core.sketch.tdigest", "new") => {
+                ("core.data.sketch.tdigest", "new") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
                     return Some(Type::Named("TDigest".to_string()));
                 }
-                ("core.sketch.cms", "new") => {
+                ("core.data.sketch.cms", "new") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
                     return Some(Type::Named("CountMinSketch".to_string()));
                 }
-                ("core.sketch.reservoir", "new") => {
+                ("core.data.sketch.reservoir", "new") => {
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity("new", 1, args.len(), span));
@@ -4741,7 +4735,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("ReservoirSampler".to_string()));
                 }
                 // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
-                ("core.science.measurement", "from") => {
+                ("core.units", "from") => {
                     if args.len() != 2 {
                         self.diags
                             .push(wrong_core_arity("from", 2, args.len(), span));
@@ -4914,7 +4908,7 @@ impl<'a> Checker<'a> {
                 let _ = alias_span;
                 return None;
             };
-            if module == "core.os" && name == "on_interrupt" {
+            if module == "core.sys" && name == "on_interrupt" {
                 // D-OSINTERRUPT1/I3: this is the one fixed callback crossing.
                 // Keep the callback expectation tied to the complete one-slot
                 // signature. Do not silently type-check only `params.first()`

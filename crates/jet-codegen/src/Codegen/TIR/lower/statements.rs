@@ -139,7 +139,7 @@ fn is_core_os_receiver(expr: &Expr, cx: &Cx) -> bool {
             Expr::Ident(alias, _) => {
                 return cx
                     .any_core_import_module(alias)
-                    .is_some_and(|module| module == "core.os");
+                    .is_some_and(|module| module == "core.sys");
             }
             Expr::Field(base, leaf, _) if leaf == "os" => expr = base,
             _ => return false,

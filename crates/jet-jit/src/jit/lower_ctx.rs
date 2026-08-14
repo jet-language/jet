@@ -7931,7 +7931,7 @@ impl LowerCtx<'_, '_> {
             THostCall::EnvSet { name, value, .. } => {
                 let name_v = self.lower_expr(name)?;
                 let value_v = self.lower_expr(value)?;
-                let _ = self.call_host(self.host.core.env_set, &[name_v, value_v]);
+                let _ = self.call_host(self.host.core.sys_set, &[name_v, value_v]);
                 self.emit_trap_check()?;
                 let _ = ty;
                 Ok(self.b.ins().iconst(types::I8, 0))
@@ -12471,21 +12471,21 @@ impl LowerCtx<'_, '_> {
                 if module == "core.crypto.expert" {
                     return self.lower_crypto_core_call(expr);
                 }
-                if module == "core.io" && method == "args" && args.is_empty() {
+                if module == "core.process" && method == "argv" && args.is_empty() {
                     return Ok(self.call_host(self.host.coll.io_args, &[]));
                 }
-                if module == "core.io" && method == "print" && args.len() == 1 {
+                if module == "core.term" && method == "print" && args.len() == 1 {
                     self.emit_print(&args[0])?;
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
-                if module == "core.io" && method == "readline" && args.is_empty() {
+                if module == "core.term" && method == "readline" && args.is_empty() {
                     // #1480: dedicated host — marshals only, calls the same
                     // `jet_std_io_readline` Prelude symbol AOT emits (I9).
                     // Do not route through `io_input`: that host backs the
-                    // separate `core.io.input` surface.
+                    // separate `core.term.input` surface.
                     return Ok(self.call_host(self.host.io.readline, &[]));
                 }
-                if module == "core.science.measurement"
+                if module == "core.units"
                     && method == "from"
                     && args.len() == 2
                 {
@@ -12493,7 +12493,7 @@ impl LowerCtx<'_, '_> {
                     let uncertainty = self.lower_expr(&args[1])?;
                     return Ok(self.call_host(self.host.measurement_new, &[value, uncertainty]));
                 }
-                if module == "core.io" && method == "input" && args.len() <= 1 {
+                if module == "core.term" && method == "input" && args.len() <= 1 {
                     let (has_prompt, prompt) = if args.is_empty() {
                         (
                             self.b.ins().iconst(types::I8, 0),
@@ -12505,9 +12505,9 @@ impl LowerCtx<'_, '_> {
                             self.lower_expr(&args[0])?,
                         )
                     };
-                    return Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt]));
+                    return Ok(self.call_host(self.host.core.term_input, &[has_prompt, prompt]));
                 }
-                if module == "core.io" {
+                if module == "core.term" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "stdout" if args.is_empty() => (self.host.io.stdout, Vec::new()),
                         "stderr" if args.is_empty() => (self.host.io.stderr, Vec::new()),
@@ -12605,91 +12605,91 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.os" {
+                if module == "core.sys" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
-                        "name" if args.is_empty() => (self.host.core.os_name, vec![]),
-                        "family" if args.is_empty() => (self.host.core.os_family, vec![]),
-                        "arch" if args.is_empty() => (self.host.core.os_arch, vec![]),
-                        "cpu_count" if args.is_empty() => (self.host.core.os_cpu_count, vec![]),
-                        "temp_dir" if args.is_empty() => (self.host.core.os_temp_dir, vec![]),
-                        "executable" if args.is_empty() => (self.host.core.os_executable, vec![]),
-                        "pid" | "getpid" if args.is_empty() => (self.host.core.os_pid, vec![]),
-                        "hostname" if args.is_empty() => (self.host.core.os_hostname, vec![]),
-                        "username" if args.is_empty() => (self.host.core.os_username, vec![]),
-                        "release" if args.is_empty() => (self.host.core.os_release, vec![]),
-                        "version" if args.is_empty() => (self.host.core.os_version, vec![]),
-                        "getppid" if args.is_empty() => (self.host.core.os_getppid, vec![]),
-                        "getuid" if args.is_empty() => (self.host.core.os_getuid, vec![]),
-                        "geteuid" if args.is_empty() => (self.host.core.os_geteuid, vec![]),
-                        "getgid" if args.is_empty() => (self.host.core.os_getgid, vec![]),
-                        "getegid" if args.is_empty() => (self.host.core.os_getegid, vec![]),
-                        "getpgrp" if args.is_empty() => (self.host.core.os_getpgrp, vec![]),
-                        "getgroups" if args.is_empty() => (self.host.core.os_getgroups, vec![]),
-                        "uptime" if args.is_empty() => (self.host.core.os_uptime, vec![]),
-                        "loadavg" if args.is_empty() => (self.host.core.os_loadavg, vec![]),
-                        "times" if args.is_empty() => (self.host.core.os_times, vec![]),
-                        "sync" if args.is_empty() => (self.host.core.os_sync, vec![]),
-                        "setpgrp" if args.is_empty() => (self.host.core.os_setpgrp, vec![]),
-                        "pipe" if args.is_empty() => (self.host.core.os_pipe, vec![]),
+                        "name" if args.is_empty() => (self.host.core.sys_name, vec![]),
+                        "family" if args.is_empty() => (self.host.core.sys_family, vec![]),
+                        "arch" if args.is_empty() => (self.host.core.sys_arch, vec![]),
+                        "cpu_count" if args.is_empty() => (self.host.core.sys_cpu_count, vec![]),
+                        "temp_dir" if args.is_empty() => (self.host.core.sys_temp_dir, vec![]),
+                        "executable" if args.is_empty() => (self.host.core.sys_executable, vec![]),
+                        "pid" | "getpid" if args.is_empty() => (self.host.core.sys_pid, vec![]),
+                        "hostname" if args.is_empty() => (self.host.core.sys_hostname, vec![]),
+                        "username" if args.is_empty() => (self.host.core.sys_username, vec![]),
+                        "release" if args.is_empty() => (self.host.core.sys_release, vec![]),
+                        "version" if args.is_empty() => (self.host.core.sys_version, vec![]),
+                        "getppid" if args.is_empty() => (self.host.core.sys_getppid, vec![]),
+                        "getuid" if args.is_empty() => (self.host.core.sys_getuid, vec![]),
+                        "geteuid" if args.is_empty() => (self.host.core.sys_geteuid, vec![]),
+                        "getgid" if args.is_empty() => (self.host.core.sys_getgid, vec![]),
+                        "getegid" if args.is_empty() => (self.host.core.sys_getegid, vec![]),
+                        "getpgrp" if args.is_empty() => (self.host.core.sys_getpgrp, vec![]),
+                        "getgroups" if args.is_empty() => (self.host.core.sys_getgroups, vec![]),
+                        "uptime" if args.is_empty() => (self.host.core.sys_uptime, vec![]),
+                        "loadavg" if args.is_empty() => (self.host.core.sys_loadavg, vec![]),
+                        "times" if args.is_empty() => (self.host.core.sys_times, vec![]),
+                        "sync" if args.is_empty() => (self.host.core.sys_sync, vec![]),
+                        "setpgrp" if args.is_empty() => (self.host.core.sys_setpgrp, vec![]),
+                        "pipe" if args.is_empty() => (self.host.core.sys_pipe, vec![]),
                         "success" if args.len() == 1 => {
-                            (self.host.core.os_success, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_success, vec![self.lower_expr(&args[0])?])
                         }
                         "exitcode" if args.len() == 1 => {
-                            (self.host.core.os_exitcode, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_exitcode, vec![self.lower_expr(&args[0])?])
                         }
                         "expand" if args.len() == 1 => {
-                            (self.host.core.os_expand, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_expand, vec![self.lower_expr(&args[0])?])
                         }
                         "getpgid" if args.len() == 1 => {
-                            (self.host.core.os_getpgid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_getpgid, vec![self.lower_expr(&args[0])?])
                         }
                         "getsid" if args.len() == 1 => {
-                            (self.host.core.os_getsid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_getsid, vec![self.lower_expr(&args[0])?])
                         }
                         "umask" if args.len() == 1 => {
-                            (self.host.core.os_umask, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_umask, vec![self.lower_expr(&args[0])?])
                         }
                         "getpriority" if args.len() == 1 => {
-                            (self.host.core.os_getpriority, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_getpriority, vec![self.lower_expr(&args[0])?])
                         }
                         "close_fd" if args.len() == 1 => {
-                            (self.host.core.os_close_fd, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_close_fd, vec![self.lower_expr(&args[0])?])
                         }
                         "setpgid" if args.len() == 2 => (
-                            self.host.core.os_setpgid,
+                            self.host.core.sys_setpgid,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "setpriority" if args.len() == 2 => (
-                            self.host.core.os_setpriority,
+                            self.host.core.sys_setpriority,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "kill" if args.len() == 2 => (
-                            self.host.core.os_kill,
+                            self.host.core.sys_kill,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "mkfifo" if args.len() == 2 => (
-                            self.host.core.os_mkfifo,
+                            self.host.core.sys_mkfifo,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
-                        "fork" if args.is_empty() => (self.host.core.os_fork, vec![]),
+                        "fork" if args.is_empty() => (self.host.core.sys_fork, vec![]),
                         "setuid" if args.len() == 1 => {
-                            (self.host.core.os_setuid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_setuid, vec![self.lower_expr(&args[0])?])
                         }
                         "setgid" if args.len() == 1 => {
-                            (self.host.core.os_setgid, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_setgid, vec![self.lower_expr(&args[0])?])
                         }
-                        "setsid" if args.is_empty() => (self.host.core.os_setsid, vec![]),
+                        "setsid" if args.is_empty() => (self.host.core.sys_setsid, vec![]),
                         "initgroups" if args.len() == 2 => (
-                            self.host.core.os_initgroups,
+                            self.host.core.sys_initgroups,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
-                        "wait" if args.is_empty() => (self.host.core.os_wait, vec![]),
+                        "wait" if args.is_empty() => (self.host.core.sys_wait, vec![]),
                         "waitpid" if args.len() == 2 => (
-                            self.host.core.os_waitpid,
+                            self.host.core.sys_waitpid,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         "utime" if args.len() == 3 => (
-                            self.host.core.os_utime,
+                            self.host.core.sys_utime,
                             vec![
                                 self.lower_expr(&args[0])?,
                                 self.lower_expr(&args[1])?,
@@ -12697,10 +12697,10 @@ impl LowerCtx<'_, '_> {
                             ],
                         ),
                         "atexit" if args.len() == 1 => {
-                            (self.host.core.os_atexit, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_atexit, vec![self.lower_expr(&args[0])?])
                         }
                         "stop" if args.len() == 1 => {
-                            (self.host.core.os_stop, vec![self.lower_expr(&args[0])?])
+                            (self.host.core.sys_stop, vec![self.lower_expr(&args[0])?])
                         }
                         _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
@@ -12713,7 +12713,7 @@ impl LowerCtx<'_, '_> {
                 if module == "core.event" && method == "scope" && args.is_empty() {
                     return Ok(self.call_host(self.host.watcher.event_scope, &[]));
                 }
-                if module == "core.tls" {
+                if module == "core.net.tls" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "client" if args.len() == 2 => (
                             self.host.net_http.tls_client,
@@ -13144,7 +13144,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.ws" {
+                if module == "core.net.ws" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "upgrade" if args.len() == 1 => (
                             self.host.net_http.ws_upgrade,
@@ -13769,7 +13769,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.uuid" {
+                if module == "core.crypto.uuid" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "v4" if args.is_empty() => (self.host.encoding.uuid_v4, Vec::new()),
                         "v7" if args.len() == 1 => {
@@ -13788,18 +13788,18 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.env" && method == "get" && args.len() == 1 {
+                if module == "core.sys" && method == "get" && args.len() == 1 {
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.env_get, self.b.func);
+                        .declare_func_in_func(self.host.core.sys_get, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     let call = self.b.ins().call(host_ref, &[a0]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.env" && method == "set" && args.len() == 2 {
+                if module == "core.sys" && method == "set" && args.len() == 2 {
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.env_set, self.b.func);
+                        .declare_func_in_func(self.host.core.sys_set, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     let a1 = self.lower_expr(&args[1])?;
                     let call = self.b.ins().call(host_ref, &[a0, a1]);
@@ -13807,16 +13807,16 @@ impl LowerCtx<'_, '_> {
                     self.emit_trap_check()?;
                     return Ok(handle);
                 }
-                if module == "core.env" && method == "unset" && args.len() == 1 {
+                if module == "core.sys" && method == "unset" && args.len() == 1 {
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.env_unset, self.b.func);
+                        .declare_func_in_func(self.host.core.sys_unset, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     let call = self.b.ins().call(host_ref, &[a0]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.env" && method == "vars" && args.is_empty() {
-                    return Ok(self.call_host(self.host.core.env_vars, &[]));
+                if module == "core.sys" && method == "vars" && args.is_empty() {
+                    return Ok(self.call_host(self.host.core.sys_vars, &[]));
                 }
                 if module == "core.process" && method == "exit" && args.len() == 1 {
                     let host_ref = self
@@ -13859,7 +13859,7 @@ impl LowerCtx<'_, '_> {
                     }
                     return Ok(self.call_host(self.host.game.run, &[scene, replay, backend]));
                 }
-                if module == "core.raylib" {
+                if module == "core.game.raylib" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "window_open" if args.len() == 3 => (
                             self.host.raylib.window_open,
@@ -13932,7 +13932,7 @@ impl LowerCtx<'_, '_> {
                         }
                         _ => {
                             return Err(format!(
-                                "jit core call unsupported: core.raylib.{method}"
+                                "jit core call unsupported: core.game.raylib.{method}"
                             ))
                         }
                     };
@@ -13949,18 +13949,18 @@ impl LowerCtx<'_, '_> {
                         _ => self.b.ins().iconst(types::I8, 0),
                     });
                 }
-                if module == "core.compress.gzip" || module == "core.compress.zstd" {
+                if module == "core.archive.gzip" || module == "core.archive.zstd" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.compress.gzip", "compress") if args.len() == 1 => {
+                        ("core.archive.gzip", "compress") if args.len() == 1 => {
                             (self.host.compress.gzip_compress, vec![self.lower_expr(&args[0])?])
                         }
-                        ("core.compress.gzip", "decompress") if args.len() == 1 => {
+                        ("core.archive.gzip", "decompress") if args.len() == 1 => {
                             (self.host.compress.gzip_decompress, vec![self.lower_expr(&args[0])?])
                         }
-                        ("core.compress.zstd", "compress") if args.len() == 1 => {
+                        ("core.archive.zstd", "compress") if args.len() == 1 => {
                             (self.host.compress.zstd_compress, vec![self.lower_expr(&args[0])?])
                         }
-                        ("core.compress.zstd", "decompress") if args.len() == 1 => {
+                        ("core.archive.zstd", "decompress") if args.len() == 1 => {
                             (self.host.compress.zstd_decompress, vec![self.lower_expr(&args[0])?])
                         }
                         _ => return Err("jit core call unsupported".to_string()),
@@ -14044,7 +14044,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.random" {
+                if module == "core.math.random" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "seed" if args.len() == 1 => {
                             (self.host.random.seed, vec![self.lower_expr(&args[0])?])
@@ -14344,7 +14344,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &arg_values);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.vault" || module == "core.vault.expert" {
+                if module == "core.crypto.vault" {
                     let tag = crate::Crypto::vault_key_tag(&expr.ty)
                         .or_else(|| {
                             args.first()
@@ -14354,30 +14354,30 @@ impl LowerCtx<'_, '_> {
                     let tag_val = self.b.ins().iconst(types::I64, tag);
                     let (host_id, mut arg_values): (FuncId, Vec<Value>) =
                         match (module.as_str(), method.as_str(), args.as_slice()) {
-                            ("core.vault", "get", [name]) => {
+                            ("core.crypto.vault", "get", [name]) => {
                                 (self.host.crypto.vault_get, vec![self.lower_expr(name)?])
                             }
-                            ("core.vault", "current", [name]) => (
+                            ("core.crypto.vault", "current", [name]) => (
                                 self.host.crypto.vault_current,
                                 vec![self.lower_expr(name)?, tag_val],
                             ),
-                            ("core.vault", "versions", [name]) => (
+                            ("core.crypto.vault", "versions", [name]) => (
                                 self.host.crypto.vault_versions,
                                 vec![self.lower_expr(name)?, tag_val],
                             ),
-                            ("core.vault", "prepare_generate", [name]) => (
+                            ("core.crypto.vault", "prepare_generate", [name]) => (
                                 self.host.crypto.vault_prepare_generate,
                                 vec![self.lower_expr(name)?, tag_val],
                             ),
-                            ("core.vault", "prepare_rotate", [name]) => (
+                            ("core.crypto.vault", "prepare_rotate", [name]) => (
                                 self.host.crypto.vault_prepare_rotate,
                                 vec![self.lower_expr(name)?, tag_val],
                             ),
-                            ("core.vault", "prepare_store", [name, key]) => (
+                            ("core.crypto.vault", "prepare_store", [name, key]) => (
                                 self.host.crypto.vault_prepare_store,
                                 vec![self.lower_expr(name)?, self.lower_expr(key)?, tag_val],
                             ),
-                            ("core.vault", "prepare_retire", [key_ref, reason]) => (
+                            ("core.crypto.vault", "prepare_retire", [key_ref, reason]) => (
                                 self.host.crypto.vault_prepare_retire,
                                 vec![
                                     self.lower_expr(key_ref)?,
@@ -14385,7 +14385,7 @@ impl LowerCtx<'_, '_> {
                                     tag_val,
                                 ],
                             ),
-                            ("core.vault", "prepare_revoke", [key_ref, reason]) => (
+                            ("core.crypto.vault", "prepare_revoke", [key_ref, reason]) => (
                                 self.host.crypto.vault_prepare_revoke,
                                 vec![
                                     self.lower_expr(key_ref)?,
@@ -14393,39 +14393,39 @@ impl LowerCtx<'_, '_> {
                                     tag_val,
                                 ],
                             ),
-                            ("core.vault", "authorize_write", [plan, reason]) => (
+                            ("core.crypto.vault", "authorize_write", [plan, reason]) => (
                                 self.host.crypto.vault_authorize_write,
                                 vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
                             ),
-                            ("core.vault", "commit_generate", [write, plan]) => (
+                            ("core.crypto.vault", "commit_generate", [write, plan]) => (
                                 self.host.crypto.vault_commit_generate,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
                             ),
-                            ("core.vault", "commit_store", [write, plan]) => (
+                            ("core.crypto.vault", "commit_store", [write, plan]) => (
                                 self.host.crypto.vault_commit_store,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
                             ),
-                            ("core.vault", "commit_rotate", [write, plan]) => (
+                            ("core.crypto.vault", "commit_rotate", [write, plan]) => (
                                 self.host.crypto.vault_commit_rotate,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
                             ),
-                            ("core.vault", "commit_retire", [write, plan]) => (
+                            ("core.crypto.vault", "commit_retire", [write, plan]) => (
                                 self.host.crypto.vault_commit_retire,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
                             ),
-                            ("core.vault", "commit_revoke", [write, plan]) => (
+                            ("core.crypto.vault", "commit_revoke", [write, plan]) => (
                                 self.host.crypto.vault_commit_revoke,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
                             ),
-                            ("core.vault", "load", [key_ref]) => (
+                            ("core.crypto.vault", "load", [key_ref]) => (
                                 self.host.crypto.vault_load,
                                 vec![self.lower_expr(key_ref)?, tag_val],
                             ),
-                            ("core.vault", "status", [key_ref]) => (
+                            ("core.crypto.vault", "status", [key_ref]) => (
                                 self.host.crypto.vault_status,
                                 vec![self.lower_expr(key_ref)?, tag_val],
                             ),
-                            ("core.vault", "export_to_recipients", [key_ref, recipients]) => (
+                            ("core.crypto.vault", "export_to_recipients", [key_ref, recipients]) => (
                                 self.host.crypto.vault_export_to_recipients,
                                 vec![
                                     self.lower_expr(key_ref)?,
@@ -14433,7 +14433,7 @@ impl LowerCtx<'_, '_> {
                                     tag_val,
                                 ],
                             ),
-                            ("core.vault", "export_to_passphrase", [key_ref, passphrase]) => (
+                            ("core.crypto.vault", "export_to_passphrase", [key_ref, passphrase]) => (
                                 self.host.crypto.vault_export_to_passphrase,
                                 vec![
                                     self.lower_expr(key_ref)?,
@@ -14441,7 +14441,7 @@ impl LowerCtx<'_, '_> {
                                     tag_val,
                                 ],
                             ),
-                            ("core.vault", "prepare_import_wrapped", [name, wrapped, unlock]) => (
+                            ("core.crypto.vault", "prepare_import_wrapped", [name, wrapped, unlock]) => (
                                 self.host.crypto.vault_prepare_import_wrapped,
                                 vec![
                                     self.lower_expr(name)?,
@@ -14450,19 +14450,19 @@ impl LowerCtx<'_, '_> {
                                     tag_val,
                                 ],
                             ),
-                            ("core.vault", "authorize_wrapped_import", [plan, reason]) => (
+                            ("core.crypto.vault", "authorize_wrapped_import", [plan, reason]) => (
                                 self.host.crypto.vault_authorize_wrapped_import,
                                 vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
                             ),
-                            ("core.vault", "commit_import_wrapped", [write, plan]) => (
+                            ("core.crypto.vault", "commit_import_wrapped", [write, plan]) => (
                                 self.host.crypto.vault_commit_import_wrapped,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
                             ),
-                            ("core.vault.expert", "prepare_import_signing", [name, bytes]) => (
+                            ("core.crypto.vault", "prepare_import_signing", [name, bytes]) => (
                                 self.host.crypto.vault_expert_prepare_import_signing,
                                 vec![self.lower_expr(name)?, self.lower_expr(bytes)?],
                             ),
-                            ("core.vault.expert", "commit_import_signing", [write, plan]) => (
+                            ("core.crypto.vault", "commit_import_signing", [write, plan]) => (
                                 self.host.crypto.vault_expert_commit_import_signing,
                                 vec![self.lower_expr(write)?, self.lower_expr(plan)?],
                             ),
@@ -14968,18 +14968,18 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module.starts_with("core.sketch.") {
+                if module.starts_with("core.data.sketch.") {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.sketch.hll", "new") if args.is_empty() => {
+                        ("core.data.sketch.hll", "new") if args.is_empty() => {
                             (self.host.sketch.hll_new, Vec::new())
                         }
-                        ("core.sketch.tdigest", "new") if args.is_empty() => {
+                        ("core.data.sketch.tdigest", "new") if args.is_empty() => {
                             (self.host.sketch.tdigest_new, Vec::new())
                         }
-                        ("core.sketch.cms", "new") if args.is_empty() => {
+                        ("core.data.sketch.cms", "new") if args.is_empty() => {
                             (self.host.sketch.cms_new, Vec::new())
                         }
-                        ("core.sketch.reservoir", "new") if args.len() == 1 => {
+                        ("core.data.sketch.reservoir", "new") if args.len() == 1 => {
                             (self.host.sketch.reservoir_new, vec![self.lower_expr(&args[0])?])
                         }
                         _ => {
@@ -14993,7 +14993,7 @@ impl LowerCtx<'_, '_> {
                 if module == "core.args" && method == "spec" && args.is_empty() {
                     return Ok(self.call_host(self.host.args.spec, &[]));
                 }
-                if module == "core.text.unicode" && args.len() == 1 {
+                if module == "core.text" && args.len() == 1 {
                     let host_id = match method.as_str() {
                         // str_len already counts Unicode scalars via jet_rt.
                         "scalar_count" => self.host.str_len,
@@ -15004,14 +15004,14 @@ impl LowerCtx<'_, '_> {
                         "scalars" => self.host.str_scalar_strings,
                         _ => {
                             return Err(format!(
-                                "jit core.text.unicode call unsupported: {method}"
+                                "jit core.text call unsupported: {method}"
                             ))
                         }
                     };
                     let text = self.lower_expr(&args[0])?;
                     return Ok(self.call_host(host_id, &[text]));
                 }
-                if module == "core.fmt" {
+                if module == "core.text.fmt" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "number" | "bytes" | "duration" | "ordinal" if args.len() == 1 => {
                             let host = match method.as_str() {
@@ -15057,7 +15057,7 @@ impl LowerCtx<'_, '_> {
                             )
                         }
                         _ => {
-                            return Err(format!("jit core call unsupported: core.fmt.{method}"))
+                            return Err(format!("jit core call unsupported: core.text.fmt.{method}"))
                         }
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -15085,21 +15085,19 @@ impl LowerCtx<'_, '_> {
                         .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
 
-                if module == "core.time.date" || module == "core.time.datetime" || module == "core.time" {
+                if module == "core.time" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
-                        ("core.time.date", "new") if args.len() == 3 => (
+                        ("core.time", "new") if args.len() == 3 => (
                             self.host.time.date_new,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
                         ),
-                        ("core.time.date", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
-                        ("core.time.date", "parse") if args.len() == 1 => (self.host.time.date_parse, vec![self.lower_expr(&args[0])?]),
-                        ("core.time.datetime", "from_timestamp") if args.len() == 1 => (
+                        ("core.time", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
+                        ("core.time", "parse") if args.len() == 1 => (self.host.time.date_parse, vec![self.lower_expr(&args[0])?]),
+                        ("core.time", "from_timestamp") if args.len() == 1 => (
                             self.host.time.datetime_from_timestamp,
                             vec![self.lower_expr(&args[0])?],
                         ),
-                        ("core.time.datetime", "now") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
                         ("core.time", "now_utc") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
-                        ("core.time", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
                         ("core.time", "start") if args.is_empty() => (self.host.time.start, Vec::new()),
                         ("core.time", "parse_rfc3339") if args.len() == 1 => (
                             self.host.time.parse_rfc3339,
@@ -15331,7 +15329,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.url" {
+                if module == "core.net.url" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 => {
                             (self.host.net.url_parse, vec![self.lower_expr(&args[0])?])
@@ -15362,7 +15360,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.mime" {
+                if module == "core.net.mime" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 => {
                             (self.host.net.mime_parse, vec![self.lower_expr(&args[0])?])
@@ -15383,7 +15381,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.browser" {
+                if module == "core.web.browser" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "profile" if args.len() == 1 => (
                             self.host.net.browser_profile,
@@ -15715,7 +15713,7 @@ impl LowerCtx<'_, '_> {
                     let callback = self.lower_interrupt_callback_value(callback)?;
                     let host = self
                         .module
-                        .declare_func_in_func(self.host.core.os_on_interrupt, self.b.func);
+                        .declare_func_in_func(self.host.core.sys_on_interrupt, self.b.func);
                     self.b.ins().call(host, &[callback]);
                     self.emit_trap_check()?;
                     Ok(self.b.ins().iconst(types::I64, 0))
@@ -17110,7 +17108,7 @@ impl LowerCtx<'_, '_> {
                     ),
                     Some(p) => (self.b.ins().iconst(types::I8, 1), self.lower_expr(p)?),
                 };
-                Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt_v]))
+                Ok(self.call_host(self.host.core.term_input, &[has_prompt, prompt_v]))
             }
             TExprKind::RequireStop {
                 kind,
@@ -23462,7 +23460,7 @@ impl LowerCtx<'_, '_> {
             return Some(ty);
         }
         match &expr.kind {
-            TExprKind::CoreCall { module, method, .. } if module == "core.random" => {
+            TExprKind::CoreCall { module, method, .. } if module == "core.math.random" => {
                 match method.as_str() {
                     "float_range" | "normal" | "exponential" => Some(Type::Float),
                     "bool" => Some(Type::Bool),
@@ -23557,7 +23555,7 @@ impl LowerCtx<'_, '_> {
             }
             // weighted_pick Option<String> when TIR erased the Option wrapper.
             if let TExprKind::CoreCall { module, method, .. } = &value.kind {
-                if module == "core.random" && method == "weighted_pick" {
+                if module == "core.math.random" && method == "weighted_pick" {
                     return Type::String;
                 }
             }

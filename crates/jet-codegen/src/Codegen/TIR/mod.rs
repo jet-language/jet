@@ -2502,7 +2502,7 @@ pub enum THostCall {
         value: Box<TExpr>,
         snap_path: String,
     },
-    /// `core.env.set` with rich panic on invalid runtime strings.
+    /// `core.sys.set` with rich panic on invalid runtime strings.
     EnvSet {
         name: Box<TExpr>,
         value: Box<TExpr>,
@@ -4033,7 +4033,7 @@ pub enum TCoreClosureKind {
     },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
-    /// `core.os.on_interrupt(<callback>)` crosses the shared Send-safe runtime
+    /// `core.sys.on_interrupt(<callback>)` crosses the shared Send-safe runtime
     /// boundary. Engines only marshal this lowered callback to their adapter.
     OnInterrupt { callback: Box<TExpr> },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.

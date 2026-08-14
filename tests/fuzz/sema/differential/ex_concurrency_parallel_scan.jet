@@ -10,8 +10,9 @@
 //   INTERACTIVE=1 nix develop -c jet run examples/features/concurrency/parallel_scan.jet
 use core.tasks as tasks
 use core.files as fs
-use core.io as io
-use core.env as env
+use core.term as io
+use core.process as process
+use core.sys as env
 
 fn count_lines(text: String) => Int :: text.lines().len()
 fn scan_one(path: String) => String {
@@ -29,7 +30,7 @@ fn default_paths() => [String] {
     ]
 }
 
-fn paths_from_args() => [String] :: io.args().skip(1).to_list()
+fn paths_from_args() => [String] :: process.argv().skip(1).to_list()
 fn paths_from_prompt() => [String] {
     print("Enter file paths (blank line when done):")
     out := [String].{}

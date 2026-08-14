@@ -1,4 +1,4 @@
-//! `core.fmt` host shims (#729). The formatting rules live in the shared
+//! `core.text.fmt` host shims (#729). The formatting rules live in the shared
 //! Prelude kernel; this file only marshals JIT strings.
 
 use crate::Marshal::{alloc_string, clone_string};

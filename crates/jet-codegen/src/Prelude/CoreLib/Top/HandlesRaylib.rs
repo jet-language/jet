@@ -46,7 +46,7 @@ struct JetPlugin {
 }
 
 // jet:raylib-begin
-// -- core.raylib bridge (D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A) -----------------
+// -- core.game.raylib bridge (D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A) -----------------
 // Display remains explicit: without JET_RAYLIB_DISPLAY=1 the bridge is a
 // deterministic headless no-op. With the flag set, Jet dynamically loads the
 // native raylib shared library and calls the real C API without adding a

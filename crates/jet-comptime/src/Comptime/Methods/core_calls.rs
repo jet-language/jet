@@ -445,7 +445,7 @@ pub(in super::super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagn
 }
 
 /// D-URL1=A: `Vec<Vec<String>>`-shaped arg (`[[String]]`) — used by
-/// `core.url.from_parts`'s `query` param and `core.url.query`'s pairs param,
+/// `core.net.url.from_parts`'s `query` param and `core.net.url.query`'s pairs param,
 /// mirroring AOT's `&Vec<Vec<String>>` signature.
 fn as_string_rows(v: &CtValue, span: Span) -> Result<Vec<Vec<String>>, Diagnostic> {
     match v {
@@ -747,7 +747,7 @@ fn repl_native_only_module(module: &str) -> Option<&'static str> {
         "core.crypto" => Some("`core.crypto`"),
         "core.auth" => Some("`core.auth` token verification"),
         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
-        "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
+        "core.mem" => Some("`core.mem` (low-level memory tier)"),
         "core.log" => Some("`core.log`"),
         _ => None,
     }
@@ -947,10 +947,10 @@ pub fn apply_core_call_with_type(
         }
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
         // tier-0. No native bridge, Boundary classification, or AOT fallback.
-        ("core.compress.gzip", "compress") => Ok(CtValue::Bytes(
+        ("core.archive.gzip", "compress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::gzip_compress(&as_bytes(one(0)?, span)?),
         )),
-        ("core.compress.gzip", "decompress") => {
+        ("core.archive.gzip", "decompress") => {
             Ok(match super::super::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
@@ -958,10 +958,10 @@ pub fn apply_core_call_with_type(
         }
         // The std-only resident codec accepts ordinary dictionaryless zstd
         // frames. The encoder deliberately chooses interoperable raw blocks.
-        ("core.compress.zstd", "compress") => Ok(CtValue::Bytes(
+        ("core.archive.zstd", "compress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
         )),
-        ("core.compress.zstd", "decompress") => {
+        ("core.archive.zstd", "decompress") => {
             Ok(match super::super::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
@@ -1931,12 +1931,6 @@ pub fn apply_core_call_with_type(
                 CtValue::Int(time_kernel::jet_time_monotonic_now_ns() / 1_000_000),
             )],
         }),
-        ("core.time.date", "today") => {
-            Ok(runtime_date_value(time_kernel::JetDate::today_utc()))
-        }
-        ("core.time.datetime", "now") => {
-            Ok(runtime_datetime_value(time_kernel::JetDateTime::now()))
-        }
         // D-DET1: testing.fake_clock is the test-facing spelling of the
         // caller-seeded deterministic Clock capability built by Clock.new.
         ("core.testing", "fake_clock") => {
@@ -1980,8 +1974,8 @@ pub fn apply_core_call_with_type(
         ("core.regex", "replace") => regex_replace(args, span, false),
         ("core.regex", "replace_all") => regex_replace(args, span, true),
         ("core.regex", "match") => regex_match(args, span),
-        // --- core.random (ambient; seed for deterministic REPL transcripts) ---
-        ("core.random", "seed") => {
+        // --- core.math.random (ambient; seed for deterministic REPL transcripts) ---
+        ("core.math.random", "seed") => {
             let seed = match one(0)? {
                 CtValue::Int(n) => *n as u64,
                 _ => return Err(unsupported("random.seed expects an Int", span)),
@@ -1989,7 +1983,7 @@ pub fn apply_core_call_with_type(
             ambient_random_kernel::seed(seed as i64);
             Ok(CtValue::Unit)
         }
-        ("core.random", "int") => {
+        ("core.math.random", "int") => {
             let low = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.int expects Int bounds", span)),
@@ -2000,12 +1994,12 @@ pub fn apply_core_call_with_type(
             };
             Ok(CtValue::Int(ambient_random_kernel::int(low, high)))
         }
-        ("core.random", "float") => {
+        ("core.math.random", "float") => {
             Ok(CtValue::Float(CtFloat::f64(ambient_random_kernel::float())))
         }
         // D-DET1: testing.fake_rng is the test-facing spelling of the same
         // caller-seeded deterministic Rng capability as random.rng.
-        ("core.random", "rng") | ("core.testing", "fake_rng") => {
+        ("core.math.random", "rng") | ("core.testing", "fake_rng") => {
             let seed = match one(0)? {
                 CtValue::Int(n) => *n as u64,
                 _ => {
@@ -2022,7 +2016,7 @@ pub fn apply_core_call_with_type(
                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
             })
         }
-        ("core.random", "split") => {
+        ("core.math.random", "split") => {
             let seed = match one(0)? {
                 CtValue::Int(n) => *n as u64,
                 _ => return Err(unsupported("random.split expects an Int seed", span)),
@@ -2033,38 +2027,38 @@ pub fn apply_core_call_with_type(
                 fields: vec![("state".to_string(), CtValue::Int(mixed as i64))],
             })
         }
-        ("core.random", "float_range") => {
+        ("core.math.random", "float_range") => {
             let low = as_float(one(0)?, span)?;
             let high = as_float(one(1)?, span)?;
             Ok(CtValue::Float(CtFloat::f64(
                 ambient_random_kernel::float_range(low, high),
             )))
         }
-        ("core.random", "bool") => {
+        ("core.math.random", "bool") => {
             let p = as_float(one(0)?, span)?;
             Ok(CtValue::Bool(ambient_random_kernel::bool_p(p)))
         }
-        ("core.random", "normal") => {
+        ("core.math.random", "normal") => {
             let mean = as_float(one(0)?, span)?;
             let stddev = as_float(one(1)?, span)?;
             Ok(CtValue::Float(CtFloat::f64(
                 ambient_random_kernel::normal(mean, stddev),
             )))
         }
-        ("core.random", "exponential") => {
+        ("core.math.random", "exponential") => {
             let lambda = as_float(one(0)?, span)?;
             Ok(CtValue::Float(CtFloat::f64(
                 ambient_random_kernel::exponential(lambda),
             )))
         }
-        ("core.random", "bytes") => {
+        ("core.math.random", "bytes") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("random.bytes expects an Int count", span)),
             };
             Ok(CtValue::Bytes(ambient_random_kernel::bytes(n)))
         }
-        ("core.random", "pick") => {
+        ("core.math.random", "pick") => {
             let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.pick needs a list", span));
             };
@@ -2077,7 +2071,7 @@ pub fn apply_core_call_with_type(
                 )),
             }
         }
-        ("core.random", "weighted_pick") => {
+        ("core.math.random", "weighted_pick") => {
             let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.weighted_pick needs a list", span));
             };
@@ -2100,7 +2094,7 @@ pub fn apply_core_call_with_type(
                 )),
             }
         }
-        ("core.random", "sample") => {
+        ("core.math.random", "sample") => {
             let CtValue::List(xs) = one(0)?.clone() else {
                 return Err(unsupported("random.sample needs a list", span));
             };
@@ -2110,7 +2104,7 @@ pub fn apply_core_call_with_type(
             };
             Ok(CtValue::List(ambient_random_kernel::sample(&xs, k)))
         }
-        ("core.random", "shuffle") => {
+        ("core.math.random", "shuffle") => {
             let CtValue::List(mut xs) = one(0)?.clone() else {
                 return Err(unsupported("random.shuffle needs a list", span));
             };
@@ -2133,15 +2127,15 @@ pub fn apply_core_call_with_type(
                 .map(CtValue::Bytes)
                 .map_err(|error| unsupported(&error.to_string(), span))
         }
-        // --- core.fmt: CtValue adapters over the shared Prelude kernel ---
-        ("core.fmt", "number") => {
+        // --- core.text.fmt: CtValue adapters over the shared Prelude kernel ---
+        ("core.text.fmt", "number") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.number expects an Int", span)),
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_number(n)))
         }
-        ("core.fmt", "decimal") => {
+        ("core.text.fmt", "decimal") => {
             let value = as_float(one(0)?, span)?;
             let precision = match one(1)? {
                 CtValue::Int(n) => *n,
@@ -2149,7 +2143,7 @@ pub fn apply_core_call_with_type(
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_decimal(value, precision)))
         }
-        ("core.fmt", "percent") => {
+        ("core.text.fmt", "percent") => {
             let value = as_float(one(0)?, span)?;
             let precision = match one(1)? {
                 CtValue::Int(n) => *n,
@@ -2157,28 +2151,28 @@ pub fn apply_core_call_with_type(
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_percent(value, precision)))
         }
-        ("core.fmt", "bytes") => {
+        ("core.text.fmt", "bytes") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.bytes expects an Int", span)),
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_bytes(n)))
         }
-        ("core.fmt", "duration") => {
+        ("core.text.fmt", "duration") => {
             let ms = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.duration expects an Int (ms)", span)),
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_duration(ms)))
         }
-        ("core.fmt", "ordinal") => {
+        ("core.text.fmt", "ordinal") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.ordinal expects an Int", span)),
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_ordinal(n)))
         }
-        ("core.fmt", "plural") => {
+        ("core.text.fmt", "plural") => {
             let count = match one(0)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.plural count must be Int", span)),
@@ -2189,7 +2183,7 @@ pub fn apply_core_call_with_type(
                 count, &singular, &plural,
             )))
         }
-        ("core.fmt", "pad_left") => {
+        ("core.text.fmt", "pad_left") => {
             let text = as_string(one(0)?, span)?.to_string();
             let width = match one(1)? {
                 CtValue::Int(n) => *n,
@@ -2200,7 +2194,7 @@ pub fn apply_core_call_with_type(
                 &text, width, &fill,
             )))
         }
-        ("core.fmt", "pad_right") => {
+        ("core.text.fmt", "pad_right") => {
             let text = as_string(one(0)?, span)?.to_string();
             let width = match one(1)? {
                 CtValue::Int(n) => *n,
@@ -2211,7 +2205,7 @@ pub fn apply_core_call_with_type(
                 &text, width, &fill,
             )))
         }
-        ("core.fmt", "pad_center") => {
+        ("core.text.fmt", "pad_center") => {
             let text = as_string(one(0)?, span)?.to_string();
             let width = match one(1)? {
                 CtValue::Int(n) => *n,
@@ -2302,17 +2296,17 @@ pub fn apply_core_call_with_type(
                 Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
             })
         }
-        // --- D-URL1=A: core.url (pure RFC-3986-shaped parser, ported
+        // --- D-URL1=A: core.net.url (pure RFC-3986-shaped parser, ported
         // verbatim from AOT's `JetURL`/`jet_url_*` in `UrlMime.rs` — see
         // `UrlLite.rs`) ---
-        ("core.url", "parse") => {
+        ("core.net.url", "parse") => {
             let s = as_string(one(0)?, span)?;
             Ok(match super::super::UrlLite::parse(s) {
                 Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
                 Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
             })
         }
-        ("core.url", "from_parts") => {
+        ("core.net.url", "from_parts") => {
             let scheme = as_string(one(0)?, span)?.to_string();
             let host = as_string(one(1)?, span)?.to_string();
             let path = as_string(one(2)?, span)?.to_string();
@@ -2326,14 +2320,14 @@ pub fn apply_core_call_with_type(
                 },
             )
         }
-        ("core.url", "file") => {
+        ("core.net.url", "file") => {
             let path = as_string(one(0)?, span)?;
             Ok(url_parts_to_ct(&super::super::UrlLite::file(path)))
         }
-        ("core.url", "data") => {
+        ("core.net.url", "data") => {
             // `mime` arg is a `CtValue::Struct { type_name: "Mime", .. }`
             // (D-URL1's `Mime` type) with `top`/`sub`/`params` fields — the
-            // `core.mime` module port isn't in this card's slice, so render
+            // `core.net.mime` module port isn't in this card's slice, so render
             // its essence + params here the same way AOT's
             // `JetMIME::to_string_value` does, matching field-for-field.
             let mime = one(0)?;
@@ -2348,11 +2342,11 @@ pub fn apply_core_call_with_type(
                     };
                     let top = match get("top") {
                         Some(CtValue::Str(s)) => s,
-                        _ => return Err(unsupported("core.url.data: mime.top must be String", span)),
+                        _ => return Err(unsupported("core.net.url.data: mime.top must be String", span)),
                     };
                     let sub = match get("sub") {
                         Some(CtValue::Str(s)) => s,
-                        _ => return Err(unsupported("core.url.data: mime.sub must be String", span)),
+                        _ => return Err(unsupported("core.net.url.data: mime.sub must be String", span)),
                     };
                     let mut out = format!("{}/{}", top, sub);
                     if let Some(CtValue::List(params)) = get("params") {
@@ -2369,11 +2363,11 @@ pub fn apply_core_call_with_type(
                     }
                     out
                 }
-                _ => return Err(unsupported("core.url.data: first argument must be a Mime", span)),
+                _ => return Err(unsupported("core.net.url.data: first argument must be a Mime", span)),
             };
             Ok(url_parts_to_ct(&super::super::UrlLite::data(&rendered, text)))
         }
-        ("core.url", "query") => {
+        ("core.net.url", "query") => {
             let rows = as_string_rows(one(0)?, span)?;
             let pairs: Vec<(String, String)> = rows
                 .iter()
@@ -2387,11 +2381,11 @@ pub fn apply_core_call_with_type(
                 .collect();
             Ok(CtValue::Str(super::super::UrlLite::url_render_query(&pairs)))
         }
-        ("core.url", "percent_encode") => {
+        ("core.net.url", "percent_encode") => {
             let s = as_string(one(0)?, span)?;
             Ok(CtValue::Str(super::super::UrlLite::url_percent_encode(s, false)))
         }
-        ("core.url", "percent_decode") => {
+        ("core.net.url", "percent_decode") => {
             let s = as_string(one(0)?, span)?;
             Ok(match super::super::UrlLite::url_percent_decode_str(s) {
                 Ok(v) => CtValue::Present(Box::new(CtValue::Str(v))),
@@ -2582,44 +2576,13 @@ pub fn apply_core_call_with_type(
             ))
         }
         ("core.data", "line_text" | "line_svg") => apply_data_line_call(method, args, span),
-        // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
-        ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
-            super::super::TextLite::unicode_scalar_count(as_string(one(0)?, span)?),
-        )),
-        ("core.text.unicode", "byte_count") => {
-            Ok(CtValue::Int(super::super::TextLite::unicode_byte_count(
-                as_string(one(0)?, span)?,
-            )))
-        }
-        ("core.text.unicode", "is_ascii") => {
-            Ok(CtValue::Bool(super::super::TextLite::unicode_is_ascii(
-                as_string(one(0)?, span)?,
-            )))
-        }
-        ("core.text.unicode", "lower") => {
-            Ok(CtValue::Str(super::super::TextLite::unicode_lower(
-                as_string(one(0)?, span)?,
-            )))
-        }
-        ("core.text.unicode", "upper") => {
-            Ok(CtValue::Str(super::super::TextLite::unicode_upper(
-                as_string(one(0)?, span)?,
-            )))
-        }
-        ("core.text.unicode", "scalars") => Ok(CtValue::List(
-            super::super::TextLite::unicode_scalars(as_string(one(0)?, span)?)
-                .into_iter()
-                .map(CtValue::Str)
-                .collect(),
-        )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when
         // no #Impure gate intercepts first in eval_method) ---
         ("core.files", _)
-        | ("core.env", _)
-        | ("core.io", _)
-        | ("core.exec", _)
+        | ("core.sys", _)
+        | ("core.term", _)
         | ("core.net", _)
-        | ("core.tls", _) => Err(Diagnostic::error(
+        | ("core.net.tls", _) => Err(Diagnostic::error(
             "E3410",
             format!(
                 "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",

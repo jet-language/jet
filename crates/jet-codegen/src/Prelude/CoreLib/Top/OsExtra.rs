@@ -1,4 +1,4 @@
-// core.os identity, facts, and POSIX control (ledger #1465 / D-OSFACTS1).
+// core.sys identity, facts, and POSIX control (ledger #1465 / D-OSFACTS1).
 // Included after FSIoEnvOsTesting.rs at crate root (same level as jet_std).
 
 pub(crate) fn jet_std_os_name() -> String {

@@ -176,8 +176,8 @@ pub const INTERP_CLOSE: &str = "}";
 /// S9 (ratified): the prelude-declared print function (adds a newline).
 pub const BUILTIN_PRINT: &str = "print";
 
-/// D-NAME-ALIAS1=A: `input` is prelude-declared (no `use core.io` required).
-/// `print` and `input` remain the interactive I/O subset. Other `core.io`
+/// D-NAME-ALIAS1=A: `input` is prelude-declared (no `use core.term` required).
+/// `print` and `input` remain the interactive I/O subset. Other `core.term`
 /// members are opened through the readable prelude's explicit aliases.
 pub const BUILTIN_INPUT: &str = "input";
 
@@ -595,7 +595,7 @@ pub const MARKER_UNINIT: &str = "Uninit";
 pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL2
 
 /// D-SOLVER-LIB1=A (ratified 2026-07-06): explicit finite solver library.
-pub const CORE_SOLVE_MODULE: &str = "core.solve";
+pub const CORE_SOLVE_MODULE: &str = "core.compute.solve";
 
 /// D-SOLVER-LIB1=A: deterministic solver state handle.
 pub const SOLVER_TYPE: &str = "Solver";
@@ -648,7 +648,7 @@ pub const TYPE_PIN: &str = "Pin";
 pub const MEM_ARENA: &str = "Arena";
 
 /// D-ALLOC-C (ratified 2026-06-19): bump allocator (append-only, O(1)).
-/// Grouped under `core.mem.alloc` together with Arena/Pool/Fixed.
+/// Grouped under `core.mem` together with Arena/Pool/Fixed.
 pub const MEM_BUMP: &str = "Bump";
 
 /// D-ALLOC-C (ratified 2026-06-19): pool allocator (fixed-slot slab).
@@ -679,9 +679,6 @@ pub const MEM_ALLOC_RESET: &str = "reset";
 /// D-SHAPE-RESOURCE2=A: retired allocator-specific terminal verb. Kept only so
 /// diagnostics can teach the sole `close(^allocator)` resource protocol.
 pub const MEM_ALLOC_FREE: &str = "free";
-
-/// D-ALLOC-C (ratified 2026-06-19): wider allocator API namespace.
-pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 
 /// S58: the two gates for named `core.mem` items.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

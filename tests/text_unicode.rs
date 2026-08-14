@@ -95,7 +95,7 @@ fn aot_prelude_passes_full_unicode_corpora() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs")).unwrap();
-    let start = text.find("// ── core.text.unicode helpers").expect("Unicode AOT block start");
+    let start = text.find("// ── core.text helpers").expect("Unicode AOT block start");
     let end = text.find("fn jet_std_fs_read").expect("Unicode AOT block end");
     let unicode_block = &text[start..end];
     let root_text = root.to_string_lossy().replace('\\', "\\\\");
@@ -317,7 +317,7 @@ fn scalar_inspector_names_invisible_codepoints() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs")).unwrap();
-    let start = text.find("// ── core.text.unicode helpers").expect("Unicode AOT block start");
+    let start = text.find("// ── core.text helpers").expect("Unicode AOT block start");
     let end = text.find("fn jet_std_fs_read").expect("Unicode AOT block end");
     let unicode_block = &text[start..end];
     let root_text = root.to_string_lossy().replace('\\', "\\\\");

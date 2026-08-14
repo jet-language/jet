@@ -196,7 +196,7 @@
 // D-STATE-NS1=A: state facts have the reserved `T.State.Name` qualified plane;
 // bare names are sugar only inside `#State` and `#Transition`.
 // D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler marker vocabularies are
-// generated enums in `core.lang`, derived from Policy::APPLIED_RULES.
+// generated enums in `core.compiler.lang`, derived from Policy::APPLIED_RULES.
 // D-MARKER-NAME-HYGIENE1=A: `#Discriminant("field")` owns serde internal
 // discriminants and `#Job fn` owns scheduled entry functions. `#Tag` and
 // `#Task` are retired spellings.

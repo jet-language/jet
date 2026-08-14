@@ -540,7 +540,7 @@ fn prompt_helpers_preserve_behavior_through_named_deopt() {
     let file = dir.join("prompts.jet");
     fs::write(
         &file,
-        r##"use core.io as io
+        r##"use core.term as io
 use core.text as text
 
 fn prompt_gap() => String {
@@ -623,12 +623,12 @@ fn args_parse_or_exit_runs_resident_for_return_help_and_usage_error() {
     fs::write(
         &file,
         r#"use core.args as args
-use core.io as io
+use core.term as io
 
 fn run() {
     spec :: args.spec()
         .flag("verbose", "print extra detail")
-    parsed :: spec.parse_or_exit(io.args())
+    parsed :: spec.parse_or_exit(process.argv())
     print(parsed.flag("verbose"))
 }
 "#,
@@ -730,7 +730,7 @@ fn process_probe_helper() {
 }
 
 /// Argument-taking builders stay resident and match the AOT lens byte for
-/// byte. The child also proves that `core.env` mutations and ProcessSpec
+/// byte. The child also proves that `core.sys` mutations and ProcessSpec
 /// overrides share one logical environment.
 #[test]
 fn arg_process_spec_builders_reach_the_child() {
@@ -748,7 +748,7 @@ fn arg_process_spec_builders_reach_the_child() {
     fs::write(
         &file,
         format!(
-            r#"use core.env as env
+            r#"use core.sys as env
 use core.files as files
 use core.process as process
 

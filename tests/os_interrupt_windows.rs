@@ -19,7 +19,7 @@ unsafe extern "system" {
 
 fn compile_interrupt_program(dir: &PathBuf) -> PathBuf {
     let src = r#"
-use core.os as os
+use core.sys as os
 use core.process as process
 
 fn run() {

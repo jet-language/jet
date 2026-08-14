@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
 
         // D-CALLDUAL1=E: ambient `print` is the one prelude free function that
         // earns the receiver-first spelling without a user declaration. An
-        // explicit `core.io` import also makes the spelling available in a
+        // explicit `core.term` import also makes the spelling available in a
         // `#NoPrelude` file. A user declaration named `print` shadows the
         // ambient prelude, matching ordinary direct-call resolution.
         if method == Syntax::BUILTIN_PRINT
@@ -186,14 +186,14 @@ impl<'a> Checker<'a> {
                 || self
                     .core_imports
                     .values()
-                    .any(|module| module == "core.io"))
+                    .any(|module| module == "core.term"))
             && (is_printable(receiver_ty, self.registry, self.trait_reg)
                 || self.is_unit_type(receiver_ty))
         {
             candidates.push(RootCallTarget {
                 module_idx: None,
                 alias: None,
-                core_module: Some("core.io".to_string()),
+                core_module: Some("core.term".to_string()),
                 name: method.to_string(),
             });
         }
@@ -673,7 +673,7 @@ impl<'a> Checker<'a> {
             if let Expr::Field(base, leaf, _) = &**receiver {
                 if let Expr::Ident(alias, _) = &**base {
                     if let Some(ns) = self.text_head_core_import(alias) {
-                        if ns == "core.tls" && leaf == "ClientConfig" && method == "default" {
+                        if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
                             if !args.is_empty() {
                                 self.diags.push(wrong_core_arity("ClientConfig.default", 0, args.len(), span));
                                 for arg in args.iter_mut() {
@@ -694,7 +694,7 @@ impl<'a> Checker<'a> {
                             *recv_type_out = Some("HTTPClientType".to_string());
                             return Some(Type::Named("HTTPClient".to_string()));
                         }
-                        if ns == "core.tls" && leaf == "RootCertificates" && method == "from_pem" {
+                        if ns == "core.net.tls" && leaf == "RootCertificates" && method == "from_pem" {
                             if args.len() != 1 {
                                 self.diags.push(wrong_core_arity("RootCertificates.from_pem", 1, args.len(), span));
                             }
@@ -707,7 +707,7 @@ impl<'a> Checker<'a> {
                                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
                             ));
                         }
-                        if ns == "core.tls" && leaf == "ClientIdentity" && method == "from_pem" {
+                        if ns == "core.net.tls" && leaf == "ClientIdentity" && method == "from_pem" {
                             if args.len() != 2 {
                                 self.diags.push(wrong_core_arity("ClientIdentity.from_pem", 2, args.len(), span));
                             }
@@ -724,7 +724,7 @@ impl<'a> Checker<'a> {
                                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
                             ));
                         }
-                        if ns == "core.vault"
+                        if ns == "core.crypto.vault"
                             && leaf == "KeyUnlock"
                             && matches!(method, "Recipient" | "Passphrase")
                         {
@@ -783,7 +783,7 @@ impl<'a> Checker<'a> {
                                 *resolved_ret_out = Some(ret.clone());
                                 return Some(ret);
                             }
-                            if ns == "core.vault"
+                            if ns == "core.crypto.vault"
                                 && type_name == "ExpiringSecret"
                                 && method == "new"
                             {
@@ -986,7 +986,7 @@ impl<'a> Checker<'a> {
                             **receiver = Expr::Ident("DataEvent".to_string(), span);
                             return Some(ty);
                         }
-                        if ns == "core.solve" && leaf == Syntax::SOLVER_TYPE && method == "new" {
+                        if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new" {
                             if args.len() != 1 {
                                 self.diags.push(Diagnostic::error(
                                     "E0101",

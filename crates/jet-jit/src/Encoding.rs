@@ -1,4 +1,4 @@
-//! `core.encoding.hex` / `base64` / `base32` / `csv` / `json` and `core.uuid`
+//! `core.encoding.hex` / `base64` / `base32` / `csv` / `json` and `core.crypto.uuid`
 //! host shims (#729). Encode mirrors `jet_std_*` in EncodingCodecs.rs; decode
 //! calls `jet_foundation::base_encoding_dispatch` (no third algorithm). CSV
 //! mirrors `jet_ring_csv_parse` / `jet_ring_csv_render`. JSON parse/render
@@ -169,7 +169,7 @@ pub(crate) mod json_rt {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
-        // Capture into JitRuntime.stderr (like jit_log_emit / core.io). Raw
+        // Capture into JitRuntime.stderr (like jit_log_emit / core.term). Raw
         // eprintln! escapes the ProgramOutput buffer and breaks JIT/AOT parity.
         let line = format!("{{\"level\":\"info\",\"body\":\"{msg}\",\"ts\":{ts}}}");
         crate::Concurrency::with_runtime_mut(|rt| {
@@ -749,7 +749,7 @@ fn uuid_format(b: &[u8; 16]) -> String {
     )
 }
 
-// #1481 core.uuid: parse/v5 mirror the AOT Prelude's `jet_uuid_bytes`/
+// #1481 core.crypto.uuid: parse/v5 mirror the AOT Prelude's `jet_uuid_bytes`/
 // `jet_std_uuid_parse`/`jet_std_uuid_v5` (Source/Prelude/CoreLib/Top/
 // EncodingCodecs.rs) — same validation and SHA-1 math, JIT-side heap ABI.
 fn uuid_bytes(s: &str) -> Result<[u8; 16], String> {

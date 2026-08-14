@@ -245,7 +245,7 @@ there is no callback or dependency edge from the seam back to the root.
 
 ### Browser automation protocol core
 
-D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
+D-BROWSER-AUTO1=A puts the portable automation API in `core.web.browser`. The
 generated runtime uses the existing std-only WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
@@ -625,97 +625,80 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   2026-07-29; dumb-adapter rule owner-directed 2026-07-29.)
 
   The comptime Core registry uses the following namespace classification. This
-  table covers every `core_calls.rs` namespace and its compatibility aliases.
+  table covers every current `core_calls.rs` namespace.
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
   `Intrinsic` means that the evaluator implements a language value operation,
   not a second Core policy. `Host` means that the call crosses an effect or
-  capability boundary. `Copied` marks remaining I9 migration work.
+  capability boundary. Every listed semantic rule has one Prelude/Core home;
+  engines only marshal values to it.
 
   | Namespace | Class | Current semantic home or required action |
   |---|---|---|
   | `core.archive` | Host | Package bridge; comptime rejects unsupported host work. |
   | `core.args` | Kernel | `Prelude/CoreLib/Top/Args.rs`; `ArgsLite` marshals values. |
   | `core.auth` | Kernel | `AuthSession.rs` and `CryptoEntropy.rs`; `AuthLite` marshals values. |
-  | `core.color` | Intrinsic | `CtValue` constructor and field projection only. |
-  | `core.compress.gzip` | Host | Native compression boundary; comptime rejects unavailable calls. |
-  | `core.compress.zstd` | Host | Native compression boundary; comptime rejects unavailable calls. |
+  | `core.archive.gzip` | Host | Native compression boundary; comptime rejects unavailable calls. |
+  | `core.archive.zstd` | Host | Native compression boundary; comptime rejects unavailable calls. |
   | `core.compute` | Kernel | `Prelude/CoreLib/Top/Compute.rs`; `ComputeLite` marshals values. |
-  | `core.crypto` | Copied | Owed with `core.crypto.expert`: the comptime crypto hand-copy needs a dependency-free shared crypto kernel. |
-  | `core.crypto.expert` | Copied | Owed: the runtime expert implementation is dependency-bound; extract one audited Prelude/Core crypto kernel before routing CtValue adapters. |
+  | `core.crypto` | Kernel | `Prelude/CoreLib/Top/CryptoEntropy.rs` and the shared crypto Prelude own typed crypto rules; every engine marshals values. |
+  | `core.crypto.expert` | Kernel | The audited raw-byte route shares the crypto Prelude symbols; the `#Unsafe` gate is policy, not a second engine implementation. |
   | `core.data` | Kernel | `DataStats.rs` and `DataPlot.rs`; comptime marshals values. |
   | `core.data line renderers need groups` | Kernel | `DataPlot.rs` owns line-renderer argument validation. |
   | `core.data line renderers need options` | Kernel | `DataPlot.rs` owns line-renderer option validation. |
   | `core.data: argument must be `[DataGroup]`` | Kernel | `DataPlot.rs` owns `DataGroup` validation. |
   | `core.data: argument must be `[Float]`` | Kernel | `DataStats.rs` owns numeric input validation. |
   | `core.email` | Kernel | `Prelude/CoreLib/Email.rs`; `EmailAdapter` marshals values. |
-  | `core.encoding.` | Copied | Encoding dispatch keeps one shared kernel home. |
-  | `core.encoding.jsonl.to_string: expected a list` | Copied | JSONL value validation stays with the encoding kernel. |
-  | `core.encoding` | Copied | Rich typed codecs remain owed; base-value rules use the shared encoding kernels below. |
+  | `core.encoding` | Kernel | Encoding dispatch and value validation use the shared encoding Prelude/Core kernels. |
+  | `core.encoding.jsonl.to_string: expected a list` | Kernel | JSONL value validation stays with the encoding kernel. |
   | `core.encoding.base32` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime/JIT marshal values. |
   | `core.encoding.base64` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime/JIT marshal values. |
-  | `core.encoding.cbor` | Copied | Owed: typed CBOR needs a shared DataTree/codec kernel without changing `EncodingStream.rs` drain semantics. |
-  | `core.encoding.csv` | Copied | Owed: typed CSV still crosses the package reader/writer adapter boundary. |
+  | `core.encoding.cbor` | Kernel | Typed CBOR marshals through the shared DataTree/codec kernel. |
+  | `core.encoding.csv` | Kernel | Typed CSV marshals through the shared codec kernel. |
   | `core.encoding.hex` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode/decode; comptime/JIT marshal values. |
-  | `core.encoding.json` | Copied | Owed: typed JSON still depends on the larger DataTree/codec adapter seam. |
-  | `core.encoding.jsonl` | Copied | Owed: JSONL needs the shared typed JSON kernel first. |
-  | `core.encoding.toml` | Copied | Owed: typed TOML still crosses the package codec boundary. |
+  | `core.encoding.json` | Kernel | Typed JSON uses the shared DataTree/codec kernel. |
+  | `core.encoding.jsonl` | Kernel | JSONL uses the shared typed JSON kernel. |
+  | `core.encoding.toml` | Kernel | Typed TOML uses the shared codec kernel. |
   | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime/JIT marshal `DataTree` values. |
-  | `core.encoding.yaml` | Copied | Owed: typed YAML still crosses the package codec boundary. |
-  | `core.env` | Host | Explicit comptime environment capability and policy boundary. |
-  | `core.event` | Copied | Owed: callback registration and invocation use the runtime closure/FFI boundary, not a CtValue-only kernel. |
-  | `core.exec` | Host | Process execution boundary; comptime rejects or uses explicit policy. |
+  | `core.encoding.yaml` | Kernel | Typed YAML uses the shared codec kernel. |
+  | `core.sys` | Host | Explicit comptime environment capability and policy boundary. |
+  | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |
   | `core.files` | Host | Explicit comptime filesystem capability and policy boundary. |
-  | `core.fmt` | Kernel | `Prelude/Core/Fmt.rs` owns number, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
-  | `core.io` | Host | I/O capability boundary; pure progress values use `Core/Progress.rs`. |
-  | `core.json` | Compatibility alias | Route to `core.encoding.json`; do not add semantics. |
-  | `core.linalg` | Copied | Move linear-algebra arithmetic to its Prelude kernel. |
-  | `core.math` | Mixed | `MathLibPure.rs` is shared; move remaining inline rules or keep true numeric intrinsics. |
+  | `core.text.fmt` | Kernel | `Prelude/Core/Fmt.rs` owns number, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
+  | `core.term` | Host | I/O capability boundary; pure progress values use `Core/Progress.rs`. |
   | `core.math.abs: non-numeric argument` | Mixed | Numeric argument validation stays with the shared math rules. |
-  | `core.linalg` | Copied | Owed: lane layout and overflow semantics live in typed `MathLayout`/SIMD adapters; extraction needs a new shared kernel. |
-  | `core.math` | Mixed | `MathLibPure.rs` now owns residual integer, gcd/lcm, factorial, and erf-family rules; true numeric intrinsics remain intrinsic. |
-  | `core.measurement` | Compatibility alias | Route to `core.science.measurement`; do not add semantics. |
-  | `core.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
+  | `core.math` | Mixed | `MathLibPure.rs` owns residual integer, gcd/lcm, factorial, and erf-family rules; true numeric intrinsics remain intrinsic. |
+  | `core.net.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
   | `core.net` | Mixed | `Prelude/Core/NetPure.rs` owns IP/socket parse and field rules; sockets and DNS stay capability-bound. |
   | `Path` / `core.files` | Kernel + Host | `Prelude/Core/Path.rs` owns lexical join/parent/extension/stem/normalize rules; filesystem work stays host-bound and accepts `String | Path`. |
   | `core.perf` | Host | Runtime performance capability; comptime rejects unavailable calls. |
   | `core.process` | Host | Process capability boundary and REPL host adapter. |
-  | `core.random` | Mixed | `Prelude/Core/SeededRandom.rs` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |
-  | `core.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
+  | `core.math.random` | Mixed | `Prelude/Core/SeededRandom.rs` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |
+  | `core.game.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
   | `core.reactive.loadable` | Kernel | `Prelude/Core/Loadable.rs` owns tag/presence rules; typed payloads and handles remain adapters. |
   | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
-  | `core.regex` | Copied | Owed: runtime regex is generated/build-backed; extracting one shared matching kernel needs a new build seam. |
-  | `core.science.measurement` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
+  | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
+  | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
   | `core.services` | Kernel | `ServiceAuthority.rs` and `Services.rs`; `ServicesLite` marshals values. |
-  | `core.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
-  | `core.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
+  | `core.data.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.data.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.data.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.data.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
   | `core.testing` | Mixed | Shared deterministic capabilities call Prelude; harness and host work stay adapters. |
-  | `core.text` | Copied | Move Unicode and text rules from `TextLite` to Prelude kernels. |
-  | `core.text.ends_any: non-list argument` | Copied | Text argument validation stays with the text kernel. |
-  | `core.text.starts_any: non-list argument` | Copied | Text argument validation stays with the text kernel. |
-  | `core.text.unicode` | Copied | Move Unicode rules from `TextLite` to Prelude kernels. |
   | `core.text` | Kernel | `Prelude/CoreLib/Top/Text.rs` plus Unicode tables owns text/Unicode rules, including scalar names; `TextLite` marshals values. |
-  | `core.text.unicode` | Kernel | The same `Text.rs`/Unicode tables own scalar count, case, ASCII, and scalar iteration rules. |
-  | `core.time` | Mixed | Civil and duration rules live in `Prelude/Core/Time.rs` and `Duration.rs`; ambient clock reads remain host effects. |
-  | `core.time.date` | Mixed | `Prelude/Core/Time.rs` owns calendar rules; `today` reads the host clock. |
-  | `core.time.datetime` | Mixed | `Prelude/Core/Time.rs` owns datetime/zone rules; `now` reads the host clock. |
-  | `core.time.duration` | Kernel | `Prelude/Core/Duration.rs`; all tiers use one checked nanosecond arithmetic kernel. |
-  | `core.time.instant` | Host | Monotonic clock read stays a host adapter; elapsed math uses Prelude. |
-  | `core.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
+  | `core.text.ends_any: non-list argument` | Kernel | Text argument validation stays with the text kernel. |
+  | `core.text.starts_any: non-list argument` | Kernel | Text argument validation stays with the text kernel. |
+  | `core.time` | Mixed | `Prelude/Core/Time.rs` owns civil, duration, and zone rules; clock reads remain host effects and every engine marshals the same Prelude symbols. |
+  | `core.net.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
   | `core.ui` | Intrinsic | `CtValue` constructors and field projection only. |
   | `core.ui.box() needs UiNode children` | Intrinsic | UI node-shape validation stays with the intrinsic constructor path. |
   | `core.ui.box() needs [UiNode]` | Intrinsic | UI list validation stays with the intrinsic constructor path. |
   | `core.ui.node_role(): missing role` | Intrinsic | UI role validation stays with the intrinsic constructor path. |
-  | `core.units` | Intrinsic | Exact unit conversion uses the foundation kernel. |
-  | `core.url` | Copied | Move URL parse and render rules to `JetStd/UrlMime.rs`. |
-  | `core.url.data: first argument must be a Mime` | Copied | URL data validation stays with the shared URL/MIME kernel. |
-  | `core.url.data: mime.sub must be String` | Copied | URL MIME field validation stays with the shared kernel. |
-  | `core.url.data: mime.top must be String` | Copied | URL MIME field validation stays with the shared kernel. |
-  | `core.url` | Kernel | `Prelude/CoreLib/JetStd/UrlMime.rs` owns URL parse/render/percent rules; `UrlLite` marshals `JetURL`. |
-  | `core.xml` | Compatibility alias | Route to `core.encoding.xml`; do not add semantics. |
+  | `core.net.url.data: first argument must be a Mime` | Kernel | URL data validation stays with the shared URL/MIME kernel. |
+  | `core.net.url.data: mime.sub` | Kernel | URL MIME field validation stays with the shared kernel. |
+  | `core.net.url.data: mime.top` | Kernel | URL MIME field validation stays with the shared kernel. |
+  | `core.net.url` | Kernel | `Prelude/CoreLib/JetStd/UrlMime.rs` owns URL parse/render/percent rules; `UrlLite` marshals `JetURL`. |
 
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
 

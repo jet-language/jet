@@ -26,20 +26,19 @@ pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) 
                 ("FS", "Read", shown(0, "<path>")),
             ("core.files", "write" | "append_all" | "create_dir" | "remove") =>
                 ("FS", "Write", shown(0, "<path>")),
-            ("core.env", "get") => ("Env", "Read", shown(0, "<key>")),
-            ("core.env", "set") => ("Env", "Write", shown(0, "<key>")),
-            ("core.env", "current_dir") => ("Env", "Read", "PWD".to_string()),
-            ("core.env", "home_dir") => ("Env", "Read", "HOME".to_string()),
-            ("core.io", "eprint") => ("IO", "Write", "stderr".to_string()),
-            ("core.io", "input" | "read_all_input" | "stdin") =>
+            ("core.sys", "get") => ("Env", "Read", shown(0, "<key>")),
+            ("core.sys", "set") => ("Env", "Write", shown(0, "<key>")),
+            ("core.sys", "current_dir") => ("Env", "Read", "PWD".to_string()),
+            ("core.sys", "home_dir") => ("Env", "Read", "HOME".to_string()),
+            ("core.term", "eprint") => ("IO", "Write", "stderr".to_string()),
+            ("core.term", "input" | "read_all_input" | "stdin") =>
                 ("IO", "Read", "stdin".to_string()),
-            ("core.io", "args") => ("IO", "Read", "argv".to_string()),
+            ("core.process", "argv") => ("IO", "Read", "argv".to_string()),
             ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
             ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
-            ("core.random", _) => ("Rand", "Draw", method.to_string()),
-            ("core.net" | "core.tls", _) =>
+            ("core.math.random", _) => ("Rand", "Draw", method.to_string()),
+            ("core.net" | "core.net.tls", _) =>
                 ("Net", method, shown(0, "<network resource>")),
-            ("core.exec", _) => ("Exec", method, shown(0, "<command>")),
             _ => ("IO", method, module.to_string()),
         }
     };
@@ -150,7 +149,7 @@ pub fn apply_repl_authorized_core_call_with_type(
     args = normalize_path_args(module, method, args, span)?;
     // REPL eprint is the inline transcript sink. It does not need an effect
     // prompt or a lexical grant; the existing REPL surface keeps it available.
-    if module == "core.io" && method == "eprint" {
+    if module == "core.term" && method == "eprint" {
         return apply_impure_core_call_with_type(
             module, method, args, span, base_dir, sink, true, None, None, resolved_ret,
         );
@@ -200,7 +199,7 @@ pub fn apply_repl_authorized_core_call_with_type(
         ));
     }
     authorizer.authorize(&request, span)?;
-    if module == "core.io" && matches!(method, "input" | "read_all_input") {
+    if module == "core.term" && matches!(method, "input" | "read_all_input") {
         let prompt = match args.first() {
             Some(CtValue::Str(value)) => value.as_str(),
             _ => "",
@@ -217,7 +216,7 @@ pub fn apply_repl_authorized_core_call_with_type(
     if module == "core.files" {
         return apply_repl_fs_call(method, &args, span, authorizer);
     }
-    if module == "core.random" {
+    if module == "core.math.random" {
         return apply_core_call_with_type(module, method, args, span, true, resolved_ret);
     }
     let verified_root = if matches!((module, method), ("core.process", "run")) {

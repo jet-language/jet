@@ -1057,7 +1057,7 @@ fn default_jet_run_deopts_jit_gap_silently() {
     let file = dir.join("env.jet");
     fs::write(
         &file,
-        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
     )
     .unwrap();
     let output = Command::new(jet())

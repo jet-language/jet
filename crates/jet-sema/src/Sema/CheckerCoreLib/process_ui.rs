@@ -138,9 +138,9 @@ pub(crate) fn args_spec_method_return(
             diags.push(Diagnostic::error(
                 "E1304",
                 format!("`parse` expects 1 argument (argv), got {}", n_args),
-                "`ArgsSpec.parse(argv)` parses a `[String]` (from `io.args()`) against the spec"
+                "`ArgsSpec.parse(argv)` parses a `[String]` (from `process.argv()`) against the spec"
                     .to_string(),
-                "pass exactly one argument: the argv list, e.g. `io.args()`".to_string(),
+                "pass exactly one argument: the argv list, e.g. `process.argv()`".to_string(),
                 Some(span),
             ));
             Some(None)

@@ -113,7 +113,7 @@ fn service_authority_receipts_match_default_run() {
 }
 
 const RESTART_SOURCE: &str = r#"
-use core.env as env
+use core.sys as env
 use core.services as services
 use core.time as time
 
@@ -268,7 +268,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
 }
 
 const STATE_RESTART_SOURCE: &str = r#"
-use core.env as env
+use core.sys as env
 use core.services as services
 
 fn run() {
@@ -404,7 +404,7 @@ fn restart_status(bin: &Path, store: &Path, phase: &str, id: &str) -> std::proce
 }
 
 const WORKFLOW_RESTART_SOURCE: &str = r#"
-use core.env as env
+use core.sys as env
 use core.services as services
 
 fn run() {
@@ -798,7 +798,7 @@ fn state_adapters_reopen_and_reject_corrupt_stores_default_run() {
 /// about the durable body. This sets an adapter first, so the upgrade really
 /// copies the store aside and the rollback reads it back.
 const ROLLBACK_WITH_STATE_SOURCE: &str = r#"
-use core.env as env
+use core.sys as env
 use core.services as services
 
 fn run() {

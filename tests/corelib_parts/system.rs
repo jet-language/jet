@@ -240,7 +240,7 @@ fn run() {
 fn core_fmt_human_formatting_surface_runs() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
-        eprintln!("note: skipping core.fmt runtime test (need rustc)");
+        eprintln!("note: skipping core.text.fmt runtime test (need rustc)");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_corelib_fmt_{}", std::process::id()));
@@ -250,7 +250,7 @@ fn core_fmt_human_formatting_surface_runs() {
         &dir,
         "human_format",
         r#"
-use core.fmt as fmt
+use core.text.fmt as fmt
 
 fn run() {
     print(fmt.number(1204331))
@@ -268,7 +268,7 @@ fn run() {
         &[],
         None,
     );
-    assert_eq!(code, 0, "core.fmt program failed: {stderr}");
+    assert_eq!(code, 0, "core.text.fmt program failed: {stderr}");
     assert_eq!(
         stdout,
         "1,204,331\n1,234.57\n12.3%\n1.5 GB\n3m 42s\n21st\n2 rows\n007\ngo..\n.x.\n"
@@ -478,11 +478,11 @@ fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
         dir.join("core_import_only.jet"),
         r#"
 use core.files as fs
-use core.io as io
-use core.env as env
+use core.term as io
+use core.sys as env
 use core.process as process
 use core.math as math
-use core.random as random
+use core.math.random as random
 use core.time as time
 use core.encoding.json as json
 
@@ -944,10 +944,10 @@ fn core_module_items_covers_known_core_modules() {
     let fn_body = &src[fn_start..];
     // Collect ALL string literals from match arm heads (handles `"a" | "b" => &[` form too).
     let mut items_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    // `core.lang` is generated from the marker registry and returns before the
+    // `core.compiler.lang` is generated from the marker registry and returns before the
     // static match table, so it has no ordinary arm to extract.
-    if fn_body.contains("if module == \"core.lang\"") {
-        items_keys.insert("core.lang".to_string());
+    if fn_body.contains("if module == \"core.compiler.lang\"") {
+        items_keys.insert("core.compiler.lang".to_string());
     }
     if fn_body.contains("module == Syntax::CORE_MEM_MODULE") {
         items_keys.insert("core.mem".to_string());
@@ -1076,7 +1076,7 @@ fn core_reference_lists_every_built_core_module() {
 
 #[test]
 fn jet_raylib_namespace_is_not_a_core_module_alias() {
-    assert!(jet::Syntax::is_known_core_module("core.raylib"));
+    assert!(jet::Syntax::is_known_core_module("core.game.raylib"));
     assert!(!jet::Syntax::is_known_core_module("jet.raylib"));
 
     let src = r#"

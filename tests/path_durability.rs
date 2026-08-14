@@ -203,7 +203,7 @@ fn atomic_write_retries_collision_replaces_and_cleans_failed_temp() {
     let src = format!(
         r#"
 use core.files as fs
-use core.os as os
+use core.sys as os
 fn run() {{
     root :: "{}"
     stale :: Path.from(root).join(".jet_tmp_{{os.pid()}}_0")

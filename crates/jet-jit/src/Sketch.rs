@@ -1,4 +1,4 @@
-//! `core.sketch` marshalling hosts for the shared Prelude kernel.
+//! `core.data.sketch.*` marshalling hosts for the shared Prelude kernel.
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
@@ -154,7 +154,6 @@ host_fns! {
     quantile: "jet_jit_sketch_quantile" => jet_jit_sketch_quantile: quant;
     sample: "jet_jit_sketch_sample" => jet_jit_sketch_sample: unary;
 }
-
 
 
 

@@ -1121,7 +1121,7 @@ fn jet_http_server_handle_stream(
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
-        // D-WS1=B: expose this connection to core.ws.upgrade during dispatch.
+        // D-WS1=B: expose this connection to core.net.ws.upgrade during dispatch.
         let _ws_guard = JetWsStreamGuard::install(stream);
         let response = jet_http_mux_dispatch(mux, request)
             .unwrap_or_else(jet_http_srv_error_response);

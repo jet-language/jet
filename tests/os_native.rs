@@ -58,7 +58,7 @@ fn native_os_facts_match_host_and_are_nonempty() {
         &dir,
         "facts",
         r#"
-use core.os as os
+use core.sys as os
 
 fn run() {
     print(os.name())
@@ -91,7 +91,7 @@ fn native_interrupt_runs_ordered_handlers_after_first_panics() {
         &dir,
         "interrupt",
         r#"
-use core.os as os
+use core.sys as os
 use core.process as process
 
 fn run() {

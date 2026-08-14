@@ -524,13 +524,13 @@ pub(crate) fn jet_crypto_uuid_v7_result(
 pub(crate) fn jet_crypto_uuid_v4() -> String {
     match jet_crypto_uuid_v4_result() {
         Ok(uuid) => uuid,
-        Err(error) => jet_crypto_entropy_fail_closed("core.uuid.v4", error),
+        Err(error) => jet_crypto_entropy_fail_closed("core.crypto.uuid.v4", error),
     }
 }
 
 pub(crate) fn jet_crypto_uuid_v7(timestamp_ms: i64) -> String {
     match jet_crypto_uuid_v7_result(timestamp_ms) {
         Ok(uuid) => uuid,
-        Err(error) => jet_crypto_entropy_fail_closed("core.uuid.v7", error),
+        Err(error) => jet_crypto_entropy_fail_closed("core.crypto.uuid.v7", error),
     }
 }

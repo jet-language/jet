@@ -833,9 +833,8 @@ fn core_member_pure(module_path: &str, name: &str) -> bool {
     if matches!(
         module_path,
         "core.math"
-            | "core.fmt"
+            | "core.text.fmt"
             | "core.text"
-            | "core.text.unicode"
             | "core.encoding"
             | "core.encoding.json"
             | "core.encoding.jsonl"
@@ -847,10 +846,10 @@ fn core_member_pure(module_path: &str, name: &str) -> bool {
             | "core.encoding.hex"
             | "core.encoding.base64"
             | "core.encoding.base32"
-            | "core.url"
-            | "core.mime"
+            | "core.net.url"
+            | "core.net.mime"
             | "core.reflect"
-            | "core.solve"
+            | "core.compute.solve"
             | "core.data"
     ) {
         return true;
@@ -858,10 +857,10 @@ fn core_member_pure(module_path: &str, name: &str) -> bool {
     if module_path == "core.files" {
         return matches!(name, "exists" | "is_dir" | "absolute");
     }
-    if module_path == "core.env" {
+    if module_path == "core.sys" {
         return matches!(name, "get" | "current_dir" | "home_dir");
     }
-    if module_path == "core.os" {
+    if module_path == "core.sys" {
         return name != "set_current_dir" && name != "on_interrupt";
     }
     if module_path == "core.time" {

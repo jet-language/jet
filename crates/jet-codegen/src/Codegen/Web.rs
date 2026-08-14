@@ -3943,7 +3943,7 @@ fn wasm_emit_expr(
                             crate::AST::StrFormat::Display => "{}",
                             crate::AST::StrFormat::Debug => "{:?}",
                             crate::AST::StrFormat::Fixed(_) => {
-                                unreachable!("Fixed interpolation lowers to core.fmt.decimal")
+                                unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                             }
                             crate::AST::StrFormat::Unit(_) => {
                                 unreachable!("Unit interpolation lowers to a String")

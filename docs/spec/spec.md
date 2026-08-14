@@ -71,7 +71,7 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   `DateTime` adds sub-second accessors (`millisecond` / `microsecond` /
   `nanosecond`), `floor` / `ceil` beside `truncate` / `round`, `replace(...)`,
   and `difference(other) => Duration`. `ZonedDateTime` adds `is_dst()`.
-  `core.time.datetime(...)`, `core.time.time(...)` / `local_time(...)`,
+  `core.time(...)`, `core.time.time(...)` / `local_time(...)`,
   `days_in_month(y, m)`, and `is_leap_year(y)` construct or query the same
   values. `Instant.elapsed()` returns a `Duration`.
 - `true` and `false` are `Bool` literals.
@@ -287,7 +287,7 @@ keep code readable from top to bottom. See
   member by artifact kind; retired suffixes have no compatibility aliases.
 - `print(x)` is prelude-declared (S9); takes one or more printable arguments
   (E0103, E0112) and writes each on its own line with a trailing newline
-  (D-VERDICT-1321-1). `io.print`/`io.eprint` accept the same variadic
+  (D-VERDICT-1321-1). `term.print`/`term.eprint` accept the same variadic
   form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
 - `input()` / `input(prompt)` is prelude (D-NAME-ALIAS1); reads a line from
   stdin, strips the trailing newline, and returns `String ? IOError`.
@@ -1839,7 +1839,7 @@ above) as the answer to "what does Jai's chain do in Jet." Example:
 ### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19)
 
 Four allocators ship under `core.mem` — `Arena`, `Bump`, `Pool`, `Fixed` — all namespaced
-under `core.mem.alloc` (D-ALLOC-C). No `#Unsafe` needed; `use core.mem` is the discovery
+under `core.mem` (D-ALLOC-C). No `#Unsafe` needed; `use core.mem` is the discovery
 gate (E3102). Constructors: `mem.Arena.new()` / `mem.Arena.new(capacity: N)` (D-ALLOC1);
 allocate with `arena.alloc(value)`. `reset()` keeps the backing storage (cheap, allocator is
 reusable). Terminal release uses the universal resource operation `close(^allocator)`; the
@@ -2183,7 +2183,7 @@ Lifecycle: `flush`, `close`, `shutdown`, `copy` / `clone`, `copy_to`, `equal`,
 `compare`, `capacity`, `get_buffer` / `buffer`, `to_bytes`, `len`, `is_empty`,
 `clear`.
 
-Consuming typed reads stay on `core.binary.Reader` / `core.io` Writer handles —
+Consuming typed reads stay on `core.encoding.Reader` / `core.term` Writer handles —
 Bytes does not grow a second Reader/Writer type (I8).
 
 Example: `examples/features/io/byte_buffer.jet`.
@@ -2212,10 +2212,10 @@ Jet ships:
 Examples: `examples/features/math/math_audit.jet`,
 `examples/features/math/more_math.jet`, `examples/features/math/fraction.jet`.
 
-### `core.os` (D-OSFACTS1, ledger #1465)
+### `core.sys` (D-OSFACTS1, ledger #1465)
 
-System facts and process identity live in `core.os`. Environment variables and
-cwd/home stay in `core.env`. Subprocess run/exit stay in `core.process`.
+System facts and process identity live in `core.sys`. Environment variables and
+cwd/home stay in `core.sys`. Subprocess run/exit stay in `core.process`.
 
 Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
 `pid`/`getpid`, `hostname`, `username`, `release`, `version`, `getppid`,
@@ -2233,8 +2233,8 @@ semantics on Windows.
 Examples: `examples/features/io/os_facts.jet`,
 `examples/features/io/os_process_control.jet`.
 
-D-CORE-COMPRESS1=A splits compression by job. `core.compress.gzip` and
-`core.compress.zstd` are the only byte-stream codec homes; both expose
+D-CORE-COMPRESS1=A splits compression by job. `core.archive.gzip` and
+`core.archive.zstd` are the only byte-stream codec homes; both expose
 `compress` and fallible `decompress`. `core.archive` exposes zip/tar container
 operations only (`zip_compress`, `zip_decompress`, `tar_add`, `tar_get`,
 `tar_names_json`). It has no gzip re-export or compatibility alias.
@@ -2366,7 +2366,7 @@ backpressure only; channels have no drop policy.
 | `AsyncEvent<T, E>` | `Block` waits; `DropNewest` drops the new attempt; `DropOldest` drops the oldest queued attempt | Only explicit loss path; report exposes acceptance and terminal state |
 | `core.services` worker mailbox | Full delivery waits under deadline or returns `Full` | At-most-once, per-sender FIFO; no silent drop |
 | `core.files` buffered handles | Reader/writer calls block or flush; no Jet queue or drop policy | Bounded-memory stream; caller pace controls progress |
-| `core.io` stream handles and `core.http` `Body` | Blocking reads/writes use OS or socket backpressure; body limits reject over-limit input | Transport streaming preserves accepted bytes; no overflow drop |
+| `core.term` stream handles and `core.http` `Body` | Blocking reads/writes use OS or socket backpressure; body limits reject over-limit input | Transport streaming preserves accepted bytes; no overflow drop |
 | `core.encoding` readers/writers and `core.data.DataStream` | Blocking `next`/`write`/`flush`; `EncodingLimits`/`DataLimits` bound retained work; no hidden queue or drop | Bounded pull/push stream, not lossy delivery |
 | `core.log` sinks | No public bounded queue, capacity, or overflow policy; sink writes and `flush` are explicit | No buffering-loss rule today; sampling/disable are explicit emission controls |
 
@@ -2728,11 +2728,11 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   declare `secrets: ["name", …]` — a plain `[String]` list, no dedicated
   grammar. Each name is one this env expects to find in the project's
   encrypted repo store (`.jet/secrets.age`, managed by `jetpack secrets
-  set/get/recipients/keygen`); reading one at runtime is `core.vault.get`,
+  set/get/recipients/keygen`); reading one at runtime is `core.crypto.vault.get`,
   gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
   denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
   `jetpack secrets get <name>` on a name absent from the store is **E1263**.
-- **Typed vault keys (D-CRYPTO-VAULT1=A):** `core.vault` persists only
+- **Typed vault keys (D-CRYPTO-VAULT1=A):** `core.crypto.vault` persists only
   `SigningKey` and `X25519SecretKey` behind immutable `KeyRef<T>` handles.
   Reads, preparation, authorization, and commits all require `Secret`.
   Mutation is a three-step compare-and-swap: prepare a five-minute move-only
@@ -2752,7 +2752,7 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   authorization and consuming compare-and-swap commit; same-origin imports are
   idempotent and revoked origins never reactivate. All secret-dependent open
   failures collapse to `KeyWrapError.OpenFailed`. Raw 32-byte import is available only
-  through `core.vault.expert` inside an audited `#Unsafe` region. Headless
+  through `core.crypto.expert` inside an audited `#Unsafe` region. Headless
   mutation requires `jet trust grant vault.write:<repository_uuid>`; source,
   workspace, environment, DAP, and stdin are never write authority.
 
@@ -2913,7 +2913,7 @@ project/host and returns captured output, so Studio never substitutes hidden
 state for CLI proof. The build action writes a named Studio candidate generation
 before proof.
 
-`module vmtest.<name>` declares a JetOS VM scenario. Its `hosts:` map names
+`module vmtest.<name>` declares a JetOS VM scenarterm. Its `hosts:` map names
 scenario handles bound to `system.<host>` declarations, and `run: test { ... }`
 captures typed host-handle assertions such as `wait_for_boot`,
 `assert_unit_active`, and `assert_port_open`. `jet os vm test <name> --disk
@@ -2986,16 +2986,16 @@ representation.
 
 | Effect  | Carried by |
 |---------|-----------|
-| `IO`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
+| `IO`    | `print`, `eprint`, `input`, `read_all_input`, `core.term.*` |
 | `FS`    | `core.files.*` (whole-file helpers and streaming handles), `core.watcher.files` |
 | `Net`   | `core.net.*`, `core.http.*`, `core.watcher.port` |
 | `Time`  | ambient `core.time` clock/zone reads (`now`, `now_utc`, `today`, `instant`, `zone`, `sleep`, `start`) |
-| `Rand`  | `core.random.*` |
-| `Env`   | `core.env.*` |
+| `Rand`  | `core.math.random.*` |
+| `Env`   | `core.sys.*` |
 | `Exec`  | `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
 | `DB`    | `core.db.*`; leaves (D-EFFDBREAD1): `conn.query`/`conn.query_one` carry `DB.Read`, `conn.execute` carries `DB.Write`, `begin`/`commit`/`rollback`/`close` and `open`/`open_memory` keep the bare `DB` root |
 | `Log`   | `core.log.*` |
-| `GPU`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |
+| `GPU`   | `core.game.raylib.*`, future `core.gpu.*` / `core.game.*` |
 
 A call to an `extern rust`/C foreign function, whose body the compiler can't
 inspect, contributes the **maximal** set (every effect) — it is assumed to do
@@ -3052,7 +3052,7 @@ through the rustls bridge and system certificate roots. Plain `http://` remains
 available for loopback fixtures and old endpoints. HTTPS client failures are
 reported in Jet terms: E4201 for handshake failure, E4202 for certificate trust
 failure, and E4203 when the host image has no usable certificate roots.
-Advanced client TLS configuration belongs in `core.tls` (custom roots,
+Advanced client TLS configuration belongs in `core.net.tls` (custom roots,
 pinning, client certificates). D-TLSSERVE1=A adds HTTPS serving as a named
 option on the same server entry point: `Server.serve(addr, mux, tls:
 Server.tls(cert, key))?`. The third argument must be labeled `tls:`; unlabeled
@@ -3060,7 +3060,7 @@ TLS config is rejected so the transport switch is visible at the call site.
 
 ### Graphics and games (D-RAYLIB1, D-GAME1-3)
 
-`core.raylib` is the first-party graphics bridge package. The typed surface is
+`core.game.raylib` is the first-party graphics bridge package. The typed surface is
 `window_open`, `window_should_close`, `window_ready`, `begin_drawing`,
 `clear_background`, `draw_rectangle`, `draw_text`, `end_drawing`,
 `close_window`, `key_down`, `set_target_fps`, and `color`. By default the
@@ -3479,7 +3479,7 @@ signature, where `T` is a CLI spec shape below. A Package may instead declare a
 typed Executable `Output` whose checked `entry:` function has the same CLI
 contract; this does not reserve another function name.
 No variadic entry signature exists; raw argv access stays explicit inside
-`fn run()` via `core.args`/`core.io.args`. `main` has no entry meaning in Jet.
+`fn run()` via `core.args`/`core.term.args`. `main` has no entry meaning in Jet.
 Bad typed-entry shapes are diagnosed (E1308 below), not silently ignored.
 
 An App-returning typed entry uses the same contract: Jet decodes the one typed

@@ -293,7 +293,7 @@ impl<'a> Checker<'a> {
                         target,
                         call.name
                     ),
-                    "`print` writes to stdout; `io.eprint` is the stderr twin in `core.io`".to_string(),
+                    "`print` writes to stdout; `io.eprint` is the stderr twin in `core.term`".to_string(),
                     format!("replace `{}` with `{}`", call.name, target),
                     Some(call.name_span),
                 )
@@ -329,8 +329,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0039",
                     "`getenv` is written `env.get` in Jet".to_string(),
-                    "environment access lives in the `core.env` module".to_string(),
-                    "import `core.env as env` and call `env.get(name)`".to_string(),
+                    "environment access lives in the `core.sys` module".to_string(),
+                    "import `core.sys as env` and call `env.get(name)`".to_string(),
                     Some(call.name_span),
                 ));
                 for arg in call.args.iter_mut() {
@@ -452,7 +452,7 @@ impl<'a> Checker<'a> {
                             Syntax::BUILTIN_INPUT,
                         ),
                         format!(
-                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
+                            "write `use core.term as io` and call `io.{}(…)`, or remove `#{}`",
                             Syntax::BUILTIN_PRINT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
@@ -531,7 +531,7 @@ impl<'a> Checker<'a> {
                 return Some(None);
             }
     
-            // D-NAME-ALIAS1=A: `input` is prelude-declared — no `use core.io` needed.
+            // D-NAME-ALIAS1=A: `input` is prelude-declared — no `use core.term` needed.
             // Resolves to the same semantics as `io.input`: optional String prompt,
             // returns Result(String, IOError). Shadowed by any user-defined `input`.
             // D-PRELUDEX1=A: `#NoPrelude` turns the readable prelude off.
@@ -554,7 +554,7 @@ impl<'a> Checker<'a> {
                             Syntax::BUILTIN_INPUT,
                         ),
                         format!(
-                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
+                            "write `use core.term as io` and call `io.{}(…)`, or remove `#{}`",
                             Syntax::BUILTIN_INPUT,
                             Syntax::MARKER_NO_PRELUDE
                         ),

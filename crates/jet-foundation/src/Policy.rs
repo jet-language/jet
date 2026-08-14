@@ -806,7 +806,7 @@ impl RuleSite {
 }
 
 /// D-META-FORM1=A: `@sites` on a `marker` declaration takes `[Site]`, so the
-/// nineteen attachment points are published as an ordinary `core.lang` enum
+/// nineteen attachment points are published as an ordinary `core.compiler.lang` enum
 /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
 /// stays the one source; `site_variants_match_the_enum` proves this list is it.
 pub const SITE_VARIANTS: &[&str] = &[
@@ -883,13 +883,13 @@ pub enum RuleArgType {
 }
 
 /// D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler vocabulary is published as
-/// ordinary generated enums in `core.lang`. Marker signatures point at these
+/// ordinary generated enums in `core.compiler.lang`. Marker signatures point at these
 /// declarations; diagnostics, reflection, and editor tools read the same rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuleArgDeclaration {
     pub name: &'static str,
     pub variants: &'static [&'static str],
-    /// Which segment of a written path names the variant. `core.lang.Target.Web`
+    /// Which segment of a written path names the variant. `core.compiler.lang.Target.Web`
     /// and `Capability.FS` are read from the front because their variants own
     /// nested names; every other menu reads the last segment.
     pub variant_segment: VariantSegment,
@@ -1543,7 +1543,7 @@ mod tests {
         assert_eq!(published, super::SITE_VARIANTS);
 
         let declaration =
-            super::rule_arg_declaration("Site").expect("`Site` is published in `core.lang`");
+            super::rule_arg_declaration("Site").expect("`Site` is published in `core.compiler.lang`");
         assert_eq!(declaration.variants, super::SITE_VARIANTS);
         assert_eq!(declaration.variant_segment, super::VariantSegment::Last);
     }
@@ -1635,7 +1635,7 @@ mod tests {
                 }
                 assert!(
                     super::rule_arg_declaration(param.source_type).is_some(),
-                    "#{} parameter {} names missing core.lang.{}",
+                    "#{} parameter {} names missing core.compiler.lang.{}",
                     row.name,
                     param.name,
                     param.source_type
@@ -1648,7 +1648,7 @@ mod tests {
                 ) {
                     assert!(
                         super::rule_arg_declaration(source_type).is_some(),
-                        "#{} variadic type core.lang.{source_type}",
+                        "#{} variadic type core.compiler.lang.{source_type}",
                         row.name
                     );
                 }

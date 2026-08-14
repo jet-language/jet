@@ -1546,8 +1546,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "module alias requires exact use-path context",
-            "use core.io as io\nfn run() { foo.bar }\n",
-            "use core.io as io\nfn run() { foo.bar as bar }\n",
+            "use core.term as io\nfn run() { foo.bar }\n",
+            "use core.term as io\nfn run() { foo.bar as bar }\n",
         ),
         (
             "struct-literal separator rule does not remove commas",

@@ -33,7 +33,7 @@ are inventoried independently from their source registries by the same gate.
 | `claim.plugin-ffi` | Foreign libraries use one typed, safe interop structure. |
 | `claim.embedded` | Typed target machines produce real firmware and kernel artifacts. |
 | `claim.adaptive-runtime` | Applications choose runtime fidelity through one explicit manual signal. |
-| `claim.logic-programming` | `core.solve` records finite Boolean constraints deterministically. |
+| `claim.logic-programming` | `core.compute.solve` records finite Boolean constraints deterministically. |
 | `claim.structural-merge` | Jet has a checked structural diff and merge path keyed by semantic identity. |
 | `claim.proof-replay` | `jet prove` combines contracts, effects, budgets, tests, and replay facts. |
 | `claim.performance-budgets` | Typed performance budgets are enforced against pinned baselines. |

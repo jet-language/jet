@@ -102,7 +102,7 @@ fn spelling(row: &AppliedRule) -> String {
 fn program_at(marker: &str, site: RuleSite) -> Option<String> {
     Some(match site {
         RuleSite::File if marker.starts_with("#NoPrelude") => format!(
-            "#NoPrelude\nuse core.io as io\nfn run() {{\n    io.print(\"ok\")\n}}\n"
+            "#NoPrelude\nuse core.term as io\nfn run() {{\n    io.print(\"ok\")\n}}\n"
         ),
         RuleSite::File => format!("{marker}\nfn run() {{\n    print(\"ok\")\n}}\n"),
         // A module rule attaches to a `module` declaration, not to the file.

@@ -34,8 +34,8 @@ fn architecture_classifies_every_comptime_core_namespace() {
         "crates/jet-comptime/src/Comptime/CorePureParity.rs",
     )));
     // Solver construction enters through type-method dispatch rather than a
-    // literal namespace arm, but `core.solve` is still part of this registry.
-    namespaces.insert("core.solve".to_string());
+    // literal namespace arm, but `core.compute.solve` is still part of this registry.
+    namespaces.insert("core.compute.solve".to_string());
 
     let architecture = read("docs/spec/architecture.md");
     for namespace in namespaces {

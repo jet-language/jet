@@ -1,6 +1,6 @@
 //! D-BROWSER-AUTO1=A (#1187): locked browser provisioning proof.
 //!
-//! Jetpack pins exact browser binaries in `.jet/lock`. `core.browser.locked`
+//! Jetpack pins exact browser binaries in `.jet/lock`. `core.web.browser.locked`
 //! reads that pin through the product path with no skip/fallback.
 
 mod common;
@@ -212,7 +212,7 @@ fn core_browser_locked_reads_project_pin() {
     assert_eq!(code, 0, "{err}");
 
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() =[FS, IO]=> {
     locked :: browser.locked("chromium") ?? panic("missing lock")
@@ -232,7 +232,7 @@ fn run() =[FS, IO]=> {
 
     fs::remove_file(&binary).unwrap();
     let hostile = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() =[FS, IO]=> {
     if browser.locked("chromium") == .Err(_) {
@@ -252,7 +252,7 @@ fn run() =[FS, IO]=> {
 #[test]
 fn core_browser_locked_requires_fs_effect() {
     let missing_effect = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() =[IO]=> {
     locked :: browser.locked("chromium") ?? return

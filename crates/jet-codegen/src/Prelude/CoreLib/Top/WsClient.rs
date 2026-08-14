@@ -1,4 +1,4 @@
-// D-WS1=B: native std-only WebSocket (RFC6455) for core.ws.
+// D-WS1=B: native std-only WebSocket (RFC6455) for core.net.ws.
 // Client connect and server upgrade share one frame codec. No external crates.
 
 const JET_WS_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";

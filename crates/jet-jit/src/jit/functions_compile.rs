@@ -501,7 +501,7 @@ pub(crate) fn lower_callable_lambda(
     )
 }
 
-/// Compile the one callback ABI used by `core.os.on_interrupt`: every
+/// Compile the one callback ABI used by `core.sys.on_interrupt`: every
 /// callback receives an environment handle, including capture-free lambdas.
 /// The zero environment value is the canonical empty environment.
 pub(crate) fn lower_interrupt_callable_lambda(

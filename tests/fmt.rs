@@ -2986,7 +2986,7 @@ fn fmt_target_web_marker_stability() {
     // captured span (same treatment as `#PubFile`) — it renders at a fixed
     // canonical position right after imports, not wherever the author
     // originally wrote it.
-    let src = "use core.io as io\n#Target(Web)\n\nfn run() {\n    io.print(\"hi\")\n}\n";
+    let src = "use core.term as io\n#Target(Web)\n\nfn run() {\n    io.print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Target(Web) marker");
 }
 
@@ -3020,7 +3020,7 @@ fn fmt_pub_file_precedes_imports() {
     // import it gates produced `priv use …` with no preceding `#PubFile`,
     // which doesn't even reparse (E0413). `#PubFile` must render before
     // imports, not after.
-    let src = "#PubFile\n\nuse core.io\n\nfn run() {\n    print(\"hi\")\n}\n";
+    let src = "#PubFile\n\nuse core.term\n\nfn run() {\n    print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#PubFile before imports");
 }
 

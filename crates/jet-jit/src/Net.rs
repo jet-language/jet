@@ -1,4 +1,4 @@
-//! Native JIT adapters for `core.url` / `core.mime` / `core.browser` (and later
+//! Native JIT adapters for `core.net.url` / `core.net.mime` / `core.web.browser` (and later
 //! net/http/email/ws). Algorithms come from the same prelude sources AOT emits.
 
 #[allow(unused_imports)]

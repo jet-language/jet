@@ -1210,7 +1210,7 @@ fn run() {
 }
 "#,
         r#"
-use core.solve as solve
+use core.compute.solve as solve
 fn run() {
     solver := solve.Solver.new(1)
     solver.require(solver.failure_count() == 0)

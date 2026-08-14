@@ -466,7 +466,7 @@ fn core_net_ratified_named_forms_require_exact_labels() {
         ),
     ];
     for (name, body, expected_fix) in cases {
-        let source = format!("use core.net as net\nuse core.tls as tls\n{body}\n");
+        let source = format!("use core.net as net\nuse core.net.tls as tls\n{body}\n");
         let diags = jet::compile(&source).expect_err(name);
         assert!(
             diags.iter().any(|diag| matches!(diag.code.as_str(), "E0764" | "E0769") && diag.fix.contains(expected_fix)),
@@ -1451,7 +1451,7 @@ fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
     std::thread::sleep(std::time::Duration::from_millis(250));
     let src = r#"
 use core.net as net
-use core.tls as tls
+use core.net.tls as tls
 
 fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
     return stream.read(limit)
@@ -1582,7 +1582,7 @@ fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
     };
     let source = format!(r#"
 use core.net as net
-use core.tls as tls
+use core.net.tls as tls
 
 fn invalid_alpn() => [String] {{
     return [""]
@@ -1688,7 +1688,7 @@ fn core_tls_identity_drop_and_protocol_mapping_use_shared_runtime_laws() {
     fs::create_dir_all(&dir).unwrap();
     let compiled = compile_temp(
         "tls_runtime_laws.jet",
-        "use core.tls as tls\nfn run() { _config :: tls.ClientConfig.default() }\n",
+        "use core.net.tls as tls\nfn run() { _config :: tls.ClientConfig.default() }\n",
     );
     let mut rust = standalone_tls_probe_source(compiled.rust);
     rust.push_str(r#"
@@ -1765,7 +1765,7 @@ fn core_tls_stalled_handshake_observes_timeout_and_cancellation() {
         r#"
 use core.net as net
 use core.tasks as tasks
-use core.tls as tls
+use core.net.tls as tls
 
 fn run() {{
     timed := net.tcp_connect("{address}") ?? panic("timeout tcp")

@@ -50,9 +50,9 @@ fn layer_of(module: &str) -> RuntimeLayer {
         // ── core: no heap, no OS ─────────────────────────────────────────
         "core"
         | "core.math"
-        | "core.science.measurement"
+        | "core.units"
         | "core.perf"
-        | "core.scope"
+        | "core.mem.scope"
         | "core.ui"
         | "core.web"
         | "core.web.storage"
@@ -64,39 +64,37 @@ fn layer_of(module: &str) -> RuntimeLayer {
 
         // ── alloc: heap / growable data, no direct OS I/O ──────────────────
         "core.mem"
-        | "core.mem.alloc"
-        | "core.random"
+        | "core.math.random"
         | "core.crypto.random"
-        | "core.uuid"
+        | "core.crypto.uuid"
         | "core.encoding"
         | "core.encoding.json"
         | "core.encoding.csv"
         | "core.encoding.toml"
         | "core.encoding.yaml"
-        | "core.text.unicode"
+        | "core.text"
         | "core.args"
         | "core.reflect"
         | "core.compiler"
         | "core.game"
         | "core.reactive.loadable"
         | "core.event"
-        | "core.solve"
+        | "core.compute.solve"
         | "core.time.expiring"
-        | "core.vault"
-        | "core.vault.expert"
+        | "core.crypto.vault"
         | "core.reactive"
-        | "core.sketch.hll"
-        | "core.sketch.tdigest"
-        | "core.sketch.cms"
-        | "core.sketch.reservoir"
+        | "core.data.sketch.hll"
+        | "core.data.sketch.tdigest"
+        | "core.data.sketch.cms"
+        | "core.data.sketch.reservoir"
         | "core.log"
         | "core.regex" => RuntimeLayer::Alloc,
 
         // ── hosted: OS I/O, networking, processes ──────────────────────────
-        "core.io" | "core.env" | "core.process" | "core.files" | "core.watcher"
-        | "core.net" | "core.tls" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
+        "core.term" | "core.sys" | "core.process" | "core.files" | "core.watcher"
+        | "core.net" | "core.net.tls" | "core.time"
         | "core.tasks" | "core.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "core.db"
+        | "core.game.raylib" | "core.archive.gzip" | "core.archive.zstd" | "core.db"
         // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime.
         | "core.plugin" => RuntimeLayer::Std,
 
@@ -106,7 +104,7 @@ fn layer_of(module: &str) -> RuntimeLayer {
     }
 }
 
-/// Classify a sema/codegen helper-usage key (`core.io::input`, `core.files::read`, …)
+/// Classify a sema/codegen helper-usage key (`core.term::input`, `core.files::read`, …)
 /// to its minimum runtime layer.
 pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
     if let Some(rest) = usage.strip_prefix("core::") {
@@ -181,7 +179,7 @@ mod tests {
 
     #[test]
     fn helper_usage_keys_map_to_layer() {
-        assert_eq!(core_usage_layer("core.io::input"), Some(RuntimeLayer::Std));
+        assert_eq!(core_usage_layer("core.term::input"), Some(RuntimeLayer::Std));
         assert_eq!(
             core_usage_layer("core.math::__mathtypes__"),
             Some(RuntimeLayer::Core)

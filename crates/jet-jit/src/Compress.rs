@@ -1,4 +1,4 @@
-//! `core.compress.gzip` / `zstd` host shims (#729).
+//! `core.archive.gzip` / `zstd` host shims (#729).
 //! Calls the canonical FFI runtime via `include!` — no third algorithm.
 
 use crate::Marshal::{clone_bytes, alloc_byte_list, result_ok, result_err_msg};

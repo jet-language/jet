@@ -567,7 +567,7 @@ struct JetExplicitExit {
 }
 
 // Process-edge callbacks live beside the one boundary so a program that does
-// not import core.os still has a complete entry wrapper. The OS adapter only
+// not import core.sys still has a complete entry wrapper. The OS adapter only
 // registers callbacks; it never installs a second native exit path.
 mod jet_runtime_atexit {
     use std::cell::RefCell;

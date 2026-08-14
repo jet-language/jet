@@ -85,7 +85,7 @@ fn core_http_client_accepts_typed_url_in_codegen() {
         "http_url.jet",
         r#"
 use core.http.client as http
-use core.url as url
+use core.net.url as url
 
 fn run() {
     u :: url.parse("https://example.com/a") ?? panic("bad url")
@@ -255,7 +255,7 @@ fn core_http_nominal_message_and_body_surface_is_executable() {
     let source = format!(
         r#"
 use core.http as http
-use core.mime as mime
+use core.net.mime as mime
 use core.files as files
 
 fn run() {{
@@ -1325,7 +1325,7 @@ fn io_input_reads_a_line_from_stdin() {
         &dir,
         "input_demo",
         r#"
-use core.io as io
+use core.term as io
 
 fn run() {
     name :: io.input("name? ") ?? panic("read failed")
@@ -1347,7 +1347,7 @@ fn run() {
 fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
-        eprintln!("note: skipping core.io prompt test (need rustc)");
+        eprintln!("note: skipping core.term prompt test (need rustc)");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_corelib_prompts_{}", std::process::id()));

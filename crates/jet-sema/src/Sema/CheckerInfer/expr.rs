@@ -1722,7 +1722,7 @@ impl<'a> Checker<'a> {
                                                 "{} can't use `:{fixed_selector}(n)`",
                                                 t.show()
                                             ),
-                                            "fixed interpolation uses `core.fmt.decimal`, which formats `Float` values"
+                                            "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` values"
                                                 .to_string(),
                                             "pass a `Float`, or use bare interpolation for this value"
                                                 .to_string(),
@@ -4002,7 +4002,7 @@ impl<'a> Checker<'a> {
         self.check_place_read(&field_expr, span);
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, _) = &**base {
-                if self.core_imports.get(alias).map(String::as_str) == Some("core.lang")
+                if self.core_imports.get(alias).map(String::as_str) == Some("core.compiler.lang")
                     && crate::Policy::rule_arg_declaration(leaf).is_some()
                 {
                     let enum_name = leaf.clone();
@@ -4050,8 +4050,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0039",
                     "`os.environ` is written `env.get` in Jet".to_string(),
-                    "environment access lives in the `core.env` module".to_string(),
-                    "import `core.env as env` and call `env.get(name)`".to_string(),
+                    "environment access lives in the `core.sys` module".to_string(),
+                    "import `core.sys as env` and call `env.get(name)`".to_string(),
                     Some(span),
                 ));
                 return None;

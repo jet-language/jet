@@ -587,7 +587,7 @@ impl Drop for RuntimeArgvGuard {
 }
 
 /// Install argv for one interpreted / deopt run (`argv[0]` = entry path).
-/// When set, impure `core.io.args` uses this instead of the host process argv
+/// When set, impure `core.process.argv` uses this instead of the host process argv
 /// (so `cargo test` flags never leak into example output).
 pub fn with_runtime_argv<R>(args: &[String], run: impl FnOnce() -> R) -> R {
     let previous = RUNTIME_ARGV.with(|slot| {

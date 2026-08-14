@@ -15,11 +15,11 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() => String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
 const PIVOT_EXPR: &str = "pivot_view()";
 const CIVIL_FN: &str = "fn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
-const CIVIL_DECLS: &str = "use core.time as time\nuse core.time.date as date\nuse core.time.datetime as datetime\nfn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_DECLS: &str = "use core.time as time\nuse core.time as date\nuse core.time as datetime\nfn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
 const CIVIL_EXPR: &str = "civil_view()";
-const CIVIL_DEV_DECLS: &str = "use core.time.date as date\nuse core.time.datetime as datetime\nfn civil_dev_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_DEV_DECLS: &str = "use core.time as date\nuse core.time as datetime\nfn civil_dev_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
 const MEASUREMENT_FN: &str = "fn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
-const MEASUREMENT_DECLS: &str = "use core.science.measurement as measurement\nfn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const MEASUREMENT_DECLS: &str = "use core.units as measurement\nfn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
 const MEASUREMENT_EXPR: &str = "measurement_math()";
 const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) => Measurement<Float> {
     hits += 1
@@ -214,7 +214,7 @@ const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() => String {
     found :: counted_map(&receiver_hits).has_key("a")
     return "{found}|{receiver_hits}"
 }"#;
-const RNG_DECLS: &str = r#"use core.random as random
+const RNG_DECLS: &str = r#"use core.math.random as random
 fn rng_view() => String {
     rng := random.rng(99)
     items := ["a", "b", "c", "d"]
@@ -477,11 +477,11 @@ fn exact_values(inputs: &[&str]) -> Vec<String> {
 #[test]
 fn public_transcript_covers_remaining_core_pure_families() {
     let values = exact_values(&[
-        "use core.mime as mime",
+        "use core.net.mime as mime",
         "use core.time as time",
-        "use core.time.date as date",
-        "use core.time.datetime as datetime",
-        "use core.science.measurement as measurement",
+        "use core.time as date",
+        "use core.time as datetime",
+        "use core.units as measurement",
         "mime.from_extension(\".PNG\") ?? \"none\"",
         "mime.extension(\"Text/HTML; charset=UTF-8\") ?? \"none\"",
         "mime.parse(\"Text/HTML; charset=UTF-8\")",
@@ -591,11 +591,11 @@ fn public_transcript_composes_email_and_codecs_exactly() {
 fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
     let values = exact_values(&[
         "use core.time as time",
-        "use core.time.date as date",
-        "use core.time.datetime as datetime",
+        "use core.time as date",
+        "use core.time as datetime",
         CIVIL_FN,
         CIVIL_EXPR,
-        "use core.science.measurement as measurement",
+        "use core.units as measurement",
         MEASUREMENT_FN,
         MEASUREMENT_EXPR,
     ]);
@@ -611,7 +611,7 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
 #[test]
 fn public_transcript_evaluates_pure_add_arguments_once() {
     let values = exact_values(&[
-        "use core.science.measurement as measurement",
+        "use core.units as measurement",
         ADD_ARGUMENT_ONCE_DECLS,
         "add_argument_once_view()",
     ]);
@@ -891,7 +891,7 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
     let cases = [
         (
             "option/string",
-            parity_source("mime.extension(\"image/png\") ?? \"none\"", "use core.mime as mime"),
+            parity_source("mime.extension(\"image/png\") ?? \"none\"", "use core.net.mime as mime"),
         ),
         (
             "result/bytes",
@@ -918,14 +918,14 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             "mime/observable-methods",
             parity_source(
                 "mime_view()",
-                "use core.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+                "use core.net.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
             ),
         ),
         (
             "date/observable-methods",
             parity_source(
                 "date_view()",
-                "use core.time.date as date\nfn date_view() => String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
+                "use core.time as date\nfn date_view() => String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
             ),
         ),
         (
@@ -939,7 +939,7 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             "measurement/observable-methods",
             parity_source(
                 "measurement_view()",
-                "use core.science.measurement as measurement\nfn measurement_view() => String {\n    value :: measurement.from(12.5, 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
+                "use core.units as measurement\nfn measurement_view() => String {\n    value :: measurement.from(12.5, 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
             ),
         ),
     ];
@@ -955,7 +955,7 @@ fn registered_shared_kernel_edges_match_all_execution_tiers() {
             "mime-one-kernel",
             parity_source(
                 "mime_view()",
-                "use core.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+                "use core.net.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
             ),
         ),
         (
@@ -969,10 +969,10 @@ fn registered_shared_kernel_edges_match_all_execution_tiers() {
             "sketch-edge-kernel",
             parity_source(
                 "sketch_edges()",
-                r#"use core.sketch.hll as hll
-use core.sketch.tdigest as tdigest
-use core.sketch.cms as cms
-use core.sketch.reservoir as reservoir
+                r#"use core.data.sketch.hll as hll
+use core.data.sketch.tdigest as tdigest
+use core.data.sketch.cms as cms
+use core.data.sketch.reservoir as reservoir
 fn sketch_edges() => String {
     cardinality := hll.new()
     empty_count :: cardinality.count()
@@ -997,7 +997,7 @@ fn sketch_edges() => String {
             parity_source(
                 "time_duration_edges()",
                 r#"use core.time as time
-use core.time.date as date
+use core.time as date
 fn time_duration_edges() => String {
     clamped :: date.new(2023, 2, 31)
     leap_end :: date.new(2024, 1, 31).add_months(1)
@@ -1119,7 +1119,7 @@ fn rustc_backed_datetime_and_measurement_display_are_exact() {
     assert_eq!(
         check_aot_comptime(
             "measurement/interpolation-display",
-            "use core.science.measurement as measurement\n@value :: measurement.from(12.5, 0.25)\n@expected :: \"{value}\"\n\nfn run() {\n    actual :: measurement.from(12.5, 0.25)\n    print(expected)\n    print(actual)\n}\n",
+            "use core.units as measurement\n@value :: measurement.from(12.5, 0.25)\n@expected :: \"{value}\"\n\nfn run() {\n    actual :: measurement.from(12.5, 0.25)\n    print(expected)\n    print(actual)\n}\n",
         ),
         "12.5 ± 0.25"
     );
@@ -1276,7 +1276,7 @@ fn rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fal
 fn rustc_backed_seeded_rng_methods_match_all_execution_tiers_exactly() {
     let source = parity_source("rng_view()", RNG_DECLS);
     assert_eq!(check_aot_comptime("rng/all-methods", &source), RNG_EXPECTED);
-    // `core.random` keeps its ambient-effect E2201 boundary. `try_anyway`
+    // `core.math.random` keeps its ambient-effect E2201 boundary. `try_anyway`
     // proves the seeded handle itself is interpreter-resident; default dev
     // proves its normal AOT fallback remains byte-identical.
     check_dev_tiers_with_boundary("rng", &source, RNG_EXPECTED, true);
@@ -1431,7 +1431,7 @@ const SOLVER_FN: &str = r#"fn solver_view() => String {
     bad.require(true)
     return "{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
 }"#;
-const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() => String {\n    empty := solve.Solver.new(-1)\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(false)\n    bad.require(true)\n    return \"{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+const SOLVER_DECLS: &str = "use core.compute.solve as solve\nfn solver_view() => String {\n    empty := solve.Solver.new(-1)\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(false)\n    bad.require(true)\n    return \"{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
 const SOLVER_EXPECTED: &str = "ok|0|ok|0|failed|2";
 
 #[test]
@@ -1447,7 +1447,7 @@ fn registered_solver_edges_match_aot_comptime_and_dev_tiers() {
 #[test]
 fn public_transcript_covers_solver_exactly() {
     let values = exact_values(&[
-        "use core.solve as solve",
+        "use core.compute.solve as solve",
         SOLVER_FN,
         "solver_view()",
     ]);
@@ -1586,7 +1586,7 @@ fn run() {
     assert_eq!(output.trim(), "true|[97, 98, 99]|16");
 }
 
-const NET_STYLE_DECLS: &str = r#"use core.io as io
+const NET_STYLE_DECLS: &str = r#"use core.term as io
 use core.net as net
 fn net_style_view() => String {
     ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")

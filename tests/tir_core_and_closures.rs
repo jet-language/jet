@@ -719,7 +719,7 @@ fn scope_guard_closure_core_call() {
         return;
     }
     let src = "\
-use core.scope as scope
+use core.mem.scope as scope
 fn work() {
     _g :: scope.guard(() => { print(\"cleanup\") })
     print(\"working\")

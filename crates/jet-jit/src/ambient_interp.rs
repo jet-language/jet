@@ -1125,8 +1125,8 @@ fn clock_now(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
                 ("now", CtValue::Int(now)) => Some(*now),
                 _ => None,
             })
-            .ok_or_else(|| unsupported("core.uuid.v7 clock state", span)),
-        _ => Err(unsupported("core.uuid.v7 clock", span)),
+            .ok_or_else(|| unsupported("core.crypto.uuid.v7 clock state", span)),
+        _ => Err(unsupported("core.crypto.uuid.v7 clock", span)),
     }
 }
 
@@ -1863,8 +1863,6 @@ fn ambient_time_call(
     if !matches!(
         (module, method),
         ("core.time", "now" | "now_utc" | "today" | "instant" | "sleep" | "start")
-            | ("core.time.date", "today")
-            | ("core.time.datetime", "now")
     ) {
         return None;
     }
@@ -1890,13 +1888,6 @@ fn ambient_time_call(
                 CtValue::Int(crate::Time::ambient_monotonic_now_ms()),
             )],
         }),
-        ("core.time.date", "today") => Ok(crate::Time::ambient_date_today_value_as(
-            match resolved_ret {
-                Some(Type::Named(name)) if name == "LocalDate" => "LocalDate",
-                _ => "Date",
-            },
-        )),
-        ("core.time.datetime", "now") => Ok(crate::Time::ambient_datetime_now_value()),
         _ => unreachable!("ambient time method was filtered above"),
     })();
     Some(result)
@@ -2351,12 +2342,12 @@ pub fn ambient_core_call(
             crate::Net::email_runtime_fns(),
         );
     }
-    if module == "core.tls" {
+    if module == "core.net.tls" {
         let result = match method {
             "client" => match args.as_slice() {
                 [stream, CtValue::Str(server_name)] => {
                     let Some(stream) = http_handle_id(stream, "TcpStream") else {
-                        return Some(Err(unsupported("core.tls.client stream", span)));
+                        return Some(Err(unsupported("core.net.tls.client stream", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_client(
                         stream,
@@ -2367,10 +2358,10 @@ pub fn ambient_core_call(
                 }
                 [stream, CtValue::Str(server_name), deadline] => {
                     let Some(stream) = http_handle_id(stream, "TcpStream") else {
-                        return Some(Err(unsupported("core.tls.client stream", span)));
+                        return Some(Err(unsupported("core.net.tls.client stream", span)));
                     };
                     let Some(deadline) = duration_ns(deadline) else {
-                        return Some(Err(unsupported("core.tls.client deadline", span)));
+                        return Some(Err(unsupported("core.net.tls.client deadline", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_client(
                         stream,
@@ -2381,13 +2372,13 @@ pub fn ambient_core_call(
                 }
                 [stream, CtValue::Str(server_name), config, deadline] => {
                     let Some(stream) = http_handle_id(stream, "TcpStream") else {
-                        return Some(Err(unsupported("core.tls.client stream", span)));
+                        return Some(Err(unsupported("core.net.tls.client stream", span)));
                     };
                     let Some(config) = http_handle_id(config, "TLSClientConfig") else {
-                        return Some(Err(unsupported("core.tls.client config", span)));
+                        return Some(Err(unsupported("core.net.tls.client config", span)));
                     };
                     let Some(deadline) = duration_ns(deadline) else {
-                        return Some(Err(unsupported("core.tls.client deadline", span)));
+                        return Some(Err(unsupported("core.net.tls.client deadline", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_client(
                         stream,
@@ -2396,76 +2387,76 @@ pub fn ambient_core_call(
                         Some(deadline),
                     ))
                 }
-                _ => Err(unsupported("core.tls.client arguments", span)),
+                _ => Err(unsupported("core.net.tls.client arguments", span)),
             },
             "read" => match args.as_slice() {
                 [stream, CtValue::Int(limit)] => {
                     let Some(stream) = http_handle_id(stream, "TLSStream") else {
-                        return Some(Err(unsupported("core.tls.read stream", span)));
+                        return Some(Err(unsupported("core.net.tls.read stream", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_stream_read_bytes(
                         stream, *limit, None,
                     ))
                 }
-                _ => Err(unsupported("core.tls.read arguments", span)),
+                _ => Err(unsupported("core.net.tls.read arguments", span)),
             },
             "read_text" => match args.as_slice() {
                 [stream, CtValue::Int(limit)] => {
                     let Some(stream) = http_handle_id(stream, "TLSStream") else {
-                        return Some(Err(unsupported("core.tls.read_text stream", span)));
+                        return Some(Err(unsupported("core.net.tls.read_text stream", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_stream_read_text(
                         stream, *limit,
                     ))
                 }
-                _ => Err(unsupported("core.tls.read_text arguments", span)),
+                _ => Err(unsupported("core.net.tls.read_text arguments", span)),
             },
             "write" => match args.as_slice() {
                 [stream, data] => {
                     let Some(stream) = http_handle_id(stream, "TLSStream") else {
-                        return Some(Err(unsupported("core.tls.write stream", span)));
+                        return Some(Err(unsupported("core.net.tls.write stream", span)));
                     };
                     let Some(data) = net_bytes_value(data) else {
-                        return Some(Err(unsupported("core.tls.write bytes", span)));
+                        return Some(Err(unsupported("core.net.tls.write bytes", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_stream_write_bytes(stream, data))
                 }
-                _ => Err(unsupported("core.tls.write arguments", span)),
+                _ => Err(unsupported("core.net.tls.write arguments", span)),
             },
             "write_all" => match args.as_slice() {
                 [stream, data] => {
                     let Some(stream) = http_handle_id(stream, "TLSStream") else {
-                        return Some(Err(unsupported("core.tls.write_all stream", span)));
+                        return Some(Err(unsupported("core.net.tls.write_all stream", span)));
                     };
                     let Some(data) = net_bytes_value(data) else {
-                        return Some(Err(unsupported("core.tls.write_all bytes", span)));
+                        return Some(Err(unsupported("core.net.tls.write_all bytes", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_stream_write_all_bytes(
                         stream, data, None,
                     ))
                 }
-                _ => Err(unsupported("core.tls.write_all arguments", span)),
+                _ => Err(unsupported("core.net.tls.write_all arguments", span)),
             },
             "write_text" => match args.as_slice() {
                 [stream, CtValue::Str(text)] => {
                     let Some(stream) = http_handle_id(stream, "TLSStream") else {
-                        return Some(Err(unsupported("core.tls.write_text stream", span)));
+                        return Some(Err(unsupported("core.net.tls.write_text stream", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_stream_write_text(
                         stream,
                         text.clone(),
                     ))
                 }
-                _ => Err(unsupported("core.tls.write_text arguments", span)),
+                _ => Err(unsupported("core.net.tls.write_text arguments", span)),
             },
             "close" => match args.as_slice() {
                 [stream] => {
                     let Some(stream) = http_handle_id(stream, "TLSStream") else {
-                        return Some(Err(unsupported("core.tls.close stream", span)));
+                        return Some(Err(unsupported("core.net.tls.close stream", span)));
                     };
                     Ok(crate::net_http_rt::runtime_tls_stream_close(stream))
                 }
-                _ => Err(unsupported("core.tls.close arguments", span)),
+                _ => Err(unsupported("core.net.tls.close arguments", span)),
             },
             _ => return None,
         };
@@ -2474,7 +2465,7 @@ pub fn ambient_core_call(
     if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
         return Some(result);
     }
-    if module == "core.random" {
+    if module == "core.math.random" {
         if let Some(result) = ambient_random_call(method, args.clone(), span, resolved_ret.as_ref()) {
             return Some(result);
         }
@@ -2535,25 +2526,25 @@ pub fn ambient_core_call(
         }
     }
     match (module, method) {
-        ("core.io", "stdout") => Some(Ok(CtValue::Struct {
+        ("core.term", "stdout") => Some(Ok(CtValue::Struct {
             type_name: "Stdout".to_string(),
             fields: vec![],
         })),
-        ("core.io", "stderr") => Some(Ok(CtValue::Struct {
+        ("core.term", "stderr") => Some(Ok(CtValue::Struct {
             type_name: "Stderr".to_string(),
             fields: vec![],
         })),
-        ("core.io", "terminal_width") => Some(Ok(CtValue::Int(
+        ("core.term", "terminal_width") => Some(Ok(CtValue::Int(
             IO::term_prelude::jet_term_width(|name| std::env::var(name).ok()),
         ))),
-        ("core.io", "terminal_height") => Some(Ok(CtValue::Int(
+        ("core.term", "terminal_height") => Some(Ok(CtValue::Int(
             IO::term_prelude::jet_term_height(|name| std::env::var(name).ok()),
         ))),
-        ("core.io", "style") => {
+        ("core.term", "style") => {
             let (Some(CtValue::Str(style)), Some(CtValue::Str(text))) =
                 (args.first(), args.get(1))
             else {
-                return Some(Err(unsupported("core.io.style arguments", span)));
+                return Some(Err(unsupported("core.term.style arguments", span)));
             };
             let enabled = IO::term_prelude::jet_term_style_enabled(
                 std::env::var_os("NO_COLOR").is_some(),
@@ -2926,23 +2917,23 @@ pub fn ambient_core_call(
                 Err(error) => CtValue::failed(Box::new(db_err(error.message))),
             }))
         }
-        ("core.io", "confirm") => {
+        ("core.term", "confirm") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
-                return Some(Err(unsupported("core.io.confirm prompt", span)));
+                return Some(Err(unsupported("core.term.confirm prompt", span)));
             };
             Some(Ok(CtValue::Bool(IO::prompt_confirm_with_sink(prompt, sink))))
         }
-        ("core.io", "choose") => {
+        ("core.term", "choose") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
-                return Some(Err(unsupported("core.io.choose prompt", span)));
+                return Some(Err(unsupported("core.term.choose prompt", span)));
             };
             let Some(CtValue::List(items)) = args.get(1) else {
-                return Some(Err(unsupported("core.io.choose items", span)));
+                return Some(Err(unsupported("core.term.choose items", span)));
             };
             let mut values = Vec::with_capacity(items.len());
             for item in items {
                 let CtValue::Str(item) = item else {
-                    return Some(Err(unsupported("core.io.choose item", span)));
+                    return Some(Err(unsupported("core.term.choose item", span)));
                 };
                 values.push(item.clone());
             }
@@ -2951,9 +2942,9 @@ pub fn ambient_core_call(
                 Err(error) => CtValue::failed(Box::new(io_error("InvalidInput", error))),
             }))
         }
-        ("core.io", "input_secret") => {
+        ("core.term", "input_secret") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
-                return Some(Err(unsupported("core.io.input_secret prompt", span)));
+                return Some(Err(unsupported("core.term.input_secret prompt", span)));
             };
             Some(Ok(match IO::prompt_input_secret_with_sink(prompt, sink) {
                 Ok(secret) => CtValue::Present(Box::new(CtValue::Str(secret))),
@@ -2988,10 +2979,10 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_std_crypto_random_bytes(*count),
             )))
         }
-        ("core.uuid", "v4") => Some(Ok(CtValue::Str(
+        ("core.crypto.uuid", "v4") => Some(Ok(CtValue::Str(
             Crypto::runtime::jet_crypto_uuid_v4(),
         ))),
-        ("core.uuid", "v7") => {
+        ("core.crypto.uuid", "v7") => {
             let timestamp = match clock_now(args.first()?, span) {
                 Ok(timestamp) => timestamp,
                 Err(error) => return Some(Err(error)),

@@ -829,7 +829,7 @@ fn simple_exec_runs_without_a_manifest() {
 #[test]
 fn passthrough_forwards_tokens_after_separator() {
     // `jet run file.jet -- --port 8080 x` — program sees 4 args: argv[0] +
-    // three forwarded tokens. io.args().len() == 4.
+    // three forwarded tokens. process.argv().len() == 4.
     let p = args_fixture(&line!().to_string());
     let out = Command::new(jet())
         .args(["run", "--release", p.to_str().unwrap(), "--", "--port", "8080", "x"])

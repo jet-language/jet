@@ -1,6 +1,6 @@
 //! D-CORE-COMPRESS1=A — stream codecs and archive containers have one home each.
 //!
-//! `core.compress` delivers gzip/zstd streams; `core.archive` delivers zip/tar
+//! `core.archive.gzip` / `.zstd` deliver streams; `core.archive` delivers zip/tar
 //! containers through the hidden FFI bridge. These tests are gated on
 //! cargo/rustc availability like the FFI golden tests.
 //!
@@ -198,11 +198,11 @@ fn rustc_bridge(
 #[test]
 fn gzip_round_trip_uses_core_compress() {
     if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping core.compress integration test");
+        eprintln!("note: cargo/rustc not found; skipping archive codec integration test");
         return;
     }
     let src = r#"
-use core.compress.gzip as gz
+use core.archive.gzip as gz
 
 fn run() {
     original :: [U8].{ 72, 101, 108, 108, 111 }

@@ -306,8 +306,8 @@ fn prelude_opt_out() {
         "I5 example must declare `#NoPrelude`"
     );
     assert!(
-        example.contains("use core.io"),
-        "opt-out example must use explicit core.io"
+        example.contains("use core.term"),
+        "opt-out example must use explicit core.term"
     );
     let expected = read("examples/features/expected/io/no_prelude.out");
     let got = run_example("examples/features/io/no_prelude.jet");

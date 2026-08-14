@@ -212,7 +212,7 @@ pub(crate) struct Cx {
     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
-    /// Import alias -> compiler-known core module (`core.files`, `core.json`, ...).
+    /// Import alias -> compiler-known core module (`core.files`, `core.encoding`, ...).
     pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,
@@ -1015,10 +1015,10 @@ impl Cx {
             (Some("core.http.client"), "RedirectPolicy") => Some("HTTPRedirectPolicy"),
             (Some("core.http.client"), "RetryPolicy") => Some("HTTPRetryPolicy"),
             (Some("core.http.client"), "CookieJar") => Some("HTTPCookieJar"),
-            (Some("core.tls"), "TLSVersion") => Some("TLSVersion"),
-            (Some("core.tls"), "RootCertificates") => Some("TLSRootCertificates"),
-            (Some("core.tls"), "ClientIdentity") => Some("TLSClientIdentity"),
-            (Some("core.env"), "EnvError") => Some("EnvError"),
+            (Some("core.net.tls"), "TLSVersion") => Some("TLSVersion"),
+            (Some("core.net.tls"), "RootCertificates") => Some("TLSRootCertificates"),
+            (Some("core.net.tls"), "ClientIdentity") => Some("TLSClientIdentity"),
+            (Some("core.sys"), "EnvError") => Some("EnvError"),
             (Some("core.mem"), "AllocError") => Some("AllocError"),
             (Some("core.encoding"), "DataTree") => Some("DataTree"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
@@ -3338,7 +3338,7 @@ fn register_core_close_types(cx: &mut Cx) {
                 .map(str::to_string),
         );
     }
-    if imports(Syntax::CORE_MEM_MODULE) || imports(Syntax::CORE_MEM_ALLOC_MODULE) {
+    if imports(Syntax::CORE_MEM_MODULE) {
         cx.close_types.extend(
             ["Arena", "Bump", "Pool", "Fixed"]
                 .into_iter()
@@ -3449,7 +3449,7 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants.insert("AuthError".to_string(), variants);
         cx.cloneable.insert("AuthError".to_string());
     }
-    if cx.core_imports.values().any(|module| module == "core.tls") {
+    if cx.core_imports.values().any(|module| module == "core.net.tls") {
         let zero = Span::new(0, 0);
         let versions = vec![
             ("Tls12".to_string(), VariantPayload::Unit),

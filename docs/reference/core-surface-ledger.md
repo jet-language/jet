@@ -51,20 +51,20 @@ Generated on: 2026-08-14
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1132 |
+| Module members | 1120 |
 | Collection method rows | 731 |
-| Jet-side rows | 1863 |
-| Total rows | 10277 |
+| Jet-side rows | 1853 |
+| Total rows | 10265 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 406 |
-| Equal | 885 |
-| Jet loses (two or more languages agree) | 155 |
+| Jet wins | 404 |
+| Equal | 881 |
+| Jet loses (two or more languages agree) | 153 |
 | Single witness (recorded, not scored) | 8152 |
-| Exported type, not an operation | 157 |
+| Exported type, not an operation | 153 |
 | Not compared | 415 |
 | Deliberately declined | 107 |
 
@@ -99,17 +99,17 @@ while losses remain.
 | core.time | 14 | #1466 | done | closed |
 | core.math | 10 | #1464 | done | closed |
 | core.net | 9 | #1469 | done | closed |
-| core.os | 9 | #1465 | done | closed |
+| core.sys | 9 | #1465 | done | closed |
 | Bytes | 8 | #1467 | done | closed |
 | core.crypto | 8 | #1725 | building | live |
 | core.log | 8 | #1474 | done | closed |
 | core.archive | 4 | #1470 | done | closed |
-| core.io | 3 | #1480 | done | closed |
+| core.term | 3 | #1480 | done | closed |
 | core.regex | 3 | #1471 | done | closed |
-| core.tls | 2 | #1593 | ready | live |
+| core.net.tls | 2 | #1593 | ready | live |
 | Set | 2 | #1584 | done | closed |
 | core.process | 1 | #1590 | done | closed |
-| core.uuid | 1 | #1590 | done | closed |
+| core.crypto.uuid | 1 | #1590 | done | closed |
 | Map | 1 | #1477 | done | closed |
 | String | 1 | #1581 | done | closed |
 
@@ -132,7 +132,7 @@ No competitor surface records a container for these Core modules, so no
 row scores them. They are listed so the shortfall stays countable rather
 than invisible.
 
-`app`, `core.auth`, `core.browser`, `core.compiler`, `core.compute`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.lang`, `core.mem.alloc`, `core.mod`, `core.perf`, `core.plugin`, `core.raylib`, `core.reactive`, `core.reactive.loadable`, `core.science.measurement`, `core.scope`, `core.services`, `core.sketch.cms`, `core.sketch.hll`, `core.sketch.reservoir`, `core.sketch.tdigest`, `core.solve`, `core.ui`, `core.vault`, `core.vault.expert`, `core.watcher`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `core.ws`
+`app`, `core.auth`, `core.web.browser`, `core.compiler`, `core.compute`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.compiler.lang`, `core.mem`, `core.mod`, `core.perf`, `core.plugin`, `core.game.raylib`, `core.reactive`, `core.reactive.loadable`, `core.units`, `core.mem.scope`, `core.services`, `core.data.sketch.cms`, `core.data.sketch.hll`, `core.data.sketch.reservoir`, `core.data.sketch.tdigest`, `core.compute.solve`, `core.ui`, `core.crypto.vault`, `core.crypto.expert`, `core.watcher`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `core.net.ws`
 
 ## Consumer
 

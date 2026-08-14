@@ -624,7 +624,7 @@ fn jetpack_toml_alone_is_not_e1226() {
 }
 
 /// D-PLUGIN1=B (c81): a `target: sandbox` package is deny-by-default — its own
-/// code using any effect (here `core.env`) must fail cleanly at build time
+/// code using any effect (here `core.sys`) must fail cleanly at build time
 /// (E1258), not defer to a runtime instantiation failure. This check lives in
 /// the CLI's post-compile effect-budget pass (`Source/CmdCompile.rs`), so it
 /// needs the real subprocess (not the `jet::compile_plugin` library call the
@@ -634,7 +634,7 @@ fn plugin_using_an_effect_is_e1258() {
     let dir = isolated_cwd("plugin_effect_denied");
     fs::write(
         dir.join("main.jet"),
-        "use core.env as env\n\npub fn get_secret() => Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
+        "use core.sys as env\n\npub fn get_secret() => Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
     )
     .unwrap();
     let out = Command::new(jet())

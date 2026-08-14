@@ -854,7 +854,7 @@ pub(crate) fn emit_tir_core_call(
         // a prompt arg →
         // `jet_std_io_input(Some(&(prompt)))`. Same emitted helper as the ambient bare
         // `input(...)` (Phase 25), the only difference being the source node shape.
-        ("core.io", "input") => {
+        ("core.term", "input") => {
             if args.is_empty() {
                 format!("{}(None)", helper("jet_std_io_input"))
             } else {
@@ -876,7 +876,7 @@ pub(crate) fn emit_tir_core_call(
         
         
         
-        ("core.io", "progress") => {
+        ("core.term", "progress") => {
             if matches!(args.first().map(|a| &a.ty), Some(Type::String)) {
                 format!("{}(&({}))", helper("jet_std_io_progress"), arg(0))
             } else {
@@ -2417,40 +2417,40 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         
-        ("core.vault", "get") => {
+        ("core.crypto.vault", "get") => {
             format!("{}(&({}))", regex_fn("jet_vault_get_impl"), arg(0))
         }
-        ("core.vault", "current") =>
+        ("core.crypto.vault", "current") =>
             format!("{}::<{}>(&({})).map(jet_outcome_of)", regex_fn("jet_vault_current_impl"), vault_rust(), arg(0)),
-        ("core.vault", "versions" | "prepare_generate" | "prepare_rotate") =>
+        ("core.crypto.vault", "versions" | "prepare_generate" | "prepare_rotate") =>
             format!("{}::<{}>(&({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0)),
-        ("core.vault", "load" | "status") =>
+        ("core.crypto.vault", "load" | "status") =>
             format!("{}::<{}>(&({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0)),
-        ("core.vault", "prepare_store") =>
+        ("core.crypto.vault", "prepare_store") =>
             format!("{}::<{}>(&({}), {})", regex_fn("jet_vault_prepare_store_impl"), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "prepare_retire" | "prepare_revoke") =>
+        ("core.crypto.vault", "prepare_retire" | "prepare_revoke") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "authorize_write") =>
+        ("core.crypto.vault", "authorize_write") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_authorize_write_impl"), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "export_to_recipients") =>
+        ("core.crypto.vault", "export_to_recipients") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_export_to_recipients_impl"), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "export_to_passphrase") =>
+        ("core.crypto.vault", "export_to_passphrase") =>
             format!("{}::<{}>(&({}), &({}), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)", regex_fn("jet_vault_export_to_passphrase_cancel_impl"), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "prepare_import_wrapped") =>
+        ("core.crypto.vault", "prepare_import_wrapped") =>
             format!("{}::<{}>(&({}), ({}).clone(), ({}).clone(), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)", regex_fn("jet_vault_prepare_import_wrapped_cancel_impl"), vault_rust(), arg(0), arg(1), arg(2)),
-        ("core.vault", "authorize_wrapped_import") =>
+        ("core.crypto.vault", "authorize_wrapped_import") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_authorize_wrapped_import_impl"), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "commit_import_wrapped") =>
+        ("core.crypto.vault", "commit_import_wrapped") =>
             format!("{}::<{}>({}, {})", regex_fn("jet_vault_commit_import_wrapped_impl"), vault_rust(), arg(0), arg(1)),
-        ("core.vault", "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke") =>
+        ("core.crypto.vault", "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke") =>
             format!("{}::<{}>({}, {})", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0), arg(1)),
-        ("core.vault.expert", "prepare_import_signing") =>
+        ("core.crypto.vault", "prepare_import_signing") =>
             format!("{}(&({}), {})", regex_fn("jet_vault_expert_prepare_import_signing_impl"), arg(0), arg(1)),
-        ("core.vault.expert", "prepare_import_x25519") =>
+        ("core.crypto.vault", "prepare_import_x25519") =>
             format!("{}(&({}), {})", regex_fn("jet_vault_expert_prepare_import_x25519_impl"), arg(0), arg(1)),
-        ("core.vault.expert", "commit_import_signing") =>
+        ("core.crypto.vault", "commit_import_signing") =>
             format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_signing_impl"), arg(0), arg(1)),
-        ("core.vault.expert", "commit_import_x25519") =>
+        ("core.crypto.vault", "commit_import_x25519") =>
             format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_x25519_impl"), arg(0), arg(1)),
         ("core.crypto", "__vault_wrapped_from_bytes") =>
             format!("{}({})", regex_fn("jet_vault_wrapped_from_bytes_impl"), arg(0)),
@@ -2645,7 +2645,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.net", "tls_close") => {
             format!("{}(&mut ({}))", helper("jet_net_tls_close"), arg(0))
         }
-        ("core.tls", "client") => {
+        ("core.net.tls", "client") => {
             let (helper_name, extra_args, begin_name) = match args.len() {
                 4 => (
                     "jet_net_tls_client_scheduler_config_deadline",
@@ -2681,27 +2681,27 @@ pub(crate) fn emit_tir_core_call(
                 regex_fn("jet_net_tls_peer_identity_impl")
             )
         },
-        ("core.tls", "read") => format!(
+        ("core.net.tls", "read") => format!(
             "{}(&mut ({}), {})",
             helper("jet_net_tls_read_bytes"), arg(0), arg(1)
         ),
-        ("core.tls", "read_text") => format!(
+        ("core.net.tls", "read_text") => format!(
             "{}(&mut ({}))",
             helper("jet_net_tls_read_text"), arg(0)
         ),
-        ("core.tls", "write") => format!(
+        ("core.net.tls", "write") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_net_tls_write_bytes"), arg(0), arg(1)
         ),
-        ("core.tls", "write_all") => format!(
+        ("core.net.tls", "write_all") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_net_tls_write_all_bytes"), arg(0), arg(1)
         ),
-        ("core.tls", "write_text") => format!(
+        ("core.net.tls", "write_text") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_net_tls_write_text"), arg(0), arg(1)
         ),
-        ("core.tls", "close") => format!(
+        ("core.net.tls", "close") => format!(
             "{}(&mut ({}))",
             helper("jet_net_tls_close"), arg(0)
         ),
@@ -2730,7 +2730,7 @@ pub(crate) fn emit_tir_core_call(
         
         
         // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
-        // zip/tar containers. Stream codecs lower through core.compress.
+        // zip/tar containers. Stream codecs lower through core.archive.
         // Archive operations use the canonical dependency-free ABI bridge.
         // zip_compress takes (&str, &[u8]); zip_decompress takes &[u8].
         ("core.archive", "zip_compress") => {
@@ -2809,20 +2809,20 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
-        ("core.compress.gzip", "compress") => {
+        ("core.archive.gzip", "compress") => {
             format!("{}(&({}))", regex_fn("jet_compress_gzip_compress"), arg(0))
         }
-        ("core.compress.gzip", "decompress") => {
+        ("core.archive.gzip", "decompress") => {
             format!(
                 "{}(&({}))",
                 regex_fn("jet_compress_gzip_decompress"),
                 arg(0)
             )
         }
-        ("core.compress.zstd", "compress") => {
+        ("core.archive.zstd", "compress") => {
             format!("{}(&({}))", regex_fn("jet_compress_zstd_compress"), arg(0))
         }
-        ("core.compress.zstd", "decompress") => {
+        ("core.archive.zstd", "decompress") => {
             format!(
                 "{}(&({}))",
                 regex_fn("jet_compress_zstd_decompress"),
@@ -2874,15 +2874,15 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),
         ("core.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
         
-        ("core.random", "shuffle") => {
+        ("core.math.random", "shuffle") => {
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
-        ("core.io", "eprint") => format!(
+        ("core.term", "eprint") => format!(
             "{{ let _ = {}jet_term_write_stderr(&format!(\"{{}}\\n\", ({}).jet_show()), false); }}",
             cx.root_prefix,
             arg(0)
         ),
-        ("core.io", "print") => format!(
+        ("core.term", "print") => format!(
             "{{ let _ = {}jet_term_write_stdout(&format!(\"{{}}\\n\", ({}).jet_show()), false); }}",
             cx.root_prefix,
             arg(0)
@@ -3125,16 +3125,14 @@ pub(crate) fn emit_tir_core_call(
         
         
         // D-TIMEDEPTH1=A: civil-time constructors.
-        ("core.time.date", "new") => {
+        ("core.time", "new") => {
             format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2))
         }
-        ("core.time.date", "today") => "JetDate::today_utc()".to_string(),
-        ("core.time.date", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
-        ("core.time.datetime", "from_timestamp") => {
+        ("core.time", "today") => "JetDate::today_utc()".to_string(),
+        ("core.time", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
+        ("core.time", "from_timestamp") => {
             format!("JetDateTime::from_timestamp({})", arg(0))
         }
-        ("core.time.datetime", "now") => "JetDateTime::now()".to_string(),
-        
         _ => "/* unknown std call */".to_string(),
     }
 }

@@ -10,7 +10,7 @@ existing drift found during review.
 
 - Names are plain English words, not abbreviations (`remove`, not `rm`).
   Blessed exceptions (closed list, D-API-LEN1=A; ballot to extend): `len`,
-  and the module names `fmt`, `args`, `env`, `mem`.
+  and the module names `fmt`, `args`, and `mem`.
 - Membership predicates are `has(value)` / `has_key(key)` (D-API-CONTAINS1=B).
 - Storage uses `add`: keyed `add(key, value)` returns the displaced value, keyed
   `add_new(key, value)` never overwrites and returns whether it stored, and element
@@ -108,10 +108,10 @@ The family has one job per spelling. Beginners learn ambient `print` first.
 | Spelling | Job | Status and default |
 | --- | --- | --- |
 | `print(value)` | Display a value and end the line. | Beginner default; no import. |
-| `io.print(value)` | The same line-ending print through `core.io`. | Qualified twin for `#NoPrelude` files. |
-| `io.println(value)` | No distinct job from `io.print`. | Retired; `jet fmt` and `jet fix` rewrite it to `io.print`. |
-| `io.sprint(value)` | No distinct job from interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value}"`. |
-| `io.repr(value)` | No distinct job from debug interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value:Debug}"`. |
+| `term.print(value)` | The same line-ending print through `core.term`. | Qualified twin for `#NoPrelude` files. |
+| `term.println(value)` | No distinct job from `term.print`. | Retired; `jet fmt` and `jet fix` rewrite it to `term.print`. |
+| `term.sprint(value)` | No distinct job from interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value}"`. |
+| `term.repr(value)` | No distinct job from debug interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value:Debug}"`. |
 
 Interpolation is the string-building mechanism. `:Debug` selects the existing
 debug representation selector; it is not a second print API.
@@ -147,9 +147,10 @@ Tower card tracking the fix; this list is the authoritative inventory.
 
 | Gap | API | Law | Follow-up |
 |-----|-----|-----|-----------|
-| L1 | `core.files.read` / `core.files.write` use short names | 1 | c44-follow-1 |
+| — | None recorded after the Core namespace cutover | — | — |
 
-*When a gap is resolved, remove the row and close the follow-up card.*
+*Resolved gaps leave this table empty; new drift gets a ratified owner card before
+it is listed here.*
 
 Resolved disposition, #1691: `core.crypto.expert` now uses distinct
 `x25519_raw` / `hkdf_sha256_raw` names, and
@@ -194,8 +195,53 @@ card #1574. The reference doc restructure rides that cutover.
 - **D-CORE-PRELUDE2=B** — `read_file`, `write_file`, and `file_exists` join the
   prelude. Random stays in `core.math.random`.
 - **D-CORE-TREE1=A** — Core uses a consistent nested tree. It keeps
-  `core.files`, nests random under math and `fmt` under text, merges env and os
-  into sys, and splits `core.io`. It does not add `core.json`.
+  `core.files`, nests random under `core.math.random` and `fmt` under
+  `core.text.fmt`, merges env and os into `core.sys`, and splits terminal,
+  process, and encoding surfaces into their canonical homes. It does not add
+  `core.json` or retain retired free namespaces.
 - **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as`
   gives a shorter local name; without `as`, the local name is the last part
   after the final dot. Existing brace item imports move to the same list.
+
+## Extended Core API doctrine
+
+The ratified Part A rules are the review test for every changed Core call. The
+short form below is the current checklist; the proposal contains the evidence
+and examples.
+
+| Rule | Current test |
+|---|---|
+| C1 | Judge the call site, not the declaration. |
+| C2 | Required values are positional; labels make uncommon or ambiguous options readable. |
+| C3 | The common dataflow reads left to right through methods and `?`. |
+| D1 | The bare call performs the safest common operation with no setup ceremony. |
+| D2 | Every magic default appears in the defaults table and has an explicit override. |
+| D3 | Defaulted options replace overload families. |
+| D4 | Options use dedicated enums; Core does not use boolean or bare-string policy flags. |
+| F1 | Expected failure is `T ? E`; propagation costs `?`. |
+| F2 | A lookup returns `T?`; sentinel values are not an API contract. |
+| F3 | Every failure message states what happened, why, and how to fix it. |
+| T1 | Domain values use domain types while beginner literals remain accepted at the boundary. |
+| T2 | Core values are immutable; mutation belongs to containers. |
+| T3 | Distinct concepts have distinct types and one simple entry door. |
+| N1 | Names follow one subject-first grammar, including acronyms. |
+| N2 | Pure operations use noun/past-participle names; mutating operations use imperative names. |
+| L-A | Each I/O domain has a whole-value call over a streaming seam. |
+| L-B | Concrete containers are eager; `.lazy` opts into the same deferred vocabulary. |
+| L-C | New containers implement the one iteration protocol and inherit its adapters. |
+| L-D | Beginner presets compose the small expert primitives; they do not fork them. |
+| E1 | A retired spelling is deleted in the same greenfield cutover. |
+| E2 | A measured gap-filler is absorbed with the wrapper's useful defaults. |
+
+### Magic defaults and expert overrides
+
+This is the one current defaults table for the common Core doors. New entries
+must extend this table or reuse an existing option.
+
+| Door | Bare default | Explicit control |
+|---|---|---|
+| `files.read(path)` / `files.write(path, text)` | Whole-value UTF-8 file operation; write is safe for the normal path. | `open`, `create`, `append_all`, or labeled write mode. |
+| `http.get(url)` | One-shot request with the safe client defaults. | `http.client` for timeout, redirect, retry, and transport policy. |
+| `list.map` / `list.filter` | Eager plain collection. | `.lazy` for a deferred view. |
+| `time.now` | Local current instant with the standard clock door. | `time.now_utc` or an injected `Clock` for explicit zone/reproducibility. |
+| `crypto` | Typed safe values and fail-closed defaults. | `crypto.expert` inside the audited raw-byte boundary. |

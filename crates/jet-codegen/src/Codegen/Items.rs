@@ -696,7 +696,7 @@ fn emit_struct_patchable(cx: &Cx, s: &StructDef, out: &mut String) {
 /// typed `run(args: T)` / `run(cmd: Enum)` generates down onto the same
 /// `__jet_cli_spec_*`/`__jet_cli_decode_*` functions `emit_struct_cli`
 /// produced, and the same `core.args` runtime surface a hand-written
-/// `.parse(io.args())` call would hit (I8: no second parser).
+/// `.parse(process.argv())` call would hit (I8: no second parser).
 pub(crate) fn emit_cli_entry_if_needed(
     cx: &Cx,
     items: &[Item],

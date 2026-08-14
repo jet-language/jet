@@ -7,8 +7,8 @@ missing domains stay implicit.
 
 | Surface | Status | Notes |
 |---------|--------|-------|
-| `core.compress.gzip` | shipped | compress/decompress `[U8]`; Prelude codecs |
-| `core.compress.zstd` | shipped | compress/decompress `[U8]` |
+| `core.archive.gzip` | shipped | compress/decompress `[U8]`; Prelude codecs |
+| `core.archive.zstd` | shipped | compress/decompress `[U8]` |
 | `core.archive` zip/tar | ordinary-Jet package plus audited ABI kernel | reachable `archive.jet` source closure; only its internal byte-format ABI crosses into `corelib/core.archive/pkgs/archive/src/lib.rs` |
 | HTTP response compression middleware | non-goal this epoch | open in HTTP table; transport gzip decode is separate |
 | Brotli / lz4 public Core modules | non-goal | not ratified; compose via FFI/`#Unsafe` if needed |
@@ -21,7 +21,7 @@ coverage in `tests/corelib.rs`.
 | Surface | Status | Notes |
 |---------|--------|-------|
 | `core.math` scalars | shipped | width-generic ops |
-| `core.linalg` helpers | shipped | Prelude `LinalgFns` |
+| `core.compute` helpers | shipped | shared numeric Prelude |
 | `core.compute` Tensor / ndarray / FFT / sparse | shipped | CPU oracle; GPU deferred to E6 |
 | `core.compute` autodiff / ML / f32 tile | shipped | examples under `examples/features/tooling/compute_*.jet` |
 | BLAS/LAPACK vendor binding | non-goal | expert `#Unsafe` / package |

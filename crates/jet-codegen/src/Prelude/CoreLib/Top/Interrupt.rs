@@ -8,7 +8,7 @@ pub(crate) fn jet_interrupt_poll_interval() -> std::time::Duration {
 }
 
 pub(crate) fn jet_interrupt_core_error(message: &str) -> String {
-    format!("core.os.on_interrupt: {message}")
+    format!("core.sys.on_interrupt: {message}")
 }
 
 pub(crate) fn jet_interrupt_dispatcher_start_error(error: impl std::fmt::Display) -> String {
@@ -24,7 +24,7 @@ pub(crate) fn jet_interrupt_invalid_callback_record_error() -> &'static str {
 }
 
 pub(crate) fn jet_interrupt_invalid_callback_value_error() -> &'static str {
-    "core.os.on_interrupt callback"
+    "core.sys.on_interrupt callback"
 }
 
 pub(crate) fn jet_interrupt_unavailable_error() -> &'static str {

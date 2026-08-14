@@ -191,7 +191,7 @@ pub(crate) struct JitRuntime {
     pub(crate) process_specs: Vec<Process::JitProcessSpec>,
     /// `ProcessChild` handles — 1-based indices (#729 process spawn).
     pub(crate) process_children: Vec<Process::JitProcessChild>,
-    /// `core.sketch` handles (#729).
+    /// `core.data.sketch.*` handles (#729).
     pub(crate) sketches: Vec<crate::Sketch::SketchSlot>,
     /// `core.args` ArgsSpec / ParsedArgs handles (#729).
     pub(crate) args_specs: Vec<crate::Args::ArgsSpec>,
@@ -240,7 +240,7 @@ pub(crate) struct JitRuntime {
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
-    /// `core.url` / `core.mime` / net handles (#1221).
+    /// `core.net.url` / `core.net.mime` / net handles (#1221).
     pub(crate) net_values: Vec<Option<Net::NetValue>>,
     /// `core.services` / `core.sync` opaque Prelude values keyed by their
     /// resident heap-record handle. Entries live for one invocation only.
@@ -250,7 +250,7 @@ pub(crate) struct JitRuntime {
     pub(crate) game_frames: Vec<crate::Game::GameFrameState>,
     pub(crate) game_replays: Vec<crate::Game::GameReplayState>,
     pub(crate) game_backends: Vec<crate::Game::GameBackendState>,
-    /// `core.raylib` window / color handles (#1218).
+    /// `core.game.raylib` window / color handles (#1218).
     pub(crate) raylib_windows: Vec<crate::Raylib::RaylibWindowState>,
     pub(crate) raylib_colors: Vec<crate::Raylib::RaylibColorState>,
     pub(crate) raylib_sounds: Vec<crate::Raylib::RaylibSoundState>,
@@ -918,7 +918,7 @@ extern "C" fn jet_jit_str_is_ascii(id: i64) -> i8 {
     })
 }
 
-/// `core.text.unicode.scalars` — list of one-scalar strings (AOT `Vec<String>`).
+/// `core.text.scalars` — list of one-scalar strings (AOT `Vec<String>`).
 extern "C" fn jet_jit_str_scalar_strings(id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();

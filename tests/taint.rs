@@ -101,7 +101,7 @@ fn run() {
         (
             "env",
             r#"
-use core.env as env
+use core.sys as env
 fn run() {
     value :: env.get("PAYLOAD") ?? return
     SQL.raw(value)

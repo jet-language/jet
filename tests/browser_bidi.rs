@@ -575,7 +575,7 @@ fn malformed_session_listener() -> (String, thread::JoinHandle<Vec<String>>) {
 #[test]
 fn native_bidi_bad_method_arguments_stop_in_sema() {
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? return
@@ -663,7 +663,7 @@ fn run() {
 #[test]
 fn native_bidi_session_handles_cannot_cross_tasks_or_channels() {
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 use core.tasks
 
 fn run() {
@@ -685,7 +685,7 @@ fn run() {
 #[test]
 fn native_bidi_io_handle_methods_record_net_effect() {
     let validators = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn validators() =[]=> {
     profile :: browser.profile("bidi-2025.5") ?? return
@@ -696,7 +696,7 @@ fn run() { validators() }
     jet::compile(validators).expect("profile and timeout validation must stay pure");
 
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn connect() =[FS]=> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
 fn context(session: Browser) =[FS]=> Unit { session.context() ?? return }
@@ -741,7 +741,7 @@ fn native_bidi_cleanup_retries_failures_and_drops_last_owners_once() {
     let endpoint = format!("ws://{}/session?token=LIFECYCLE_SECRET", listener.local_addr().unwrap());
     let server = thread::spawn(move || run_lifecycle(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -813,7 +813,7 @@ fn native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent() {
     );
     let server = thread::spawn(move || run_tab_frame_lifecycle(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -875,7 +875,7 @@ fn native_bidi_frames_on_closed_page_fail_without_get_tree() {
     );
     let server = thread::spawn(move || run_closed_frames_hostile(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -976,7 +976,7 @@ fn native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks() {
         handshake_listener(r#"{"ready":true,"message":"ready"}"#, true);
     let (malformed_session, malformed_session_server) = malformed_session_listener();
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn connect_outcome(endpoint: String) => String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
@@ -1087,7 +1087,7 @@ fn native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts() {
     let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
     let server = thread::spawn(move || run_event_storm(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1128,7 +1128,7 @@ fn native_bidi_command_deadline_does_not_reset_on_continuous_events() {
     let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
     let server = thread::spawn(move || run_continuous_events(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1161,7 +1161,7 @@ fn native_bidi_runs_real_network_path_in_forced_and_default_dev_tier_zero() {
         let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
         let server = thread::spawn(move || run_smoke(listener));
         let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2024.11") ?? panic("profile")
@@ -1256,7 +1256,7 @@ fn run() {
     let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
     let server = thread::spawn(move || run_profile_smoke(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1289,7 +1289,7 @@ fn run() {
         let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
         let server = thread::spawn(move || run_smoke(listener));
         let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     session :: browser.connect("__ENDPOINT__") ?? panic("connect")
@@ -1313,7 +1313,7 @@ fn run() {
     let (surrogate, surrogate_server) =
         handshake_listener(r#"{"ready":true,"message":"\uD83D\uDE80"}"#, true);
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn outcome(endpoint: String) => String {
     session :: browser.connect(endpoint) ?? return "caught"
@@ -1393,7 +1393,7 @@ fn native_bidi_semantic_locators_actions_and_waits() {
     );
     let server = thread::spawn(move || run_locator_actions(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1491,7 +1491,7 @@ fn native_bidi_missing_locator_action_times_out_without_leaks() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1596,7 +1596,7 @@ fn native_bidi_network_events_inspection_and_interception() {
     );
     let server = thread::spawn(move || run_network_events(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1710,7 +1710,7 @@ fn native_bidi_network_intercept_rejects_bad_phase_and_empty_request() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1803,7 +1803,7 @@ fn native_bidi_network_response_event_exposes_status_without_payload_leak() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -1951,7 +1951,7 @@ fn native_bidi_artifacts_storage_files_screenshots_and_pdf() {
     );
     let server = thread::spawn(move || run_artifacts(listener));
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2075,7 +2075,7 @@ fn native_bidi_artifacts_reject_hostile_inputs_without_wire() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2176,7 +2176,7 @@ fn native_bidi_closed_page_rejects_artifacts() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2280,7 +2280,7 @@ fn native_bidi_checked_expert_cdp_supplement_success_and_gates() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2387,7 +2387,7 @@ fn native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire() 
     });
 
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn missing_cdp(endpoint: String) => String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
@@ -2479,7 +2479,7 @@ fn native_bidi_checked_expert_cdp_integrates_with_page_lifecycle() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2589,7 +2589,7 @@ fn native_bidi_privacy_isolation_receipt_and_cleanup_success() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2747,7 +2747,7 @@ fn native_bidi_privacy_receipt_hostile_and_closed_paths() {
     });
 
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn hostile(endpoint: String) => String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
@@ -2847,7 +2847,7 @@ fn native_bidi_privacy_receipt_integrates_with_lifecycle() {
         methods
     });
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -2968,7 +2968,7 @@ fn native_bidi_browser_surface_matrix_success() {
     });
 
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
@@ -3131,7 +3131,7 @@ fn native_bidi_browser_surface_hostile_matrix() {
     });
 
     let source = r#"
-use core.browser as browser
+use core.web.browser as browser
 
 fn bad_profile() => String {
     browser.profile("not-a-profile") ?? return "caught-profile"

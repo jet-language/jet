@@ -85,7 +85,7 @@ baseline is refreshed.
       "file": "examples/features/io/os_process_control.jet",
       "line": 25,
       "column": 5,
-      "reason": "POSIX process and pipe control for the core.os surface"
+      "reason": "POSIX process and pipe control for the core.sys surface"
     },
     {
       "package": "examples",
@@ -524,7 +524,7 @@ baseline is refreshed.
 | examples | examples/features/crypto/vault_keys.jet | 36:5 | "restore audited raw signing-key material" |
 | examples | examples/features/effects/audited_gate_ladder.jet | 7:5 | "the audited block has no low-level operation" |
 | examples | examples/features/effects/single_use_discard.jet | 39:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
-| examples | examples/features/io/os_process_control.jet | 25:5 | "POSIX process and pipe control for the core.os surface" |
+| examples | examples/features/io/os_process_control.jet | 25:5 | "POSIX process and pipe control for the core.sys surface" |
 | examples | examples/features/io/process_exit_cleanup.jet | 15:5 | "the exit callback has no captured state" |
 | examples | examples/features/lowlevel/inline_asm.jet | 3:1 | "the operands are scalar registers and add does not access memory" |
 | examples | examples/features/lowlevel/inline_asm.jet | 8:5 | "call the audited register-only assembly contract" |

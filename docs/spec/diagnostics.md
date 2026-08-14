@@ -195,7 +195,7 @@ renumbered, and no new `W` code may be allocated.
 | E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
 | E0035 | sema | enum discriminant is not a computable integer (D-META-CONST1) |
 | E0036 | parse | *retired by D-S14-PAUSE* (was: `dyn`/`Box` teaching) |
-| E0037 | sema  | teaching: `println!`/`eprintln!` → `print`/`io.eprint` |
+| E0037 | sema  | teaching: `println!`/`eprintln!` → `print`/`term.eprint` |
 | E0038 | sema  | *retired by D-S14-PAUSE* (was: file-open teaching) |
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
@@ -590,7 +590,7 @@ renumbered, and no new `W` code may be allocated.
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
-| E3410 | sema  | Tier-2 comptime effect (`core.files`/`env`/`io`/`exec`) called outside a `#Impure` gate (D-CTEFFECT1) |
+| E3410 | sema  | Tier-2 comptime effect (`core.files`/`core.sys`/`core.term`/`core.process`) called outside a `#Impure` gate (D-CTEFFECT1) |
 | E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--gate impure=allow` not passed (D-CTEFFECT1 / D-ONCE-GATE1=A) |
 | E3415 | sema  | audited gate denied by effective organization or package policy (D-ONCE-GATE1=A) |
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
@@ -750,7 +750,7 @@ renumbered, and no new `W` code may be allocated.
 | E1112 | sema  | a task combinator has no task branch (D-CONCSELECT1) |
 | E1130 | sema/parse | `#Kernel(.parallel)` has a duplicate marker or its body cannot satisfy the safe-kernel proof obligations (D-COMPUTE-KERNEL-SURFACE1=B) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
-| W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
+| W0410 | sema  | `core.math.random.bytes` output used in a crypto context — `core.math.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2301 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference return spelling `-> &T` remains absent; invalid named-view returns use E2305/E2307) |
 | E2302 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference field spelling `&T`/`#Ref` remains absent; named view fields follow D-MEM-VIEWRET1) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
@@ -822,8 +822,8 @@ renumbered, and no new `W` code may be allocated.
 | E1341 | jet   | a selected `Library` output requests an invalid target, binding, or export shape (D-LIB-EXPORT1=C) |
 | E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
-| E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
-| E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
+| E1264 | sema  | a function reaches `core.crypto.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
+| E1265 | comptime | `core.crypto.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
 | E1266 | jet   | an `Image`'s `kind:` isn't active `.Oci`, or disagrees with what `from:` names (D-JPK-IMAGE1, D-JETOS-FREEZE1) |
 | E1267 | jet   | an `.Oci` image's `from: packages.<name>` doesn't name an `executable`-kind package (U14, D-JPK-IMAGE1) |
 | E1268 | jetpack | remote OCI base or push needs a verified registry transport; local `file://` layouts are supported (U14, D-JPK-IMAGE1) |
@@ -963,7 +963,7 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 ## CLI arg-parsing diagnostics (D-ARGS1, `core.args`)
 
 `core.args` provides a declarative builder: `args.spec().flag(…).option(…).positional(…)`
-parsed against `io.args()` into a typed `ParsedArgs`. These errors fire when builder
+parsed against `process.argv()` into a typed `ParsedArgs`. These errors fire when builder
 or query methods are called with the wrong number of arguments.
 
 | Code | What | Why | Fix |
@@ -971,13 +971,13 @@ or query methods are called with the wrong number of arguments.
 | E1301 | `` `flag` expects 2 arguments (name, help), got N `` | `ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`; both the flag name and a one-line help string are required. | Pass exactly two strings: the flag name and a help description, e.g. `.flag("verbose", "enable verbose output")`. |
 | E1302 | `` `option` expects 3 arguments (name, help, metavar), got N `` | `ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`; all three strings are required. | Pass three strings: the option name, a help description, and a placeholder like `FILE`, e.g. `.option("output", "write to FILE", "FILE")`. |
 | E1303 | `` `positional` expects 2 arguments (name, help), got N `` | `ArgsSpec.positional(name, help)` registers a required positional argument; both name and help are required. | Pass exactly two strings: the positional name and a help description, e.g. `.positional("input", "file to process")`. |
-| E1304 | `` `parse` expects 1 argument (argv), got N `` | `ArgsSpec.parse(argv)` parses a `[String]` against the spec; pass exactly the argv list. | Pass exactly one argument: the argv list, e.g. `spec.parse(io.args())`. |
+| E1304 | `` `parse` expects 1 argument (argv), got N `` | `ArgsSpec.parse(argv)` parses a `[String]` against the spec; pass exactly the argv list. | Pass exactly one argument: the argv list, e.g. `spec.parse(process.argv())`. |
 
 ### Typed entry-signature CLI parsing (D-CLIFLAG1)
 
 `#CLI` is a derive (sibling of `#Codable`) that turns a struct's fields into
 `core.args` flag registrations; `fn run(args: T)` / `fn run(cmd: Enum)` is the
-typed form of Jet's only entry point. It parses `io.args()` against
+typed form of Jet's only entry point. It parses `process.argv()` against
 the derived spec before calling the user's function. See docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. These
 errors are all compile-time shape checks; a bad flag value at runtime reuses
@@ -1291,7 +1291,7 @@ server built on top. E28xx is the block for M10.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2801 | {operation} on `{address}` failed: {detail}. | A socket bind, listen, connect, or accept call returned an OS error. The address and operation are named so you can act on the specific failure. | Check that the address is reachable and the port is not already in use. For `bind`, try a different port. For `connect`, verify the server is running. |
-| E2802 | TLS handshake with `{host}` failed: {detail}. | The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store. | Verify the server's certificate, ensure the system trust store is up-to-date, or use `core.tls.insecure_skip_verify()` in a test environment only. |
+| E2802 | TLS handshake with `{host}` failed: {detail}. | The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store. | Verify the server's certificate, ensure the system trust store is up-to-date, or use `core.net.tls.insecure_skip_verify()` in a test environment only. |
 | E2803 | Request body exceeds the {limit}-byte limit. | The server's configured `max_body` cap was reached. Allowing unbounded bodies risks memory exhaustion. | Raise the `max_body` option passed to `http.serve`, or reject the request in your handler before reading the body. |
 | E2804 | Two routes both match `{METHOD} {pattern}`. | A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately. | Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one). |
 | E2805 | Invalid HTTP route `{pattern}`: {reason}. | Route patterns use one canonical grammar. Ambiguous escapes, traversal, duplicate names, or retired markers would make routing and audit metadata disagree. | Use `:name` for one segment or final `*name` for a catch-all. Percent-encode a literal leading `:` or `*`; never encode `/`. |
@@ -1497,7 +1497,7 @@ Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--gat
 
 | code | what | why | fix |
 |------|------|-----|-----|
-| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.files`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call in `#Impure("reading config") { … }`. |
+| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.files`, `core.sys`, `core.term`, and `core.process` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call in `#Impure("reading config") { … }`. |
 | E3411 | `#Impure` gate present but `--gate impure=allow` was not passed. | The `#Impure` block opts in to ambient I/O, but the invocation gate is also required so CI can audit builds that touch the host. | Add `--gate impure=allow` to your `jet build` / `jet run` invocation. |
 | E3415 | The `{gate}` gate is denied by effective policy. | The shared policy ladder is the authority for audited escapes; an invocation gate cannot widen a `.Forbid` floor. | Remove the gate or change the owning policy to allow it. |
 | E3412 | `core.net.{method}()` is not available at comptime. | Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect. Other `core.net` methods are not planned for comptime access. | Use `core.net.fetch(url, sha256: "…")` for content-hash-pinned downloads. |
@@ -1905,8 +1905,8 @@ front-end `.jet` diagnostics).
 | E1339 | Library `{name}` declares the `{effect}` effect, which this load site doesn't grant. | A loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped. Compiler identity is verified first, so this check only runs against an artifact already proven to come from this compiler. | Widen the grant at the load site to include `{effect}`, or remove the effect from the library. |
 | E1341 | This `Library` output requests an invalid target, binding, or export shape. | D-LIB-EXPORT1=C is a closed native projection: a Library emits only the checked static/shared, C-header, and named binding surfaces. Unknown bindings and backend combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; otherwise remove the invalid field. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
-| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
-| E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no audited gate escape because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
+| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.crypto.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
+| E1265 | `core.crypto.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no audited gate escape because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
 | E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
 | E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `package.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `package.jet`, or point `from:` at an existing executable package. |
 | E1268 | `` `jet image <name>` cannot use remote OCI reference `<ref>`. `` | D-JPK-IMAGE1: local OCI layouts are copied only after digest validation; remote registry transport is a separate trust boundary and is never faked. | Use `--push file:///path/to/layout`, or configure a verified registry transport. |

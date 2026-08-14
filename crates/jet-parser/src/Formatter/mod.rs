@@ -99,7 +99,7 @@ pub fn retired_print_family_edits(src: &str) -> Vec<TextEdit> {
         .imports
         .iter()
         .flat_map(|import| import.walk_bindings())
-        .filter(|binding| binding.path() == "core.io")
+        .filter(|binding| binding.path() == "core.term")
         .map(|binding| binding.local)
         .collect();
     if aliases.is_empty() {

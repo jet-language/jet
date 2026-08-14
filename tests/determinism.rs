@@ -38,7 +38,7 @@ use core.time as time;
 #[test]
 fn pure_fn_injected_rng_ok() {
     let src = r#"
-use core.random as random;
+use core.math.random as random;
 fn draw(rng: &Rng) =[]=> Int {
     return rng.int(1, 6)
 }
@@ -57,7 +57,7 @@ fn run() {
 fn pure_fn_constructs_caps_ok() {
     let src = r#"
 use core.time as time;
-use core.random as random;
+use core.math.random as random;
 fn seeded() =[]=> Int {
     c :: Clock.new(10)
     r := random.rng(1)
@@ -343,7 +343,7 @@ fn run() { print("{bad()}") }
 #[test]
 fn pure_fn_ambient_random_still_e3403() {
     let src = r#"
-use core.random as random;
+use core.math.random as random;
 fn bad() =[]=> Int {
     return random.int(1, 6)
 }
@@ -365,7 +365,7 @@ fn run() { print("{bad()}") }
 #[test]
 fn nondeterministic_time_classification_is_shared_by_purity_and_folding() {
     let pure_src = r#"
-use core.time.date as date;
+use core.time as date;
 
 fn pure_today() =[]=> String {
     return date.today().to_string()
@@ -383,7 +383,7 @@ fn run() {
     );
 
     let fold_src = r#"
-use core.time.date as date;
+use core.time as date;
 
 fn run() {
     @today :: date.today()
@@ -501,7 +501,7 @@ fn run() {
 #[test]
 fn pure_fn_widened_rng_ok() {
     let src = r#"
-use core.random as random;
+use core.math.random as random;
 fn draws(rng: &Rng) =[]=> Bool {
     flip := rng.bool()
     xs := [1, 2, 3]
@@ -527,7 +527,7 @@ fn run() {
 #[test]
 fn rng_pick_returns_element_option() {
     let src = r#"
-use core.random as random;
+use core.math.random as random;
 fn choose(rng: &Rng) =[]=> String {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
@@ -549,7 +549,7 @@ fn run() {
 #[test]
 fn rng_bool_needs_mut_receiver() {
     let src = r#"
-use core.random as random;
+use core.math.random as random;
 fn run() {
     r :: random.rng(3)
     b := r.bool()
@@ -570,7 +570,7 @@ fn run() {
 #[test]
 fn rng_shuffle_needs_mut_list_arg() {
     let src = r#"
-use core.random as random;
+use core.math.random as random;
 fn run() {
     r := random.rng(3)
     deck := [1, 2, 3]

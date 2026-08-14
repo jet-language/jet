@@ -174,10 +174,10 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
 /// program has no foreign declarations and does not use `core.archive`,
-/// `core.db`, or `core.compress.{gzip,zstd}`.
+/// `core.db`, or `core.archive.{gzip,zstd}`.
 ///
 /// `core.archive` (zip/tar; D-CORE-COMPRESS1), `core.db` (D-DEP-DB1), and
-/// `core.compress` (gzip/zstd; D-CORE-COMPRESS1) are delivered through this
+/// `core.archive.gzip` / `.zstd` (D-CORE-COMPRESS1) are delivered through this
 /// same hidden-cargo bridge: when a program imports any of them, the bridge
 /// crate gains the matching dependency and an audited runtime. Archive embeds
 /// the canonical dependency-free vendored package source; the other bridges live under
@@ -208,12 +208,12 @@ pub fn prepare_for_target(
         .used_core
         .iter()
         .any(|u| u == "core.db" || u.starts_with("core.db::"));
-    // D-CODECS1: standalone `core.compress.gzip` / `core.compress.zstd` codecs.
+    // D-CODECS1: standalone `core.archive.gzip` / `core.archive.zstd` codecs.
     let needs_compress = bundle.used_core.iter().any(|u| {
-        u == "core.compress.gzip"
-            || u.starts_with("core.compress.gzip::")
-            || u == "core.compress.zstd"
-            || u.starts_with("core.compress.zstd::")
+        u == "core.archive.gzip"
+            || u.starts_with("core.archive.gzip::")
+            || u == "core.archive.zstd"
+            || u.starts_with("core.archive.zstd::")
     });
     // D-HTTP-CLIENT2=A / D-DEP-HTTP2=B: the native HTTP client uses only the
     // separately-ratified rustls/system-root TLS bridge.
@@ -240,8 +240,8 @@ pub fn prepare_for_target(
     // TcpStream through the same hidden rustls bridge family as HTTP TLS.
     let needs_net_tls = bundle.used_core.iter().any(|u| {
         u == "core.net::tls_connect"
-            || u == "core.tls"
-            || u.starts_with("core.tls::")
+            || u == "core.net.tls"
+            || u.starts_with("core.net.tls::")
             || u == "core.email"
             || u.starts_with("core.email::")
     });
@@ -257,10 +257,8 @@ pub fn prepare_for_target(
             || u.starts_with("core.auth::")
             || u == "core.email"
             || u.starts_with("core.email::")
-            || u == "core.vault"
-            || u.starts_with("core.vault::")
-            || u == "core.vault.expert"
-            || u.starts_with("core.vault.expert::")
+            || u == "core.crypto.vault"
+            || u.starts_with("core.crypto.vault::")
     });
     // D-DEP-WASM1=A (c81): `core.plugin` — the sandboxed WASM Component Model
     // plugin loader (`Plugin.load`/`.call`).
@@ -268,12 +266,12 @@ pub fn prepare_for_target(
         .used_core
         .iter()
         .any(|u| u == "core.plugin" || u.starts_with("core.plugin::"));
-    // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — decrypted-repo-secret read,
+    // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` — decrypted-repo-secret read,
     // age-style crypto FFI bridge.
     let needs_secrets = bundle
         .used_core
         .iter()
-        .any(|u| u == "core.vault" || u.starts_with("core.vault::") || u == "core.vault.expert" || u.starts_with("core.vault.expert::"));
+        .any(|u| u == "core.crypto.vault" || u.starts_with("core.crypto.vault::"));
     // Link discovery is independent of hidden-bridge eligibility. A C surface
     // made only from local Jet types must still resolve its declared provider
     // and report E3201 when the provider is absent.
@@ -1451,13 +1449,13 @@ const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
 pub const COMPILER_EXTENSION_RUNTIME: &str =
     include_str!("Prelude/CompilerExtension.rs");
 
-/// The `age` crate version backing `core.vault` (U13, D-JPK-SECRETCRYPTO1=A) —
+/// The `age` crate version backing `core.crypto.vault` (U13, D-JPK-SECRETCRYPTO1=A) —
 /// the age-style crypto bridge: X25519 recipients, ChaCha20-Poly1305 payload.
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const AGE_CRATE_SPEC: (&str, &str) = ("age", "0.10");
 
 /// Hand-written age-style crypto runtime emitted into the bridge crate when
-/// `core.vault` is used (U13). This is the only place the `age` crate is
+/// `core.crypto.vault` is used (U13). This is the only place the `age` crate is
 /// touched.
 const SECRETS_RUNTIME: &str = include_str!("Prelude/SecretsCrypto.rs");
 const VAULT_KEY_WRAP_RUNTIME: &str = include_str!("Prelude/VaultKeyWrap.rs");
@@ -1465,12 +1463,12 @@ const VAULT_NFC_RUNTIME: &str = include_str!("Prelude/VaultNfc.rs");
 const UNICODE_TABLES_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
 
-/// The `flate2` crate version that backs canonical `core.compress.gzip`
+/// The `flate2` crate version that backs canonical `core.archive.gzip`
 /// (D-CORE-COMPRESS1=A / D-CODECS1). Lives only here — never in the compiler's
 /// Cargo.toml (I6).
 pub const COMPRESS_GZIP_CRATE_SPEC: (&str, &str) = ("flate2", "1");
 
-/// The `zstd` crate version that backs `core.compress.zstd` (D-CODECS1). Pure
+/// The `zstd` crate version that backs `core.archive.zstd` (D-CODECS1). Pure
 /// bootstrap dep: the `zstd` crate is a Rust binding that vendors/builds the C
 /// zstd source via `zstd-sys` at compile time (same I6 bootstrap-exception
 /// posture as `rusqlite`'s bundled SQLite, `DB_CRATE_SPEC`). Lives only here —
@@ -1478,7 +1476,7 @@ pub const COMPRESS_GZIP_CRATE_SPEC: (&str, &str) = ("flate2", "1");
 pub const COMPRESS_ZSTD_CRATE_SPEC: (&str, &str) = ("zstd", "0.13");
 
 /// Hand-written compression runtime emitted into the bridge crate when
-/// `core.compress.gzip` or `core.compress.zstd` is used (D-CODECS1). This is
+/// `core.archive.gzip` or `core.archive.zstd` is used (D-CODECS1). This is
 /// the only place the standalone codec paths touch `flate2` / `zstd`.
 const COMPRESS_RUNTIME: &str = include_str!("Prelude/Compress.rs");
 
@@ -1634,7 +1632,7 @@ fn build_bridge_full(
         );
     }
     if needs_compress {
-        // D-CORE-COMPRESS1=A: only core.compress pulls stream-codec deps.
+        // D-CORE-COMPRESS1=A: only archive codec children pull stream-codec deps.
         deps.insert(
             COMPRESS_GZIP_CRATE_SPEC.0.to_string(),
             COMPRESS_GZIP_CRATE_SPEC.1.to_string(),
@@ -2846,7 +2844,7 @@ fn emit_wrapper_lib(
     }
     if needs_compress {
         // D-CODECS1: the compress runtime is the only place the standalone
-        // `core.compress.gzip` / `core.compress.zstd` codec paths are touched.
+        // `core.archive.gzip` / `core.archive.zstd` codec paths are touched.
         out.push_str(COMPRESS_RUNTIME);
         out.push('\n');
     }

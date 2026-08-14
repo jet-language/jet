@@ -1,8 +1,9 @@
 // 34 — Parallel file scan (D-EXAMPLES-SHORTPATH1=A).
 // Short path: `para_map`. Expert channel+spawn+join → parallel_scan_expert.jet.
 use core.files as fs
-use core.io as io
-use core.env as env
+use core.term as io
+use core.process as process
+use core.sys as env
 
 fn count_lines(text: String) => Int :: text.lines().len()
 
@@ -21,7 +22,7 @@ fn default_paths() => [String] {
     return [a, b]
 }
 
-fn paths_from_args() => [String] :: io.args().skip(1).to_list()
+fn paths_from_args() => [String] :: process.argv().skip(1).to_list()
 
 fn gather_paths() => [String] {
     from_args :: paths_from_args()

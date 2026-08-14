@@ -550,7 +550,7 @@ extern "C" fn jet_jit_list_uninit(len: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_uninit_list(len.max(0) as usize))
 }
 
-/// `core.io.args()` — List(String) matching AOT `jet_std_io_args`, fed by the
+/// `core.process.argv()` — List(String) matching AOT `jet_std_io_args`, fed by the
 /// `with_program_args` argv installed for this JIT run (falls back to
 /// `std::env::args` when unset, same as a bare host process).
 extern "C" fn jet_jit_io_args() -> i64 {
@@ -568,7 +568,7 @@ extern "C" fn jet_jit_io_args() -> i64 {
             let sid = rt.heap.alloc_string(arg);
             rt.heap
                 .list_push_int(list, sid)
-                .expect("jit io.args push");
+                .expect("jit process.argv push");
         }
         list
     })

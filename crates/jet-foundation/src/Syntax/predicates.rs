@@ -49,53 +49,26 @@ pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 /// key set equals this slice.
 pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
-    // D-LANGNS-NAME1=A: generated declarations for compiler vocabulary.
-    "core.lang",
-    "core.io",
-    "core.env",
-    // D-OSFACTS1=A: system facts and safe interrupt hook.
-    "core.os",
+    // D-CORE-TREE1=A: one canonical nested Core tree. Keep this list in
+    // lexical/domain order; deleted free namespaces do not get aliases here.
+    "core.files",
+    "core.term",
+    "core.args",
+    "core.log",
     "core.process",
+    "core.sys",
     "core.math",
-    "core.random",
+    "core.math.random",
     "core.time",
+    "core.time.expiring",
     "core.tasks",
-    // D-TESTKIT1=A: helpers under existing #Test syntax.
     "core.testing",
     "core.mem",
-    // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
-    "core.mem.alloc",
-    // D-SOLVER-LIB1=A: explicit finite solver state, no language backtracking.
-    "core.solve",
-    // D-DATA-SURFACE1=A: one beginner facade for typed tables, series, stats, and plots.
-    "core.data",
-    // E2-M7: streaming file handles and typed Path methods (D-IO2, D-CORE-PATH1).
-    "core.files",
-    // D-URL1=A: typed WHATWG-class URLs and MIME values.
-    "core.url",
-    "core.mime",
-    // D-EMAIL1=A: typed message construction and native SMTP substrate.
-    CORE_EMAIL_MODULE,
-    // D-WATCH-SCOPE1: unified file/process/port watcher constructors.
-    "core.watcher",
-    // E2-M10: TCP/UDP sockets.
-    "core.net",
-    // D-DEFER1 option B: scope-exit guard (RAII cleanup via closure).
-    "core.scope",
-    // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing builder.
-    "core.args",
-    // D-LIB-CALLGRANT1=A: pinned loadable Jet libraries.
-    CORE_MOD_MODULE,
-    // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
-    "core.term",
-    // D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): runtime reflection floor —
-    // `reflect.of(x) -> Value` with `.type_name()`/`.path()`/`.display()`/`.fields()`.
+    "core.mem.scope",
+    "core.mod",
     "core.reflect",
-    // D-FRONTENDAPI1=A: read-only compiler facts are available only to
-    // compile-time build code; no runtime compiler object is emitted.
     "core.compiler",
-    // D-ENC1 (ratified 2026-06-24): unified serialization library `core.encoding` with
-    // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
+    "core.compiler.lang",
     "core.encoding",
     "core.encoding.json",
     "core.encoding.jsonl",
@@ -108,110 +81,55 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.encoding.hex",
     "core.encoding.base64",
     "core.encoding.base32",
-    // D-TEXTUNICODE1: std-only Unicode scalar helpers. Grapheme segmentation stays
-    // future work because it needs a Unicode data table/engine.
-    "core.text.unicode",
-    // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — the constructors are
-    // bare (no import needed); the modules exist for discoverability/docs.
-    "core.binary",
     "core.text",
-    // D-HUMANFMT1=A: Go-humanize-style helpers as ordinary library calls.
-    "core.fmt",
-    // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
-    "core.uuid",
-    // D-CORENS1: ring packages use their canonical `core.*` names end to end.
-    "core.log",
-    "core.crypto",
-    // D-RANDSPLIT1=A: CSPRNG submodule — `core.crypto.random.bytes(n)`.
-    "core.crypto.random",
-    // D-CRYPTOENV1=A: expert-only raw crypto primitives.
-    "core.crypto.expert",
-    // D-NETDEP1=A / D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
-    "core.http",
-    // D-WS1=B: standalone WebSocket client/server home.
-    "core.ws",
-    // D-BROWSER-AUTO1=A: native versioned WebDriver BiDi automation profiles.
-    "core.browser",
-    // D-REGEXENGINE1=A: std-only linear regex in the generated prelude.
+    "core.text.fmt",
     "core.regex",
-    // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: zip/tar containers only.
-    "core.archive",
-    // D-RAYLIB1=A / D-GAME1=B: official first-party raylib graphics bridge.
-    "core.raylib",
-    // D-GAME1/2/3 + D-WD10 + D-GAME-*: stable headless game substrate.
-    "core.game",
-    // D-CORE-COMPRESS1=A / D-CODECS1: canonical stream codecs.
-    // `flate2` (gzip) and `zstd` FFI bridges.
-    "core.compress.gzip",
-    "core.compress.zstd",
-    // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
+    "core.net",
+    "core.net.tls",
+    "core.net.ws",
+    "core.net.url",
+    "core.net.mime",
+    "core.http",
+    "core.http.client",
+    "core.http.server",
+    "core.crypto",
+    "core.crypto.random",
+    "core.crypto.uuid",
+    "core.crypto.vault",
+    "core.crypto.expert",
+    "core.email",
+    "core.data",
+    "core.data.plot",
+    "core.data.sketch.hll",
+    "core.data.sketch.tdigest",
+    "core.data.sketch.reservoir",
+    "core.data.sketch.cms",
+    "core.compute",
+    "core.compute.solve",
     "core.db",
-    // D-DEP-WASM1=A / D-PLUGIN1=B (c81): sandboxed WASM Component Model
-    // plugin loader (wasmtime, runtime-side only, I6).
-    "core.plugin",
-    // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
-    // derived values, and effects. Pure std runtime (no external crate).
-    "core.reactive",
-    // D-EVENT1=D (ratified 2026-07-07): typed Event<T>/Hook<T,R> runtime family.
+    "core.auth",
+    "core.sync",
     "core.event",
-    // D-HONESTNUM1=A (ratified 2026-06-26): Measurement<T> — value ± uncertainty
-    // with standard uncertainty propagation. Pure float arithmetic; no external crates.
-    "core.science.measurement",
-    // D-CORE-NUMERIC1=A: precise numerics live in core.math.
-    // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
-    // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
-    // D-CORENS2=A: loading state belongs to the reactive domain.
+    "core.reactive",
     "core.reactive.loadable",
-    // D-FIDELITY-API1=A (ratified 2026-07-06): core.perf.Perf static API —
-    // runtime-global quality/perf knob, with manual override/reset only.
-    "core.perf",
-    // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): render-target backend trait seam.
+    "core.services",
+    "core.watcher",
+    "core.game",
+    "core.game.raylib",
     "core.ui",
-    // D-FLAGSHIP-WEBAPI1=A: browser events, element reads, and storage for web slices.
     "core.web",
-    // D-LIVEQUERY1=A: application live-query surface (`app.live` / subscribe /
-    // invalidate). Shares the web/app graph Prelude.
-    "app",
+    "core.web.browser",
     "core.web.storage",
     "core.web.storage.local",
     "core.web.storage.session",
-    // D-APPROX1=A (ratified 2026-06-26): approximate data structures under core.sketch.
-    "core.sketch.hll",
-    "core.sketch.tdigest",
-    "core.sketch.reservoir",
-    "core.sketch.cms",
-    // D-TIMEDEPTH1=A (ratified 2026-06-26): civil-time constructors.
-    "core.time.date",
-    "core.time.datetime",
-    // D-CORE-SECRETS1=A: generic TTL wrapping.
-    "core.time.expiring",
-    // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
-    "core.http.client",
-    "core.http.server",
-    // D-NETTLSSTREAM1=A: verified TLS wraps the canonical core.net byte stream.
-    "core.tls",
-    // c-devserver (owner-directed 2026-07-01): a `.jet` file's own `jet dev`
-    // behavior — a configurable server value (`for_app`/`.html`/`.port`/`.serve`).
-    // D-CORENS2=A: dev-server configuration belongs to the web domain.
     "core.web.devserver",
-    // U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `core.vault.get` reads a
-    // secret decrypted from the project's encrypted repo file (`.jet/secrets.age`),
-    // via an age-style crypto FFI bridge. D-CORE-SECRETS1=A also places
-    // secret lifecycle (`ExpiringSecret<T>`) here; generic TTL remains
-    // `core.time.expiring`.
-    "core.vault",
-    "core.vault.expert",
-    // D-AUTH-TOKENPOLICY1=A (ratified 2026-07-18): strict standalone JWT/PASETO
-    // verification. Callers name key and audience; exp+aud are required, and
-    // unknown algorithms, versions, and purposes fail closed.
-    // D-AUTH1=A: session batteries share this module.
-    "core.auth",
-    // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + typed row policies.
-    "core.sync",
-    // D-COMPUTE1=D: ranked Tensor / Vec / Matrix CPU oracle (+ accelerators).
-    "core.compute",
-    // D-SERVICES1: long-running service runtime surface.
-    "core.services",
+    "core.archive",
+    "core.archive.gzip",
+    "core.archive.zstd",
+    "core.plugin",
+    "core.units",
+    "core.perf",
+    "app",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {
@@ -228,7 +146,7 @@ mod tests {
     #[test]
     fn core_module_keys_reject_internal_jet_prefix() {
         assert!(KNOWN_CORE_MODULES.iter().all(|name| !name.starts_with("jet.")));
-        for ring in ["log", "crypto", "http", "regex", "reactive", "archive", "raylib", "db", "plugin", "time"] {
+        for ring in ["log", "crypto", "http", "regex", "reactive", "archive", "game", "db", "plugin", "time"] {
             assert!(is_known_core_module(&format!("core.{ring}")));
             assert!(!is_known_core_module(&format!("jet.{ring}")));
         }

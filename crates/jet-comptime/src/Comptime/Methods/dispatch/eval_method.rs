@@ -150,7 +150,7 @@ impl<'a> Interp<'a> {
                             base.as_ref(),
                             Expr::Ident(alias, _)
                                 if self.core_imports.get(alias).map(String::as_str)
-                                    == Some("core.solve")
+                                    == Some("core.compute.solve")
                         ) =>
                 {
                     true
@@ -425,7 +425,7 @@ impl<'a> Interp<'a> {
                 // D-DET1: `random.shuffle(&xs)` edits its list in place (E0202 requires
                 // write access). Evaluate the list first, then use the same Core
                 // adapter as every other tier before writing the returned list back.
-                if matches!((module.as_str(), method), ("core.random", "shuffle")) {
+                if matches!((module.as_str(), method), ("core.math.random", "shuffle")) {
                     let Some(arg) = args.first() else {
                         return Err(unsupported("random.shuffle(): missing arg 0", span));
                     };
@@ -723,11 +723,11 @@ impl<'a> Interp<'a> {
                 if module == "core.net" && method == "fetch" {
                     return eval_net_fetch(&argv, Some(&mut self.embed_inputs), span);
                 }
-                // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` is denied at build time
+                // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` is denied at build time
                 // unconditionally — unlike the Tier-2 effects below, there is no
                 // `#Impure`/`--gate impure=allow` escape hatch, because a build artifact
                 // must never bake in a decrypted secret (I1).
-                if module == "core.vault" {
+                if module == "core.crypto.vault" {
                     return Err(vault_comptime_denied(&module, method, span));
                 }
                 // D-DET1 / I9: the AST interpreter is another fold-capable

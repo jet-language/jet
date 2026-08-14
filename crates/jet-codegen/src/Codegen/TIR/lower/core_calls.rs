@@ -178,7 +178,7 @@ pub(crate) fn lower_core_closure_call(
         }
     };
     let kind = match (module, method) {
-        ("core.os", "on_interrupt") if args.len() == 1 => {
+        ("core.sys", "on_interrupt") if args.len() == 1 => {
             TCoreClosureKind::OnInterrupt {
                 callback: Box::new(lower_interrupt_callback(&args[0].expr, cx, env)),
             }
@@ -197,7 +197,7 @@ pub(crate) fn lower_core_closure_call(
                 closure,
             }
         }
-        ("core.scope", "guard") => {
+        ("core.mem.scope", "guard") => {
             let lam = lam_at(0)?;
             // `jet_scope_guard<F: FnOnce()>` takes the closure by value, single-use.
             // Build the closure text directly (not via `render_lambda_str`, which

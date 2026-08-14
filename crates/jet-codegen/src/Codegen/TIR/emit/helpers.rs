@@ -191,7 +191,7 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     crate::AST::StrFormat::Display => "jet_display",
                     crate::AST::StrFormat::Debug => "jet_debug",
                     crate::AST::StrFormat::Fixed(_) => {
-                        unreachable!("Fixed interpolation lowers to core.fmt.decimal")
+                        unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                     }
                     crate::AST::StrFormat::Unit(_) => {
                         unreachable!("Unit interpolation lowers to a String")

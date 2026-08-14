@@ -73,7 +73,23 @@ PascalCase. The standard library is
 first-party library (built-in module or ring package) is `core.<name>`. No
 `jet.*`, `std.*`, or `jet.core` spellings (old ring spelling → E0341).
 
-**D-SOLVER-LIB1 — Explicit solver library**: `core.solve` ships a finite
+**D-CORE-TREE1=A — Canonical Core namespace tree** *(ratified 2026-08-06,
+card #1495; implementation #1574)*: the current tree keeps `core.files`,
+`core.term`, `core.args`, `core.log`, `core.process`, and `core.sys`; nests
+random under `core.math.random`, formatting under `core.text.fmt`, network
+leaves under `core.net`, UUID/vault/raw primitives under `core.crypto`, data
+sketches under `core.data.sketch`, solver under `core.compute.solve`, graphics
+under `core.game.raylib`, browser automation under `core.web.browser`, and
+gzip/zstd under `core.archive`. `core.time` is the one clock/civil-time door.
+Retired free namespaces have no aliases or re-exports, and there is no
+`core.json` short door.
+
+**D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06,
+implementation #1575)*: grouped imports use `use path.[a as x, b]`. A missing
+`as` uses the final path segment. Braces and wildcards are not grouped-import
+syntax.
+
+**D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order
 constraint checks, ordinary `Bool` values, and no language-level
 backtracking/unification. Initial Core surface: `solve.Solver.new(seed)`,
@@ -154,7 +170,7 @@ derives `--flag` names/defaults/help from the struct's fields
 an entry `enum` may use `#Doc("...")` on the enum and its variants for the
 program description and subcommand summaries. There is no Jet `main` entry and no
 variadic entry signature. Raw argv access stays explicit inside `fn run()`
-via `core.args`/`core.io.args`. See docs/spec/spec.md
+via `core.process.argv`. See docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. The
 existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
@@ -3037,7 +3053,7 @@ exits from an empty prompt.
 **S9 — Print**: `print` (adds newline).
 
 **S51 — Core library**: exported as the `core` module — `use core.files`,
-`use core.io as io`; dot paths select submodules; never quoted paths. `core`
+`use core.term as term`; dot paths select submodules; never quoted paths. `core`
 is compiler-reserved (see D-CORENS1).
 
 **D-GAME1 / D-GAME2 / D-GAME3 — Game stack** *(ratified 2026-07-05/06,

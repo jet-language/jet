@@ -1,4 +1,4 @@
-//! `core.random` ambient + `Rng` handle host shims (#729).
+//! `core.math.random` ambient + `Rng` handle host shims (#729).
 //! Ambient and seeded draws call the shared Prelude kernels; this module only
 //! marshals Cranelift ABI values and runtime-heap handles.
 

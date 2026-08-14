@@ -305,12 +305,12 @@ fn core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure() {
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
 use core.args as args
-use core.io as io
+use core.term as io
 
 fn run() {
     spec :: args.spec()
         .flag("verbose", "print extra detail")
-    parsed :: spec.parse_or_exit(io.args())
+    parsed :: spec.parse_or_exit(process.argv())
     embedded :: spec.parse(["embedded", "--verbose"]) ?? panic("pure parse failed")
     print(parsed.flag("verbose"))
     print(embedded.flag("verbose"))
@@ -384,7 +384,7 @@ fn core_os_facts_and_interrupt_hook_compile() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_os_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-use core.os as os
+use core.sys as os
 
 fn run() {
     os.on_interrupt(() => {
@@ -399,7 +399,7 @@ fn run() {
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "os_facts", src, &[], None);
-    assert_eq!(code, 0, "core.os program failed: {stderr}");
+    assert_eq!(code, 0, "core.sys program failed: {stderr}");
     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
 }
 
@@ -417,7 +417,7 @@ fn core_os_interrupt_callback_forms_match_dev_tiers() {
     fs::create_dir_all(&dir).unwrap();
 
     let aot_source = r#"
-use core.os as os
+use core.sys as os
 use core.process as process
 
 fn named_callback() {
@@ -474,7 +474,7 @@ fn run() {
     assert_eq!(rest, "named\nnamed\ninline\n");
 
     let dev_source = r#"
-use core.os as os
+use core.sys as os
 
 fn named_callback() {
     print("named")
@@ -607,7 +607,7 @@ fn core_os_interrupt_prelude_is_emitted_only_when_used() {
     let facts_only = compile_temp(
         "os_facts_only.jet",
         r#"
-use core.os as os
+use core.sys as os
 
 fn run() {
     print(os.name())
@@ -618,7 +618,7 @@ fn run() {
         !facts_only.rust.contains("mod jet_os_interrupt")
             && !facts_only.rust.contains("SetConsoleCtrlHandler")
             && !facts_only.rust.contains("jet_std_os_on_interrupt"),
-        "ordinary core.os facts should not inherit signal FFI"
+        "ordinary core.sys facts should not inherit signal FFI"
     );
     assert!(
         facts_only.rust.contains("JET_INTERRUPT_HANDLER_DEPTH")
@@ -629,7 +629,7 @@ fn run() {
     let with_interrupt = compile_temp(
         "os_interrupt.jet",
         r#"
-use core.os as os
+use core.sys as os
 
 fn run() {
     os.on_interrupt(() => {
@@ -663,7 +663,7 @@ fn core_os_interrupt_handlers_are_additive_and_ordered() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_interrupt_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-use core.os as os
+use core.sys as os
 use core.process as process
 
 fn run() {
@@ -726,7 +726,7 @@ fn core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary() {
     ));
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-use core.os as os
+use core.sys as os
 use core.process as process
 use core.time as time
 

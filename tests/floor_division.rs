@@ -346,7 +346,7 @@ fn dividing_by_zero_traps_on_the_jit_tier() {
         ("jit_remainder_zero", "%%"),
     ] {
         let src = format!(
-            "use core.env as env
+            "use core.sys as env
 {SEED}
 fn run() {{
     zero :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0
@@ -375,7 +375,7 @@ fn run() {{
 #[test]
 fn env_divisor_uses_live_process_environment() {
     let src = format!(
-        "use core.env as env
+        "use core.sys as env
 {SEED}
 fn run() {{
     d :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0
@@ -388,15 +388,15 @@ fn run() {{
     assert_eq!(out, "5\n", "10 /% 2 from live env, got: {out}");
 }
 
-/// #1483: `io.args` under `jet run` reads the live invocation argv — a non-zero
+/// #1483: `process.argv` under `jet run` reads the live invocation argv — a non-zero
 /// divisor from args must compute, not trap or fold at build time.
 #[test]
 fn args_divisor_uses_live_invocation_argv() {
     let src = format!(
-        "use core.io as io
+        "use core.term as io
 {SEED}
 fn run() {{
-    raw :: io.args().get(1) ?? \"0\"
+    raw :: process.argv().get(1) ?? \"0\"
     print(seed(10) /% (Int.parse(raw) ?? 0))
 }}
 "

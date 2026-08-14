@@ -224,20 +224,20 @@ pub fn apply_impure_core_call_with_type(
                 )))),
             }
         }
-        ("core.env", "get") => {
+        ("core.sys", "get") => {
             let key = as_string(one(0)?, span)?;
             match std::env::var(key) {
                 Ok(v) => Ok(CtValue::Present(Box::new(CtValue::Str(v)))),
                 Err(_) => Ok(CtValue::absent(crate::AST::Type::String)),
             }
         }
-        ("core.env", "set") => {
+        ("core.sys", "set") => {
             let key = as_string(one(0)?, span)?;
             let val = as_string(one(1)?, span)?;
             std::env::set_var(key, val);
             Ok(CtValue::Unit)
         }
-        ("core.env", "current_dir") => match std::env::current_dir() {
+        ("core.sys", "current_dir") => match std::env::current_dir() {
             Ok(p) => Ok(CtValue::Present(Box::new(CtValue::Str(
                 p.to_string_lossy().into_owned(),
             )))),
@@ -247,7 +247,7 @@ pub fn apply_impure_core_call_with_type(
                 e,
             )))),
         },
-        ("core.env", "home_dir") => Ok(
+        ("core.sys", "home_dir") => Ok(
             match std::env::var("HOME")
                 .ok()
                 .or_else(|| std::env::var("USERPROFILE").ok())
@@ -256,21 +256,21 @@ pub fn apply_impure_core_call_with_type(
                 None => CtValue::absent(crate::AST::Type::String),
             },
         ),
-        ("core.io", "args") => {
+        ("core.process", "argv") => {
             // Prefer argv installed for this jet run/deopt. Never fall back to
             // the host process argv — `cargo test` flags would leak into output.
             let argv = super::super::super::Interpreter::runtime_argv()
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
         }
-        ("core.io", "progress") => {
+        ("core.term", "progress") => {
             let Some(source) = args.first() else {
-                return Err(unsupported("`core.io.progress` needs a source", span));
+                return Err(unsupported("`core.term.progress` needs a source", span));
             };
             if let CtValue::Str(text) = source {
                 if args.len() != 1 {
                     return Err(unsupported(
-                        "`core.io.progress` text form takes one argument",
+                        "`core.term.progress` text form takes one argument",
                         span,
                     ));
                 }
@@ -289,7 +289,7 @@ pub fn apply_impure_core_call_with_type(
             }
             let CtValue::List(items) = source else {
                 return Err(unsupported(
-                    "`core.io.progress` expects a List or Iter source",
+                    "`core.term.progress` expects a List or Iter source",
                     span,
                 ));
             };
@@ -331,7 +331,7 @@ pub fn apply_impure_core_call_with_type(
             })
         }
         // D-VERDICT-1321-1: variadic — each argument renders on its own line.
-        ("core.io", "print") => {
+        ("core.term", "print") => {
             let text = args
                 .iter()
                 .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
@@ -347,7 +347,7 @@ pub fn apply_impure_core_call_with_type(
             }
             Ok(CtValue::Unit)
         }
-        ("core.io", "eprint") => {
+        ("core.term", "eprint") => {
             let text = args
                 .iter()
                 .map(|v| display_core_pure_value(v).unwrap_or_else(|| v.jet_show()))
@@ -363,15 +363,15 @@ pub fn apply_impure_core_call_with_type(
             }
             Ok(CtValue::Unit)
         }
-        ("core.io", "input") | ("core.io", "read_all_input") => {
+        ("core.term", "input") | ("core.term", "read_all_input") => {
             if repl_mode {
-                Err(repl_native_module_diag("core.io", method, span))
+                Err(repl_native_module_diag("core.term", method, span))
             } else {
                 Ok(CtValue::Present(Box::new(CtValue::Str(String::new()))))
             }
         }
-        ("core.io", "stdin") if repl_mode => Err(repl_native_module_diag("core.io", method, span)),
-        ("core.io", "stdin") => Ok(CtValue::Struct {
+        ("core.term", "stdin") if repl_mode => Err(repl_native_module_diag("core.term", method, span)),
+        ("core.term", "stdin") => Ok(CtValue::Struct {
             type_name: "StdinHandle".to_string(),
             fields: vec![],
         }),
@@ -442,9 +442,9 @@ pub fn apply_impure_core_call_with_type(
                 )))),
             }
         }
-        ("core.tls", _) => Err(Diagnostic::error(
+        ("core.net.tls", _) => Err(Diagnostic::error(
             "E3412",
-            format!("`core.tls.{}()` is not available at comptime", method),
+            format!("`core.net.tls.{}()` is not available at comptime", method),
             "live TLS sessions cannot be opened during compile-time evaluation".to_string(),
             "move the TLS operation to runtime; use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned build-time downloads"
                 .to_string(),
@@ -454,8 +454,8 @@ pub fn apply_impure_core_call_with_type(
         // them when the runtime evaluator has ambient impure depth open (#778
         // deopt / #715 default-dev encoding parity). Whole-value encoding must
         // not die as E0956 impure-tier after silent deopt.
-        ("core.compress.gzip", _)
-        | ("core.compress.zstd", _)
+        ("core.archive.gzip", _)
+        | ("core.archive.zstd", _)
         | ("core.archive", _)
         | ("core.perf", _) => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
@@ -467,22 +467,19 @@ pub fn apply_impure_core_call_with_type(
         // that TirBridge already evaluates (date/math/measurement/testing/…).
         // Pure style/net helpers share the implementation dispatch so
         // impure_depth>0 (TirBridge / jet run deopt) still hits CorePureParity.
-        ("core.io", method)
-            if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
+        ("core.term", method)
+            if jet_foundation::Effects::core_effect("core.term", method).is_none() =>
         {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
-        ("core.random", _) | ("core.testing", "fake_rng") => {
+        ("core.math.random", _) | ("core.testing", "fake_rng") => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         ("core.crypto.random", "bytes") => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
-        ("core.time.date", _)
-        | ("core.time.duration", _)
-        | ("core.time.instant", _)
+        ("core.time", _)
         | ("core.math", _)
-        | ("core.measurement", _)
         | ("core.testing", _)
         | ("core.data", _)
         | ("core.compute", _)
@@ -493,16 +490,10 @@ pub fn apply_impure_core_call_with_type(
         | ("core.ui", _)
         | ("core.crypto", _)
         | ("core.crypto.expert", _)
-        | ("core.linalg", _)
         | ("core.email", _)
-        | ("core.xml", _)
-        | ("core.json", _)
         | ("core.regex", _)
-        | ("core.color", _)
         | ("core.units", _)
-        | ("core.time", _)
-        | ("core.time.datetime", _)
-        | ("core.science.measurement", _) => {
+        => {
             apply_core_call_with_type(module, method, args, span, repl_mode, resolved_ret)
         }
         // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.

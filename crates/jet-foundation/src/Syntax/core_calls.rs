@@ -58,7 +58,7 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "zoned_local",
             ],
         ))
-        || (same_text(module, "core.random") && same_text(method, "rng"))
+        || (same_text(module, "core.math.random") && same_text(method, "rng"))
     {
         return None;
     }
@@ -67,12 +67,10 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
             method,
             &["now", "now_utc", "today", "instant", "sleep", "start"],
         ))
-        || (same_text(module, "core.time.date") && same_text(method, "today"))
-        || (same_text(module, "core.time.datetime") && same_text(method, "now"))
     {
         return Some(Effect::Time);
     }
-    if (same_text(module, "core.random")
+    if (same_text(module, "core.math.random")
         && one_of(
             method,
             &[
@@ -95,7 +93,7 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     {
         return Some(Effect::Rand);
     }
-    if (same_text(module, "core.io") && same_text(method, "style_force"))
+    if (same_text(module, "core.term") && same_text(method, "style_force"))
         || (same_text(module, "core.net")
             && one_of(
                 method,
@@ -145,7 +143,7 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
             None
         };
     }
-    if same_text(module, "core.browser") {
+    if same_text(module, "core.web.browser") {
         return if one_of(method, &["profile", "timeout"]) {
             None
         } else if same_text(method, "locked") {
@@ -170,29 +168,29 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
         return Some(Effect::FS);
     }
     if same_text(module, "core.net")
-        || same_text(module, "core.tls")
+        || same_text(module, "core.net.tls")
         || same_text(module, "core.http.client")
         || same_text(module, "core.http.server")
         || same_text(module, "core.http.middleware")
     {
         return Some(Effect::Net);
     }
-    if same_text(module, "core.raylib") {
+    if same_text(module, "core.game.raylib") {
         return Some(Effect::GPU);
     }
     if same_text(module, "core.time") {
         return Some(Effect::Time);
     }
-    if same_text(module, "core.random") || same_text(module, "core.crypto.random") {
+    if same_text(module, "core.math.random") || same_text(module, "core.crypto.random") {
         return Some(Effect::Rand);
     }
-    if same_text(module, "core.env") {
+    if same_text(module, "core.sys") {
         return Some(Effect::Env);
     }
     if same_text(module, "core.process") {
         return Some(Effect::Exec);
     }
-    if same_text(module, "core.io") {
+    if same_text(module, "core.term") {
         return Some(Effect::IO);
     }
     if same_text(module, "core.db") {
@@ -227,7 +225,7 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     {
         return Some(Effect::Browser);
     }
-    if same_text(module, "core.vault")
+    if same_text(module, "core.crypto.vault")
         && one_of(
             method,
             &[
@@ -257,7 +255,17 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     {
         return Some(Effect::Secret);
     }
-    if same_text(module, "core.vault.expert") {
+    if same_text(module, "core.crypto.vault")
+        && one_of(
+            method,
+            &[
+                "prepare_import_signing",
+                "prepare_import_x25519",
+                "commit_import_signing",
+                "commit_import_x25519",
+            ],
+        )
+    {
         return Some(Effect::Secret);
     }
     None
@@ -580,10 +588,10 @@ impl CoreCallRecord {
             ("core.files", "read_at") => &[true],
             ("core.files", "write_at") => &[true],
             ("core.watcher", "files") => &[true],
-            ("core.io", "binread") => &[true],
-            ("core.io", "binwrite") => &[true],
-            ("core.os", "set_current_dir" | "mkfifo") => &[true],
-            ("core.os", "utime") => &[true, false, false],
+            ("core.term", "binread") => &[true],
+            ("core.term", "binwrite") => &[true],
+            ("core.sys", "set_current_dir" | "mkfifo") => &[true],
+            ("core.sys", "utime") => &[true, false, false],
             _ => &[],
         }
     }
@@ -653,7 +661,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.reactive", "signal", "jet_std::JetSignal::new", true, &[false]), // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
     CoreCallRecord::new("core.event", "scope", "jet_std::JetEventScope::new", true, &[]), // D-EVENT1=D: first-party typed Event/Hook constructors.
     CoreCallRecord::new("core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[]),
-    CoreCallRecord::new("core.science.measurement", "from", "jet_std::JetMeasurement::new", true, &[false, false])
+    CoreCallRecord::new("core.units", "from", "jet_std::JetMeasurement::new", true, &[false, false])
         .with_pure_route(CoreCallPureRoute::Measurement), // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
     CoreCallRecord::new("core.math", "fraction", "jet_fraction_new", true, &[false, false])
         .with_pure_route(CoreCallPureRoute::Math), // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → exact parse.
@@ -693,87 +701,87 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.watcher", "process_pid", "jet_watcher_process_pid", true, &[false]),
     CoreCallRecord::new("core.watcher", "port", "jet_watcher_port", true, &[true, false]),
     CoreCallRecord::new("core.watcher", "set", "jet_watcher_set", true, &[]),
-    CoreCallRecord::new("core.io", "args", "jet_std_io_args", true, &[]),
     CoreCallRecord::new("core.args", "spec", "jet_args_spec", true, &[]), // D-ARGS1: `args.spec()` → empty builder.
-    CoreCallRecord::new("core.io", "confirm", "jet_std_io_confirm", true, &[true]),
-    CoreCallRecord::new("core.io", "choose", "jet_std_io_choose", true, &[true, true]),
-    CoreCallRecord::new("core.io", "input_secret", "jet_std_io_input_secret", true, &[true]),
-    CoreCallRecord::new("core.io", "read_all_input", "jet_std_io_read_all_input", true, &[]),
-    CoreCallRecord::new("core.io", "readline", "jet_std_io_readline", true, &[]),
-    CoreCallRecord::new("core.io", "read_until", "jet_std_io_read_until", true, &[true]),
-    CoreCallRecord::new("core.io", "take", "jet_std_io_take", true, &[false]),
-    CoreCallRecord::new("core.io", "buffered", "jet_std_io_buffered", true, &[]),
-    CoreCallRecord::new("core.io", "binread", "jet_std_io_binread", true, &[true]),
-    CoreCallRecord::new("core.io", "binwrite", "jet_std_io_binwrite", true, &[true, true]),
-    CoreCallRecord::new("core.io", "stdin", "jet_std_io_stdin", true, &[]), // D-STDIN1=A: io.stdin() → JetStdinReader handle.
-    CoreCallRecord::new("core.io", "stdout", "jet_std_io_stdout", true, &[]),
-    CoreCallRecord::new("core.io", "stderr", "jet_std_io_stderr", true, &[]),
-    CoreCallRecord::new("core.io", "terminal_width", "jet_std_io_terminal_width", true, &[]),
-    CoreCallRecord::new("core.io", "terminal_height", "jet_std_io_terminal_height", true, &[]),
-    CoreCallRecord::new("core.io", "style", "jet_std_io_style", true, &[true, true]),
-    CoreCallRecord::new("core.io", "style_force", "jet_std_io_style_force", true, &[true, true])
+    CoreCallRecord::new("core.term", "confirm", "jet_std_io_confirm", true, &[true]),
+    CoreCallRecord::new("core.term", "choose", "jet_std_io_choose", true, &[true, true]),
+    CoreCallRecord::new("core.term", "input_secret", "jet_std_io_input_secret", true, &[true]),
+    CoreCallRecord::new("core.term", "read_all_input", "jet_std_io_read_all_input", true, &[]),
+    CoreCallRecord::new("core.term", "readline", "jet_std_io_readline", true, &[]),
+    CoreCallRecord::new("core.term", "read_until", "jet_std_io_read_until", true, &[true]),
+    CoreCallRecord::new("core.term", "take", "jet_std_io_take", true, &[false]),
+    CoreCallRecord::new("core.term", "buffered", "jet_std_io_buffered", true, &[]),
+    CoreCallRecord::new("core.term", "binread", "jet_std_io_binread", true, &[true]),
+    CoreCallRecord::new("core.term", "binwrite", "jet_std_io_binwrite", true, &[true, true]),
+    CoreCallRecord::new("core.term", "stdin", "jet_std_io_stdin", true, &[]), // D-STDIN1=A: io.stdin() → JetStdinReader handle.
+    CoreCallRecord::new("core.term", "stdout", "jet_std_io_stdout", true, &[]),
+    CoreCallRecord::new("core.term", "stderr", "jet_std_io_stderr", true, &[]),
+    CoreCallRecord::new("core.term", "terminal_width", "jet_std_io_terminal_width", true, &[]),
+    CoreCallRecord::new("core.term", "terminal_height", "jet_std_io_terminal_height", true, &[]),
+    CoreCallRecord::new("core.term", "style", "jet_std_io_style", true, &[true, true]),
+    CoreCallRecord::new("core.term", "style_force", "jet_std_io_style_force", true, &[true, true])
         .with_pure_route(CoreCallPureRoute::Io),
-    CoreCallRecord::new("core.env", "get", "jet_std_env_get", true, &[true]),
-    CoreCallRecord::new("core.env", "set", "jet_std_env_set", true, &[true, true]),
-    CoreCallRecord::new("core.env", "unset", "jet_std_env_unset", true, &[true]),
-    CoreCallRecord::new("core.env", "vars", "jet_std_env_vars", true, &[]),
-    CoreCallRecord::new("core.env", "current_dir", "jet_std_env_current_dir", true, &[]),
-    CoreCallRecord::new("core.env", "home_dir", "jet_std_env_home_dir", true, &[]),
-    CoreCallRecord::new("core.os", "name", "jet_std_os_name", true, &[]),
-    CoreCallRecord::new("core.os", "family", "jet_std_os_family", true, &[]),
-    CoreCallRecord::new("core.os", "arch", "jet_std_os_arch", true, &[]),
-    CoreCallRecord::new("core.os", "cpu_count", "jet_std_os_cpu_count", true, &[]),
-    CoreCallRecord::new("core.os", "temp_dir", "jet_std_os_temp_dir", true, &[]),
-    CoreCallRecord::new("core.os", "executable", "jet_std_os_executable", true, &[]),
-    CoreCallRecord::new("core.os", "pid", "jet_std_os_pid", true, &[]),
-    CoreCallRecord::new("core.os", "getpid", "jet_std_os_pid", true, &[]),
-    CoreCallRecord::new("core.os", "hostname", "jet_std_os_hostname", true, &[]),
-    CoreCallRecord::new("core.os", "username", "jet_std_os_username", true, &[]),
-    CoreCallRecord::new("core.os", "release", "jet_std_os_release", true, &[]),
-    CoreCallRecord::new("core.os", "version", "jet_std_os_version", true, &[]),
-    CoreCallRecord::new("core.os", "expand", "jet_std_os_expand", true, &[true]),
-    CoreCallRecord::new("core.os", "getppid", "jet_std_os_getppid", true, &[]),
-    CoreCallRecord::new("core.os", "getuid", "jet_std_os_getuid", true, &[]),
-    CoreCallRecord::new("core.os", "geteuid", "jet_std_os_geteuid", true, &[]),
-    CoreCallRecord::new("core.os", "getgid", "jet_std_os_getgid", true, &[]),
-    CoreCallRecord::new("core.os", "getegid", "jet_std_os_getegid", true, &[]),
-    CoreCallRecord::new("core.os", "getgroups", "jet_std_os_getgroups", true, &[]),
-    CoreCallRecord::new("core.os", "getpgrp", "jet_std_os_getpgrp", true, &[]),
-    CoreCallRecord::new("core.os", "uptime", "jet_std_os_uptime", true, &[]),
-    CoreCallRecord::new("core.os", "loadavg", "jet_std_os_loadavg", true, &[]),
-    CoreCallRecord::new("core.os", "times", "jet_std_os_times", true, &[]),
-    CoreCallRecord::new("core.os", "sync", "jet_std_os_sync", true, &[]),
-    CoreCallRecord::new("core.os", "getpgid", "jet_std_os_getpgid", true, &[false]),
-    CoreCallRecord::new("core.os", "getsid", "jet_std_os_getsid", true, &[false]),
-    CoreCallRecord::new("core.os", "exitcode", "jet_std_os_exitcode", true, &[false]),
-    CoreCallRecord::new("core.os", "success", "jet_std_os_success", true, &[false]),
-    CoreCallRecord::new("core.os", "umask", "jet_std_os_umask", true, &[false]),
-    CoreCallRecord::new("core.os", "getpriority", "jet_std_os_getpriority", true, &[false]),
-    CoreCallRecord::new("core.os", "setpriority", "jet_std_os_setpriority", true, &[false, false]),
-    CoreCallRecord::new("core.os", "utime", "jet_std_os_utime", true, &[true, false, false]),
-    CoreCallRecord::new("core.os", "stop", "jet_std_os_stop", true, &[false]),
-    CoreCallRecord::new("core.os", "set_current_dir", "jet_std_os_set_current_dir", true, &[true]),
-    CoreCallRecord::new("core.os", "on_interrupt", "jet_std_os_on_interrupt", true, &[false])
+    CoreCallRecord::new("core.sys", "get", "jet_std_env_get", true, &[true]),
+    CoreCallRecord::new("core.sys", "set", "jet_std_env_set", true, &[true, true]),
+    CoreCallRecord::new("core.sys", "unset", "jet_std_env_unset", true, &[true]),
+    CoreCallRecord::new("core.sys", "vars", "jet_std_env_vars", true, &[]),
+    CoreCallRecord::new("core.sys", "current_dir", "jet_std_env_current_dir", true, &[]),
+    CoreCallRecord::new("core.sys", "home_dir", "jet_std_env_home_dir", true, &[]),
+    CoreCallRecord::new("core.sys", "name", "jet_std_os_name", true, &[]),
+    CoreCallRecord::new("core.sys", "family", "jet_std_os_family", true, &[]),
+    CoreCallRecord::new("core.sys", "arch", "jet_std_os_arch", true, &[]),
+    CoreCallRecord::new("core.sys", "cpu_count", "jet_std_os_cpu_count", true, &[]),
+    CoreCallRecord::new("core.sys", "temp_dir", "jet_std_os_temp_dir", true, &[]),
+    CoreCallRecord::new("core.sys", "executable", "jet_std_os_executable", true, &[]),
+    CoreCallRecord::new("core.sys", "pid", "jet_std_os_pid", true, &[]),
+    CoreCallRecord::new("core.sys", "getpid", "jet_std_os_pid", true, &[]),
+    CoreCallRecord::new("core.sys", "hostname", "jet_std_os_hostname", true, &[]),
+    CoreCallRecord::new("core.sys", "username", "jet_std_os_username", true, &[]),
+    CoreCallRecord::new("core.sys", "release", "jet_std_os_release", true, &[]),
+    CoreCallRecord::new("core.sys", "version", "jet_std_os_version", true, &[]),
+    CoreCallRecord::new("core.sys", "expand", "jet_std_os_expand", true, &[true]),
+    CoreCallRecord::new("core.sys", "getppid", "jet_std_os_getppid", true, &[]),
+    CoreCallRecord::new("core.sys", "getuid", "jet_std_os_getuid", true, &[]),
+    CoreCallRecord::new("core.sys", "geteuid", "jet_std_os_geteuid", true, &[]),
+    CoreCallRecord::new("core.sys", "getgid", "jet_std_os_getgid", true, &[]),
+    CoreCallRecord::new("core.sys", "getegid", "jet_std_os_getegid", true, &[]),
+    CoreCallRecord::new("core.sys", "getgroups", "jet_std_os_getgroups", true, &[]),
+    CoreCallRecord::new("core.sys", "getpgrp", "jet_std_os_getpgrp", true, &[]),
+    CoreCallRecord::new("core.sys", "uptime", "jet_std_os_uptime", true, &[]),
+    CoreCallRecord::new("core.sys", "loadavg", "jet_std_os_loadavg", true, &[]),
+    CoreCallRecord::new("core.sys", "times", "jet_std_os_times", true, &[]),
+    CoreCallRecord::new("core.sys", "sync", "jet_std_os_sync", true, &[]),
+    CoreCallRecord::new("core.sys", "getpgid", "jet_std_os_getpgid", true, &[false]),
+    CoreCallRecord::new("core.sys", "getsid", "jet_std_os_getsid", true, &[false]),
+    CoreCallRecord::new("core.sys", "exitcode", "jet_std_os_exitcode", true, &[false]),
+    CoreCallRecord::new("core.sys", "success", "jet_std_os_success", true, &[false]),
+    CoreCallRecord::new("core.sys", "umask", "jet_std_os_umask", true, &[false]),
+    CoreCallRecord::new("core.sys", "getpriority", "jet_std_os_getpriority", true, &[false]),
+    CoreCallRecord::new("core.sys", "setpriority", "jet_std_os_setpriority", true, &[false, false]),
+    CoreCallRecord::new("core.sys", "utime", "jet_std_os_utime", true, &[true, false, false]),
+    CoreCallRecord::new("core.sys", "stop", "jet_std_os_stop", true, &[false]),
+    CoreCallRecord::new("core.sys", "set_current_dir", "jet_std_os_set_current_dir", true, &[true]),
+    CoreCallRecord::new("core.sys", "on_interrupt", "jet_std_os_on_interrupt", true, &[false])
         .without_direct_aot()
         .without_direct_jit(),
-    CoreCallRecord::new("core.os", "atexit", "jet_std_os_atexit", true, &[false]),
-    CoreCallRecord::new("core.os", "fork", "jet_std_os_fork", true, &[]),
-    CoreCallRecord::new("core.os", "setuid", "jet_std_os_setuid", true, &[false]),
-    CoreCallRecord::new("core.os", "setgid", "jet_std_os_setgid", true, &[false]),
-    CoreCallRecord::new("core.os", "setpgid", "jet_std_os_setpgid", true, &[false, false]),
-    CoreCallRecord::new("core.os", "setpgrp", "jet_std_os_setpgrp", true, &[]),
-    CoreCallRecord::new("core.os", "setsid", "jet_std_os_setsid", true, &[]),
-    CoreCallRecord::new("core.os", "initgroups", "jet_std_os_initgroups", true, &[true, false]),
-    CoreCallRecord::new("core.os", "kill", "jet_std_os_kill", true, &[false, false]),
-    CoreCallRecord::new("core.os", "wait", "jet_std_os_wait", true, &[]),
-    CoreCallRecord::new("core.os", "waitpid", "jet_std_os_waitpid", true, &[false, false]),
-    CoreCallRecord::new("core.os", "pipe", "jet_std_os_pipe", true, &[]),
-    CoreCallRecord::new("core.os", "close_fd", "jet_std_os_close_fd", true, &[false]),
-    CoreCallRecord::new("core.os", "mkfifo", "jet_std_os_mkfifo", true, &[true, false]),
+    CoreCallRecord::new("core.sys", "atexit", "jet_std_os_atexit", true, &[false]),
+    CoreCallRecord::new("core.sys", "fork", "jet_std_os_fork", true, &[]),
+    CoreCallRecord::new("core.sys", "setuid", "jet_std_os_setuid", true, &[false]),
+    CoreCallRecord::new("core.sys", "setgid", "jet_std_os_setgid", true, &[false]),
+    CoreCallRecord::new("core.sys", "setpgid", "jet_std_os_setpgid", true, &[false, false]),
+    CoreCallRecord::new("core.sys", "setpgrp", "jet_std_os_setpgrp", true, &[]),
+    CoreCallRecord::new("core.sys", "setsid", "jet_std_os_setsid", true, &[]),
+    CoreCallRecord::new("core.sys", "initgroups", "jet_std_os_initgroups", true, &[true, false]),
+    CoreCallRecord::new("core.sys", "kill", "jet_std_os_kill", true, &[false, false]),
+    CoreCallRecord::new("core.sys", "wait", "jet_std_os_wait", true, &[]),
+    CoreCallRecord::new("core.sys", "waitpid", "jet_std_os_waitpid", true, &[false, false]),
+    CoreCallRecord::new("core.sys", "pipe", "jet_std_os_pipe", true, &[]),
+    CoreCallRecord::new("core.sys", "close_fd", "jet_std_os_close_fd", true, &[false]),
+    CoreCallRecord::new("core.sys", "mkfifo", "jet_std_os_mkfifo", true, &[true, false]),
     CoreCallRecord::new("core.process", "exit", "jet_std_process_exit", true, &[false]),
     CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true]),
     CoreCallRecord::new("core.process", "cmd", "jet_std_process_cmd", true, &[true]),
     CoreCallRecord::new("core.process", "pipeline", "jet_std_process_pipeline", true, &[true]),
+    CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]),
     // D-LIB-CALLGRANT1=A: the loader is a Prelude symbol; sema owns the
     // typed `ModGrant` contract and every engine only marshals into this row.
     CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true]),
@@ -809,17 +817,17 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "int_pow", "jet_std_math_int_pow", true, &[false, false]),
     CoreCallRecord::new("core.math", "gcd", "jet_std_math_gcd", true, &[false, false]),
     CoreCallRecord::new("core.math", "lcm", "jet_std_math_lcm", true, &[false, false]),
-    CoreCallRecord::new("core.random", "int", "jet_std_random_int", true, &[false, false]),
-    CoreCallRecord::new("core.random", "float", "jet_std_random_float", true, &[]),
-    CoreCallRecord::new("core.random", "float_range", "jet_std_random_float_range", true, &[false, false]),
-    CoreCallRecord::new("core.random", "bool", "jet_std_random_bool", true, &[false]),
-    CoreCallRecord::new("core.random", "normal", "jet_std_random_normal", true, &[false, false]),
-    CoreCallRecord::new("core.random", "exponential", "jet_std_random_exponential", true, &[false]),
-    CoreCallRecord::new("core.random", "seed", "jet_std_random_seed", true, &[false]),
-    CoreCallRecord::new("core.random", "bytes", "jet_std_random_bytes", true, &[false]), // D-RANDSPLIT1=A: PRNG bytes — fast, NOT crypto-safe.
+    CoreCallRecord::new("core.math.random", "int", "jet_std_random_int", true, &[false, false]),
+    CoreCallRecord::new("core.math.random", "float", "jet_std_random_float", true, &[]),
+    CoreCallRecord::new("core.math.random", "float_range", "jet_std_random_float_range", true, &[false, false]),
+    CoreCallRecord::new("core.math.random", "bool", "jet_std_random_bool", true, &[false]),
+    CoreCallRecord::new("core.math.random", "normal", "jet_std_random_normal", true, &[false, false]),
+    CoreCallRecord::new("core.math.random", "exponential", "jet_std_random_exponential", true, &[false]),
+    CoreCallRecord::new("core.math.random", "seed", "jet_std_random_seed", true, &[false]),
+    CoreCallRecord::new("core.math.random", "bytes", "jet_std_random_bytes", true, &[false]), // D-RANDSPLIT1=A: PRNG bytes — fast, NOT crypto-safe.
     CoreCallRecord::new("core.crypto.random", "bytes", "jet_std_crypto_random_bytes", true, &[false]), // D-CRYPTO-RNG1=A: shared fail-closed OS CSPRNG provider.
-    CoreCallRecord::new("core.random", "rng", "jet_std_rng_new", true, &[false]), // D-DET1: deterministic injected RNG capability constructor.
-    CoreCallRecord::new("core.random", "split", "jet_std_random_split", true, &[false]),
+    CoreCallRecord::new("core.math.random", "rng", "jet_std_rng_new", true, &[false]), // D-DET1: deterministic injected RNG capability constructor.
+    CoreCallRecord::new("core.math.random", "split", "jet_std_random_split", true, &[false]),
     CoreCallRecord::new("core.time", "now", "jet_std_time_now", true, &[]),
     CoreCallRecord::new("core.time", "sleep", "jet_std_time_sleep", true, &[false]),
     CoreCallRecord::new("core.time", "start", "jet_std_time_start", true, &[]),
@@ -967,16 +975,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data", "require_bridge", "jet_data_require_bridge", true, &[true]),
     CoreCallRecord::new("core.data", "csv_reader", "jet_data_csv_reader", true, &[false, false]),
     CoreCallRecord::new("core.data", "json_reader", "jet_data_json_reader", true, &[false, false]),
-    CoreCallRecord::new("core.fmt", "number", "jet_fmt_number", true, &[false]),
-    CoreCallRecord::new("core.fmt", "decimal", "jet_fmt_decimal", true, &[false, false]),
-    CoreCallRecord::new("core.fmt", "percent", "jet_fmt_percent", true, &[false, false]),
-    CoreCallRecord::new("core.fmt", "bytes", "jet_fmt_bytes", true, &[false]),
-    CoreCallRecord::new("core.fmt", "duration", "jet_fmt_duration", true, &[false]),
-    CoreCallRecord::new("core.fmt", "ordinal", "jet_fmt_ordinal", true, &[false]),
-    CoreCallRecord::new("core.fmt", "plural", "jet_fmt_plural", true, &[false, true, true]),
-    CoreCallRecord::new("core.fmt", "pad_left", "jet_fmt_pad_left", true, &[true, false, true]),
-    CoreCallRecord::new("core.fmt", "pad_right", "jet_fmt_pad_right", true, &[true, false, true]),
-    CoreCallRecord::new("core.fmt", "pad_center", "jet_fmt_pad_center", true, &[true, false, true]),
+    CoreCallRecord::new("core.text.fmt", "number", "jet_fmt_number", true, &[false]),
+    CoreCallRecord::new("core.text.fmt", "decimal", "jet_fmt_decimal", true, &[false, false]),
+    CoreCallRecord::new("core.text.fmt", "percent", "jet_fmt_percent", true, &[false, false]),
+    CoreCallRecord::new("core.text.fmt", "bytes", "jet_fmt_bytes", true, &[false]),
+    CoreCallRecord::new("core.text.fmt", "duration", "jet_fmt_duration", true, &[false]),
+    CoreCallRecord::new("core.text.fmt", "ordinal", "jet_fmt_ordinal", true, &[false]),
+    CoreCallRecord::new("core.text.fmt", "plural", "jet_fmt_plural", true, &[false, true, true]),
+    CoreCallRecord::new("core.text.fmt", "pad_left", "jet_fmt_pad_left", true, &[true, false, true]),
+    CoreCallRecord::new("core.text.fmt", "pad_right", "jet_fmt_pad_right", true, &[true, false, true]),
+    CoreCallRecord::new("core.text.fmt", "pad_center", "jet_fmt_pad_center", true, &[true, false, true]),
     CoreCallRecord::new("core.encoding.toml", "parse", "jet_std_toml_parse", true, &[true]),
     CoreCallRecord::new("core.encoding.yaml", "parse", "jet_std_yaml_parse", true, &[true]),
     CoreCallRecord::new("core.encoding.xml", "parse", "jet_std_xml_parse", true, &[true]),
@@ -997,27 +1005,27 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.encoding.base64", "decode_url", "jet_std_b64url_decode", true, &[true]),
     CoreCallRecord::new("core.encoding.base32", "encode", "jet_std_base32_encode", true, &[true]),
     CoreCallRecord::new("core.encoding.base32", "decode", "jet_std_base32_decode", true, &[true]),
-    CoreCallRecord::new("core.uuid", "v4", "jet_std_uuid_v4", true, &[]), // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
-    CoreCallRecord::new("core.uuid", "v7", "jet_std_uuid_v7", true, &[true]),
-    CoreCallRecord::new("core.uuid", "v5", "jet_std_uuid_v5", true, &[true, true]), // #1481: `v5` (namespace+name, deterministic) and `parse` (validate // + normalize) — pure std, same UUID-as-String shape as v4/v7.
-    CoreCallRecord::new("core.uuid", "parse", "jet_std_uuid_parse", true, &[true]),
+    CoreCallRecord::new("core.crypto.uuid", "v4", "jet_std_uuid_v4", true, &[]), // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
+    CoreCallRecord::new("core.crypto.uuid", "v7", "jet_std_uuid_v7", true, &[true]),
+    CoreCallRecord::new("core.crypto.uuid", "v5", "jet_std_uuid_v5", true, &[true, true]), // #1481: `v5` (namespace+name, deterministic) and `parse` (validate // + normalize) — pure std, same UUID-as-String shape as v4/v7.
+    CoreCallRecord::new("core.crypto.uuid", "parse", "jet_std_uuid_parse", true, &[true]),
     CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true])
         .with_jit_symbol("jet_jit_fs_open"),
     CoreCallRecord::new("core.files", "create", "jet_std_files_create", true, &[true])
         .with_jit_symbol("jet_jit_fs_create"),
     CoreCallRecord::new("core.files", "append", "jet_std_files_append", true, &[true]),
-    CoreCallRecord::new("core.url", "parse", "jet_url_parse", true, &[true]),
-    CoreCallRecord::new("core.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true]),
-    CoreCallRecord::new("core.url", "file", "jet_url_file", true, &[true]),
-    CoreCallRecord::new("core.url", "data", "jet_url_data", true, &[true, true]),
-    CoreCallRecord::new("core.url", "query", "jet_url_query", true, &[true]),
-    CoreCallRecord::new("core.url", "percent_encode", "jet_url_percent_encode_component", true, &[true]),
-    CoreCallRecord::new("core.url", "percent_decode", "jet_url_percent_decode_component", true, &[true]),
-    CoreCallRecord::new("core.mime", "parse", "jet_mime_parse", true, &[true])
+    CoreCallRecord::new("core.net.url", "parse", "jet_url_parse", true, &[true]),
+    CoreCallRecord::new("core.net.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true]),
+    CoreCallRecord::new("core.net.url", "file", "jet_url_file", true, &[true]),
+    CoreCallRecord::new("core.net.url", "data", "jet_url_data", true, &[true, true]),
+    CoreCallRecord::new("core.net.url", "query", "jet_url_query", true, &[true]),
+    CoreCallRecord::new("core.net.url", "percent_encode", "jet_url_percent_encode_component", true, &[true]),
+    CoreCallRecord::new("core.net.url", "percent_decode", "jet_url_percent_decode_component", true, &[true]),
+    CoreCallRecord::new("core.net.mime", "parse", "jet_mime_parse", true, &[true])
         .with_pure_route(CoreCallPureRoute::Mime),
-    CoreCallRecord::new("core.mime", "from_extension", "jet_mime_from_extension", true, &[true])
+    CoreCallRecord::new("core.net.mime", "from_extension", "jet_mime_from_extension", true, &[true])
         .with_pure_route(CoreCallPureRoute::Mime),
-    CoreCallRecord::new("core.mime", "extension", "jet_mime_extension", true, &[true])
+    CoreCallRecord::new("core.net.mime", "extension", "jet_mime_extension", true, &[true])
         .with_pure_route(CoreCallPureRoute::Mime),
     CoreCallRecord::new("core.email", "address", "jet_email::address", true, &[true])
         .with_pure_route(CoreCallPureRoute::Email),
@@ -1029,12 +1037,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         .with_pure_route(CoreCallPureRoute::Email),
     CoreCallRecord::new("core.email", "serialize", "jet_email::serialize", true, &[true])
         .with_pure_route(CoreCallPureRoute::Email),
-    CoreCallRecord::new("core.text.unicode", "scalar_count", "jet_text_unicode_scalar_count", true, &[true]), // D-TEXTUNICODE1: std-only Unicode scalar helpers.
-    CoreCallRecord::new("core.text.unicode", "byte_count", "jet_text_unicode_byte_count", true, &[true]),
-    CoreCallRecord::new("core.text.unicode", "is_ascii", "jet_text_unicode_is_ascii", true, &[true]),
-    CoreCallRecord::new("core.text.unicode", "lower", "jet_text_unicode_lower", true, &[true]),
-    CoreCallRecord::new("core.text.unicode", "upper", "jet_text_unicode_upper", true, &[true]),
-    CoreCallRecord::new("core.text.unicode", "scalars", "jet_text_unicode_scalars", true, &[true]),
+    // D-TEXTUNICODE1: Unicode scalar operations share the ordinary text
+    // module rows below. The retired Unicode child key has no second dispatch
+    // family.
     CoreCallRecord::new("core.text", "nfc", "jet_text_nfc", true, &[true]),
     CoreCallRecord::new("core.text", "nfd", "jet_text_nfd", true, &[true]),
     CoreCallRecord::new("core.text", "nfkc", "jet_text_nfkc", true, &[true]),
@@ -1215,20 +1220,20 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.regex", "split_limit", "jet_std::jet_regex_split_limit", true, &[true, true, false]),
     CoreCallRecord::new("core.regex", "replace", "jet_std::jet_regex_replace", true, &[true, true, true]),
     CoreCallRecord::new("core.regex", "replace_all", "jet_std::jet_regex_replace_all", true, &[true, true, true]),
-    CoreCallRecord::new("core.raylib", "window_open", "jet_raylib_window_open", true, &[false, false, true]), // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
-    CoreCallRecord::new("core.raylib", "window_should_close", "jet_raylib_window_should_close", true, &[true]),
-    CoreCallRecord::new("core.raylib", "window_ready", "jet_raylib_window_ready", true, &[true]),
-    CoreCallRecord::new("core.raylib", "begin_drawing", "jet_raylib_begin_drawing", true, &[true]),
-    CoreCallRecord::new("core.raylib", "clear_background", "jet_raylib_clear_background", true, &[true]),
-    CoreCallRecord::new("core.raylib", "draw_text", "jet_raylib_draw_text", true, &[true, false, false, false, true]),
-    CoreCallRecord::new("core.raylib", "draw_rectangle", "jet_raylib_draw_rectangle", true, &[false, false, false, false, true]),
-    CoreCallRecord::new("core.raylib", "end_drawing", "jet_raylib_end_drawing", true, &[]),
-    CoreCallRecord::new("core.raylib", "close_window", "jet_raylib_close_window", true, &[true]),
-    CoreCallRecord::new("core.raylib", "key_down", "jet_raylib_key_down", true, &[true]),
-    CoreCallRecord::new("core.raylib", "set_target_fps", "jet_raylib_set_target_fps", true, &[false]),
-    CoreCallRecord::new("core.raylib", "load_sound", "jet_raylib_load_sound", true, &[true]),
-    CoreCallRecord::new("core.raylib", "play_sound", "jet_raylib_play_sound", true, &[true]),
-    CoreCallRecord::new("core.raylib", "color", "jet_raylib_color", true, &[false, false, false, false])
+    CoreCallRecord::new("core.game.raylib", "window_open", "jet_raylib_window_open", true, &[false, false, true]), // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
+    CoreCallRecord::new("core.game.raylib", "window_should_close", "jet_raylib_window_should_close", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "window_ready", "jet_raylib_window_ready", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "begin_drawing", "jet_raylib_begin_drawing", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "clear_background", "jet_raylib_clear_background", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "draw_text", "jet_raylib_draw_text", true, &[true, false, false, false, true]),
+    CoreCallRecord::new("core.game.raylib", "draw_rectangle", "jet_raylib_draw_rectangle", true, &[false, false, false, false, true]),
+    CoreCallRecord::new("core.game.raylib", "end_drawing", "jet_raylib_end_drawing", true, &[]),
+    CoreCallRecord::new("core.game.raylib", "close_window", "jet_raylib_close_window", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "key_down", "jet_raylib_key_down", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "set_target_fps", "jet_raylib_set_target_fps", true, &[false]),
+    CoreCallRecord::new("core.game.raylib", "load_sound", "jet_raylib_load_sound", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "play_sound", "jet_raylib_play_sound", true, &[true]),
+    CoreCallRecord::new("core.game.raylib", "color", "jet_raylib_color", true, &[false, false, false, false])
         .with_pure_route(CoreCallPureRoute::Raylib),
     CoreCallRecord::new("core.db", "params", "jet_std::jet_db_params_from_sql", true, &[true]),
     CoreCallRecord::new("core.db", "row_value", "jet_std::jet_db_row_value", true, &[true, true]),
@@ -1238,9 +1243,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.db", "row_bool", "jet_std::jet_db_row_bool", true, &[true, true]),
     CoreCallRecord::new("core.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true]),
     CoreCallRecord::new("core.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true]),
-    CoreCallRecord::new("core.random", "pick", "jet_std_random_pick", true, &[true]),
-    CoreCallRecord::new("core.random", "weighted_pick", "jet_std_random_weighted_pick", true, &[true, true]),
-    CoreCallRecord::new("core.random", "sample", "jet_std_random_sample", true, &[true, false]),
+    CoreCallRecord::new("core.math.random", "pick", "jet_std_random_pick", true, &[true]),
+    CoreCallRecord::new("core.math.random", "weighted_pick", "jet_std_random_weighted_pick", true, &[true, true]),
+    CoreCallRecord::new("core.math.random", "sample", "jet_std_random_sample", true, &[true, false]),
     CoreCallRecord::new("core.term", "read_key", "jet_term_read_key", true, &[]), // D-TERM1 (ratified 2026-06-22): terminal direct-input.
     CoreCallRecord::new("core.perf", "fidelity", "jet_perf_fidelity", false, &[]), // D-FIDELITY-API1=A: runtime-global fidelity signal.
     CoreCallRecord::new("core.perf", "default_fidelity", "jet_perf_default_fidelity", false, &[]),
@@ -1295,19 +1300,19 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.web", "auth_show", "jet_app_auth_show", true, &[true]),
     CoreCallRecord::new("core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true]), // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)` // constructor — the builder methods dispatch through // `THandleOp::DevServerMethod` above, not here.
     CoreCallRecord::new("core.web.devserver", "app", "jet_devserver_app", true, &[]),
-    CoreCallRecord::new("core.sketch.hll", "new", "JetHyperLogLog::new", false, &[])
+    CoreCallRecord::new("core.data.sketch.hll", "new", "JetHyperLogLog::new", false, &[])
         .with_pure_route(CoreCallPureRoute::SketchHll), // D-APPROX1=A: sketch constructors.
-    CoreCallRecord::new("core.sketch.tdigest", "new", "JetTDigest::new", false, &[])
+    CoreCallRecord::new("core.data.sketch.tdigest", "new", "JetTDigest::new", false, &[])
         .with_pure_route(CoreCallPureRoute::SketchTDigest),
-    CoreCallRecord::new("core.sketch.cms", "new", "JetCountMinSketch::new", false, &[])
+    CoreCallRecord::new("core.data.sketch.cms", "new", "JetCountMinSketch::new", false, &[])
         .with_pure_route(CoreCallPureRoute::SketchCms),
-    CoreCallRecord::new("core.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false])
+    CoreCallRecord::new("core.data.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false])
         .with_pure_route(CoreCallPureRoute::SketchReservoir),
-    CoreCallRecord::new("core.browser", "profile", "jet_browser_profile", false, &[true]), // D-BROWSER-AUTO1=A: native versioned BiDi entry points.
-    CoreCallRecord::new("core.browser", "timeout", "jet_browser_timeout", false, &[false]),
-    CoreCallRecord::new("core.browser", "locked", "jet_browser_locked", false, &[true]),
-    CoreCallRecord::new("core.browser", "connect", "jet_browser_connect", false, &[true]),
-    CoreCallRecord::new("core.browser", "connect_profile", "jet_browser_connect_profile", false, &[true, true, false]),
+    CoreCallRecord::new("core.web.browser", "profile", "jet_browser_profile", false, &[true]), // D-BROWSER-AUTO1=A: native versioned BiDi entry points.
+    CoreCallRecord::new("core.web.browser", "timeout", "jet_browser_timeout", false, &[false]),
+    CoreCallRecord::new("core.web.browser", "locked", "jet_browser_locked", false, &[true]),
+    CoreCallRecord::new("core.web.browser", "connect", "jet_browser_connect", false, &[true]),
+    CoreCallRecord::new("core.web.browser", "connect_profile", "jet_browser_connect_profile", false, &[true, true, false]),
     CoreCallRecord::new("core.http.server", "mux", "jet_http_mux_new", false, &[]),
     CoreCallRecord::new("core.http.server", "response", "jet_http_srv_response", false, &[false, true]),
     CoreCallRecord::new("core.http.server", "tls", "jet_http_srv_tls", false, &[true, true]),
@@ -1316,18 +1321,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.http.server", "cors", "jet_http_srv_install_cors", false, &[true, true]),
     CoreCallRecord::new("core.http.server", "access_log", "jet_http_srv_access_log", false, &[true, false]),
     CoreCallRecord::new("core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true]),
-    CoreCallRecord::new("core.ws", "connect", "jet_ws_connect", false, &[true]), // D-WS1=B: cleartext WebSocket client/server.
-    CoreCallRecord::new("core.ws", "upgrade", "jet_ws_upgrade", false, &[true]),
-    CoreCallRecord::new("core.time.date", "new", "JetDate::new", false, &[false, false, false])
+    CoreCallRecord::new("core.net.ws", "connect", "jet_ws_connect", false, &[true]), // D-WS1=B: cleartext WebSocket client/server.
+    CoreCallRecord::new("core.net.ws", "upgrade", "jet_ws_upgrade", false, &[true]),
+    CoreCallRecord::new("core.time", "new", "JetDate::new", false, &[false, false, false])
         .with_pure_route(CoreCallPureRoute::Date)
         .without_direct_aot(), // D-TIMEDEPTH1=A: civil-time constructors.
-    CoreCallRecord::new("core.time.date", "today", "JetDate::today_utc", false, &[])
-        .with_pure_route(CoreCallPureRoute::Date)
-        .without_direct_aot(),
-    CoreCallRecord::new("core.time.datetime", "from_timestamp", "JetDateTime::from_timestamp", false, &[false])
+    CoreCallRecord::new("core.time", "from_timestamp", "JetDateTime::from_timestamp", false, &[false])
         .with_pure_route(CoreCallPureRoute::DateTime)
-        .without_direct_aot(),
-    CoreCallRecord::new("core.time.datetime", "now", "JetDateTime::now", false, &[])
         .without_direct_aot(),
 
     // Pure comptime evaluator rows whose AOT form is typed or otherwise
@@ -1337,7 +1337,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         .with_pure_route(CoreCallPureRoute::Time)
         .without_direct_aot()
         .with_jit_symbol("jet_jit_time_parse_time"),
-    CoreCallRecord::new("core.time.date", "parse", "JetDate::parse", false, &[true])
+    CoreCallRecord::new("core.time", "parse", "JetDate::parse", false, &[true])
         .with_pure_route(CoreCallPureRoute::Date)
         .without_direct_aot()
         .without_direct_jit(),

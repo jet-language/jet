@@ -70,7 +70,7 @@ fn job_scope_and_cli_name_collisions_use_the_job_diagnostic() {
 fn qualified_core_lang_hierarchical_marker_enums_use_the_variant_root() {
     let diagnostics = codes(
         r#"
-use core.lang as lang
+use core.compiler.lang as lang
 
 #Target(lang.Target.Web)
 fn helper() {}

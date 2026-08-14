@@ -243,12 +243,12 @@ fn marker_argument_declarations(row: &jet_foundation::Policy::AppliedRule) -> St
         .iter()
         .filter_map(|param| {
             jet_foundation::Policy::rule_arg_declaration(param.source_type)
-                .map(|_| format!(" `core.lang.{}`", param.source_type))
+                .map(|_| format!(" `core.compiler.lang.{}`", param.source_type))
         })
         .collect::<Vec<_>>();
     if let Some(source_type) = row.signature.variadic_source_type {
         if jet_foundation::Policy::rule_arg_declaration(source_type).is_some() {
-            declarations.push(format!(" `core.lang.{source_type}`"));
+            declarations.push(format!(" `core.compiler.lang.{source_type}`"));
         }
     }
     declarations.sort();

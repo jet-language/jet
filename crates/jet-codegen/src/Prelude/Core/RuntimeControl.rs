@@ -1,4 +1,4 @@
-// ── D-DEFER1 option B: core.scope.guard ──────────────────────────────────────
+// ── D-DEFER1 option B: core.mem.scope.guard ──────────────────────────────────────
 // A ScopeGuard stores a zero-argument closure and runs it in Drop — on every
 // exit path (normal fall-through, early `return`, `?` propagation).
 // LIFO ordering is guaranteed by Rust's reverse-declaration drop order.

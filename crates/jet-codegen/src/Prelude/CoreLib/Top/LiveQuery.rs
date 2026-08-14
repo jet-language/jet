@@ -440,7 +440,7 @@ fn jet_app_invalidate(footprint: String) -> i64 {
 /// D-LIVEQUERY1: `#Transact` write-set → invalidate matching live footprints.
 /// Invalidation never fabricates a result. Registered typed rerunners execute
 /// outside the registry lock; successful results update the canonical query,
-/// signal sink, and existing core.ws transport.
+/// signal sink, and existing core.net.ws transport.
 fn jet_app_transact_invalidate(write_set: String) -> i64 {
     if write_set.trim().is_empty() {
         return JET_LIVE_ERR_INVALID_INPUT;

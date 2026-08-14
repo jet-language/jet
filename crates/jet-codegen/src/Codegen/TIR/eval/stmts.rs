@@ -1045,7 +1045,7 @@ impl<'a> EvalCtx<'a> {
                     ..
                 } = &source.kind
                 {
-                    if module == "core.io"
+                    if module == "core.term"
                         && method == "progress"
                         && args.len() >= 1
                         && !matches!(args.first().map(|arg| &arg.ty), Some(Type::String))

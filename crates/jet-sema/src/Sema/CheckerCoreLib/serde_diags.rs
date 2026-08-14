@@ -10,13 +10,13 @@ use super::module_items::core_module_items;
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
-        "core.files" | "core.watcher" | "core.io" | "core.net" | "core.tls" | "core.tasks"
+        "core.files" | "core.watcher" | "core.term" | "core.net" | "core.net.tls" | "core.tasks"
             | "core.process" | "core.time" | "core.http" | "core.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
             // U13 (D-JPK-SECRETCRYPTO1): reading the encrypted repo store is
             // filesystem I/O — same OS dependency as `core.files`.
-            | "core.vault"
+            | "core.crypto.vault"
     )
 }
 
@@ -31,13 +31,13 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         "core.files" => {
             "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
         }
-        "core.net" | "core.tls" | "core.http" => {
+        "core.net" | "core.net.tls" | "core.http" => {
             "Freestanding targets have no network stack. Build without `--freestanding`, or use a bare-metal driver."
         }
         "core.tasks" => {
             "OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency."
         }
-        "core.io" => {
+        "core.term" => {
             "Standard I/O requires an OS. Use a platform-specific write routine or build without `--freestanding`."
         }
         "core.process" | "core.time" => {
