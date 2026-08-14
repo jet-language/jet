@@ -1816,6 +1816,7 @@ impl<'a> Checker<'a> {
                 (Type::Named(name), _) if name == crate::Syntax::TYPE_INSTANT
             )
             && !matches!(
+                (left, right),
                 (_, Type::Named(name)) if name == crate::Syntax::TYPE_INSTANT
             )
     }
