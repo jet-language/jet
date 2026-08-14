@@ -368,6 +368,23 @@ pub fn jet_outcome_of<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
     value.ok_or(JetAbsent)
 }
 
+/// One process-boundary queue law for every native execution tier.
+pub fn jet_runtime_register_atexit<T>(handlers: &mut Vec<T>, handler: T) {
+    handlers.push(handler);
+}
+
+pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut(T)) {
+    let pending = std::mem::take(handlers);
+    for handler in pending {
+        invoke(handler);
+    }
+}
+
+/// Project a Jet process status into the native process status carrier.
+pub fn jet_runtime_exit_code(code: i64) -> i32 {
+    code as i32
+}
+
 /// D-REPORT-RUNTIME1=A: the dependency-free runtime projection of one
 /// registered diagnostic. AOT, JIT, and the interpreter marshal into this
 /// value; none of those engines owns report text or exit policy.

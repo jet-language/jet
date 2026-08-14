@@ -1831,7 +1831,7 @@ extern "C" fn jet_jit_process_exit(code: i64) {
     // that exit status. Never terminate the resident host — that would kill
     // the resident/test process (three-way battery, `jet serve`, …).
     Concurrency::with_runtime_mut(|rt| {
-        rt.exit_code = Some(code as i32);
+        rt.exit_code = Some(jet_foundation::Outcome::jet_runtime_exit_code(code));
         rt.set_trap("__jet_process_exit__");
     });
 }

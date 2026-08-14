@@ -4646,6 +4646,25 @@ impl<'a> EvalCtx<'a> {
         if module == "core.services" {
             return self.eval_core_services_call(method, args, source_span, scope);
         }
+        // I9: process-edge calls marshal into the evaluator's one runtime
+        // boundary. Lexical cleanup remains owned by `run_func`; the boundary
+        // drains callbacks only after that cleanup completes.
+        if self.runtime_execution && module == "core.sys" && method == "atexit" {
+            return self.register_atexit_callback(&args[0], scope);
+        }
+        if self.runtime_execution && module == "core.process" && method == "exit" {
+            let code = as_int(&self.eval_expr_child(&args[0], scope)?, source_span)?;
+            let code = jet_foundation::Outcome::jet_runtime_exit_code(code);
+            let Some(sink) = self.sink.as_ref() else {
+                return Err(unsupported("process exit runtime boundary", source_span));
+            };
+            sink.lock().expect("evaluator sink poisoned").exit_code = Some(code);
+            return Err(crate::Sema::Diagnostics::soft_exit(
+                String::new(),
+                String::new(),
+                Some(source_span),
+            ));
+        }
         // D-PIN1 / S58: `mem.address_of(place)` returns the stable address
         // identity and records its allocation provenance in the sentry
         // kernel before `Ptr.from_addr` carries it onward.

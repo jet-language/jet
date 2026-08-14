@@ -1137,6 +1137,9 @@ struct EvalChannel {
 struct EvalRuntime<'a> {
     callables: Vec<EvalCallable<'a>>,
     interrupt_handlers: Vec<usize>,
+    /// Process-edge callbacks. The evaluator invokes these after lexical
+    /// cleanup, matching the Prelude runtime boundary used by AOT/JIT.
+    atexit_handlers: Vec<usize>,
     streams: Vec<EvalStream<'a>>,
     shared_values: Vec<Arc<EvalSharedState>>,
     shared_guards: Vec<Arc<shared_protocol::JetSharedGuardState>>,
@@ -1356,6 +1359,7 @@ impl EvalRuntime<'_> {
         Self {
             callables: Vec::new(),
             interrupt_handlers: Vec::new(),
+            atexit_handlers: Vec::new(),
             streams: Vec::new(),
             shared_values: Vec::new(),
             shared_guards: Vec::new(),
@@ -2709,6 +2713,41 @@ impl<'a> EvalCtx<'a> {
         Ok(CtValue::Unit)
     }
 
+    /// Register one process-edge callback. The callback stays in the shared
+    /// callable arena until the whole-program boundary drains it.
+    pub(super) fn register_atexit_callback(
+        &mut self,
+        callback: &TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let value = self.eval_expr(callback, scope)?;
+        let index = Self::callable_index(&value)
+            .ok_or_else(|| unsupported("invalid atexit callback value", self.span()))?;
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        jet_foundation::Outcome::jet_runtime_register_atexit(
+            &mut runtime.atexit_handlers,
+            index,
+        );
+        Ok(CtValue::Unit)
+    }
+
+    /// Drain callbacks at the one evaluator process boundary. Lexical
+    /// cleanup has already run when this method is called.
+    pub(super) fn run_atexit_handlers(&mut self) -> Result<(), Diagnostic> {
+        let mut indexes = Vec::new();
+        {
+            let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            jet_foundation::Outcome::jet_runtime_drain_atexit(
+                &mut runtime.atexit_handlers,
+                |index| indexes.push(index),
+            );
+        }
+        for index in indexes {
+            self.call_callable(&Self::callable_value(index), Vec::new())?;
+        }
+        Ok(())
+    }
+
     pub(super) fn dispatch_pending_interrupts(
         &mut self,
         scope: &mut HashMap<String, CtValue>,
@@ -3761,6 +3800,10 @@ fn run_program_with_structs_on_stack(
             result
         }
     });
+    let result = match (result, ctx.run_atexit_handlers()) {
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    };
     *sink = std::mem::take(
         &mut *shared_sink.lock().expect("evaluator sink poisoned"),
     );

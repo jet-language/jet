@@ -2546,7 +2546,7 @@ pub(crate) fn register_jit_atexit(handler: i64) -> bool {
             rt.set_trap("invalid resident atexit callback");
             return false;
         };
-        rt.atexit_handlers.push(slot);
+        jet_foundation::Outcome::jet_runtime_register_atexit(&mut rt.atexit_handlers, slot);
         true
     })
 }
@@ -2555,8 +2555,7 @@ pub(crate) fn register_jit_atexit(handler: i64) -> bool {
 /// ABI is either `extern "C" fn()` or `extern "C" fn(i64)` when it carries
 /// the resident environment handle.
 pub(crate) fn run_jit_atexit_handlers(rt: &mut JitRuntime) {
-    let handlers = std::mem::take(&mut rt.atexit_handlers);
-    for handler in handlers {
+    jet_foundation::Outcome::jet_runtime_drain_atexit(&mut rt.atexit_handlers, |handler| {
         // SAFETY: `fn_ptr`, `env`, and `has_env` are written together by the
         // checked JIT callable binder. The callback signature is the zero-arg
         // `atexit` signature, with the environment word prepended only for a
@@ -2570,7 +2569,7 @@ pub(crate) fn run_jit_atexit_handlers(rt: &mut JitRuntime) {
                 callback();
             }
         }
-    }
+    });
 }
 
 fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) -> i64 {

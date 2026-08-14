@@ -580,14 +580,17 @@ mod jet_runtime_atexit {
     where
         F: Fn() + 'static,
     {
-        HANDLERS.with(|handlers| handlers.borrow_mut().push(Box::new(handler)));
+        HANDLERS.with(|handlers| {
+            let mut handlers = handlers.borrow_mut();
+            jet_runtime_register_atexit(&mut handlers, Box::new(handler));
+        });
     }
 
     pub(super) fn run() {
-        let pending = HANDLERS.with(|handlers| std::mem::take(&mut *handlers.borrow_mut()));
-        for handler in pending {
-            handler();
-        }
+        HANDLERS.with(|handlers| {
+            let mut handlers = handlers.borrow_mut();
+            jet_runtime_drain_atexit(&mut handlers, |handler| handler());
+        });
     }
 }
 
@@ -706,7 +709,9 @@ fn jet_runtime_exit() -> ! {
 }
 
 fn jet_runtime_explicit_exit(code: i64) -> ! {
-    std::panic::resume_unwind(Box::new(JetExplicitExit { code: code as i32 }))
+    std::panic::resume_unwind(Box::new(JetExplicitExit {
+        code: jet_runtime_exit_code(code),
+    }))
 }
 
 fn jet_runtime_panic_exit() -> ! {
