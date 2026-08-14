@@ -15,8 +15,10 @@ The check scans semantic `.jet` source forms: block/function
 It ignores comments, strings, invalid marker placements, and generated FFI
 files under `.jet/bindings/`. A higher count fails with each new region. Use
 `--update` in the same change when the new region is approved. A lower count
-updates the baseline automatically. A same-count edit that changes a recorded
-file, position, or reason fails as stale until the baseline is refreshed.
+updates the baseline automatically when the change only removes recorded
+regions. A new semantic region cannot hide behind a net shrink. A same-count
+edit that changes a recorded file, position, or reason fails as stale until the
+baseline is refreshed.
 
 <!-- unsafe-ratchet:begin -->
 <!-- unsafe-ratchet:data

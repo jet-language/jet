@@ -26,7 +26,7 @@ function usage() {
     "usage: check-unsafe-ratchet.mjs [--update] [--root PATH] [--baseline PATH]",
     "",
     "Scan user-written Jet unsafe regions and compare them with the committed baseline.",
-    "A lower count updates the baseline. Use --update to approve a higher count.",
+    "A lower count updates the baseline only for exact-row removals. Use --update to approve changes.",
   ].join("\n");
 }
 
@@ -122,7 +122,7 @@ function lineStarts(text) {
   return starts;
 }
 
-function location(starts, index) {
+function location(text, starts, index) {
   let low = 0;
   let high = starts.length;
   while (low + 1 < high) {
@@ -130,13 +130,19 @@ function location(starts, index) {
     if (starts[middle] <= index) low = middle;
     else high = middle;
   }
-  return { line: low + 1, column: index - starts[low] + 1 };
+  return { line: low + 1, column: Array.from(text.slice(starts[low], index)).length + 1 };
 }
 
 function skipQuoted(text, start, delimiter) {
   if (delimiter === "\"\"\"") {
-    const end = text.indexOf(delimiter, start + delimiter.length);
-    return end < 0 ? text.length : end + delimiter.length;
+    for (let index = start + delimiter.length; index < text.length; index += 1) {
+      if (text[index] === "\\") {
+        index += 1;
+      } else if (text.startsWith(delimiter, index)) {
+        return index + delimiter.length;
+      }
+    }
+    return text.length;
   }
   for (let index = start + delimiter.length; index < text.length; index += 1) {
     if (text[index] === "\\") {
@@ -167,8 +173,26 @@ function skipComment(text, start) {
   return text.length;
 }
 
+function isIdentifierStart(char) {
+  return Boolean(char) && (char === "_" || /\p{L}/u.test(char));
+}
+
 function isIdentifierChar(char) {
-  return Boolean(char) && /[A-Za-z0-9_]/.test(char);
+  return Boolean(char) && (char === "_" || /[\p{L}\p{N}]/u.test(char));
+}
+
+function codePointLengthAt(text, index) {
+  return text.codePointAt(index) > 0xffff ? 2 : 1;
+}
+
+function isIdentifierStartAt(text, index) {
+  const codePoint = text.codePointAt(index);
+  return codePoint !== undefined && isIdentifierStart(String.fromCodePoint(codePoint));
+}
+
+function isIdentifierCharAt(text, index) {
+  const codePoint = text.codePointAt(index);
+  return codePoint !== undefined && isIdentifierChar(String.fromCodePoint(codePoint));
 }
 
 function skipSpace(text, start) {
@@ -227,19 +251,77 @@ function quotedStringAt(text, start) {
   return reason === null ? null : { end, reason };
 }
 
+function skipMarkerArgument(text, start) {
+  for (let index = start; index < text.length; index += 1) {
+    if (text.startsWith("//", index) || text.startsWith("/*", index)) {
+      index = skipComment(text, index) - 1;
+      continue;
+    }
+    if (text.startsWith('"""', index)) {
+      index = skipQuoted(text, index, '"""') - 1;
+      continue;
+    }
+    if (text[index] === '"' || text[index] === "`" || text[index] === "'") {
+      index = skipQuoted(text, index, text[index]) - 1;
+      continue;
+    }
+    if (text[index] === "(" || text[index] === "[" || text[index] === "{") {
+      const close = text[index] === "(" ? ")" : text[index] === "[" ? "]" : "}";
+      index = skipBalanced(text, index, text[index], close) - 1;
+      continue;
+    }
+    if (text[index] === "," || text[index] === ")") return index;
+  }
+  return text.length;
+}
+
+function unsafeArgumentsAt(text, start) {
+  const end = skipBalanced(text, start, "(", ")");
+  if (end <= start || text[end - 1] !== ")") return null;
+  let index = skipLayout(text, start + 1);
+  let positional = 0;
+  let reason = null;
+  while (index < end - 1) {
+    let label = null;
+    const labelStart = index;
+    if (isIdentifierStartAt(text, index)) {
+      let labelEnd = index + codePointLengthAt(text, index);
+      while (isIdentifierCharAt(text, labelEnd)) labelEnd += codePointLengthAt(text, labelEnd);
+      const afterLabel = skipLayout(text, labelEnd);
+      if (text[afterLabel] === ":") {
+        label = text.slice(labelStart, labelEnd);
+        index = skipLayout(text, afterLabel + 1);
+      }
+    }
+    if ((label === "reason" || label === null && positional === 0) && reason === null) {
+      const literal = quotedStringAt(text, index);
+      if (literal) reason = literal.reason;
+    }
+    index = skipMarkerArgument(text, index);
+    if (text[index] !== ",") break;
+    if (label === null) positional += 1;
+    index = skipLayout(text, index + 1);
+  }
+  return { end, reason };
+}
+
 function unsafeAt(text, start) {
   if (text[start] !== "#") return null;
   let index = skipLayout(text, start + 1);
-  if (!text.startsWith("Unsafe", index) || isIdentifierChar(text[index + "Unsafe".length])) return null;
+  if (!text.startsWith("Unsafe", index) || isIdentifierCharAt(text, index + "Unsafe".length)) return null;
   index = skipLayout(text, index + "Unsafe".length);
   if (text[index] !== "(") return null;
-  const literal = quotedStringAt(text, skipLayout(text, index + 1));
-  if (!literal) return null;
-  const end = skipBalanced(text, index, "(", ")");
-  if (end <= index || text[end - 1] !== ")" || !markerSequenceLeadsToBlockOrFunction(text, end)) {
+  const argumentsAt = unsafeArgumentsAt(text, index);
+  if (!argumentsAt || argumentsAt.reason === null || !markerSequenceLeadsToBlockOrFunction(text, argumentsAt.end)) {
     return null;
   }
-  return { end, reason: literal.reason };
+  return { end: argumentsAt.end, reason: argumentsAt.reason };
+}
+
+function markerGroupStart(text, start) {
+  if (text[start] !== "#") return null;
+  const bracket = skipLayout(text, start + 1);
+  return text[bracket] === "[" ? bracket : null;
 }
 
 function skipBalanced(text, start, open, close) {
@@ -267,9 +349,10 @@ function skipBalanced(text, start, open, close) {
 }
 
 function markerGroupAt(text, start) {
-  if (!text.startsWith("#[", start)) return null;
+  const bracket = markerGroupStart(text, start);
+  if (bracket === null) return null;
   const markers = [];
-  let index = start + 2;
+  let index = bracket + 1;
   while (index < text.length) {
     index = skipLayout(text, index);
     if (text[index] === "]") return { end: index + 1, markers };
@@ -278,19 +361,21 @@ function markerGroupAt(text, start) {
       negated = true;
       index = skipLayout(text, index + 1);
     }
-    if (!/[A-Za-z_]/.test(text[index] ?? "")) return null;
+    if (!isIdentifierStartAt(text, index)) return null;
     const nameStart = index;
-    index += 1;
-    while (isIdentifierChar(text[index])) index += 1;
+    index += codePointLengthAt(text, index);
+    while (isIdentifierCharAt(text, index)) index += codePointLengthAt(text, index);
     const name = text.slice(nameStart, index);
     index = skipLayout(text, index);
     let reason = null;
     if (text[index] === "(") {
       if (name === "Unsafe") {
-        const literal = quotedStringAt(text, skipLayout(text, index + 1));
-        reason = literal?.reason ?? null;
+        const argumentsAt = unsafeArgumentsAt(text, index);
+        reason = argumentsAt?.reason ?? null;
+        index = argumentsAt?.end ?? skipBalanced(text, index, "(", ")");
+      } else {
+        index = skipBalanced(text, index, "(", ")");
       }
-      index = skipBalanced(text, index, "(", ")");
     }
     markers.push({ name, negated, reason });
     index = skipLayout(text, index);
@@ -308,9 +393,9 @@ function skipBareMarker(text, start) {
   if (text[start] !== "#") return null;
   let index = skipLayout(text, start + 1);
   if (text[index] === "!") index = skipLayout(text, index + 1);
-  if (!/[A-Za-z_]/.test(text[index] ?? "")) return null;
-  index += 1;
-  while (isIdentifierChar(text[index])) index += 1;
+  if (!isIdentifierStartAt(text, index)) return null;
+  index += codePointLengthAt(text, index);
+  while (isIdentifierCharAt(text, index)) index += codePointLengthAt(text, index);
   index = skipLayout(text, index);
   if (text[index] !== "(") return index;
   const end = skipBalanced(text, index, "(", ")");
@@ -318,7 +403,7 @@ function skipBareMarker(text, start) {
 }
 
 function startsWord(text, start, word) {
-  return text.startsWith(word, start) && !isIdentifierChar(text[start + word.length]);
+  return text.startsWith(word, start) && !isIdentifierCharAt(text, start + word.length);
 }
 
 function markerSequenceLeadsToFunction(text, start) {
@@ -328,7 +413,7 @@ function markerSequenceLeadsToFunction(text, start) {
       index = skipLayout(text, index + 1);
       continue;
     }
-    if (text.startsWith("#[", index)) {
+    if (markerGroupStart(text, index) !== null) {
       const group = markerGroupAt(text, index);
       if (!group) return false;
       index = skipLayout(text, group.end);
@@ -375,12 +460,12 @@ function scanSource(text, relativePath, owner) {
       index = skipQuoted(text, index, "'");
       continue;
     }
-    if (text.startsWith("#[", index)) {
+    if (markerGroupStart(text, index) !== null) {
       const group = markerGroupAt(text, index);
       if (group) {
         const unsafeMarkers = group.markers.filter((marker) => marker.name === "Unsafe" && !marker.negated && marker.reason !== null);
         if (unsafeMarkers.length === 1 && markerSequenceLeadsToFunction(text, group.end)) {
-          const position = location(starts, index);
+          const position = location(text, starts, index);
           regions.push({ package: owner, file: relativePath, line: position.line, column: position.column, reason: unsafeMarkers[0].reason });
         }
         index = group.end;
@@ -390,7 +475,7 @@ function scanSource(text, relativePath, owner) {
     if (text[index] === "#") {
       const found = unsafeAt(text, index);
       if (found) {
-        const position = location(starts, index);
+        const position = location(text, starts, index);
         regions.push({ package: owner, file: relativePath, line: position.line, column: position.column, reason: found.reason });
         index = found.end;
         continue;
@@ -500,6 +585,22 @@ function regionKey(region) {
   return JSON.stringify([region.package, region.file, region.reason]);
 }
 
+function unmatchedRegions(current, baseline) {
+  const remaining = new Map();
+  for (const region of baseline.regions) {
+    const key = regionKey(region);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const added = [];
+  for (const region of current.regions) {
+    const key = regionKey(region);
+    const count = remaining.get(key) ?? 0;
+    if (count > 0) remaining.set(key, count - 1);
+    else added.push(region);
+  }
+  return added;
+}
+
 function exactRegionKey(region) {
   return JSON.stringify([region.package, region.file, region.line, region.column, region.reason]);
 }
@@ -540,16 +641,7 @@ function growth(current, baseline) {
     .map((name) => ({ name, before: baseline.counts[name] ?? 0, after: current.counts[name] ?? 0 }))
     .filter((row) => row.after > row.before);
   if (increases.length === 0) return null;
-  const remaining = new Map();
-  for (const region of baseline.regions) remaining.set(regionKey(region), (remaining.get(regionKey(region)) ?? 0) + 1);
-  const newRegions = [];
-  for (const region of current.regions) {
-    const key = regionKey(region);
-    const count = remaining.get(key) ?? 0;
-    if (count > 0) remaining.set(key, count - 1);
-    else if ((current.counts[region.package] ?? 0) > (baseline.counts[region.package] ?? 0)) newRegions.push(region);
-  }
-  return { increases, newRegions };
+  return { increases, newRegions: unmatchedRegions(current, baseline) };
 }
 
 function formatGrowth(details) {
@@ -599,8 +691,14 @@ function main() {
   }
 
   if (current.total < baseline.data.total) {
-    writeFileSync(options.baseline, baselineDocument(baseline.text, current));
-    console.log(`unsafe ratchet: baseline decreased to ${current.total} regions`);
+    const changes = staleRows(current, baseline.data);
+    if (changes.added.length > 0) {
+      console.error(formatStale(changes));
+      process.exitCode = 1;
+    } else {
+      writeFileSync(options.baseline, baselineDocument(baseline.text, current));
+      console.log(`unsafe ratchet: baseline decreased to ${current.total} regions`);
+    }
   } else if (!sameRegions(current, baseline.data)) {
     console.error(formatStale(staleRows(current, baseline.data)));
     process.exitCode = 1;
