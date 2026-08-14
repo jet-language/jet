@@ -2468,7 +2468,7 @@ fn run() {
         &shown,
     );
     let expected = ProgramOutput::ran(
-        "example.com\nwrapped: example.com\nwrapped: example.com\n".to_string(),
+        "name\nwrapped: name\nwrapped: name\n".to_string(),
         String::new(),
         0,
     );
