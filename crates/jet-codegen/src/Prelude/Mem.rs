@@ -467,6 +467,12 @@ mod jet_mem {
         }
 
         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            if super::jet_fault_should_fail_allocation() {
+                return Err(super::jet_alloc_error(
+                    std::mem::size_of::<T>().max(1),
+                    "Arena",
+                ));
+            }
             let mut state = self.state.borrow_mut();
             let required = std::mem::size_of::<T>().max(1)
                 .saturating_add(std::mem::align_of::<T>());
@@ -576,6 +582,12 @@ mod jet_mem {
         }
 
         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            if super::jet_fault_should_fail_allocation() {
+                return Err(super::jet_alloc_error(
+                    std::mem::size_of::<T>().max(1),
+                    "Bump",
+                ));
+            }
             let mut state = self.state.borrow_mut();
             let ptr = unsafe { state.block.try_write(val, "Bump")? };
             record_drop(&mut state.drops, ptr);
@@ -687,6 +699,12 @@ mod jet_mem {
         }
 
         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            if super::jet_fault_should_fail_allocation() {
+                return Err(super::jet_alloc_error(
+                    std::mem::size_of::<T>().max(1),
+                    "Pool",
+                ));
+            }
             let mut state = self.state.borrow_mut();
             let bytes = std::mem::size_of::<T>().max(1);
             let align = std::mem::align_of::<T>();
@@ -892,6 +910,12 @@ mod jet_mem {
         }
 
         pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+            if super::jet_fault_should_fail_allocation() {
+                return Err(super::jet_alloc_error(
+                    std::mem::size_of::<T>().max(1),
+                    "Fixed",
+                ));
+            }
             let mut state = self.state.borrow_mut();
             let base = state.ptr.as_ptr() as usize;
             let value_offset = Self::aligned_offset(base, state.used, std::mem::align_of::<T>());

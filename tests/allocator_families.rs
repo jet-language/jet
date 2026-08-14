@@ -27,11 +27,14 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
     let observe = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Observe.rs").unwrap();
     let uninit = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Uninit.rs").unwrap();
     let outcome = std::fs::read_to_string("crates/jet-foundation/src/Outcome.rs").unwrap();
+    let fault_injection =
+        std::fs::read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
     let source_text = format!(
         r#"#![allow(dead_code)]
 {observe}
 {outcome}
+{fault_injection}
 mod jet_uninit_semantics {{
 {uninit}
 }}
@@ -534,4 +537,37 @@ fn try_allocation_example_reports_exhaustion_as_a_value() {
     } else {
         compile_jet(src).expect("try allocation example should pass the front end");
     }
+}
+
+#[test]
+fn fault_scheduler_reaches_allocator_try_alloc() {
+    if !common::have_rustc() {
+        return;
+    }
+    let ran = compile_rust_harness(
+        r#"
+fn main() {
+    let (result, injected, counts) = jet_fault_run_once(
+        &["FS.Write"],
+        Some(1),
+        1,
+        &mut || {
+            let mut bytes = [0u8; 64];
+            let fixed = jet_mem::JetFixed::over(&mut bytes);
+            match fixed.try_alloc(7u64) {
+                Ok(_) => Err("allocator fault was not injected".to_string()),
+                Err(_) => Ok(()),
+            }
+        },
+    )
+    .unwrap();
+    assert!(result.is_ok());
+    assert!(injected);
+    assert_eq!(counts[1], 1);
+    println!("ok");
+}
+"#,
+    );
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }

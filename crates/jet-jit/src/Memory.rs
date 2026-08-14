@@ -500,14 +500,21 @@ extern "C" fn jet_jit_allocator_try_alloc(
                     state.capacity = next;
                 }
             }
-            let result = jet_foundation::Outcome::jet_try_alloc_value(
-                value,
-                state.used,
-                state.capacity,
-                requested,
-                state.allocator,
-                overhead,
-            );
+            let result = if crate::fault_injection::jet_fault_should_fail_allocation() {
+                Err(jet_foundation::Outcome::jet_alloc_error(
+                    requested,
+                    state.allocator,
+                ))
+            } else {
+                jet_foundation::Outcome::jet_try_alloc_value(
+                    value,
+                    state.used,
+                    state.capacity,
+                    requested,
+                    state.allocator,
+                    overhead,
+                )
+            };
             if let Ok((_, next_used)) = &result {
                 state.slots.push(AllocatorSlot {
                     generation: state.generation,
