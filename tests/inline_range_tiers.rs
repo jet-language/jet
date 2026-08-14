@@ -4,6 +4,8 @@
 use std::fs;
 use std::process::Command;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 mod common;
 
 const EXAMPLE: &str = include_str!("../examples/features/types/range_types.jet");
@@ -26,7 +28,7 @@ fn have_wasm_target() -> bool {
 }
 
 #[test]
-fn inline_range_comptime_and_repl_match_the_example_golden() {
+fn inline_range_comptime_and_repl_accept_legal_inputs() {
     let compiled = jet::compile_with_path(EXAMPLE, "examples/features/types/range_types.jet")
         .expect("inline range example must compile through the shared front end");
     assert!(
@@ -34,8 +36,23 @@ fn inline_range_comptime_and_repl_match_the_example_golden() {
         "comptime inline-range binding was not carried into generated output"
     );
 
-    let transcript = jet::REPL::run_transcript(&[EXAMPLE, "run()"], None);
-    assert_eq!(transcript, format!("ok\n{EXPECTED}"));
+    // The REPL accepts one item or statement per input. Keep `#Numeric` in the
+    // file-wide comptime check above; it is not legal at a statement site.
+    let transcript = jet::REPL::run_transcript(
+        &[
+            "fn set_brightness(level: Int(0..100)) => Int(0..100) :: level",
+            "fn checked_inline(raw: Int) => Int(0..100) ? String :: Int(0..100).from_int(raw)",
+            "print(set_brightness(42))",
+            "print(checked_inline(3) ?? Int(0..100).from_int(0))",
+        ],
+        None,
+    );
+    assert_eq!(transcript, "ok\nok\n42\n3\n");
+}
+
+#[test]
+fn inline_range_example_matches_aot_default_run_and_interpreter() {
+    tir_support::assert_example_cli_tiers_agree("types/range_types", EXPECTED);
 }
 
 #[test]
