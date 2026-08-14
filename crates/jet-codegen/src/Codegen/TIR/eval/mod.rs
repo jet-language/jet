@@ -3642,7 +3642,7 @@ fn run_program_with_structs_at_stage_and_cli(
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("jet-tir-eval".to_string())
-            .stack_size(8 * 1024 * 1024)
+            .stack_size(64 * 1024 * 1024)
             .spawn_scoped(scope, move || {
                 crate::Comptime::with_ambient(ambient_core, ambient_handle, || {
                     run_program_with_structs_on_stack(
