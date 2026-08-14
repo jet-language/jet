@@ -679,7 +679,7 @@ fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, Lowe
         let (cap_ty, init) = materialized_capture_kind(name, outer_env)
             .map(|(helper, ty)| {
                 (
-                    ty,
+                    Some(ty),
                     format!("{helper}(({}))", outer_env.place_of(name)),
                 )
             })
