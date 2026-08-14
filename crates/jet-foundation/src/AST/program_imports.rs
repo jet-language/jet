@@ -3,6 +3,7 @@ use crate::{
     Diagnostics::{Diagnostic, Span},
     Syntax,
 };
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Program {
@@ -145,6 +146,67 @@ pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> 
         }
     }
     None
+}
+
+/// Build the Core alias maps consumed by pre-sema comptime evaluation. The
+/// same member walk handles qualified module imports and grouped Core items,
+/// including dotted members and explicit aliases.
+pub fn core_import_maps(
+    imports: &[ImportDecl],
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    let mut modules = HashMap::new();
+    let mut items = HashMap::new();
+    for import in imports {
+        if let Some(module) = import.core_module_path() {
+            modules.insert(import.import_alias(), module);
+        }
+        let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
+            continue;
+        };
+        if core_list_prefix(module_alias).is_none() {
+            continue;
+        }
+        for binding in import.walk_bindings() {
+            let Some(original) = binding.original else {
+                continue;
+            };
+            match core_list_path(module_alias, original) {
+                Some(CoreListPath::Module(module)) => {
+                    modules.insert(binding.local, module);
+                }
+                Some(CoreListPath::Item { module, item }) => {
+                    modules.insert(binding.local.clone(), module);
+                    items.insert(binding.local, item);
+                }
+                None => {}
+            }
+        }
+    }
+    (modules, items)
+}
+
+/// Rewrite one grouped Core item call to the ordinary qualified-method AST
+/// shape. Sema and the early comptime pass share this exact normalization so
+/// TIR sees one dispatch form on every path.
+pub fn rewrite_core_item_call(expr: &mut Expr, method: &str) {
+    if !matches!(expr, Expr::Call(_)) {
+        return;
+    }
+    let span = expr.span();
+    let Expr::Call(call) = std::mem::replace(expr, Expr::Absent(span)) else {
+        unreachable!("Core item rewrite checked the expression shape");
+    };
+    *expr = Expr::MethodCall {
+        receiver: Box::new(Expr::Ident(call.name, call.name_span)),
+        method: method.to_string(),
+        method_span: call.name_span,
+        owner_type_args: Vec::new(),
+        type_args: call.type_args,
+        args: call.args,
+        recv_type: None,
+        resolved_ret: call.resolved_ret,
+        checked_widen: false,
+    };
 }
 
 /// The binding introduced by one member-list item. A dotted Core member uses

@@ -184,6 +184,8 @@ pub(crate) fn eval_comptime_items(
     // D-META-EFFECT1: module alias → Core path so the interpreter can evaluate
     // effect-approved Core calls (e.g. `@value :: math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
+    /// D-CORE-USELIST1=A: local grouped-item name → original Core member.
+    core_item_imports: &HashMap<String, String>,
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {
@@ -280,8 +282,23 @@ pub(crate) fn eval_comptime_items(
             }
             // D-META-EFFECT1: evaluate_with_imports resolves Core calls
             // through the shared effect facts.
+            let mut eval_value = value.clone();
+            eval_value.for_each_expr_mut(|expr| {
+                let Expr::Call(call) = expr else {
+                    return;
+                };
+                if funcs.contains_key(&call.name) {
+                    return;
+                }
+                let Some(item) = core_item_imports.get(&call.name) else {
+                    return;
+                };
+                if core_imports.contains_key(&call.name) {
+                    crate::AST::rewrite_core_item_call(expr, item);
+                }
+            });
             match crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs(
-                &value,
+                &eval_value,
                 &funcs,
                 &externs,
                 base_dir,

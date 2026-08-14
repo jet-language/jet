@@ -18,8 +18,8 @@ pub use program_imports::{
     AppliedRuleApplication, ErrorConvDef, FencedNames, FencedStatement, ForeignLanguage,
     ForeignImportError, ForeignNamespace, ImportBinding, ImportDecl, ImportKind, InlineVersion,
     LoadedModule, MigrationDecl, PackageGuarantees,
-    MigrationOp, Program, ProgramBundle, TryConvert, CoreListPath, core_list_path,
-    core_list_prefix, member_import_local,
+    MigrationOp, Program, ProgramBundle, TryConvert, CoreListPath, core_import_maps,
+    core_list_path, core_list_prefix, member_import_local, rewrite_core_item_call,
     walk_imports,
 };
 pub use crate::Names::{

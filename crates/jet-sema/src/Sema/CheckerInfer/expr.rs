@@ -1053,8 +1053,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn normalize_imported_core_expr(&mut self, e: &mut Expr) {
-        let (name, span) = match &*e {
-            Expr::Call(call) => (call.name.clone(), call.name_span),
+        let name = match &*e {
+            Expr::Call(call) => call.name.clone(),
             _ => return,
         };
         if self.funcs.contains_key(&name) || self.lookup(&name).is_some() {
@@ -1066,21 +1066,7 @@ impl<'a> Checker<'a> {
         if !self.core_imports.contains_key(&name) {
             return;
         }
-        let old = std::mem::replace(e, Expr::Absent(span));
-        let Expr::Call(call) = old else {
-            unreachable!("Core import normalization only replaces calls");
-        };
-        *e = Expr::MethodCall {
-            receiver: Box::new(Expr::Ident(name, call.name_span)),
-            method: item,
-            method_span: call.name_span,
-            owner_type_args: Vec::new(),
-            type_args: call.type_args,
-            args: call.args,
-            recv_type: None,
-            resolved_ret: call.resolved_ret,
-            checked_widen: false,
-        };
+        crate::AST::rewrite_core_item_call(e, &item);
     }
 
     pub(crate) fn normalize_prelude_expr(&mut self, e: &mut Expr) {

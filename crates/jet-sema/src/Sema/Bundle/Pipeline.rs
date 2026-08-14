@@ -537,35 +537,12 @@ fn check_bundle_opts_for_output_inner(
     let ct_core_imports: Vec<HashMap<String, String>> = bundle
         .modules
         .iter()
-        .map(|module| {
-            let mut imports = HashMap::new();
-            for import in &module.imports {
-                if let Some(core_module) = import.core_module_path() {
-                    imports.insert(import.import_alias(), core_module);
-                }
-                let ImportKind::Unqualified {
-                    module_alias,
-                    ..
-                } = &import.kind
-                else {
-                    continue;
-                };
-                let Some(core_prefix) = crate::AST::core_list_prefix(module_alias) else {
-                    continue;
-                };
-                for binding in import.walk_bindings() {
-                    let original = binding
-                        .original
-                        .expect("member walker returned a binding without a member");
-                    let local = binding.local;
-                    let full = format!("{core_prefix}.{original}");
-                    if crate::Syntax::is_known_core_module(&full) {
-                        imports.insert(local, full);
-                    }
-                }
-            }
-            imports
-        })
+        .map(|module| crate::AST::core_import_maps(&module.imports).0)
+        .collect();
+    let ct_core_item_imports: Vec<HashMap<String, String>> = bundle
+        .modules
+        .iter()
+        .map(|module| crate::AST::core_import_maps(&module.imports).1)
         .collect();
     for (state, (module, core_imports)) in states
         .iter_mut()
@@ -603,6 +580,7 @@ fn check_bundle_opts_for_output_inner(
             &base,
             &mut diags,
             &ct_core_imports[idx],
+            &ct_core_item_imports[idx],
             &bundle.build_facts,
             Some(&mut top_level_embed_inputs),
         );
