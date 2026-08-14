@@ -3194,9 +3194,15 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             .map(|(name, ty, conv)| wasm_export_arg_expr(name, ty, *conv))
             .collect::<Vec<_>>()
             .join(", ");
+        let ok_json = match f.return_type.as_ref() {
+            Some(Type::Result { ok, .. }) => {
+                wasm_edge_ok_json_expr(ok, "value").ok_or_else(|| web_emit_error(f))?
+            }
+            _ => unreachable!("fallible Wasm edge run has a Result return"),
+        };
         out.push_str(&format!(
-            "        match jet_wasm_{}({args}) {{\n            Ok(_) => {{ jet_wasm_store_ok(); 0 }},\n            Err(error) => {{ jet_wasm_store_error(&error); 1 }}\n        }}\n    }})\n}}\n\n",
-            f.key
+            "        match jet_wasm_{}({args}) {{\n            Ok(value) => {{ jet_wasm_store_ok({ok_json}); 0 }},\n            Err(error) => {{ jet_wasm_store_error(&error); 1 }}\n        }}\n    }})\n}}\n\n",
+            f.key,
         ));
     }
     if export_wrapper {
@@ -3568,6 +3574,42 @@ fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
         ty if is_string_like(ty) => Some("u64"),
         ty if is_map_string_int(ty) => Some("u64"),
         _ => wasm_ty(ty),
+    }
+}
+
+fn wasm_edge_ok_json_expr(ty: &Type, value: &str) -> Option<String> {
+    match ty {
+        Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } => {
+            wasm_edge_ok_json_expr(inner, value)
+        }
+        Type::Named(name) if name == "Unit" => Some("\"null\".to_string()".to_string()),
+        Type::Named(name)
+            if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT =>
+        {
+            Some(format!("{value}.to_string()"))
+        }
+        Type::Int | Type::IntN { .. } | Type::Bool => Some(format!("{value}.to_string()")),
+        Type::Float | Type::Float32 => Some(format!("jet_wasm_json_float({value})")),
+        Type::String => Some(format!("jet_wasm_json(&{value})")),
+        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => {
+            Some(format!("jet_wasm_json(&{value})"))
+        }
+        Type::List(inner) if matches!(**inner, Type::Int) => {
+            Some(format!("jet_wasm_json_list_int(&{value})"))
+        }
+        Type::List(inner) if matches!(**inner, Type::IntN { .. }) => {
+            Some(format!("jet_wasm_json_list_i64(&{value})"))
+        }
+        Type::List(inner) if is_string_like(inner) => {
+            Some(format!("jet_wasm_json_list_string(&{value})"))
+        }
+        Type::Map { key, value: map_value, .. } if is_string_like(key) => match map_value.as_ref() {
+            Type::Int => Some(format!("jet_wasm_json_map_string_int(&{value})")),
+            Type::IntN { signed: true, .. } => Some(format!("jet_wasm_json_map_string_i64(&{value})")),
+            Type::IntN { signed: false, .. } => Some(format!("jet_wasm_json_map_string_u64(&{value})")),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -7391,6 +7433,13 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    out.push('\\\"');\n",
     "    out\n",
     "}\n\n",
+    "fn jet_wasm_json_float(value: f64) -> String { if value.is_finite() { value.to_string() } else { \"null\".to_string() } }\n\n",
+    "fn jet_wasm_json_list_int(value: &[JetWasmInt]) -> String { format!(\"[{}]\", value.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(\",\")) }\n\n",
+    "fn jet_wasm_json_list_i64(value: &[i64]) -> String { format!(\"[{}]\", value.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(\",\")) }\n\n",
+    "fn jet_wasm_json_list_string(value: &[String]) -> String { format!(\"[{}]\", value.iter().map(|item| jet_wasm_json(item)).collect::<Vec<_>>().join(\",\")) }\n\n",
+    "fn jet_wasm_json_map_string_int(value: &std::collections::BTreeMap<String, JetWasmInt>) -> String { format!(\"{{{}}}\", value.iter().map(|(key, item)| format!(\"{}:{}\", jet_wasm_json(key), item)).collect::<Vec<_>>().join(\",\")) }\n\n",
+    "fn jet_wasm_json_map_string_i64(value: &std::collections::BTreeMap<String, i64>) -> String { format!(\"{{{}}}\", value.iter().map(|(key, item)| format!(\"{}:{}\", jet_wasm_json(key), item)).collect::<Vec<_>>().join(\",\")) }\n\n",
+    "fn jet_wasm_json_map_string_u64(value: &std::collections::BTreeMap<String, u64>) -> String { format!(\"{{{}}}\", value.iter().map(|(key, item)| format!(\"{}:{}\", jet_wasm_json(key), item)).collect::<Vec<_>>().join(\",\")) }\n\n",
     "fn jet_wasm_err_wire(error: &JetErr) -> String {\n",
     "    let code = match jet_err_code(error) { Ok(code) => jet_wasm_json(&code), Err(_) => \"null\".to_string() };\n",
     "    let cause = match jet_err_cause(error) { Ok(cause) => jet_wasm_err_wire(&cause), Err(_) => \"null\".to_string() };\n",
@@ -7399,8 +7448,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_wasm_store(json: String, journey: String, frame: String) {\n",
     "    JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = Some(JetWasmHostError { json, journey, frame }));\n",
     "}\n\n",
-    "fn jet_wasm_store_ok() {\n",
-    "    jet_wasm_store(\"{\\\"tag\\\":\\\"Ok\\\",\\\"value\\\":null}\".to_string(), String::new(), String::new());\n",
+    "fn jet_wasm_store_ok(value: String) {\n",
+    "    jet_wasm_store(format!(\"{{\\\"tag\\\":\\\"Ok\\\",\\\"value\\\":{value}}}\"), String::new(), String::new());\n",
     "}\n\n",
     "fn jet_wasm_store_error(error: &JetErr) {\n",
     "    let journey = jet_journey_take();\n",

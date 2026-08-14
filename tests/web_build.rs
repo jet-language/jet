@@ -1652,7 +1652,10 @@ try {
     assert!(wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"), "{wasm}");
     assert!(wasm.contains("jet_wasm_error_len"), "{wasm}");
     assert!(wasm.contains("jet.err/v1"), "{wasm}");
-    assert!(wasm.contains("\"tag\\\":\\\"Err\""), "{wasm}");
+    assert!(wasm.contains("\"tag\":\"Err\""), "{wasm}");
+    assert!(wasm.contains("Ok(value) =>"), "{wasm}");
+    assert!(wasm.contains("jet_wasm_store_ok("), "{wasm}");
+    assert!(!wasm.contains("jet_wasm_store_ok();"), "{wasm}");
     assert!(!wasm.contains("jet_wasm_report_"), "human report parsing survived:\n{wasm}");
     assert!(!wasm.contains("error.to_string()"), "JetErr was stringified at the edge:\n{wasm}");
     assert!(
