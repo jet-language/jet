@@ -55,6 +55,30 @@ fn foundation_sources() -> Vec<PathBuf> {
     out
 }
 
+#[test]
+fn defer_close_string_sentinel_stays_retired() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let sentinel = ["\\0jet", ".defer.close"].concat();
+    let mut stack = vec![manifest.join("Source"), manifest.join("crates")];
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(&path).unwrap().flatten() {
+                stack.push(entry.path());
+            }
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains(&sentinel),
+            "{}: defer-close string sentinel must stay retired; use Stmt::DeferClose",
+            path.display()
+        );
+    }
+}
+
 fn scan(path: &PathBuf) -> Vec<String> {
     let text =
         fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
