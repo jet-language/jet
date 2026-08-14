@@ -1323,7 +1323,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::GetMap => format!("jet_outcome_of(({}).get(&({}).clone()).cloned())", recv, a(0)),
                 TBuiltinOp::GetList => format!("jet_outcome_of(({}).get({} as usize).cloned())", recv, a(0)),
-                TBuiltinOp::First => format!("jet_outcome_of(({}).first().cloned())", recv),
+                TBuiltinOp::First => {
+                    if recv_is_iter {
+                        format!("({recv}).first()")
+                    } else {
+                        format!("jet_outcome_of(({}).first().cloned())", recv)
+                    }
+                }
                 TBuiltinOp::Last => format!("jet_outcome_of(({}).last().cloned())", recv),
                 TBuiltinOp::Contains => format!("({}).contains(&{})", recv, a(0)),
                 TBuiltinOp::IndexOf => format!(

@@ -1197,12 +1197,21 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             arity_ok && args.iter().all(web_expr_supported)
         }
         E::BuiltinMethod { recv, op, args } => {
-            matches!(
-                op,
+            let op_supported = match op {
                 TIR::TBuiltinOp::ListLazy
-                    | TIR::TBuiltinOp::IterToList
-                    | TIR::TBuiltinOp::IterCollect
-            ) && web_expr_supported(recv)
+                | TIR::TBuiltinOp::IterToList
+                | TIR::TBuiltinOp::IterCollect => args.is_empty(),
+                TIR::TBuiltinOp::Skip => {
+                    args.len() == 1
+                        && (jet_foundation::Collections::is_iter_type(&recv.ty)
+                            || matches!(&recv.ty, Type::List(_) | Type::FixedList { .. }))
+                }
+                TIR::TBuiltinOp::First => {
+                    args.is_empty() && jet_foundation::Collections::is_iter_type(&recv.ty)
+                }
+                _ => false,
+            };
+            op_supported && web_expr_supported(recv)
                 && args.iter().all(web_expr_supported)
         }
         E::HandleMethod { recv, op, args } => {
@@ -5607,15 +5616,29 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         }
         E::CoreCall { module, method, args, .. } => tir_core_call(module, method, args, funcs, file_prefix)?,
         E::BuiltinMethod { recv, op, args } => {
-            if !args.is_empty() {
-                return Err(());
-            }
+            let recv_ty = &recv.ty;
+            let recv = tir_js_expr(recv, funcs, file_prefix)?;
             match op {
-                TIR::TBuiltinOp::ListLazy => {
-                    format!("jet_iter_from_vec({})", tir_js_expr(recv, funcs, file_prefix)?)
+                TIR::TBuiltinOp::ListLazy if args.is_empty() => {
+                    format!("jet_iter_from_vec({recv})")
                 }
-                TIR::TBuiltinOp::IterToList | TIR::TBuiltinOp::IterCollect => {
-                    format!("jet_iter_to_list({})", tir_js_expr(recv, funcs, file_prefix)?)
+                TIR::TBuiltinOp::IterToList | TIR::TBuiltinOp::IterCollect if args.is_empty() => {
+                    format!("jet_iter_to_list({recv})")
+                }
+                TIR::TBuiltinOp::Skip
+                    if args.len() == 1
+                        && (jet_foundation::Collections::is_iter_type(recv_ty)
+                            || matches!(recv_ty, Type::List(_) | Type::FixedList { .. })) =>
+                {
+                    format!(
+                        "jet_iter_skip({recv}, {})",
+                        tir_js_expr(&args[0], funcs, file_prefix)?
+                    )
+                }
+                TIR::TBuiltinOp::First
+                    if args.is_empty() && jet_foundation::Collections::is_iter_type(recv_ty) =>
+                {
+                    format!("jet_iter_first({recv})")
                 }
                 _ => return Err(()),
             }

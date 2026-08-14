@@ -4292,7 +4292,7 @@ pub enum TBuiltinOp {
     GetMap,
     /// `get(i)` on a list → `(recv).get(a0 as usize).cloned()`.
     GetList,
-    /// `first()` → `(recv).first().cloned()`.
+    /// `first()` → the consuming `JetIter::first()` terminal or a cloned collection item.
     First,
     /// `last()` → `(recv).last().cloned()`.
     Last,

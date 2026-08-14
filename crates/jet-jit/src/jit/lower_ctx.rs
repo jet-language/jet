@@ -18113,6 +18113,8 @@ impl LowerCtx<'_, '_> {
                     &recv_ty,
                     Type::List(_) | Type::FixedList { .. }
                 ) || jit_list_native_type(&recv_ty)
+                    || (matches!(op, TBuiltinOp::First)
+                        && jit_list_iter_elem_type(&recv_ty).is_some())
                 {
                     // Option-packed like GetList / list_get_opt: 0 = None, value+1 = Some.
                     let idx = if matches!(op, TBuiltinOp::First) {

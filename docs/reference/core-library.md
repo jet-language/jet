@@ -228,6 +228,10 @@ Jet requires every Set element to implement Hash and Eq (E0506), so no
 `copyto` is declined on `Set` and `SortedSet`; use `to_list()` then list/iter
 methods for all of the above.
 
+For a positional pick from an `Iter<T>`, use `skip(n).first()`. `n` is
+zero-based. The terminal returns `T?`; an index past the end returns `None`.
+This is the only positional-pick path. `nth` is not part of the API.
+
 Example: `examples/features/collections/iter_adapters.jet` demonstrates the
 eager default, `.lazy()`, and the #1479 surface (`repeat`, `cycle`, `drop_last`,
 `shuffle`,

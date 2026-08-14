@@ -486,6 +486,9 @@ impl<T: 'static> JetIter<T> {
     fn is_empty(mut self) -> bool {
         self.0.next().is_none()
     }
+    fn first(mut self) -> JetOutcome<T, JetAbsent> {
+        jet_outcome_of(self.0.next())
+    }
 }
 
 impl<T> IntoIterator for JetIter<T> {

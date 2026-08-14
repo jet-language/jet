@@ -3013,7 +3013,9 @@ fn resident_safe_builtin_op(
         TBuiltinOp::First | TBuiltinOp::Last => {
             (matches!(recv_ty, Type::Apply { name, .. } if name == "SortedSet")
                 || matches!(recv_ty, Type::List(_) | Type::FixedList { .. })
-                || jit_list_native_type(recv_ty))
+                || jit_list_native_type(recv_ty)
+                || (matches!(op, TBuiltinOp::First)
+                    && jit_list_iter_elem_type(recv_ty).is_some()))
                 && args.is_empty()
         }
         TBuiltinOp::Pop => {

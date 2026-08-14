@@ -28,6 +28,15 @@ function jet_iter_lazy(pull) {
     filter(f) {
       return jet_iter_lazy(() => this._pull().filter((value) => f(value)));
     },
+    skip(n) {
+      return jet_iter_lazy(() => this._pull().slice(Math.max(0, Number(n))));
+    },
+    first() {
+      const values = this._pull();
+      return values.length === 0
+        ? { tag: "None", values: [] }
+        : { tag: "Some", values: [values[0]] };
+    },
     to_list() {
       return this._pull();
     },
@@ -41,4 +50,16 @@ function jet_iter_from_vec(xs) {
 
 function jet_iter_to_list(view) {
   return view.to_list();
+}
+
+function jet_iter_skip(view, n) {
+  if (view && view.__jet_iter) return view.skip(n);
+  return jet_iter_from_vec(view).skip(n);
+}
+
+function jet_iter_first(view) {
+  if (view && view.__jet_iter) return view.first();
+  return view.length === 0
+    ? { tag: "None", values: [] }
+    : { tag: "Some", values: [view[0]] };
 }

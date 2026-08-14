@@ -1089,6 +1089,7 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         // Lazy adapters / reducers: same surface as lists (minus in-place mutators).
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("first", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("sum" | "product", 0) => Some(Some(inner.clone())),
         ("min" | "max", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("map", 1) => Some(Some(iter_ty(Type::Int))),
