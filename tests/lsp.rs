@@ -1335,7 +1335,7 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     assert!(diagnostics.contains(r#""code":"E0999""#), "{diagnostics}");
     assert!(
         diagnostics.contains(
-            r#""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":0,"end":10},"new_text":"#Codable"}]"#
+            r##""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":0,"end":10},"new_text":"#Codable"}]"##
         ),
         "{diagnostics}"
     );
