@@ -410,6 +410,41 @@ fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
     assert_eq!(reopened.notebook.cells[0].source, source);
 }
 
+#[test]
+fn notebook_cli_headless_journey_uses_production_session() {
+    let scratch = common::Scratch::new("notebook-cli-headless");
+    let document = scratch.join("journey.jetnb");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["notebook", "journey.jetnb", "--protocol"])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start production notebook protocol");
+    let mut input = child.stdin.take().expect("protocol stdin");
+    input
+        .write_all(
+            b"add-jet answer :: 42\nexec first\ncomplete answer\nsave journey.jetnb\nreopen\nexport-ipynb\nexport-jet\nquit\n",
+        )
+        .expect("write notebook protocol journey");
+    drop(input);
+
+    let output = child
+        .wait_with_output()
+        .expect("finish production notebook protocol");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "protocol journey failed:\n{stdout}\n{stderr}");
+    assert!(stdout.contains("\"status\":\"ok\""), "missing successful execution: {stdout}");
+    assert!(stdout.contains("\"body\":\"answer\""), "missing completion response: {stdout}");
+    assert!(stdout.contains("saved=journey.jetnb"), "missing save response: {stdout}");
+    assert!(stdout.contains("reopened"), "missing reopen response: {stdout}");
+    assert!(stdout.contains("ipynb_bytes=") && stdout.contains("jet_bytes="), "missing export responses: {stdout}");
+    assert!(document.is_file(), "headless protocol did not save the notebook");
+}
+
 struct RunningNotebook(Child);
 
 impl Drop for RunningNotebook {
@@ -419,9 +454,15 @@ impl Drop for RunningNotebook {
     }
 }
 
+fn command_path(name: &str, environment_name: &str) -> std::ffi::OsString {
+    std::env::var_os(environment_name).unwrap_or_else(|| name.into())
+}
+
 fn command_available(name: &str, environment_name: &str) -> bool {
-    let executable = std::env::var_os(environment_name).unwrap_or_else(|| name.into());
-    Command::new(executable).arg("--version").output().is_ok()
+    Command::new(command_path(name, environment_name))
+        .arg("--version")
+        .output()
+        .is_ok()
 }
 
 fn free_loopback_port() -> u16 {
@@ -507,7 +548,7 @@ fn notebook_browser_matrix_uses_production_server() {
         let _server = RunningNotebook(child);
         wait_for_notebook_server(port, token);
 
-        let output = Command::new("node")
+        let output = Command::new(command_path("node", "NODE"))
             .current_dir(env!("CARGO_MANIFEST_DIR"))
             .args([
                 "scripts/notebook-test/acceptance.mjs",

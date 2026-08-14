@@ -106,13 +106,17 @@ try {
   await waitFor(async () => (await evaluate("document.querySelectorAll('#cells .cell').length")) === 1, "Jet cell");
   await setCellSource(0, source);
   await runClient("first-party");
+  await waitFor(async () => await evaluate("document.querySelectorAll('#cells a').length > 0"), "source link");
   await runClient("canvas");
   await runClient("jupyter");
 
+  await setValue("#complete", "");
+  await click("#complete-button");
+  await waitFor(async () => (await evaluate("document.querySelector('#completion')?.textContent || ''")).startsWith("completions="), "completion action");
   await clickCellAction("Inspect");
   await waitFor(async () => (await status()).includes("inspected="), "inspect action");
   await clickCellAction("Debug");
-  await waitFor(async () => (await status()).includes("inspected="), "debug action");
+  await waitFor(async () => (await status()).includes("debug_attached"), "debug action");
   await queueInput("Ada");
   await clickCellAction("Profile");
   await waitFor(async () => (await status()).includes("profiled="), "profile action");

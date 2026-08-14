@@ -276,6 +276,7 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
         "/api/debug" => {
             kernel.attach_debug();
             inspect_message(kernel, &value("cell_id"), client().unwrap_or(ClientKind::FirstParty))
+                .map(|message| format!("debug_attached;{message}"))
         }
         "/api/inspect" => {
             inspect_message(kernel, &value("cell_id"), client().unwrap_or(ClientKind::FirstParty))
