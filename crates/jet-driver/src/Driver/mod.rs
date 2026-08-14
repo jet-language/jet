@@ -1301,6 +1301,25 @@ pub fn seed_build_facts(
     locked: bool,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(), Vec<Diagnostic>> {
+    seed_build_facts_with_contributions(
+        bundle,
+        profile,
+        locked,
+        setting_overrides,
+        &[],
+    )
+}
+
+/// Seed the build snapshot after a selected `fn build` has produced computed
+/// writers. The same resolver handles manifest defaults, profile settings,
+/// CLI settings, and computed contributions; no engine receives a lookup.
+pub fn seed_build_facts_with_contributions(
+    bundle: &mut crate::AST::ProgramBundle,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+    computed_contributions: &[jet_foundation::Policy::FactContribution],
+) -> Result<(), Vec<Diagnostic>> {
     let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
         None => None,
         Some(Ok(facts)) => Some(facts),
@@ -1373,65 +1392,151 @@ pub fn seed_build_facts(
                 None,
             )]
         })?;
-    let contributions = profile_fact
+    let mut contributions = profile_fact
         .into_iter()
         .map(|fact| (fact.key.name.clone(), fact))
-        .collect();
+        .collect::<BTreeMap<_, _>>();
     let enum_types = fieldless_setting_enums(bundle);
     let mut settings = BTreeMap::new();
     let mut setting_provenance = BTreeMap::new();
     if let Some(facts) = manifest.as_ref() {
+        let mut setting_contributions = BTreeMap::<
+            String,
+            Vec<jet_foundation::Policy::FactContribution>,
+        >::new();
         for (key, declaration) in &facts.settings {
             let value = parse_setting_value(&declaration.ty, &declaration.default, &enum_types).map_err(|detail| {
                 vec![setting_value_diagnostic(key, &declaration.ty, &declaration.default, detail)]
             })?;
-            settings.insert(
+            setting_contributions
+                .entry(key.clone())
+                .or_default()
+                .push(
+                    jet_foundation::Policy::FactContribution::new(
+                        build_setting_fact_key(key),
+                        policy_fact_value(&value),
+                        jet_foundation::Policy::SourceScope::Package,
+                        jet_foundation::Policy::ContributionLayer::Declaration,
+                        format!("{}:settings.{key} (default)", facts.origin),
+                    ),
+                );
+        }
+        if let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) {
+            for (key, raw) in &profile_def.settings {
+                let Some(declaration) = facts.settings.get(key) else {
+                    return Err(vec![undeclared_setting_diagnostic(
+                        key,
+                        &format!("the profile contribution names no declaration in `package.jet`"),
+                        &facts.origin,
+                    )]);
+                };
+                let value = parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
+                    vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
+                })?;
+                setting_contributions
+                    .entry(key.clone())
+                    .or_default()
+                    .push(
+                        jet_foundation::Policy::FactContribution::new(
+                            build_setting_fact_key(key),
+                            policy_fact_value(&value),
+                            jet_foundation::Policy::SourceScope::Package,
+                            jet_foundation::Policy::ContributionLayer::OptimizationBundle,
+                            format!("{}:build.{profile}.settings.{key}", facts.origin),
+                        ),
+                    );
+            }
+        }
+        for (key, raw) in setting_overrides {
+            let Some(declaration) = facts.settings.get(key) else {
+                return Err(vec![undeclared_setting_diagnostic(
+                    key,
+                    "the CLI contribution names no declaration in `package.jet`",
+                    &facts.origin,
+                )]);
+            };
+            let value = parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
+                vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
+            })?;
+            setting_contributions
+                .entry(key.clone())
+                .or_default()
+                .push(
+                    jet_foundation::Policy::FactContribution::new(
+                        build_setting_fact_key(key),
+                        policy_fact_value(&value),
+                        jet_foundation::Policy::SourceScope::Package,
+                        jet_foundation::Policy::ContributionLayer::CommandLine,
+                        format!("command line:--set {key}={raw}"),
+                    ),
+                );
+        }
+        for contribution in computed_contributions {
+            let Some(key) = contribution
+                .key
+                .strip_prefix("Build.Settings.")
+            else {
+                return Err(vec![undeclared_setting_diagnostic(
+                    &contribution.key,
+                    "`fn build` can contribute only to a declared setting",
+                    &facts.origin,
+                )]);
+            };
+            if !facts.settings.contains_key(key) {
+                return Err(vec![undeclared_setting_diagnostic(
+                    key,
+                    "the `fn build` contribution names no declaration in `package.jet`",
+                    &facts.origin,
+                )]);
+            }
+            setting_contributions
+                .entry(key.to_string())
+                .or_default()
+                .push(contribution.clone());
+        }
+        for (key, declarations) in setting_contributions {
+            let fact_key = jet_foundation::Policy::FactKey::new(build_setting_fact_key(&key));
+            let fact = jet_foundation::Policy::resolve(fact_key, declarations)
+                .map_err(|error| vec![fact_contribution_diagnostic(error)])?
+                .expect("a declared setting always has a default contribution");
+            let declaration = facts
+                .settings
+                .get(&key)
+                .expect("setting contribution key was checked against the manifest");
+            let value = setting_value_from_fact(&key, &declaration.ty, &fact.value, &enum_types)?;
+            setting_provenance.insert(
                 key.clone(),
+                fact.provenance
+                    .iter()
+                    .map(setting_provenance_line)
+                    .collect(),
+            );
+            settings.insert(
+                key,
                 jet_foundation::Facts::BuildSettingFact {
                     ty: declaration.ty.clone(),
                     value,
                 },
             );
-            setting_provenance.insert(
-                key.clone(),
-                vec![format!("{}:settings.{key} (default)", facts.origin)],
-            );
+            contributions.insert(fact.key.name.clone(), fact);
         }
-        if let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) {
-            for (key, raw) in &profile_def.settings {
-                apply_setting(
-                    &mut settings,
-                    facts,
-                    key,
-                    raw,
-                    "profile",
-                    &enum_types,
-                )?;
-                setting_provenance
-                    .entry(key.clone())
-                    .or_default()
-                    .push(format!("{}:build.{profile}.settings.{key}", facts.origin));
-            }
-        }
-    }
-    for (key, raw) in setting_overrides {
-        let Some(facts) = manifest.as_ref() else {
-            let declaration_site = bundle
-                .project_root
-                .join(crate::Syntax::PACKAGE_FILE)
-                .display()
-                .to_string();
-            return Err(vec![undeclared_setting_diagnostic(
-                key,
-                "the package has no `settings:` declaration",
-                &declaration_site,
-            )]);
-        };
-        apply_setting(&mut settings, facts, key, raw, "CLI", &enum_types)?;
-        setting_provenance
-            .entry(key.clone())
-            .or_default()
-            .push(format!("command line:--set {key}={raw}"));
+    } else if !setting_overrides.is_empty() || !computed_contributions.is_empty() {
+        let declaration_site = bundle
+            .project_root
+            .join(crate::Syntax::PACKAGE_FILE)
+            .display()
+            .to_string();
+        let key = setting_overrides
+            .keys()
+            .next()
+            .cloned()
+            .or_else(|| computed_contributions.first().map(|contribution| contribution.key.clone()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        return Err(vec![undeclared_setting_diagnostic(
+            &key,
+            "the package has no `settings:` declaration",
+            &declaration_site,
+        )]);
     }
     bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
         package_name,
@@ -1446,31 +1551,156 @@ pub fn seed_build_facts(
     Ok(())
 }
 
-fn apply_setting(
-    settings: &mut BTreeMap<String, jet_foundation::Facts::BuildSettingFact>,
-    facts: &crate::Package::PackageFacts,
+fn build_setting_fact_key(key: &str) -> String {
+    format!("Build.Settings.{key}")
+}
+
+fn policy_fact_value(value: &jet_foundation::Facts::BuildFactValue) -> jet_foundation::Policy::FactValue {
+    match value {
+        jet_foundation::Facts::BuildFactValue::Text(value) => {
+            jet_foundation::Policy::FactValue::Text(value.clone())
+        }
+        jet_foundation::Facts::BuildFactValue::Bool(value) => {
+            jet_foundation::Policy::FactValue::Bool(*value)
+        }
+        jet_foundation::Facts::BuildFactValue::Int(value) => {
+            jet_foundation::Policy::FactValue::Int(*value)
+        }
+        jet_foundation::Facts::BuildFactValue::Char(value) => {
+            jet_foundation::Policy::FactValue::Char(*value)
+        }
+        jet_foundation::Facts::BuildFactValue::Enum { variant, .. } => {
+            jet_foundation::Policy::FactValue::Enum(variant.clone())
+        }
+        jet_foundation::Facts::BuildFactValue::OptionalText(value) => {
+            jet_foundation::Policy::FactValue::OptionalText(value.clone())
+        }
+    }
+}
+
+fn setting_provenance_line(contribution: &jet_foundation::Policy::FactContribution) -> String {
+    let reason = contribution
+        .reason
+        .as_deref()
+        .map_or(String::new(), |reason| format!(" ({reason})"));
+    format!("{}{}", contribution.source, reason)
+}
+
+fn setting_value_from_fact(
     key: &str,
-    raw: &str,
-    source: &str,
+    ty: &str,
+    value: &jet_foundation::Policy::FactValue,
     enum_types: &BTreeMap<String, BTreeSet<String>>,
-) -> Result<(), Vec<Diagnostic>> {
-    let Some(declaration) = facts.settings.get(key) else {
-        return Err(vec![undeclared_setting_diagnostic(
+) -> Result<jet_foundation::Facts::BuildFactValue, Vec<Diagnostic>> {
+    let raw = value.display();
+    let result = match (ty.trim(), value) {
+        ("Bool", jet_foundation::Policy::FactValue::Bool(value)) => {
+            Ok(jet_foundation::Facts::BuildFactValue::Bool(*value))
+        }
+        ("Int", jet_foundation::Policy::FactValue::Int(value)) => {
+            Ok(jet_foundation::Facts::BuildFactValue::Int(*value))
+        }
+        ("Char", jet_foundation::Policy::FactValue::Char(value)) => {
+            Ok(jet_foundation::Facts::BuildFactValue::Char(*value))
+        }
+        ("String", jet_foundation::Policy::FactValue::Text(value)) => {
+            Ok(jet_foundation::Facts::BuildFactValue::Text(value.clone()))
+        }
+        (type_name, jet_foundation::Policy::FactValue::Enum(variant))
+            if valid_setting_type_name(type_name)
+                && enum_types
+                    .get(type_name)
+                    .is_some_and(|variants| variants.contains(variant)) =>
+        {
+            Ok(jet_foundation::Facts::BuildFactValue::Enum {
+                type_name: type_name.to_string(),
+                variant: variant.clone(),
+            })
+        }
+        _ => Err(setting_value_diagnostic(
             key,
-            &format!("the {source} contribution names no declaration in `package.jet`"),
-            &facts.origin,
-        )]);
+            ty,
+            &raw,
+            "the computed value does not match the declared setting type".to_string(),
+        )),
     };
-    let value = parse_setting_value(&declaration.ty, raw, enum_types).map_err(|detail| {
-        vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
-    })?;
-    settings.insert(
-        key.to_string(),
-        jet_foundation::Facts::BuildSettingFact {
-            ty: declaration.ty.clone(),
-            value,
-        },
-    );
+    result
+}
+
+fn fact_contribution_diagnostic(error: jet_foundation::Policy::FactError) -> Diagnostic {
+    match error.diagnostic() {
+        Some(diagnostic) => diagnostic,
+        None => Diagnostic::error(
+            "E3521",
+            "build fact contributions conflict".to_string(),
+            error.message(),
+            "make same-layer writers agree, or move one value to a more explicit layer".to_string(),
+            None,
+        ),
+    }
+}
+
+fn validate_build_contributions(
+    bundle: &crate::AST::ProgramBundle,
+    contributions: &[jet_foundation::Policy::FactContribution],
+) -> Result<(), Vec<Diagnostic>> {
+    if contributions.is_empty() {
+        return Ok(());
+    }
+    let facts = match crate::Package::PackageFacts::load(&bundle.project_root) {
+        Some(Ok(facts)) => facts,
+        Some(Err(error)) => {
+            return Err(vec![Diagnostic::error(
+                "E1206",
+                "package manifest is not valid".to_string(),
+                error.to_string(),
+                "fix `package.jet` before compiling the package".to_string(),
+                None,
+            )]);
+        }
+        None => {
+            let declaration_site = bundle
+                .project_root
+                .join(crate::Syntax::PACKAGE_FILE)
+                .display()
+                .to_string();
+            return Err(vec![undeclared_setting_diagnostic(
+                contributions[0].key.strip_prefix("Build.Settings.").unwrap_or(&contributions[0].key),
+                "the package has no `settings:` declaration",
+                &declaration_site,
+            )]);
+        }
+    };
+    let enum_types = fieldless_setting_enums(bundle);
+    let mut by_key = BTreeMap::<String, Vec<jet_foundation::Policy::FactContribution>>::new();
+    for contribution in contributions {
+        let Some(key) = contribution.key.strip_prefix("Build.Settings.") else {
+            return Err(vec![undeclared_setting_diagnostic(
+                &contribution.key,
+                "`fn build` can contribute only to a declared setting",
+                &facts.origin,
+            )]);
+        };
+        let Some(declaration) = facts.settings.get(key) else {
+            return Err(vec![undeclared_setting_diagnostic(
+                key,
+                "the `fn build` contribution names no declaration in `package.jet`",
+                &facts.origin,
+            )]);
+        };
+        let _ = setting_value_from_fact(key, &declaration.ty, &contribution.value, &enum_types)?;
+        by_key
+            .entry(contribution.key.clone())
+            .or_default()
+            .push(contribution.clone());
+    }
+    for (key, values) in by_key {
+        jet_foundation::Policy::resolve(
+            jet_foundation::Policy::FactKey::new(key),
+            values,
+        )
+        .map_err(|error| vec![fact_contribution_diagnostic(error)])?;
+    }
     Ok(())
 }
 
@@ -1660,6 +1890,9 @@ pub struct BuildRun {
 pub struct BuildCompileOutput {
     pub compile: crate::CompileOutput,
     pub build: Option<BuildRun>,
+    /// The exact fact snapshot used to check the returned program. Query and
+    /// explain callers consume this instead of rebuilding contribution state.
+    pub build_facts: jet_foundation::Facts::BuildFactSnapshot,
 }
 
 struct BuildFilesystemTransaction {
@@ -1844,7 +2077,21 @@ pub fn query_build_plan(
     file: &str,
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
     compile_bundle_path_build(file, build_query_options())
-    .map(|output| output.build.map(|build| build.plan))
+        .map(|output| output.build.map(|build| build.plan))
+}
+
+/// Read the one build-fact snapshot produced by the query path. This keeps
+/// `jet explain` on the same build-entry evaluator and contribution resolver
+/// as sema and codegen without executing actions or writing a lock.
+pub fn query_build_facts(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<jet_foundation::Facts::BuildFactSnapshot, Vec<Diagnostic>> {
+    let mut options = build_query_options();
+    options.profile = profile.to_string();
+    options.setting_overrides = setting_overrides.clone();
+    compile_bundle_path_build(file, options).map(|output| output.build_facts)
 }
 
 fn build_query_options() -> BuildRunOptions {
@@ -2373,6 +2620,8 @@ fn compile_bundle_path_build_inner(
             return Err(evaluated.diagnostics);
         }
 
+        validate_build_contributions(&bundle, evaluated.plan.fact_contributions())?;
+
         let dependency_name = dependency_boundary.map(build_package_name).transpose()?;
         validate_build_authority(
             &evaluated.plan,
@@ -2400,11 +2649,7 @@ fn compile_bundle_path_build_inner(
             .cross_target
             .clone()
             .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
-        let compiler_profile = evaluated
-            .plan
-            .default_profile
-            .clone()
-            .unwrap_or_else(|| "default".to_string());
+        let compiler_profile = options.profile.clone();
         if !package_specs.is_empty() && !evaluated.plan.targets().is_empty() {
             evaluated
                 .plan
@@ -2501,6 +2746,12 @@ fn compile_bundle_path_build_inner(
                 .map_err(|error| vec![generated_io_diag("build filesystem transaction", &error)])?,
         );
         if options.locked {
+            crate::Lock::verify_locked_build_contributions(
+                &bundle.project_root,
+                &bundle.build_facts.package_name,
+                evaluated.plan.fact_contributions(),
+            )
+            .map_err(|diagnostic| vec![diagnostic])?;
             let planned_generated = selected_generated
                 .iter()
                 .map(|module| crate::AST::ComptimeInput {
@@ -2531,7 +2782,7 @@ fn compile_bundle_path_build_inner(
                 .collect()
         };
         let executed = if options.execute {
-            let execution_grants = effective_grants(&options, &evaluated.plan);
+            let execution_grants = effective_grants(&options);
             crate::Comptime::Build::execute_build_plan_with_front_end_and_remote_and_compiler(
                 &evaluated.plan,
                 &bundle.project_root,
@@ -2626,11 +2877,15 @@ fn compile_bundle_path_build_inner(
         });
         bundle = planned_bundle;
         bundle.active_os = active_os;
-        seed_build_facts(
+        let build_run = build_run
+            .as_ref()
+            .expect("selected build entry produces a build run");
+        seed_build_facts_with_contributions(
             &mut bundle,
             &options.profile,
             options.locked,
             &options.setting_overrides,
+            build_run.plan.fact_contributions(),
         )?;
         bundle.web_partition_enforced = options.web_target;
     }
@@ -2698,10 +2953,23 @@ fn compile_bundle_path_build_inner(
         )
             .map_err(|diagnostic| vec![diagnostic])?;
     }
+    if options.execute {
+        if let Some(build_run) = build_run.as_ref() {
+            crate::Lock::record_build_contributions(
+                &bundle.project_root,
+                &bundle.build_facts.package_name,
+                build_run.plan.fact_contributions(),
+                options.locked,
+                &bundle.build_facts.stamp,
+            )
+            .map_err(|diagnostic| vec![diagnostic])?;
+        }
+    }
 
     // Static graph/query/explain (`execute: false`) must not codegen the
     // pre-build entry: `fn run` may call generated symbols that only exist
-    // after materialization. CLI/LSP consumers only need `build.plan`.
+    // after materialization. CLI/LSP consumers need only the plan and folded
+    // fact snapshot.
     if !options.execute {
         if let Some(transaction) = filesystem_transaction.as_mut() {
             transaction.commit();
@@ -2723,6 +2991,7 @@ fn compile_bundle_path_build_inner(
                 layer_ceiling: bundle.layer_ceiling,
             },
             build: build_run,
+            build_facts: bundle.build_facts.clone(),
         });
     }
 
@@ -2796,6 +3065,7 @@ fn compile_bundle_path_build_inner(
     Ok(BuildCompileOutput {
         compile,
         build: build_run,
+        build_facts: bundle.build_facts.clone(),
     })
 }
 
@@ -3510,7 +3780,7 @@ fn validate_build_authority(
                 Some(span),
             )]);
         }
-        if !options.inspect_only && (!options.gates.allows(crate::Policy::PolicyKey::Impure) || !effective_grants(options, plan).contains(&effect)) {
+        if !options.inspect_only && (!options.gates.allows(crate::Policy::PolicyKey::Impure) || !effective_grants(options).contains(&effect)) {
             if let Some(dependency_name) = dependency_name.as_deref() {
                 return Err(vec![Diagnostic::error(
                     "E3504",
@@ -3624,18 +3894,10 @@ fn validate_legacy_project_imports(
     Ok(())
 }
 
-/// D-BUILDCTX-FLAGS1=A: CLI grants ∪ `fn build` default_allow (CLI cannot remove defaults by omission).
 fn effective_grants(
     options: &BuildRunOptions,
-    plan: &crate::Comptime::Build::BuildPlan,
 ) -> std::collections::BTreeSet<crate::Comptime::Build::BuildCapability> {
-    let mut grants = options.grants.clone();
-    for name in &plan.default_allows {
-        if let Some(cap) = crate::Comptime::Build::BuildCapability::parse(name) {
-            grants.insert(cap);
-        }
-    }
-    grants
+    options.grants.clone()
 }
 
 pub fn program_semantic_facts(

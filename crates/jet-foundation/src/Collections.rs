@@ -216,7 +216,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
     "close collect compare concat contains contains_value copy copy_to count count_by count_ones count_zeros ",
-    "cycle dedup dedup_by default_allow default_profile delete delivered delivered_handlers diagnostics difference digest downgrade ",
+    "cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
     "flat_map flatten float float_range flush fold from from_bytes from_keys from_text functions generate ",
@@ -550,9 +550,7 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
         ("probe", 3..=6) => build_result(Syntax::TYPE_BUILD_PROBE),
         ("error", 5) => Some(None),
         ("plan", 0 | 1) => build_result(Syntax::TYPE_BUILD_PLAN),
-        // D-BUILDCTX-FLAGS1=A
-        ("default_profile", 1) => Some(None),
-        ("default_allow", 1) => Some(None),
+        ("contribute", 2) => Some(None),
         _ => None,
     }
 }
@@ -572,6 +570,10 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
         ("plugin", 2) => Some(vec![Type::String, Type::String]),
         ("find" | "embed", 1) => Some(vec![Type::String]),
         ("fetch", 2) => Some(vec![Type::String, Type::String]),
+        // D-CONF-SPLIT1=A: the value is checked against the manifest
+        // declaration by the build driver after the closed value crosses the
+        // comptime bridge, so only the fact-name slot is fixed here.
+        ("contribute", 2) => Some(vec![Type::String]),
         ("action", 5) => Some(vec![
             Type::String, strings(), strings(), strings(), strings(),
         ]),
@@ -734,8 +736,6 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
         ]),
         ("plan", 0) => Some(Vec::new()),
         ("plan", 1) => Some(vec![Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())]),
-        ("default_profile", 1) => Some(vec![Type::String]),
-        ("default_allow", 1) => Some(vec![strings()]),
         _ => None,
     }
 }

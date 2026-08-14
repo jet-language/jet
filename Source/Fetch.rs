@@ -258,6 +258,10 @@ impl<'a> Resolver<'a> {
             build_stamp: self
                 .existing_lock
                 .and_then(|lock| lock.build_stamp.clone()),
+            build_contributions: self
+                .existing_lock
+                .map(|lock| lock.build_contributions.clone())
+                .unwrap_or_default(),
         };
 
         // Build dep_dirs map.

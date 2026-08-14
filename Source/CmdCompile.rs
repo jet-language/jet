@@ -1237,6 +1237,7 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
         browsers: Vec::new(),
         source_channels: Vec::new(),
         build_stamp: None,
+        build_contributions: Vec::new(),
     });
 
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);

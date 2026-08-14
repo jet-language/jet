@@ -16,10 +16,16 @@ pub struct BuildPlan {
     pub(super) plugins: Vec<BuildPlugin>,
     pub(super) generated_modules: Vec<BuildGeneratedModule>,
     pub(super) default: Option<TargetRef>,
-    /// D-BUILDCTX-FLAGS1=A
-    pub default_profile: Option<String>,
-    /// D-BUILDCTX-FLAGS1=A — effect names (`Exec`, `FS`, …)
-    pub default_allows: Vec<String>,
+    /// D-CONF-SPLIT1=A: computed fact writers produced by the selected
+    /// `fn build`. They remain compile-time data and enter action identity so
+    /// a changed contribution cannot reuse an old runtime artifact.
+    pub fact_contributions: Vec<jet_foundation::Policy::FactContribution>,
+}
+
+impl BuildPlan {
+    pub fn fact_contributions(&self) -> &[jet_foundation::Policy::FactContribution] {
+        &self.fact_contributions
+    }
 }
 
 /// One compiler-owned package artifact input to a generated compile action.

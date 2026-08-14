@@ -283,6 +283,7 @@ fn lock_roundtrip_layer_metadata() {
         browsers: Vec::new(),
         source_channels: Vec::new(),
         build_stamp: None,
+        build_contributions: Vec::new(),
     };
     let raw = jet::Lock::write(&lock);
     let parsed = jet::Lock::parse(&raw).unwrap();

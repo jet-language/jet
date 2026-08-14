@@ -195,6 +195,10 @@ pub struct FactContribution {
     pub span: Span,
     pub target: Option<Span>,
     pub source: String,
+    /// Human-readable reason retained for explain and lock provenance. The
+    /// caller supplies this only when the writer is computed rather than a
+    /// manifest or command-line declaration.
+    pub reason: Option<String>,
     pub force: bool,
     pub force_reason: Option<String>,
 }
@@ -215,6 +219,7 @@ impl FactContribution {
             span: Span::new(0, 0),
             target: None,
             source: source.into(),
+            reason: None,
             force: false,
             force_reason: None,
         }
@@ -238,6 +243,11 @@ impl FactContribution {
 
     pub fn force(self) -> Self {
         self.force_with_reason(".Force")
+    }
+
+    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = Some(reason.into());
+        self
     }
 }
 
@@ -730,7 +740,11 @@ impl ExplainableResolution for EffectiveFact {
                 .force_reason
                 .as_deref()
                 .map_or(String::new(), |reason| format!(" pin={reason}"));
-            out.push_str(&format!("\n  [{status}] {} / {} {} at {}:{}..{}{}", contribution.layer.name(), contribution.scope.name(), contribution.value.display(), contribution.source, contribution.span.start, contribution.span.end, pin));
+            let reason = contribution
+                .reason
+                .as_deref()
+                .map_or(String::new(), |reason| format!(" reason={reason}"));
+            out.push_str(&format!("\n  [{status}] {} / {} {} at {}:{}..{}{}{}", contribution.layer.name(), contribution.scope.name(), contribution.value.display(), contribution.source, contribution.span.start, contribution.span.end, pin, reason));
         }
         out
     }

@@ -6566,6 +6566,12 @@ cannot mint an undeclared fact. D-BUILDCTX-FLAGS1 survives only as
 follow D-MODCOMPUTE1. Build actions keep the D-BUILDTARGET1/D-BUILDACTION1
 family.
 
+**2026-08-14 — D-CONF-SPLIT1=A implementation log** *(card #1522)*: `b.contribute`
+now carries a closed typed value into the shared fact resolver. The resolved
+writer chain enters the build action key, `jet explain`, and the unified lock;
+locked builds replay the exact writer set. Free-floating `BuildContext` profile
+and grant setters are deleted.
+
 **D-CONF-ENTRY1=A — one build entry per package** *(ratified 2026-08-06,
 card #1521)*: `fn build` follows `fn run` discovery. A package has at most one
 `fn build`, in any package file; the compiler discovers it. Duplicate

@@ -1772,6 +1772,26 @@ fn run_explain_setting(key: &str, mode: OutputMode) {
                 .map(|value| (profile.name.as_str(), value.as_str()))
         })
         .collect::<Vec<_>>();
+    let build_facts = crate::resolve_bare_entry("run", &cwd, None).map(|file| {
+        jet::Driver::query_build_facts(file.to_string_lossy().as_ref(), "dev", &BTreeMap::new())
+    });
+    let build_facts = match build_facts {
+        Some(Ok(facts)) => Some(facts),
+        Some(Err(diags)) => {
+            for diagnostic in diags {
+                eprintln!("{}", diagnostic.what);
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+        None => None,
+    };
+    let resolved = build_facts
+        .as_ref()
+        .and_then(|facts| facts.contribution(&format!("Build.Settings.{key}")))
+        .and_then(|fact| {
+            jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone())
+                .and_then(|explanation| explanation.what)
+        });
     let cli = format!("--set {key}=<value>");
     if mode.json {
         let profile_json = profiles
@@ -1786,12 +1806,16 @@ fn run_explain_setting(key: &str, mode: OutputMode) {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"setting\":\"{}\",\"type\":\"{}\",\"default\":\"{}\",\"cli\":\"{}\",\"profiles\":[{}]}}",
+            "{{\"setting\":\"{}\",\"type\":\"{}\",\"default\":\"{}\",\"cli\":\"{}\",\"profiles\":[{}],\"resolved\":{}}}",
             json_escape(key),
             json_escape(&declaration.ty),
             json_escape(&declaration.default),
             json_escape(&cli),
             profile_json,
+            resolved
+                .as_deref()
+                .map(|value| format!("\"{}\"", json_escape(value)))
+                .unwrap_or_else(|| "null".to_string()),
         );
     } else {
         println!("build.settings.{key}");
@@ -1800,6 +1824,12 @@ fn run_explain_setting(key: &str, mode: OutputMode) {
             println!("  profile.{name}: {value}");
         }
         println!("  default: {} = {}", declaration.ty, declaration.default);
+        if let Some(resolved) = resolved {
+            println!("  resolved:");
+            for line in resolved.lines() {
+                println!("    {line}");
+            }
+        }
     }
 }
 

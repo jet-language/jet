@@ -383,6 +383,7 @@ mod tests {
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         }
     }
 

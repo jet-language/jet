@@ -73,6 +73,18 @@ impl BuildPlan {
         );
         facts.insert("plan.targets".to_string(), self.targets().len().to_string());
         facts.insert("plan.actions".to_string(), self.actions().len().to_string());
+        for (index, contribution) in self.fact_contributions().iter().enumerate() {
+            let prefix = format!("fact_contribution.{index}");
+            facts.insert(format!("{prefix}.key"), contribution.key.clone());
+            facts.insert(format!("{prefix}.value"), format!("{:?}", contribution.value));
+            facts.insert(format!("{prefix}.scope"), contribution.scope.name().to_string());
+            facts.insert(format!("{prefix}.layer"), contribution.layer.name().to_string());
+            facts.insert(format!("{prefix}.source"), contribution.source.clone());
+            facts.insert(
+                format!("{prefix}.reason"),
+                contribution.reason.clone().unwrap_or_default(),
+            );
+        }
         for (index, target) in self.targets().iter().enumerate() {
             let prefix = format!("target.{index}");
             facts.insert(format!("{prefix}.name"), target.name.clone());

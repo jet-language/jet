@@ -175,6 +175,28 @@ pub(super) fn canonical_action_key(
             w.str(&module.source);
         }
     }
+    w.str("build-fact-contributions");
+    let mut contributions = plan.fact_contributions().iter().collect::<Vec<_>>();
+    contributions.sort_by(|left, right| {
+        left.key
+            .cmp(&right.key)
+        .then_with(|| left.layer.cmp(&right.layer))
+        .then_with(|| left.scope.cmp(&right.scope))
+        .then_with(|| left.source.cmp(&right.source))
+        .then_with(|| left.reason.cmp(&right.reason))
+        .then_with(|| left.force.cmp(&right.force))
+        .then_with(|| left.force_reason.cmp(&right.force_reason))
+    });
+    for contribution in contributions {
+        w.str(&contribution.key);
+        w.str(&format!("{:?}", contribution.value));
+        w.str(contribution.scope.name());
+        w.str(contribution.layer.name());
+        w.str(&contribution.source);
+        w.str(contribution.reason.as_deref().unwrap_or_default());
+        w.bool(contribution.force);
+        w.str(contribution.force_reason.as_deref().unwrap_or_default());
+    }
     w.str("target");
     if let Some(target) = plan
         .action_targets()

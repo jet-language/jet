@@ -357,6 +357,8 @@ pub struct LockFile {
     /// D-CONF-STAMP1=B: provenance for the build fact plane. The timestamp is
     /// lock history and is replayed verbatim by later locked builds.
     pub build_stamp: Option<BuildStamp>,
+    /// D-CONF-SPLIT1=A: computed build-fact writers, keyed by package.
+    pub build_contributions: Vec<LockedBuildContribution>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -367,6 +369,20 @@ pub struct LockedWorkspaceMember {
     pub canonical_path: String,
     /// Digest of the fully composed typed Package facts for this member.
     pub package_digest: String,
+}
+
+/// D-CONF-SPLIT1=A: one locked writer record for every computed build fact.
+/// The semantic resolver remains in `jet-foundation`; this is only its stable
+/// on-disk provenance projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedBuildContribution {
+    pub package: String,
+    pub key: String,
+    pub value: String,
+    pub scope: String,
+    pub layer: String,
+    pub source: String,
+    pub reason: String,
 }
 
 // ──────────────────────────────────────────────
@@ -388,6 +404,17 @@ pub fn write(lock: &LockFile) -> String {
             escape_str(&stamp.toolchain)
         ));
         out.push_str(&format!("at = \"{}\"\n", escape_str(&stamp.at)));
+    }
+
+    for contribution in &lock.build_contributions {
+        out.push_str("\n[[build.contribution]]\n");
+        out.push_str(&format!("package = \"{}\"\n", escape_str(&contribution.package)));
+        out.push_str(&format!("key = \"{}\"\n", escape_str(&contribution.key)));
+        out.push_str(&format!("value = \"{}\"\n", escape_str(&contribution.value)));
+        out.push_str(&format!("scope = \"{}\"\n", escape_str(&contribution.scope)));
+        out.push_str(&format!("layer = \"{}\"\n", escape_str(&contribution.layer)));
+        out.push_str(&format!("source = \"{}\"\n", escape_str(&contribution.source)));
+        out.push_str(&format!("reason = \"{}\"\n", escape_str(&contribution.reason)));
     }
 
     for pkg in &lock.packages {
@@ -724,6 +751,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut toolchains: Vec<LockedToolchain> = Vec::new();
     let mut browsers: Vec<LockedBrowser> = Vec::new();
     let mut source_channels: Vec<LockedSourceChannel> = Vec::new();
+    let mut build_contributions: Vec<LockedBuildContribution> = Vec::new();
     let mut build_stamp: Option<BuildStamp> = None;
     let mut current_pkg: Option<PartialPkg> = None;
     let mut current_ci: Option<PartialCi> = None;
@@ -731,6 +759,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut current_toolchain: Option<PartialToolchain> = None;
     let mut current_browser: Option<PartialBrowser> = None;
     let mut current_source_channel: Option<PartialSourceChannel> = None;
+    let mut current_build_contribution: Option<PartialBuildContribution> = None;
     let mut current_workspace_overlay: Option<PartialWorkspaceOverlay> = None;
     let mut current_workspace_overlay_package: Option<PartialWorkspaceOverlayPackage> = None;
     let mut current_workspace_build_grant: Option<PartialWorkspaceBuildGrant> = None;
@@ -766,6 +795,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     source_channels.push(c);
                 }
             }
+            if let Some(contribution) = current_build_contribution.take() {
+                build_contributions.push(contribution.finish()?);
+            }
             if let Some(package) = current_workspace_overlay_package.take() {
                 workspace_overlay_packages.push(package.finish()?);
             }
@@ -787,6 +819,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "[[browser]]" => current_browser = Some(PartialBrowser::default()),
                 "[[source_channel]]" => {
                     current_source_channel = Some(PartialSourceChannel::default())
+                }
+                "[[build.contribution]]" => {
+                    current_build_contribution = Some(PartialBuildContribution::default())
                 }
                 "[[workspace_overlay]]" => {
                     current_workspace_overlay = Some(PartialWorkspaceOverlay::default())
@@ -865,6 +900,19 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "path" => ci.path = Some(val.trim_matches('"').to_string()),
                 "hash" => ci.hash = Some(val.trim_matches('"').to_string()),
                 _ => {}
+            }
+            continue;
+        }
+        if let Some(ref mut contribution) = current_build_contribution {
+            match key {
+                "package" => contribution.package = Some(unescape_str(val)),
+                "key" => contribution.key = Some(unescape_str(val)),
+                "value" => contribution.value = Some(unescape_str(val)),
+                "scope" => contribution.scope = Some(unescape_str(val)),
+                "layer" => contribution.layer = Some(unescape_str(val)),
+                "source" => contribution.source = Some(unescape_str(val)),
+                "reason" => contribution.reason = Some(unescape_str(val)),
+                _ => return Err(format!("unknown build contribution field `{key}`")),
             }
             continue;
         }
@@ -1030,6 +1078,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             source_channels.push(c);
         }
     }
+    if let Some(contribution) = current_build_contribution {
+        build_contributions.push(contribution.finish()?);
+    }
 
     if let Some(package) = current_workspace_overlay_package {
         workspace_overlay_packages.push(package.finish()?);
@@ -1061,6 +1112,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         browsers,
         source_channels,
         build_stamp,
+        build_contributions,
     })
 }
 
@@ -1122,6 +1174,36 @@ fn parse_string_array(val: &str) -> Vec<String> {
 struct PartialCi {
     path: Option<String>,
     hash: Option<String>,
+}
+
+#[derive(Default)]
+struct PartialBuildContribution {
+    package: Option<String>,
+    key: Option<String>,
+    value: Option<String>,
+    scope: Option<String>,
+    layer: Option<String>,
+    source: Option<String>,
+    reason: Option<String>,
+}
+
+impl PartialBuildContribution {
+    fn finish(self) -> Result<LockedBuildContribution, String> {
+        let required = |name: &str, value: Option<String>| {
+            value
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| format!("build contribution is missing `{name}`"))
+        };
+        Ok(LockedBuildContribution {
+            package: required("package", self.package)?,
+            key: required("key", self.key)?,
+            value: required("value", self.value)?,
+            scope: required("scope", self.scope)?,
+            layer: required("layer", self.layer)?,
+            source: required("source", self.source)?,
+            reason: self.reason.unwrap_or_default(),
+        })
+    }
 }
 
 impl PartialCi {
@@ -1764,6 +1846,7 @@ pub fn record_nix_realization(
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         },
         Err(error) => {
             return Err(format!(
@@ -1917,6 +2000,7 @@ pub fn record_cran_realization(
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         });
     lock.version = LOCK_VERSION;
     let existing_provenance = lock
@@ -2008,6 +2092,7 @@ pub fn record_luarocks_realization(
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         });
     lock.version = LOCK_VERSION;
     let existing_provenance = lock
@@ -2100,6 +2185,7 @@ pub fn record_registry_realization(
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         });
     lock.version = LOCK_VERSION;
     let existing_provenance = lock
@@ -2196,6 +2282,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         });
     // A project has exactly one `jet` self-toolchain pin (its object id is
     // `jet-<version>-<fp>`), kept distinct from any bridge build-toolchain
@@ -2235,6 +2322,7 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         });
     lock.version = LOCK_VERSION;
     if let Some(existing) = lock
@@ -2307,7 +2395,8 @@ pub fn record_generated_inputs(
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
-    });
+            build_contributions: Vec::new(),
+        });
     if locked {
         let mut expected = lock.comptime_inputs.clone();
         expected.sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
@@ -2355,6 +2444,153 @@ pub fn record_generated_inputs(
     Ok(())
 }
 
+fn locked_build_contribution(
+    package: &str,
+    contribution: &jet_foundation::Policy::FactContribution,
+) -> LockedBuildContribution {
+    LockedBuildContribution {
+        package: package.to_string(),
+        key: contribution.key.clone(),
+        value: format!("{:?}", contribution.value),
+        scope: contribution.scope.name().to_string(),
+        layer: contribution.layer.name().to_string(),
+        source: contribution.source.clone(),
+        reason: contribution.reason.clone().unwrap_or_default(),
+    }
+}
+
+fn locked_build_contribution_set(
+    package: &str,
+    contributions: &[jet_foundation::Policy::FactContribution],
+) -> Vec<LockedBuildContribution> {
+    let mut records = contributions
+        .iter()
+        .map(|contribution| locked_build_contribution(package, contribution))
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| {
+        left.package
+            .cmp(&right.package)
+            .then_with(|| left.key.cmp(&right.key))
+            .then_with(|| left.layer.cmp(&right.layer))
+            .then_with(|| left.scope.cmp(&right.scope))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.value.cmp(&right.value))
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+    records
+}
+
+/// D-CONF-SPLIT1=A: locked builds replay the exact computed writer set.
+pub fn verify_locked_build_contributions(
+    project_root: &Path,
+    package: &str,
+    contributions: &[jet_foundation::Policy::FactContribution],
+) -> Result<(), Diagnostic> {
+    let actual = locked_build_contribution_set(package, contributions);
+    let Some(lock) = load(project_root) else {
+        if actual.is_empty() {
+            return Ok(());
+        }
+        return Err(Diagnostic::error(
+            "E3512",
+            format!("locked build contributions for `{package}` are not recorded"),
+            "a locked build must replay every computed fact writer from `.jet/lock`".to_string(),
+            "rerun without `--locked` to record the computed contribution chain".to_string(),
+            None,
+        ));
+    };
+    let mut expected = lock
+        .build_contributions
+        .into_iter()
+        .filter(|contribution| contribution.package == package)
+        .collect::<Vec<_>>();
+    expected.sort_by(|left, right| {
+        left.package
+            .cmp(&right.package)
+            .then_with(|| left.key.cmp(&right.key))
+            .then_with(|| left.layer.cmp(&right.layer))
+            .then_with(|| left.scope.cmp(&right.scope))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.value.cmp(&right.value))
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+    if expected == actual {
+        return Ok(());
+    }
+    Err(Diagnostic::error(
+        "E3512",
+        format!("locked build contribution for `{package}` drifted"),
+        "the computed fact writer chain differs from the chain recorded in `.jet/lock`".to_string(),
+        "rerun without `--locked` to review and record the new contribution chain".to_string(),
+        None,
+    ))
+}
+
+/// D-CONF-SPLIT1=A: replace one package's computed writer records in the
+/// unified lock after the selected runtime bundle has passed the front end.
+pub fn record_build_contributions(
+    project_root: &Path,
+    package: &str,
+    contributions: &[jet_foundation::Policy::FactContribution],
+    locked: bool,
+    stamp: &BuildStamp,
+) -> Result<(), Diagnostic> {
+    if locked {
+        return verify_locked_build_contributions(project_root, package, contributions);
+    }
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            browsers: Vec::new(),
+            source_channels: Vec::new(),
+            build_stamp: None,
+            build_contributions: Vec::new(),
+        });
+    lock.build_contributions
+        .retain(|contribution| contribution.package != package);
+    lock.build_contributions
+        .extend(locked_build_contribution_set(package, contributions));
+    lock.build_contributions.sort_by(|left, right| {
+        left.package
+            .cmp(&right.package)
+            .then_with(|| left.key.cmp(&right.key))
+            .then_with(|| left.layer.cmp(&right.layer))
+            .then_with(|| left.scope.cmp(&right.scope))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.value.cmp(&right.value))
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+    if lock.build_stamp.is_none() {
+        lock.build_stamp = Some(stamp.clone());
+    }
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
+    }
+    let temp = lock_path.with_extension(format!("lock.tmp.{}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temp)
+        .map_err(|error| lock_write_error(&lock_path, error))?;
+    file.write_all(write(&lock).as_bytes())
+        .map_err(|error| lock_write_error(&lock_path, error))?;
+    file.sync_all()
+        .map_err(|error| lock_write_error(&lock_path, error))?;
+    std::fs::rename(&temp, &lock_path).map_err(|error| lock_write_error(&lock_path, error))?;
+    Ok(())
+}
+
 fn lock_write_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic::error(
         "E3502",
@@ -2392,6 +2628,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         });
     lock.version = LOCK_VERSION;
     if let Some(existing) = lock
@@ -2671,6 +2908,7 @@ mod a4_envelope_tests {
             browsers: Vec::new(),
             source_channels: Vec::new(),
             build_stamp: None,
+            build_contributions: Vec::new(),
         }
     }
 

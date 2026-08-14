@@ -729,62 +729,28 @@ fn eval_session_method(
                 default,
             ))));
         }
-        // D-BUILDCTX-FLAGS1=A
-        "default_profile" => {
-            let profile = match args.first() {
-                Some(CtValue::Str(value)) => value.clone(),
-                Some(CtValue::Enum { variant, .. }) => variant.clone(),
-                Some(CtValue::Struct { type_name, fields }) if type_name.ends_with("Profile") || type_name.contains("Build") => {
-                    fields
-                        .iter()
-                        .find_map(|(n, v)| match (n.as_str(), v) {
-                            ("name" | "tag" | "variant", CtValue::Str(s)) => Some(s.clone()),
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| "release".to_string())
-                }
-                _ => {
-                    // Leading-dot enum often arrives as enum variant name via show.
-                    return Err(build_diag(
-                        "`b.default_profile` needs a profile name or `.Release` / `.Debug`",
-                        span,
-                    ));
-                }
-            };
-            let profile = match profile.to_ascii_lowercase().as_str() {
-                "release" => "release".to_string(),
-                "debug" => "debug".to_string(),
-                "ci" => "ci".to_string(),
-                other => other.to_string(),
-            };
-            session.context.default_profile(profile);
-            return Ok(CtValue::Unit);
-        }
-        "default_allow" => {
-            let Some(CtValue::List(values)) = args.first() else {
-                return Err(build_diag("`b.default_allow` needs a list of effects", span));
-            };
-            let mut effects = Vec::new();
-            for value in values {
-                let name = match value {
-                    CtValue::Str(s) => s.clone(),
-                    CtValue::Enum { variant, .. } => variant.clone(),
-                    other => {
-                        return Err(build_diag(
-                            &format!("`b.default_allow` entry must be an effect, got {other:?}"),
-                            span,
-                        ));
-                    }
-                };
-                if crate::Comptime::Build::BuildCapability::parse(&name).is_none() {
-                    return Err(build_diag(
-                        &format!("unknown build effect `{name}` in default_allow"),
-                        span,
-                    ));
-                }
-                effects.push(name);
+        "contribute" => {
+            if args.len() != 2 {
+                return Err(build_diag("`b.contribute` requires a fact name and one value", span));
             }
-            session.context.default_allow(effects);
+            let name = string_arg(&args, 0, span)?;
+            if name.trim().is_empty() || name.contains('.') {
+                return Err(build_diag(
+                    "`b.contribute` needs one declared setting name, such as `cache_slots`",
+                    span,
+                ));
+            }
+            let value = fact_value_arg(&args[1], span)?;
+            let contribution = jet_foundation::Policy::FactContribution::new(
+                format!("Build.Settings.{name}"),
+                value,
+                jet_foundation::Policy::SourceScope::Function,
+                jet_foundation::Policy::ContributionLayer::Environment,
+                format!("{}::build", session.package),
+            )
+            .at(span)
+            .with_reason("computed by fn build");
+            session.context.contribute(contribution);
             return Ok(CtValue::Unit);
         }
         _ => return None.ok_or_else(|| build_diag(&format!("unknown build method `{method}`"), span)),
@@ -793,6 +759,22 @@ fn eval_session_method(
         Ok(value) => CtValue::Present(Box::new(value)),
         Err(error) => CtValue::failed(Box::new(CtValue::Str(build_error_text(&error)))),
     })
+}
+
+fn fact_value_arg(value: &CtValue, span: Span) -> Result<jet_foundation::Policy::FactValue, Diagnostic> {
+    match value {
+        CtValue::Bool(value) => Ok(jet_foundation::Policy::FactValue::Bool(*value)),
+        CtValue::Int(value) => Ok(jet_foundation::Policy::FactValue::Int(*value)),
+        CtValue::Char(value) => Ok(jet_foundation::Policy::FactValue::Char(*value)),
+        CtValue::Str(value) => Ok(jet_foundation::Policy::FactValue::Text(value.clone())),
+        CtValue::Enum { variant, args, .. } if args.is_empty() => {
+            Ok(jet_foundation::Policy::FactValue::Enum(variant.clone()))
+        }
+        _ => Err(build_diag(
+            "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value",
+            span,
+        )),
+    }
 }
 
 /// A source-level `b.legacy` call declares the graph handles, while the

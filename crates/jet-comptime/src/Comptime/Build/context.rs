@@ -50,10 +50,9 @@ pub struct BuildContext {
     /// Policy captured at build-session creation. Every typed bridge method
     /// observes this same policy; no method silently widens it.
     policy: BuildPolicy,
-    /// D-BUILDCTX-FLAGS1=A: project default profile name (`release`, `debug`, …).
-    default_profile: Option<String>,
-    /// D-BUILDCTX-FLAGS1=A: `--allow-*` grants applied when CLI omits them.
-    default_allows: HashSet<String>,
+    /// D-CONF-SPLIT1=A: computed writers collected by the same build session
+    /// that owns actions and generated modules.
+    fact_contributions: Vec<jet_foundation::Policy::FactContribution>,
 }
 
 impl BuildContext {
@@ -96,8 +95,7 @@ impl BuildContext {
             probe_names: HashSet::new(),
             default_toolchain,
             policy,
-            default_profile: None,
-            default_allows: HashSet::new(),
+            fact_contributions: Vec::new(),
         }
     }
 
@@ -105,16 +103,11 @@ impl BuildContext {
         &self.policy
     }
 
-    /// D-BUILDCTX-FLAGS1=A: set the project default profile (CLI `--profile`/`--release` wins).
-    pub fn default_profile(&mut self, profile: impl Into<String>) {
-        self.default_profile = Some(profile.into());
-    }
-
-    /// D-BUILDCTX-FLAGS1=A: declare default `--allow-*` grants when CLI omits them.
-    pub fn default_allow(&mut self, effects: impl IntoIterator<Item = impl Into<String>>) {
-        for effect in effects {
-            self.default_allows.insert(effect.into());
-        }
+    /// Record one computed build-fact writer. The driver applies the manifest
+    /// declaration and shared contribution resolver after the build returns;
+    /// this method only keeps the writer on the typed build plan.
+    pub fn contribute(&mut self, contribution: jet_foundation::Policy::FactContribution) {
+        self.fact_contributions.push(contribution);
     }
 
     pub fn default_host_toolchain(&self) -> ToolchainHandle {
@@ -1024,12 +1017,7 @@ impl BuildContext {
             plugins: self.plugins.clone(),
             generated_modules: self.generated_modules.clone(),
             default,
-            default_profile: self.default_profile.clone(),
-            default_allows: {
-                let mut allows: Vec<String> = self.default_allows.iter().cloned().collect();
-                allows.sort();
-                allows
-            },
+            fact_contributions: self.fact_contributions.clone(),
         })
     }
 
