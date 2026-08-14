@@ -206,6 +206,8 @@ fn tape_rule_to_ct(rule: Option<&JetComputeTapeRule>) -> CtValue {
         JetComputeTapeRule::Maximum => ("maximum", None, None),
         JetComputeTapeRule::Minimum => ("minimum", None, None),
         JetComputeTapeRule::Matmul => ("matmul", None, None),
+        JetComputeTapeRule::MseLoss => ("mse_loss", None, None),
+        JetComputeTapeRule::SgdStep { .. } => ("sgd_step", None, None),
         JetComputeTapeRule::Unary(op) => (op.as_str(), None, None),
         JetComputeTapeRule::Reshape { source_shape } => ("reshape", Some(source_shape), None),
         JetComputeTapeRule::Broadcast { source_shape } => ("broadcast", Some(source_shape), None),
@@ -226,6 +228,12 @@ fn tape_rule_to_ct(rule: Option<&JetComputeTapeRule>) -> CtValue {
     }
     if let Some(axis) = axis {
         fields.push(("axis".to_string(), CtValue::Int(axis)));
+    }
+    if let JetComputeTapeRule::SgdStep { learning_rate } = rule {
+        fields.push((
+            "learning_rate".to_string(),
+            CtValue::Float(CtFloat::f64(*learning_rate)),
+        ));
     }
     CtValue::Struct {
         type_name: "__JetComputeRule".to_string(),
@@ -630,6 +638,17 @@ fn tape_rule_from_ct(value: &CtValue, span: Span) -> Result<Option<JetComputeTap
             })
             .ok_or_else(|| unsupported("autodiff reduction axis", span))
     };
+    let learning_rate = || {
+        fields
+            .iter()
+            .find_map(|(name, value)| (name == "learning_rate").then_some(value))
+            .ok_or_else(|| unsupported("autodiff learning rate", span))
+            .and_then(|value| match value {
+                CtValue::Float(rate) => Ok(rate.as_f64()),
+                CtValue::Int(rate) => Ok(*rate as f64),
+                _ => Err(unsupported("autodiff learning rate", span)),
+            })
+    };
     Ok(Some(match kind {
         "add" => JetComputeTapeRule::Add,
         "sub" => JetComputeTapeRule::Sub,
@@ -638,6 +657,10 @@ fn tape_rule_from_ct(value: &CtValue, span: Span) -> Result<Option<JetComputeTap
         "maximum" => JetComputeTapeRule::Maximum,
         "minimum" => JetComputeTapeRule::Minimum,
         "matmul" => JetComputeTapeRule::Matmul,
+        "mse_loss" => JetComputeTapeRule::MseLoss,
+        "sgd_step" => JetComputeTapeRule::SgdStep {
+            learning_rate: learning_rate()?,
+        },
         "negate" | "abs" | "exp" | "log" | "sqrt" => {
             JetComputeTapeRule::Unary(kind.to_string())
         }
