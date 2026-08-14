@@ -8438,11 +8438,11 @@ fn serde_jit_parity_manifest_pins() {
             }),
             "{stem} must not return to the run-tier gap ledger"
         );
+        assert!(
+            compile_covered.iter().any(|row| row == stem),
+            "{stem} must remain compile-covered"
+        );
     }
-    assert!(
-        compile_covered.iter().any(|stem| stem == "serde/encoding_breadth"),
-        "encoding_breadth must remain compile-covered"
-    );
 }
 
 /// #1509 c4: negative control — the cross-check actually fires.

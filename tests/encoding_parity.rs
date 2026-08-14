@@ -376,6 +376,62 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev() {
     on_encoding_stack(whole_value_codecs_match_aot_comptime_and_default_dev_inner);
 }
 
+#[test]
+fn serde_examples_match_aot_default_resident_jit_and_interpreter() {
+    on_encoding_stack(serde_examples_match_aot_default_resident_jit_and_interpreter_inner);
+}
+
+fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping serde example parity (need rustc)");
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = Scratch::new("serde_examples");
+    for (stem, expected) in [
+        (
+            "serde/encoding_breadth",
+            concat!(
+                "{\"a\":1,\"b\":2}\ntrue\n2\ntrue\n",
+                "<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>\n",
+                "true\n{\"a\":1,\"b\":2}\naGk\n2\nNBUQ====\n2\n",
+            ),
+        ),
+        (
+            "serde/serde_generic",
+            concat!(
+                "{\"value\":7}\n42\n{\"value\":\"hi\"}\n",
+                "{\"raw\":9}\n3\n",
+            ),
+        ),
+    ] {
+        let jet_path = root.join("examples/features").join(format!("{stem}.jet"));
+        let expected_path = root
+            .join("examples/features/expected")
+            .join(format!("{stem}.out"));
+        assert_eq!(
+            fs::read_to_string(&expected_path).expect("serde golden output"),
+            expected,
+            "{stem} golden output drifted"
+        );
+
+        let aot = run_aot(&jet_path, scratch.path());
+        let expected_output = ProgramOutput::ran(expected.to_string(), String::new(), 0);
+        assert_eq!(aot, expected_output, "{stem} AOT output drifted");
+
+        let (backend, default_run) = run_default_dev(jet_path.to_str().unwrap());
+        assert_eq!(
+            backend,
+            DevBackend::ResidentJit,
+            "{stem} default run must stay resident JIT"
+        );
+        assert_eq!(default_run, aot, "{stem} default run diverged from AOT");
+
+        let interpreter = run_forced_interpreter(jet_path.to_str().unwrap());
+        assert_eq!(interpreter, aot, "{stem} interpreter diverged from AOT");
+    }
+}
+
 fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping whole-value encoding parity (need rustc)");
