@@ -315,7 +315,7 @@ impl ProfileConfig {
                     .iter()
                     .map(|(key, value)| format!("{}:{key}{}:{value}", key.len(), value.len()))
                     .collect::<Vec<_>>()
-                    .join(",")
+                    .join("")
             ));
         }
         parts.join(";")
