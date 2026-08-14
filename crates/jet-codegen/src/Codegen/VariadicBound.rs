@@ -222,6 +222,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                         meta: None,
                         name: var.clone(),
                         name_span: *var_span,
+                        sigil_span: None,
                         pattern: None,
                         ty: None,
                         ty_span: None,

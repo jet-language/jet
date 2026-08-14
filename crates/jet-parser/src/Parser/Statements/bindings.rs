@@ -9,7 +9,7 @@ impl<'a> Parser<'a> {
         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
         // struct — instead of a plain `name`.
         if let Some(pattern) = self.try_bind_pattern()? {
-            let mutable = self.expect_bind_sigil()?;
+            let (mutable, sigil_span) = self.expect_bind_sigil()?;
             let init = self.expr()?;
             return Ok(Binding {
                 mutable,
@@ -18,6 +18,7 @@ impl<'a> Parser<'a> {
                 meta: None,
                 name: String::new(),
                 name_span: pattern.span(),
+                sigil_span: Some(sigil_span),
                 pattern: Some(pattern),
                 ty: None,
                 ty_span: None,
@@ -55,7 +56,7 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
-        let mutable = self.expect_bind_sigil()?;
+        let (mutable, sigil_span) = self.expect_bind_sigil()?;
         // Bare `name := uninit` — type must ride a `Type.{ uninit }` head.
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
             && matches!(
@@ -89,6 +90,7 @@ impl<'a> Parser<'a> {
                     meta: None,
                     name,
                     name_span,
+                    sigil_span: Some(sigil_span),
                     pattern: None,
                     ty: Some(ty),
                     ty_span: Some(ty_span),
@@ -113,6 +115,7 @@ impl<'a> Parser<'a> {
             is_comptime: Syntax::is_comptime_name(&name),
             name,
             name_span,
+            sigil_span: Some(sigil_span),
             pattern: None,
             ty: None,
             ty_span: None,
@@ -126,16 +129,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-BIND-BARE1: consume `::` (immutable) or `:=` (mutable); returns `mutable`.
-    pub(super) fn expect_bind_sigil(&mut self) -> Result<bool, Diagnostic> {
+    /// D-BIND-BARE1: consume `::` (immutable) or `:=` (mutable), returning the
+    /// mutability and exact source span for the consumed sigil.
+    pub(super) fn expect_bind_sigil(&mut self) -> Result<(bool, Span), Diagnostic> {
         match self.peek().kind {
             TokKind::ColonColon => {
-                self.bump();
-                Ok(false)
+                let span = self.bump().span;
+                Ok((false, span))
             }
             TokKind::ColonEq => {
-                self.bump();
-                Ok(true)
+                let span = self.bump().span;
+                Ok((true, span))
             }
             _ => Err(Diagnostic::error(
                 "E0003",
@@ -525,11 +529,14 @@ impl<'a> Parser<'a> {
             self.take_mark()?;
         }
         let (name, name_span) = self.expect_ident("for the compile-time binding")?;
-        if retired {
+        let sigil_span = if retired {
             self.expect(TokKind::Eq, "in the retired comptime binding")?;
+            None
         } else {
+            let span = self.peek().span;
             self.expect(TokKind::ColonColon, "after a compile-time binding name")?;
-        }
+            Some(span)
+        };
         let init = self.expr()?;
         Ok(Binding {
             mutable: false,
@@ -538,6 +545,7 @@ impl<'a> Parser<'a> {
             meta: None,
             name,
             name_span,
+            sigil_span,
             pattern: None,
             ty: None,
             ty_span: None,

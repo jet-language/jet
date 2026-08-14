@@ -1,5 +1,5 @@
 use super::*;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::{is_cloneable, type_requires_owned_iteration};
 use crate::Generics::{is_type_var_name, substitute_type};
 use crate::Collections;
@@ -5343,7 +5343,7 @@ impl<'a> Checker<'a> {
                 if let Expr::Ident(name, span) = &arg.expr {
                     if let Some(info) = self.lookup(name) {
                         if !info.mutable {
-                            self.diags.push(Diagnostic::error(
+                            let mut diagnostic = Diagnostic::error(
                                 "E0111",
                                 format!(
                                     "`{name}` was made with `{}`, so it can't be changed",
@@ -5358,7 +5358,14 @@ impl<'a> Checker<'a> {
                                     Syntax::SIGIL_BIND_MUT
                                 ),
                                 Some(*span),
-                            ));
+                            );
+                            if let Some(sigil_span) = info.binding_sigil_span {
+                                diagnostic = diagnostic.with_edit(TextEdit {
+                                    span: sigil_span,
+                                    new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+                                });
+                            }
+                            self.diags.push(diagnostic);
                         }
                     }
                 }

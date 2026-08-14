@@ -241,6 +241,7 @@ impl<'a> Checker<'a> {
                 depth,
                 LocalInfo {
                     def_span: name_span,
+                    binding_sigil_span: None,
                     ty: inner,
                     mutable: false,
                     param_conv: None,
@@ -272,6 +273,7 @@ impl<'a> Checker<'a> {
                     span,
                     LocalInfo {
                         def_span: span,
+                        binding_sigil_span: None,
                         ty,
                         mutable: false,
                         param_conv: None,
@@ -695,6 +697,7 @@ impl<'a> Checker<'a> {
                         Syntax::KW_IT,
                         LocalInfo {
                             def_span: span,
+                            binding_sigil_span: None,
                             ty: st,
                             mutable: false,
                             param_conv: None,

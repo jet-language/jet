@@ -243,6 +243,7 @@ impl<'a> Checker<'a> {
                         &p.name,
                         LocalInfo {
                             def_span: p.name_span,
+                            binding_sigil_span: None,
                             ty: self_ty,
                             mutable: matches!(p.convention, AccessConvention::Write),
                             param_conv: Some(p.convention),
@@ -298,6 +299,7 @@ impl<'a> Checker<'a> {
                     &p.name,
                     LocalInfo {
                         def_span: p.name_span,
+                        binding_sigil_span: None,
                         ty: pty,
                         mutable: matches!(p.convention, AccessConvention::Write),
                         param_conv: Some(p.convention),
@@ -410,6 +412,7 @@ impl<'a> Checker<'a> {
                 f.name_span,
                 LocalInfo {
                     def_span: f.name_span,
+                    binding_sigil_span: None,
                     ty: result_ty,
                     mutable: false,
                     param_conv: None,

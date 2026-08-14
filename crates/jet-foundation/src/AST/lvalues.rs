@@ -171,6 +171,9 @@ pub struct Binding {
     pub meta: Option<MetaAttr>,
     pub name: String,
     pub name_span: Span,
+    /// Source span of the binding mutability sigil (`::` or `:=`). Sema uses
+    /// this exact token span for a typed E0111 replacement.
+    pub sigil_span: Option<Span>,
     /// S74: when present, this binding destructures `init` instead of binding
     /// the single `name`. `name` is empty and `name_span` covers the pattern.
     pub pattern: Option<BindPattern>,

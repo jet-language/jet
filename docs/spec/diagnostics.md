@@ -57,15 +57,19 @@ coverage checks accept both.
    `remove:->`, or `generated:missing_arms`; the marker becomes typed fix
    metadata before the report is built. Fix prose is never parsed to recover
    an edit.
-4. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
+4. When a fix names one exact source replacement, author its `TextEdit` at the
+   raise site from the source span and replacement token. The diagnostic model
+   carries that typed edit unchanged; changing the human Fix sentence must not
+   change `fix_edits`.
+5. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
    recoverable errors, and includes no raw rustc text. Every report row has a
    UI snapshot, including test, tool, web, and editor reports when applicable.
-5. Emit it from lexer, parser, or sema—the layer that knows the violated rule.
+6. Emit it from lexer, parser, or sema—the layer that knows the violated rule.
    Codegen, AOT, JIT/dev, interpreter, and web hosts receive approved facts and
    marshal the same row or Prelude report (I3, I9). They do not re-encode the
    rule, defaults, policy, error meaning, or report words.
-6. Run the focused snapshot test without update mode, review the diff, then use
+7. Run the focused snapshot test without update mode, review the diff, then use
    the blessing procedure in `.claude/skills/verify/SKILL.md`. Re-run without
    update mode. Add `jet explain` coverage and regenerate
    `docs/reference/errors/` from the typed rows when the code is part of that

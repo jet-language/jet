@@ -356,6 +356,7 @@ impl<'a> Checker<'a> {
                 b.name_span,
                 LocalInfo {
                     def_span: b.name_span,
+                    binding_sigil_span: b.sigil_span,
                     ty,
                     mutable: true,
                     param_conv: None,
@@ -956,6 +957,7 @@ impl<'a> Checker<'a> {
                 b.name_span,
                 LocalInfo {
                     def_span: b.name_span,
+                    binding_sigil_span: if b.is_comptime { None } else { b.sigil_span },
                     ty: final_ty.clone(),
                     mutable: b.mutable && !b.is_comptime,
                     param_conv: None,
@@ -998,7 +1000,13 @@ impl<'a> Checker<'a> {
                 // The initializer itself didn't type-check; declare error
                 // placeholders so the bound names don't cascade into E0107.
                 for n in pattern.names() {
-                    self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                    self.declare_bound(
+                        n.local_name(),
+                        n.span,
+                        Type::Int,
+                        b.mutable,
+                        b.sigil_span,
+                    );
                 }
                 return;
             };
@@ -1040,7 +1048,13 @@ impl<'a> Checker<'a> {
                             Some(*type_span),
                         ));
                         for n in pattern.names() {
-                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                            self.declare_bound(
+                                n.local_name(),
+                                n.span,
+                                Type::Int,
+                                b.mutable,
+                                b.sigil_span,
+                            );
                         }
                         return;
                     }
@@ -1076,7 +1090,13 @@ impl<'a> Checker<'a> {
                             Some(*type_span),
                         ));
                         for n in pattern.names() {
-                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                            self.declare_bound(
+                                n.local_name(),
+                                n.span,
+                                Type::Int,
+                                b.mutable,
+                                b.sigil_span,
+                            );
                         }
                         return;
                     }
@@ -1084,7 +1104,13 @@ impl<'a> Checker<'a> {
                         // `field_type` resolves the field's type and reports E0302
                         // with a suggestion if the field name is unknown.
                         let fty = self.field_type(&it, &f.name, f.span).unwrap_or(Type::Int);
-                        self.declare_bound(f.local_name(), f.span, fty, b.mutable);
+                        self.declare_bound(
+                            f.local_name(),
+                            f.span,
+                            fty,
+                            b.mutable,
+                            b.sigil_span,
+                        );
                     }
                     // D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't
                     // name every field, and redundant when it already does.
@@ -1134,7 +1160,13 @@ impl<'a> Checker<'a> {
                                 Some(*span),
                             ));
                             for n in pattern.names() {
-                                self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                                self.declare_bound(
+                                    n.local_name(),
+                                    n.span,
+                                    Type::Int,
+                                    b.mutable,
+                                    b.sigil_span,
+                                );
                             }
                             return;
                         }
@@ -1185,7 +1217,13 @@ impl<'a> Checker<'a> {
                         }
                     }
                     for e in elems {
-                        self.declare_bound(&e.name, e.span, elem_ty.clone(), b.mutable);
+                        self.declare_bound(
+                            &e.name,
+                            e.span,
+                            elem_ty.clone(),
+                            b.mutable,
+                            b.sigil_span,
+                        );
                     }
                 }
                 BindPattern::Tuple { elems, span } => {
@@ -1201,7 +1239,13 @@ impl<'a> Checker<'a> {
                             };
                             let types = [Type::Named("Tensor".to_string()), pull_ty];
                             for (element, ty) in elems.iter().zip(types.iter()) {
-                                self.declare_bound(&element.name, element.span, ty.clone(), b.mutable);
+                                self.declare_bound(
+                                    &element.name,
+                                    element.span,
+                                    ty.clone(),
+                                    b.mutable,
+                                    b.sigil_span,
+                                );
                             }
                             return;
                         }
@@ -1219,7 +1263,13 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                         for n in pattern.names() {
-                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                            self.declare_bound(
+                                n.local_name(),
+                                n.span,
+                                Type::Int,
+                                b.mutable,
+                                b.sigil_span,
+                            );
                         }
                         return;
                     };
@@ -1263,7 +1313,13 @@ impl<'a> Checker<'a> {
                         }
                     }
                     for (e, (_, fty)) in elems.iter().zip(fields.iter()) {
-                        self.declare_bound(&e.name, e.span, (**fty).clone(), b.mutable);
+                        self.declare_bound(
+                            &e.name,
+                            e.span,
+                            (**fty).clone(),
+                            b.mutable,
+                            b.sigil_span,
+                        );
                     }
                 }
             }

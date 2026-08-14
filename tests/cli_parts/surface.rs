@@ -780,6 +780,42 @@ fn machine_report_paths stay_resolvable_across_repository_layouts() {
 }
 
 #[test]
+fn e0102_and_e0111_typed_fix_edits_apply() {
+    let dir = isolated_cwd("typed_fix_edits");
+    let typo = dir.join("typo.jet");
+    fs::write(&typo, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
+    let immutable = dir.join("immutable.jet");
+    fs::write(
+        &immutable,
+        "fn run() {\n    x :: 1\n    x = 2;\n    print(x);\n}\n",
+    )
+    .unwrap();
+
+    for (file, expected) in [
+        (&typo, "fn run() {\n    print(\"hi\");\n}\n"),
+        (
+            &immutable,
+            "fn run() {\n    x := 1\n    x = 2;\n    print(x);\n}\n",
+        ),
+    ] {
+        let output = Command::new(jet())
+            .args(["fix", file.to_str().unwrap()])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "jet fix failed for {}: {}",
+            file.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_to_string(file).unwrap(), expected);
+    }
+}
+
+#[test]
 fn clean_check_json_golden() {
     let dir = isolated_cwd("check_json_clean");
     fs::write(dir.join("clean.jet"), "fn run() {}\n").unwrap();

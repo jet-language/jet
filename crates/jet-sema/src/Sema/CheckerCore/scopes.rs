@@ -239,6 +239,7 @@ impl<'a> Checker<'a> {
                     depth,
                     LocalInfo {
                         def_span: name_span,
+                        binding_sigil_span: None,
                         ty: ty.clone(),
                         mutable: false,
                         param_conv: None,

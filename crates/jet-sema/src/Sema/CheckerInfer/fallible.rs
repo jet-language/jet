@@ -532,6 +532,7 @@ impl<'a> Checker<'a> {
                 Syntax::AMBIENT_ERR,
                 LocalInfo {
                     def_span: span,
+                    binding_sigil_span: None,
                     ty: err_ty,
                     mutable: false,
                     param_conv: None,

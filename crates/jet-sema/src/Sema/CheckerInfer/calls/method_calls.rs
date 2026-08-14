@@ -3,7 +3,7 @@ use crate::AST::{
     Type,
 };
 use crate::Collections;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::e0901;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::{
@@ -27,7 +27,7 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerInfer::contains_tuple_type;
 use crate::Sema::Diagnostics::{
-    builtin_type_from_ident, expr_root_ident, is_printable, suggest_field, type_is_copy,
+    builtin_type_from_ident, expr_root_ident, is_printable, type_is_copy,
 };
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
@@ -54,7 +54,32 @@ impl<'a> Checker<'a> {
                 candidates = self.method_names_for_type_name(type_name);
             }
         }
-        suggest_field(method, &candidates)
+        let mut best: Option<(String, usize)> = None;
+        let mut ambiguous = false;
+        for candidate in candidates {
+            let distance = crate::Syntax::edit_distance(method, &candidate);
+            if distance > 2 {
+                continue;
+            }
+            match best.as_ref().map(|(_, current)| *current) {
+                None => {
+                    best = Some((candidate, distance));
+                    ambiguous = false;
+                }
+                Some(current) if distance < current => {
+                    best = Some((candidate, distance));
+                    ambiguous = false;
+                }
+                Some(current)
+                    if distance == current
+                        && best.as_ref().is_some_and(|(known, _)| known != &candidate) =>
+                {
+                    ambiguous = true;
+                }
+                _ => {}
+            }
+        }
+        (!ambiguous).then(|| best.map(|(candidate, _)| candidate)).flatten()
     }
 
     fn receiver_method_label(receiver_ty: &Type) -> String {
@@ -4426,8 +4451,9 @@ impl<'a> Checker<'a> {
                 )
                 .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
                 .flatten();
-                let fix = self
-                    .method_candidate(method, &recv_ty, Some(&type_name))
+                let candidate = self.method_candidate(method, &recv_ty, Some(&type_name));
+                let fix = candidate
+                    .as_deref()
                     .map(|candidate| format!("did you mean `{candidate}`?"))
                     .or_else(|| {
                         materializer
@@ -4438,13 +4464,20 @@ impl<'a> Checker<'a> {
                             "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
                         )
                     });
-                self.diags.push(Diagnostic::error(
+                let mut diagnostic = Diagnostic::error(
                     "E0102",
                     format!("`{}` has no method `{}`", display_type_name, method),
                     "check the method name on this type".to_string(),
                     fix,
                     Some(span),
-                ));
+                );
+                if let Some(candidate) = candidate {
+                    diagnostic = diagnostic.with_edit(TextEdit {
+                        span,
+                        new_text: candidate,
+                    });
+                }
+                self.diags.push(diagnostic);
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }

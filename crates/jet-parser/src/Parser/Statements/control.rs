@@ -524,7 +524,7 @@ impl<'a> Parser<'a> {
     /// not a statement block — same separator convention as `[T].{ … }`.
     fn layout_ctor_binding(&mut self) -> Result<Stmt, Diagnostic> {
         let (name, name_span) = self.expect_ident("for the layout binding name")?;
-        let mutable = self.expect_bind_sigil()?;
+        let (mutable, _) = self.expect_bind_sigil()?;
         if mutable {
             return Err(Diagnostic::error(
                 "E0003",

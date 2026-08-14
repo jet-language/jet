@@ -183,6 +183,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         meta: None,
         name: ERRORS_VAR.to_string(),
         name_span: span,
+        sigil_span: None,
         pattern: None,
         ty: Some(Type::List(Box::new(field_error_ty()))),
         ty_span: Some(span),

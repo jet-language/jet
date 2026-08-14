@@ -476,6 +476,7 @@ impl<'a> Checker<'a> {
             meta: None,
             name: synth.clone(),
             name_span: span,
+            sigil_span: None,
             pattern: None,
             ty: None,
             ty_span: None,

@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, TextEdit};
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::CheckerInfer::is_reactive_handle_ty;
 use crate::Sema::Diagnostics::{is_cloneable, type_fix_hint};
@@ -134,14 +134,23 @@ use std::collections::HashSet;
                 }
                 if let Some(info) = self.lookup(name) {
                     if !info.mutable {
-                        self.diags.push(Diagnostic::error(
+                        let mut diagnostic = Diagnostic::error(
                             "E0111",
                             format!("`{}` can't be changed inside this lambda", name),
-                            "changing a value inside a short function requires a `var` binding"
+                            "changing a value inside a short function requires a `:=` binding"
                                 .to_string(),
-                            format!("declare `var {}: …` instead of `val`", name),
+                            format!(
+                                "declare `{name} := …` instead of `{name} :: …`"
+                            ),
                             Some(lam.span),
-                        ));
+                        );
+                        if let Some(sigil_span) = info.binding_sigil_span {
+                            diagnostic = diagnostic.with_edit(TextEdit {
+                                span: sigil_span,
+                                new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+                            });
+                        }
+                        self.diags.push(diagnostic);
                     }
                 }
             }
@@ -429,6 +438,7 @@ use std::collections::HashSet;
                     &p.name,
                     LocalInfo {
                         def_span: p.name_span,
+                        binding_sigil_span: None,
                         ty: pty.clone(),
                         // D-MEM1 S6: `Shared<T>.edit(f)`'s closure param is the one
                         // builtin-closure shape that binds its param mutable with no
@@ -823,6 +833,7 @@ fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Dia
             meta: None,
             name: target.clone(),
             name_span: span,
+            sigil_span: None,
             pattern: None,
             ty: Some(Type::List(Box::new(item_ty.clone()))),
             ty_span: Some(span),

@@ -3,8 +3,8 @@
 //! Contract (docs/spec/diagnostics.md): every Diagnostic has a stable code,
 //! a `what` (one line, plain language), a `why` (the rule behind it), and
 //! a `fix` (a concrete next step, copy-pasteable when possible). Typed rows
-//! own those templates and all machine metadata; this module only fills holes
-//! and marshals the result into a report.
+//! own those templates and static machine metadata; raise sites supply any
+//! source-derived edit, and this module marshals the result into a report.
 //!
 //! Render format uses sentence capitalization — `Error` / `Why:` / `Fix:`
 //! (owner, 2026-06-11) — and width-aware caret columns so the underline
@@ -100,7 +100,7 @@ pub use crate::Terminal::ColorChoice;
 use crate::Terminal::Theme;
 
 /// A single-span text replacement (LSP quick-fix / M6 S14 autocorrect).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextEdit {
     pub span: Span,
     pub new_text: String,
@@ -161,8 +161,8 @@ pub struct Diagnostic {
     pub span: Option<Span>,
     /// Ordered report codes that caused this report. Root reports carry none.
     pub cause: Vec<String>,
-    /// Mechanical fix projected from the diagnostic row's structured-fix
-    /// metadata (S14).
+    /// Mechanical fix projected from row metadata or authored from a
+    /// source-derived fact at the diagnostic raise site (S14).
     pub edit: Option<TextEdit>,
     /// Extra indented detail (e.g. tool output for E0704).
     pub detail: Option<String>,
@@ -271,6 +271,13 @@ impl Diagnostic {
             detail: None,
             structured: None,
         }
+    }
+
+    /// Attach a source-derived edit authored by the checker at the diagnostic
+    /// raise site. Human fix prose is presentation only.
+    pub fn with_edit(mut self, edit: TextEdit) -> Self {
+        self.edit = Some(edit);
+        self
     }
 
     /// Build a compile-time error emitted by a programmable build rule.
@@ -1266,6 +1273,32 @@ mod crypto_diagnostic_contract_tests {
             diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
             Some(",")
         );
+    }
+
+    #[test]
+    fn construction_edit_survives_fix_rewording() {
+        let span = Span::new(4, 9);
+        let edit = TextEdit {
+            span,
+            new_text: "print".to_string(),
+        };
+        let original = Diagnostic::error(
+            "E0102",
+            "nothing named `pirnt` exists here".to_string(),
+            "only known functions can be called".to_string(),
+            "did you mean `print`?".to_string(),
+            Some(span),
+        )
+        .with_edit(edit.clone());
+        let reworded = Diagnostic::error(
+            "E0102",
+            "nothing named `pirnt` exists here".to_string(),
+            "only known functions can be called".to_string(),
+            "try `print` instead".to_string(),
+            Some(span),
+        )
+        .with_edit(edit);
+        assert_eq!(original.edit, reworded.edit);
     }
 
     #[test]

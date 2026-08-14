@@ -730,6 +730,9 @@ fn find_forward_refs_inner(
 #[derive(Debug, Clone)]
 pub(crate) struct LocalInfo {
     def_span: Span,
+    /// Source span of this local binding's `::`/`:=` sigil, when it has one.
+    /// Parameters and compiler-created locals have no binding sigil.
+    binding_sigil_span: Option<Span>,
     ty: Type,
     mutable: bool,
     /// Set when the name is a parameter (with its access convention).

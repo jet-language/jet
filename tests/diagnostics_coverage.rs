@@ -785,6 +785,70 @@ fn every_emitted_code_has_snapshot() {
     );
 }
 
+#[test]
+fn e0102_and_e0111_exact_replacement_reports_carry_machine_edits() {
+    let mut failures = Vec::new();
+    check_json_snapshots_for_edits(&root().join("tests/cli"), &mut failures);
+    assert!(
+        failures.is_empty(),
+        "machine-readable diagnostics with one exact replacement token must carry fix_edits:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            check_json_snapshots_for_edits(&path, failures);
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line, raw) in text.lines().enumerate() {
+            let Ok(report) = jet_foundation::JSON::parse_json(raw) else {
+                continue;
+            };
+            let Some(schema) = jet_foundation::JSON::json_get(&report, "schema")
+                .and_then(jet_foundation::JSON::json_str)
+            else {
+                continue;
+            };
+            if schema != "jet.report/v1" {
+                continue;
+            }
+            let Some(fix) = jet_foundation::JSON::json_get(&report, "fix")
+                .and_then(jet_foundation::JSON::json_str)
+            else {
+                continue;
+            };
+            if !names_one_exact_replacement(fix) {
+                continue;
+            }
+            let has_edit = matches!(
+                jet_foundation::JSON::json_get(&report, "fix_edits"),
+                Some(jet_foundation::JSON::JSONValue::Array(edits)) if !edits.is_empty()
+            );
+            if !has_edit {
+                failures.push(format!("{}:{} — {fix}", path.display(), line + 1));
+            }
+        }
+    }
+}
+
+fn names_one_exact_replacement(fix: &str) -> bool {
+    (fix.starts_with("did you mean `") && fix.ends_with("`?"))
+        || (fix.starts_with("replace `") && fix.contains("` with `"))
+        || (fix.starts_with("declare it with `") && fix.contains(" := "))
+}
+
 // ---------------------------------------------------------------------------
 // Acknowledged gap sentinel: the list must not grow silently
 // ---------------------------------------------------------------------------

@@ -5,7 +5,14 @@ use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 impl<'a> Checker<'a> {
         /// Declare one name bound by a destructuring pattern (S74).
-        pub(crate) fn declare_bound(&mut self, name: &str, span: Span, ty: Type, mutable: bool) {
+        pub(crate) fn declare_bound(
+            &mut self,
+            name: &str,
+            span: Span,
+            ty: Type,
+            mutable: bool,
+            binding_sigil_span: Option<Span>,
+        ) {
             let sendable = self.sendability_problem(&ty, true).is_none();
             let single_use_span = if self.type_is_single_use(&ty) {
                 Some(span)
@@ -17,6 +24,7 @@ impl<'a> Checker<'a> {
                 span,
                 LocalInfo {
                     def_span: span,
+                    binding_sigil_span,
                     ty,
                     mutable,
                     param_conv: None,

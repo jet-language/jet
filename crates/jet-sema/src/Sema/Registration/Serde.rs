@@ -1068,6 +1068,7 @@ fn binding(name: &str, ty: Option<Type>, init: Expr, mutable: bool, span: Span) 
         meta: None,
         name: name.to_string(),
         name_span: span,
+        sigil_span: None,
         pattern: None,
         ty,
         ty_span: Some(span),

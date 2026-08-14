@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, BinOp, Call, CallablePolicyChain, Expr, StrPart, Type};
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0904, e0905};
 use crate::Sema::Bundle::{fn_types_compatible, func_sig_to_fn_type};
 use crate::Sema::Checker;
@@ -896,7 +896,7 @@ impl<'a> Checker<'a> {
                     Syntax::KW_FN,
                     call.name
                 );
-                let mut best: Option<(&str, usize)> = None;
+                let mut candidates = Vec::new();
                 let prelude_cands: Vec<&str> = if self.no_prelude {
                     Vec::new()
                 } else {
@@ -909,14 +909,27 @@ impl<'a> Checker<'a> {
                     .chain(prelude_cands.iter().copied())
                 {
                     let d = edit_distance(&call.name, cand);
-                    if d <= 2 && best.map_or(true, |(_, bd)| d < bd) {
-                        best = Some((cand, d));
+                    if d <= 2 && !candidates.iter().any(|(known, _)| *known == cand) {
+                        candidates.push((cand, d));
                     }
                 }
-                if let Some((cand, _)) = best {
+                let suggestion = candidates
+                    .iter()
+                    .map(|(_, distance)| *distance)
+                    .min()
+                    .map(|distance| {
+                        candidates
+                            .iter()
+                            .filter(|(_, candidate_distance)| *candidate_distance == distance)
+                            .map(|(candidate, _)| *candidate)
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|matches| matches.len() == 1)
+                    .map(|matches| matches[0]);
+                if let Some(cand) = suggestion {
                     fix = format!("did you mean `{}`?", cand);
                 }
-                self.diags.push(Diagnostic::error(
+                let mut diagnostic = Diagnostic::error(
                     "E0102",
                     format!("nothing named `{}` exists here", call.name),
                     format!(
@@ -925,7 +938,14 @@ impl<'a> Checker<'a> {
                     ),
                     fix,
                     Some(call.name_span),
-                ));
+                );
+                if let Some(cand) = suggestion {
+                    diagnostic = diagnostic.with_edit(TextEdit {
+                        span: call.name_span,
+                        new_text: cand.to_string(),
+                    });
+                }
+                self.diags.push(diagnostic);
                 for arg in call.args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
@@ -1568,7 +1588,7 @@ impl<'a> Checker<'a> {
                         if let Expr::Ident(name, span) = &arg.expr {
                             if let Some(info) = self.lookup(name) {
                                 if !info.mutable {
-                                    self.diags.push(Diagnostic::error(
+                                    let mut diagnostic = Diagnostic::error(
                                         "E0111",
                                         format!(
                                             "`{}` was made with `{}`, so it can't be changed",
@@ -1586,7 +1606,14 @@ impl<'a> Checker<'a> {
                                             Syntax::SIGIL_BIND_MUT
                                         ),
                                         Some(*span),
-                                    ));
+                                    );
+                                    if let Some(sigil_span) = info.binding_sigil_span {
+                                        diagnostic = diagnostic.with_edit(TextEdit {
+                                            span: sigil_span,
+                                            new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+                                        });
+                                    }
+                                    self.diags.push(diagnostic);
                                 }
                             }
                         }

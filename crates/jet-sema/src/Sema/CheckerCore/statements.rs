@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, TextEdit};
 use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
 use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
@@ -626,7 +626,7 @@ impl<'a> Checker<'a> {
                                         Syntax::SIGIL_BIND_MUT
                                     )
                                 };
-                                self.diags.push(Diagnostic::error(
+                                let mut diagnostic = Diagnostic::error(
                                     "E0111",
                                     what,
                                     format!(
@@ -635,7 +635,14 @@ impl<'a> Checker<'a> {
                                     ),
                                     fix,
                                     Some(name_span),
-                                ));
+                                );
+                                if let Some(sigil_span) = info.binding_sigil_span {
+                                    diagnostic = diagnostic.with_edit(TextEdit {
+                                        span: sigil_span,
+                                        new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+                                    });
+                                }
+                                self.diags.push(diagnostic);
                             }
                             self.clear_moved_binding(name);
                             if matches!(&info.ty, Type::Fn { .. }) {
@@ -1808,6 +1815,7 @@ impl<'a> Checker<'a> {
                                 &v,
                                 LocalInfo {
                                     def_span: vs,
+                                    binding_sigil_span: None,
                                     ty: Type::Int,
                                     mutable: false,
                                     param_conv: None,
@@ -2371,6 +2379,7 @@ impl<'a> Checker<'a> {
                         *name_span,
                         LocalInfo {
                             def_span: *name_span,
+                            binding_sigil_span: None,
                             ty: Type::Named(Syntax::TYPE_TASKGROUP.to_string()),
                             mutable: false,
                             param_conv: None,
@@ -2412,6 +2421,7 @@ impl<'a> Checker<'a> {
                         *name_span,
                         LocalInfo {
                             def_span: *name_span,
+                            binding_sigil_span: None,
                             ty: Type::Named(Syntax::LAYOUT_TYPE.to_string()),
                             mutable: false,
                             param_conv: None,
