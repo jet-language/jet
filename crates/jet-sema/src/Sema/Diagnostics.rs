@@ -1339,6 +1339,41 @@ pub(crate) fn is_equatable(
     }
 }
 
+fn native_structural_ordering(
+    ty: &Type,
+    registry: &TypeRegistry,
+    visiting: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. } => native_structural_ordering(inner, registry, visiting),
+        Type::Result { ok, err } => {
+            native_structural_ordering(ok, registry, visiting)
+                && native_structural_ordering(err, registry, visiting)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| native_structural_ordering(field, registry, visiting)),
+        Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
+        Type::Named(name) => {
+            let Some((params, target)) = registry.type_alias(name) else {
+                return false;
+            };
+            if !params.is_empty() || !visiting.insert(name.clone()) {
+                return false;
+            }
+            let ready = native_structural_ordering(target, registry, visiting);
+            visiting.remove(name);
+            ready
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
     if is_secret_bearing_crypto_type(ty) {
         return false;
@@ -1346,11 +1381,16 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
-        Type::Option(inner) => types_comparable(inner, registry),
-        Type::Result { ok, err } => {
-            types_comparable(ok, registry) && types_comparable(err, registry)
+        Type::Option(inner) => {
+            native_structural_ordering(inner, registry, &mut HashSet::new())
         }
-        Type::List(inner) => types_comparable(inner, registry),
+        Type::Result { ok, err } => {
+            native_structural_ordering(ok, registry, &mut HashSet::new())
+                && native_structural_ordering(err, registry, &mut HashSet::new())
+        }
+        Type::List(inner) => {
+            native_structural_ordering(inner, registry, &mut HashSet::new())
+        }
         Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
         // D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
         Type::Named(name)
@@ -1372,11 +1412,17 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") => false,
         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
-        Type::Tuple(fields) => fields.iter().all(|(_, t)| types_comparable(t, registry)),
+        Type::Tuple(fields) => fields.iter().all(|(_, t)| {
+            native_structural_ordering(t, registry, &mut HashSet::new())
+        }),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
-        Type::FixedList { elem, .. } => types_comparable(elem, registry),
-        Type::Tagged { inner, .. } => types_comparable(inner, registry),
-        Type::Union(members) => members.iter().all(|m| types_comparable(m, registry)),
+        Type::FixedList { elem, .. } => {
+            native_structural_ordering(elem, registry, &mut HashSet::new())
+        }
+        Type::Tagged { inner, .. } => {
+            native_structural_ordering(inner, registry, &mut HashSet::new())
+        }
+        Type::Union(_) => false,
         // Same as the prior `\0Quantity` encoding: falls through the generic
         // `Type::Apply` trait-lookup path, which never registered an
         // `Equatable` impl for the marker name, so this stayed non-comparable.

@@ -463,16 +463,32 @@ impl TraitRegistry {
             Type::Int | Type::IntN { .. } | Type::Bool | Type::String | Type::Char => None,
             Type::Float | Type::Float32 => Some(ty.name()),
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
-                self.partial_comparable_offender(inner, items, visiting)
+                let offender = self.partial_comparable_offender(inner, items, visiting);
+                offender.or_else(|| {
+                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
+                })
             }
-            Type::Result { ok, err } => self
-                .partial_comparable_offender(ok, items, visiting)
-                .or_else(|| self.partial_comparable_offender(err, items, visiting)),
-            Type::Tuple(fields) => fields.iter().find_map(|(_, field)| {
-                self.partial_comparable_offender(field, items, visiting)
-            }),
+            Type::Result { ok, err } => {
+                let offender = self
+                    .partial_comparable_offender(ok, items, visiting)
+                    .or_else(|| self.partial_comparable_offender(err, items, visiting));
+                offender.or_else(|| {
+                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
+                })
+            }
+            Type::Tuple(fields) => {
+                let offender = fields.iter().find_map(|(_, field)| {
+                    self.partial_comparable_offender(field, items, visiting)
+                });
+                offender.or_else(|| {
+                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
+                })
+            }
             Type::Tagged { inner, .. } => {
-                self.partial_comparable_offender(inner, items, visiting)
+                let offender = self.partial_comparable_offender(inner, items, visiting);
+                offender.or_else(|| {
+                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
+                })
             }
             Type::Named(name) => {
                 if name == Syntax::TYPE_FLOAT || name == "F32" {
@@ -537,50 +553,33 @@ impl TraitRegistry {
                 result
             }
             Type::Apply { name, args } => {
-                if self
-                    .trait_impls
-                    .contains(&(name.clone(), COMPARABLE.to_string()))
-                {
-                    return None;
-                }
-                if !self.implements_trait(name, COMPARABLE) {
-                    return Some(name.clone());
-                }
-                let Some(params) = self
-                    .struct_params
-                    .get(name)
-                    .or_else(|| self.enum_params.get(name))
-                else {
-                    return self.partial_comparable_offender(
-                        &Type::Named(name.clone()),
-                        items,
-                        visiting,
-                    );
-                };
-                let subst: HashMap<String, Type> = params
+                let offender = args
                     .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                if let Some(Item::Struct(s)) = items
-                    .iter()
-                    .find(|item| matches!(item, Item::Struct(s) if s.name == *name))
-                {
-                    return s
-                        .fields
-                        .iter()
-                        .filter(|field| field.computed.is_none())
-                        .find_map(|field| {
-                            self.partial_comparable_offender(
-                                &substitute_type(&field.ty, &subst),
-                                items,
-                                visiting,
-                            )
-                        });
-                }
-                self.partial_comparable_offender(&Type::Named(name.clone()), items, visiting)
+                    .find_map(|arg| self.partial_comparable_offender(arg, items, visiting));
+                offender.or_else(|| Some(name.clone()))
             }
             other => Some(other.name()),
+        }
+    }
+
+    /// Structural values currently lower through Rust's comparison operators.
+    /// A direct Jet nominal value uses the generated Comparable hook instead,
+    /// but a nominal nested in a container has no Rust PartialOrd bridge.
+    fn native_ordering_ready(ty: &Type) -> bool {
+        match ty {
+            Type::Int | Type::IntN { .. } | Type::Bool | Type::String | Type::Char => true,
+            Type::List(inner)
+            | Type::Option(inner)
+            | Type::FixedList { elem: inner, .. }
+            | Type::Tagged { inner, .. } => Self::native_ordering_ready(inner),
+            Type::Result { ok, err } => {
+                Self::native_ordering_ready(ok) && Self::native_ordering_ready(err)
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .all(|(_, field)| Self::native_ordering_ready(field)),
+            Type::Named(name) => matches!(name.as_str(), "U8" | "Ordering"),
+            _ => false,
         }
     }
 
@@ -1058,56 +1057,79 @@ impl TraitRegistry {
     ) -> bool {
         match ty {
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
-                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+                if trait_name == COMPARABLE {
+                    Self::native_ordering_ready(ty)
+                } else {
+                    self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+                }
             }
             Type::Result { ok, err } => {
-                self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
-                    && self.auto_derive_type_ready(
-                        err,
-                        trait_name,
-                        type_params,
-                        foreign_supports,
-                    )
+                if trait_name == COMPARABLE {
+                    Self::native_ordering_ready(ty)
+                } else {
+                    self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
+                        && self.auto_derive_type_ready(
+                            err,
+                            trait_name,
+                            type_params,
+                            foreign_supports,
+                        )
+                }
             }
             Type::Map { key, value, .. } => {
-                trait_name != EQUATABLE
-                    && self.auto_derive_type_ready(
-                        key,
-                        trait_name,
-                        type_params,
-                        foreign_supports,
-                    )
-                    && self.auto_derive_type_ready(
-                        value,
-                        trait_name,
-                        type_params,
-                        foreign_supports,
-                    )
+                if trait_name == COMPARABLE {
+                    false
+                } else {
+                    trait_name != EQUATABLE
+                        && self.auto_derive_type_ready(
+                            key,
+                            trait_name,
+                            type_params,
+                            foreign_supports,
+                        )
+                        && self.auto_derive_type_ready(
+                            value,
+                            trait_name,
+                            type_params,
+                            foreign_supports,
+                        )
+                }
             }
-            Type::Tuple(fields) => fields
-                .iter()
-                .all(|(_, field)| {
-                    self.auto_derive_type_ready(
-                        field,
-                        trait_name,
-                        type_params,
-                        foreign_supports,
-                    )
-                }),
-            Type::Union(members) => members.iter().all(|member| {
-                self.auto_derive_type_ready(
-                    member,
-                    trait_name,
-                    type_params,
-                    foreign_supports,
-                )
-            }),
+            Type::Tuple(fields) => {
+                if trait_name == COMPARABLE {
+                    Self::native_ordering_ready(ty)
+                } else {
+                    fields.iter().all(|(_, field)| {
+                        self.auto_derive_type_ready(
+                            field,
+                            trait_name,
+                            type_params,
+                            foreign_supports,
+                        )
+                    })
+                }
+            }
+            Type::Union(members) => {
+                if trait_name == COMPARABLE {
+                    Self::native_ordering_ready(ty)
+                } else {
+                    members.iter().all(|member| {
+                        self.auto_derive_type_ready(
+                            member,
+                            trait_name,
+                            type_params,
+                            foreign_supports,
+                        )
+                    })
+                }
+            }
             Type::Apply { name, args } => {
-                foreign_supports(name, trait_name)
-                    .unwrap_or_else(|| self.implements_trait(name, trait_name))
-                    && args
-                        .iter()
-                        .all(|arg| {
+                if trait_name == COMPARABLE {
+                    false
+                } else {
+                    foreign_supports(name, trait_name)
+                        .unwrap_or_else(|| self.implements_trait(name, trait_name))
+                        && args.iter().all(|arg| {
                             self.auto_derive_type_ready(
                                 arg,
                                 trait_name,
@@ -1115,9 +1137,14 @@ impl TraitRegistry {
                                 foreign_supports,
                             )
                         })
+                }
             }
             Type::Tagged { inner, .. } => {
-                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+                if trait_name == COMPARABLE {
+                    Self::native_ordering_ready(ty)
+                } else {
+                    self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+                }
             }
             Type::Named(name) if type_params.iter().any(|param| param.name == *name) => {
                 type_params
@@ -1244,17 +1271,25 @@ impl TraitRegistry {
                     && !matches!(trait_name, CLOSE | COMPARABLE)
             }
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
-                if matches!(trait_name, EQUATABLE | COMPARABLE) =>
+                if trait_name == EQUATABLE =>
             {
                 self.type_implements_trait(inner, trait_name)
             }
-            Type::Result { ok, err } if matches!(trait_name, EQUATABLE | COMPARABLE) => {
+            Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
+                if trait_name == COMPARABLE => Self::native_ordering_ready(inner),
+            Type::Result { ok, err } if trait_name == EQUATABLE => {
                 self.type_implements_trait(ok, trait_name)
                     && self.type_implements_trait(err, trait_name)
             }
-            Type::Tuple(fields) if matches!(trait_name, EQUATABLE | COMPARABLE) => fields
+            Type::Result { ok, err } if trait_name == COMPARABLE => {
+                Self::native_ordering_ready(ok) && Self::native_ordering_ready(err)
+            }
+            Type::Tuple(fields) if trait_name == EQUATABLE => fields
                 .iter()
                 .all(|(_, field)| self.type_implements_trait(field, trait_name)),
+            Type::Tuple(fields) if trait_name == COMPARABLE => fields
+                .iter()
+                .all(|(_, field)| Self::native_ordering_ready(field)),
             Type::Named(name) => self.implements_trait(name, trait_name),
             Type::Apply { name, args } => {
                 if !self.implements_trait(name, trait_name) {
@@ -1279,6 +1314,9 @@ impl TraitRegistry {
                     })
             }
             Type::TraitObject(bounds) => bounds.iter().any(|bound| bound == trait_name),
+            Type::Tagged { inner, .. } if trait_name == COMPARABLE => {
+                Self::native_ordering_ready(inner)
+            }
             Type::Tagged { inner, .. } => self.type_implements_trait(inner, trait_name),
             other => self.implements_trait(&other.name(), trait_name),
         }
