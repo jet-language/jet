@@ -106,9 +106,7 @@ fn run() {
     print(shadowed.raw())
 }
 "#;
-    let (code, stdout) = tir_support::build_and_run("imaginary_unit_shadow", source);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "9\n4.0\n");
+    tir_support::assert_tiers_agree("imaginary_unit_shadow", source, "9\n4.0\n");
 }
 
 #[test]

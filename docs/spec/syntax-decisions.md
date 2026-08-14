@@ -6463,9 +6463,9 @@ minting the imaginary component of the ratified Complex type. Only the suffix fo
 is special: bare i is untouched, and shadowing risks are the same as any unit
 suffix in scope.
 
-The `Complex` and `i` Syntax rows are registered now; imaginary semantics and
-their UI or formatter snapshots are owed to #1556. No standalone `i` keyword row
-is added because it remains an ordinary identifier.
+The `Complex` and `i` Syntax rows are registered now; #1556 carries the
+imaginary semantics and their UI or formatter snapshots. No standalone `i`
+keyword row is added because it remains an ordinary identifier.
 
 Amends: none.
 

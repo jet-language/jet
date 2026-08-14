@@ -178,6 +178,7 @@ use core.math.[abs]
 
 fn run() {
     z :: 3 + 4i
+    print(z)
     print(z * z)
     print(abs(z))
 }
@@ -189,6 +190,7 @@ fn run() {
     assert!(result.wasm_rust.contains("JetComplex"));
     assert!(result.wasm_rust.contains("jet_complex_mul"));
     assert!(result.wasm_rust.contains("jet_complex_abs"));
+    assert!(result.wasm_rust.contains("impl std::fmt::Display for JetComplex"));
     assert!(!result.wasm_rust.contains("4i"));
 }
 
