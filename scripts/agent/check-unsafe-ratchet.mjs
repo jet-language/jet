@@ -177,6 +177,22 @@ function skipSpace(text, start) {
   return index;
 }
 
+function skipLayout(text, start) {
+  let index = start;
+  for (;;) {
+    const spaced = skipSpace(text, index);
+    if (spaced !== index) {
+      index = spaced;
+      continue;
+    }
+    if (text.startsWith("//", index) || text.startsWith("/*", index)) {
+      index = skipComment(text, index);
+      continue;
+    }
+    return index;
+  }
+}
+
 function decodeJetString(text) {
   let value = "";
   for (let index = 0; index < text.length; index += 1) {
@@ -213,12 +229,17 @@ function quotedStringAt(text, start) {
 
 function unsafeAt(text, start) {
   if (text[start] !== "#") return null;
-  let index = skipSpace(text, start + 1);
+  let index = skipLayout(text, start + 1);
   if (!text.startsWith("Unsafe", index) || isIdentifierChar(text[index + "Unsafe".length])) return null;
-  index = skipSpace(text, index + "Unsafe".length);
+  index = skipLayout(text, index + "Unsafe".length);
   if (text[index] !== "(") return null;
-  const literal = quotedStringAt(text, skipSpace(text, index + 1));
-  return literal ? { end: literal.end, reason: literal.reason } : null;
+  const literal = quotedStringAt(text, skipLayout(text, index + 1));
+  if (!literal) return null;
+  const end = skipBalanced(text, index, "(", ")");
+  if (end <= index || text[end - 1] !== ")" || !markerSequenceLeadsToBlockOrFunction(text, end)) {
+    return null;
+  }
+  return { end, reason: literal.reason };
 }
 
 function skipBalanced(text, start, open, close) {
@@ -250,29 +271,29 @@ function markerGroupAt(text, start) {
   const markers = [];
   let index = start + 2;
   while (index < text.length) {
-    index = skipSpace(text, index);
+    index = skipLayout(text, index);
     if (text[index] === "]") return { end: index + 1, markers };
     let negated = false;
     if (text[index] === "!") {
       negated = true;
-      index = skipSpace(text, index + 1);
+      index = skipLayout(text, index + 1);
     }
     if (!/[A-Za-z_]/.test(text[index] ?? "")) return null;
     const nameStart = index;
     index += 1;
     while (isIdentifierChar(text[index])) index += 1;
     const name = text.slice(nameStart, index);
-    index = skipSpace(text, index);
+    index = skipLayout(text, index);
     let reason = null;
     if (text[index] === "(") {
       if (name === "Unsafe") {
-        const literal = quotedStringAt(text, skipSpace(text, index + 1));
+        const literal = quotedStringAt(text, skipLayout(text, index + 1));
         reason = literal?.reason ?? null;
       }
       index = skipBalanced(text, index, "(", ")");
     }
     markers.push({ name, negated, reason });
-    index = skipSpace(text, index);
+    index = skipLayout(text, index);
     if (text[index] === ",") {
       index += 1;
       continue;
@@ -281,6 +302,53 @@ function markerGroupAt(text, start) {
     return null;
   }
   return null;
+}
+
+function skipBareMarker(text, start) {
+  if (text[start] !== "#") return null;
+  let index = skipLayout(text, start + 1);
+  if (text[index] === "!") index = skipLayout(text, index + 1);
+  if (!/[A-Za-z_]/.test(text[index] ?? "")) return null;
+  index += 1;
+  while (isIdentifierChar(text[index])) index += 1;
+  index = skipLayout(text, index);
+  if (text[index] !== "(") return index;
+  const end = skipBalanced(text, index, "(", ")");
+  return end > index && text[end - 1] === ")" ? end : null;
+}
+
+function startsWord(text, start, word) {
+  return text.startsWith(word, start) && !isIdentifierChar(text[start + word.length]);
+}
+
+function markerSequenceLeadsToFunction(text, start) {
+  let index = skipLayout(text, start);
+  for (;;) {
+    if (text[index] === ";") {
+      index = skipLayout(text, index + 1);
+      continue;
+    }
+    if (text.startsWith("#[", index)) {
+      const group = markerGroupAt(text, index);
+      if (!group) return false;
+      index = skipLayout(text, group.end);
+      continue;
+    }
+    if (text[index] === "#") {
+      const end = skipBareMarker(text, index);
+      if (end === null) return false;
+      index = skipLayout(text, end);
+      continue;
+    }
+    break;
+  }
+  if (startsWord(text, index, "fn")) return true;
+  return startsWord(text, index, "pub") && startsWord(text, skipLayout(text, index + 3), "fn");
+}
+
+function markerSequenceLeadsToBlockOrFunction(text, start) {
+  const index = skipLayout(text, start);
+  return text[index] === "{" || markerSequenceLeadsToFunction(text, index);
 }
 
 function scanSource(text, relativePath, owner) {
@@ -310,10 +378,10 @@ function scanSource(text, relativePath, owner) {
     if (text.startsWith("#[", index)) {
       const group = markerGroupAt(text, index);
       if (group) {
-        for (const marker of group.markers) {
-          if (marker.name !== "Unsafe" || marker.negated || marker.reason === null) continue;
+        const unsafeMarkers = group.markers.filter((marker) => marker.name === "Unsafe" && !marker.negated && marker.reason !== null);
+        if (unsafeMarkers.length === 1 && markerSequenceLeadsToFunction(text, group.end)) {
           const position = location(starts, index);
-          regions.push({ package: owner, file: relativePath, line: position.line, column: position.column, reason: marker.reason });
+          regions.push({ package: owner, file: relativePath, line: position.line, column: position.column, reason: unsafeMarkers[0].reason });
         }
         index = group.end;
         continue;
@@ -432,6 +500,40 @@ function regionKey(region) {
   return JSON.stringify([region.package, region.file, region.reason]);
 }
 
+function exactRegionKey(region) {
+  return JSON.stringify([region.package, region.file, region.line, region.column, region.reason]);
+}
+
+function sameRegions(current, baseline) {
+  if (current.regions.length !== baseline.regions.length) return false;
+  return current.regions.every((region, index) => exactRegionKey(region) === exactRegionKey(baseline.regions[index]));
+}
+
+function staleRows(current, baseline) {
+  const remaining = new Map();
+  for (const region of baseline.regions) {
+    const key = exactRegionKey(region);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const added = [];
+  for (const region of current.regions) {
+    const key = exactRegionKey(region);
+    const count = remaining.get(key) ?? 0;
+    if (count > 0) remaining.set(key, count - 1);
+    else added.push(region);
+  }
+  const removed = [];
+  for (const region of baseline.regions) {
+    const key = exactRegionKey(region);
+    const count = remaining.get(key) ?? 0;
+    if (count > 0) {
+      remaining.set(key, count - 1);
+      removed.push(region);
+    }
+  }
+  return { added, removed };
+}
+
 function growth(current, baseline) {
   const packages = [...new Set([...Object.keys(current.counts), ...Object.keys(baseline.counts)])].sort(compareText);
   const increases = packages
@@ -455,6 +557,17 @@ function formatGrowth(details) {
   if (details.newRegions.length === 0) lines.push("  (baseline rows changed without enough named rows to identify the additions)");
   else for (const region of details.newRegions) lines.push(`  - ${region.package} ${region.file}:${region.line}:${region.column} reason ${JSON.stringify(region.reason)}`);
   lines.push("update the committed baseline in the same change:", "  node scripts/agent/check-unsafe-ratchet.mjs --update");
+  return lines.join("\n");
+}
+
+function formatStale(details) {
+  const lines = ["unsafe-region baseline is stale; semantic site rows changed:", "current rows:"];
+  if (details.added.length === 0) lines.push("  (none)");
+  else for (const region of details.added) lines.push(`  - ${region.package} ${region.file}:${region.line}:${region.column} reason ${JSON.stringify(region.reason)}`);
+  lines.push("baseline rows no longer present:");
+  if (details.removed.length === 0) lines.push("  (none)");
+  else for (const region of details.removed) lines.push(`  - ${region.package} ${region.file}:${region.line}:${region.column} reason ${JSON.stringify(region.reason)}`);
+  lines.push("refresh the committed baseline in the same change:", "  node scripts/agent/check-unsafe-ratchet.mjs --update");
   return lines.join("\n");
 }
 
@@ -488,6 +601,9 @@ function main() {
   if (current.total < baseline.data.total) {
     writeFileSync(options.baseline, baselineDocument(baseline.text, current));
     console.log(`unsafe ratchet: baseline decreased to ${current.total} regions`);
+  } else if (!sameRegions(current, baseline.data)) {
+    console.error(formatStale(staleRows(current, baseline.data)));
+    process.exitCode = 1;
   } else {
     console.log(`unsafe ratchet: ${current.total} regions; baseline unchanged`);
   }
