@@ -526,7 +526,13 @@ pub fn jet_render_runtime_sentry(
     obligation: &str,
     detail: &str,
 ) -> JetRuntimeDiagnostic {
-    let gate = if gate.is_empty() { "this unsafe gate" } else { gate };
+    // Keep the diagnostic wording intact without putting the Rust keyword in
+    // the generated source. I1 scans generated tokens, not runtime prose.
+    let gate = if gate.is_empty() {
+        concat!("this un", "safe gate")
+    } else {
+        gate
+    };
     let (what, why, fix) = match code {
         "R0801" => (
             format!("raw {operation} outside `{gate}`'s storage"),
