@@ -5453,6 +5453,22 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::TcpStreamReady | THandleOp::UdpSocketReady if args.len() == 2 => true,
         THandleOp::UdpSocketReceiveDeadline if args.len() == 2 => true,
         THandleOp::UdpSocketSendToDeadline if args.len() == 3 => true,
+        THandleOp::TLSStreamReadDeadline
+        | THandleOp::TLSStreamWriteAllDeadline
+        | THandleOp::TLSStreamReady if args.len() == 2 => true,
+        THandleOp::TLSStreamClose | THandleOp::TLSStreamPeerIdentity if args.is_empty() => true,
+        THandleOp::TLSStreamCloseWrite if args.len() == 1 => true,
+        THandleOp::TLSClientConfigDefault if args.is_empty() => true,
+        THandleOp::TLSClientConfigWithAlpn
+        | THandleOp::TLSRootCertificatesFromPem
+        | THandleOp::TLSClientConfigWithTrust
+        | THandleOp::TLSClientConfigWithIdentity
+            if args.len() == 1 =>
+        {
+            true
+        }
+        THandleOp::TLSClientIdentityFromPem
+        | THandleOp::TLSClientConfigWithVersionBounds if args.len() == 2 => true,
         THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
             ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
             ("HTTPResponse", "header") if args.len() == 1 => true,

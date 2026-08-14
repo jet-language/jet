@@ -21374,7 +21374,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::TcpStreamWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamPeerAddr => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamLocalAddr => Err("jit handle method unsupported".to_string()),
-            THandleOp::TLSStreamReadDeadline if args.len() == 2 => {
+            THandleOp::TLSStreamReadDeadline => {
                 let limit = self.lower_expr(&args[0])?;
                 let deadline = self.lower_expr(&args[1])?;
                 Ok(self.call_host(
@@ -21382,7 +21382,7 @@ impl LowerCtx<'_, '_> {
                     &[recv_val, limit, deadline],
                 ))
             }
-            THandleOp::TLSStreamWriteAllDeadline if args.len() == 2 => {
+            THandleOp::TLSStreamWriteAllDeadline => {
                 let data = self.lower_expr(&args[0])?;
                 let deadline = self.lower_expr(&args[1])?;
                 Ok(self.call_host(
@@ -21390,7 +21390,7 @@ impl LowerCtx<'_, '_> {
                     &[recv_val, data, deadline],
                 ))
             }
-            THandleOp::TLSStreamReady if args.len() == 2 => {
+            THandleOp::TLSStreamReady => {
                 let interest = self.lower_expr(&args[0])?;
                 let deadline = self.lower_expr(&args[1])?;
                 Ok(self.call_host(
@@ -21401,7 +21401,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::TLSStreamClose => {
                 Ok(self.call_host(self.host.net_http.tls_close, &[recv_val]))
             }
-            THandleOp::TLSStreamCloseWrite if args.len() == 1 => {
+            THandleOp::TLSStreamCloseWrite => {
                 let deadline = self.lower_expr(&args[0])?;
                 Ok(self.call_host(
                     self.host.net_http.tls_close_write,
@@ -21415,14 +21415,14 @@ impl LowerCtx<'_, '_> {
                 self.host.net_http.tls_client_config_default,
                 &[],
             )),
-            THandleOp::TLSRootCertificatesFromPem if args.len() == 1 => {
+            THandleOp::TLSRootCertificatesFromPem => {
                 let pem = self.lower_expr(&args[0])?;
                 Ok(self.call_host(
                     self.host.net_http.tls_root_certificates_from_pem,
                     &[pem],
                 ))
             }
-            THandleOp::TLSClientIdentityFromPem if args.len() == 2 => {
+            THandleOp::TLSClientIdentityFromPem => {
                 let cert_chain = self.lower_expr(&args[0])?;
                 let private_key = self.lower_expr(&args[1])?;
                 Ok(self.call_host(
@@ -21430,28 +21430,28 @@ impl LowerCtx<'_, '_> {
                     &[cert_chain, private_key],
                 ))
             }
-            THandleOp::TLSClientConfigWithAlpn if args.len() == 1 => {
+            THandleOp::TLSClientConfigWithAlpn => {
                 let protocols = self.lower_expr(&args[0])?;
                 Ok(self.call_host(
                     self.host.net_http.tls_client_config_with_alpn,
                     &[recv_val, protocols],
                 ))
             }
-            THandleOp::TLSClientConfigWithTrust if args.len() == 1 => {
+            THandleOp::TLSClientConfigWithTrust => {
                 let trust = self.lower_expr(&args[0])?;
                 Ok(self.call_host(
                     self.host.net_http.tls_client_config_with_trust,
                     &[recv_val, trust],
                 ))
             }
-            THandleOp::TLSClientConfigWithIdentity if args.len() == 1 => {
+            THandleOp::TLSClientConfigWithIdentity => {
                 let identity = self.lower_expr(&args[0])?;
                 Ok(self.call_host(
                     self.host.net_http.tls_client_config_with_identity,
                     &[recv_val, identity],
                 ))
             }
-            THandleOp::TLSClientConfigWithVersionBounds if args.len() == 2 => {
+            THandleOp::TLSClientConfigWithVersionBounds => {
                 let min = self.lower_expr(&args[0])?;
                 let max = self.lower_expr(&args[1])?;
                 Ok(self.call_host(
