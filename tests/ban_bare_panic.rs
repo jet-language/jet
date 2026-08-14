@@ -19,7 +19,9 @@
 //! panic site AND a seeded extra panic on an already-allowlisted file trip
 //! this test, per card #453's exit criteria.
 //!
-//! Run: `cargo test --test ban_bare_panic`
+//! CI and `scripts/agent/verify-full.sh` pick this root integration target up
+//! through the complete Cargo test-target inventory. Run:
+//! `scripts/agent/jet-env cargo test --test ban_bare_panic`
 
 mod common;
 
@@ -31,7 +33,7 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// (path relative to repo root, max allowed bare `panic!(` occurrences, why).
+/// (path relative to repo root, exact bare `panic!(` baseline, why).
 const ALLOWLIST: &[(&str, usize, &str)] = &[
     (
         "crates/jet-foundation/src/Diagnostics.rs",
@@ -248,7 +250,7 @@ fn count_bare_panics(text: &str) -> usize {
 #[derive(Debug, Clone)]
 struct ExamplePanicBudgetEntry {
     path: String,
-    max: usize,
+    baseline: usize,
     reason: String,
 }
 
@@ -271,7 +273,7 @@ fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
             .unwrap_or_default()
             .trim()
             .to_owned();
-        let max = fields
+        let baseline = fields
             .next()
             .unwrap_or_default()
             .trim()
@@ -287,7 +289,10 @@ fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
             path.starts_with("examples/features/"),
             "panic budget path must be a feature-corpus source: {path}"
         );
-        assert!(max > 0, "panic budget count must be positive: {path}");
+        assert!(
+            baseline > 0,
+            "panic budget count must be positive: {path}"
+        );
         assert!(
             !reason.is_empty(),
             "panic budget entry needs a teaching reason: {path}"
@@ -299,7 +304,11 @@ fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
             );
         }
         previous_path = Some(path.clone());
-        entries.push(ExamplePanicBudgetEntry { path, max, reason });
+        entries.push(ExamplePanicBudgetEntry {
+            path,
+            baseline,
+            reason,
+        });
     }
 
     assert!(
@@ -450,11 +459,13 @@ fn example_panic_budget_violations(
     current: &[(String, usize)],
     budget: &[ExamplePanicBudgetEntry],
 ) -> Vec<String> {
+    // Baselines are exact, not reusable ceilings: every source reduction must
+    // retire its allowance so a later panic cannot spend it again.
     let mut allowed = BTreeMap::new();
-    let mut maximum_total = 0;
+    let mut baseline_total = 0;
     for entry in budget {
-        maximum_total += entry.max;
-        allowed.insert(entry.path.clone(), entry.max);
+        baseline_total += entry.baseline;
+        allowed.insert(entry.path.clone(), entry.baseline);
     }
 
     let mut current_paths = BTreeSet::new();
@@ -467,13 +478,16 @@ fn example_panic_budget_violations(
             None if *count > 0 => violations.push(format!(
                 "{path}: {count} panic( calls are unbudgeted; add a real teaching reason before keeping this path"
             )),
-            Some(max) if *count > *max => violations.push(format!(
-                "{path}: {count} panic( calls grew past its budget of {max} ({}); migrate the failure instead",
+            Some(baseline) if *count > *baseline => violations.push(format!(
+                "{path}: {count} panic( calls grew past its baseline of {baseline} ({}); migrate the failure instead",
                 budget
                     .iter()
                     .find(|entry| entry.path.as_str() == path.as_str())
                     .map(|entry| entry.reason.as_str())
                     .unwrap_or("missing reason")
+            )),
+            Some(baseline) if *count < *baseline => violations.push(format!(
+                "{path}: panic baseline is stale at {baseline}; current source has {count}, lower the baseline or remove the path"
             )),
             _ => {}
         }
@@ -487,9 +501,9 @@ fn example_panic_budget_violations(
             ));
         }
     }
-    if current_total > maximum_total {
+    if current_total > baseline_total {
         violations.push(format!(
-            "feature corpus total grew to {current_total} panic( calls; budget is {maximum_total}"
+            "feature corpus total grew to {current_total} panic( calls; baseline is {baseline_total}"
         ));
     }
     violations
@@ -515,9 +529,9 @@ fn examples_panic_budget_trips_on_seeded_growth() {
     let seed = budget
         .first()
         .expect("panic budget needs a seeded growth entry");
-    let seeded_source = "panic(\"seeded\")\n".repeat(seed.max + 1);
+    let seeded_source = "panic(\"seeded\")\n".repeat(seed.baseline + 1);
     let seeded_count = count_jet_panic_calls(&seeded_source);
-    assert_eq!(seeded_count, seed.max + 1);
+    assert_eq!(seeded_count, seed.baseline + 1);
 
     let current = vec![(seed.path.clone(), seeded_count)];
     let violations = example_panic_budget_violations(&current, &budget);

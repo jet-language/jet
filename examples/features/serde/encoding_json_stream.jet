@@ -33,9 +33,9 @@ fn run() ? {
             .Key(key) && key == "a" -> print("event:Key:a")
             .Int(value) && value == 1 -> print("event:Int:1")
             .ObjectEnd -> print("event:ObjectEnd")
-            // The writer above emits only the five events handled here. Any
-            // other event means this example and its reader contract disagree.
-            else -> panic("unexpected JSON event")
+            // The writer above emits only the five events handled here. Keep
+            // the reader total if the event contract gains another variant.
+            else -> print("event:unexpected")
         }
         read_count++
     }
