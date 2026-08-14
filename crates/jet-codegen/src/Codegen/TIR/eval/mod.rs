@@ -18,7 +18,7 @@ mod webapp;
 
 #[allow(dead_code)]
 mod gc_runtime {
-    include!("../../../../jet-rt/src/__gc.rs");
+    include!("../../../../../jet-rt/src/__gc.rs");
 }
 
 mod contract_semantics {
