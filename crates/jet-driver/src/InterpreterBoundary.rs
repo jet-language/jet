@@ -4,9 +4,9 @@
 //! Keeping the pure AST walk in the driver prevents either product from
 //! depending on the root host or inventing a second boundary vocabulary.
 
-use crate::AST::{Expr, ImportKind, Item, ProgramBundle, Stmt};
+use crate::AST::{core_import_maps, Expr, ImportKind, Item, ProgramBundle, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 struct Boundary {
     feature: String,
@@ -42,6 +42,7 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
 fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary> {
     let has_typed_cli = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
     for module in &bundle.modules {
+        let (core_modules, core_items) = core_import_maps(&module.imports);
         let interpreted_functions: HashSet<&str> = module
             .items
             .iter()
@@ -56,6 +57,15 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
             if let ImportKind::Module(name, span) = &import.kind {
                 if let Some(feature) = native_module_feature(name, debug_impure) {
                     return Some(Boundary { feature: feature.to_string(), span: Some(*span) });
+                }
+            }
+            if debug_impure {
+                let (imported_modules, _) = core_import_maps(std::slice::from_ref(import));
+                if let Some(feature) = imported_modules
+                    .values()
+                    .find_map(|name| native_module_feature(name, true))
+                {
+                    return Some(Boundary { feature: feature.to_string(), span: Some(import.span) });
                 }
             }
         }
@@ -86,6 +96,15 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                             span: Some(function.name_span),
                         });
                     }
+                    if !debug_impure {
+                        if let Some(boundary) = scan_stmts_for_process_edge(
+                            &function.body,
+                            &core_modules,
+                            &core_items,
+                        ) {
+                            return Some(boundary);
+                        }
+                    }
                     if let Some(boundary) =
                         scan_stmts_for_mut_arg(&function.body, &interpreted_functions)
                     {
@@ -103,13 +122,75 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
     match name {
         "core.mem" => Some("uses the low-level `core.mem` tier"),
         "core.files" if debug_impure => Some("reads or writes files"),
-        "core.sys" => Some("reads the environment"),
-        "core.process" => Some("runs another process or exits early"),
+        "core.sys" | "core.process" if debug_impure => process_module_feature(name),
         // `core.time` / `core.math.random` are allowed: deterministic `Clock`/`Rng`
         // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
         // fail at the expression if unsupported.
         _ => None,
     }
+}
+
+fn process_module_feature(name: &str) -> Option<&'static str> {
+    match name {
+        "core.sys" => Some("reads the environment"),
+        "core.process" => Some("runs another process or exits early"),
+        _ => None,
+    }
+}
+
+fn scan_stmts_for_process_edge(
+    stmts: &[Stmt],
+    core_modules: &HashMap<String, String>,
+    core_items: &HashMap<String, String>,
+) -> Option<Boundary> {
+    let mut stmts = stmts.to_vec();
+    for stmt in &mut stmts {
+        let mut boundary = None;
+        stmt.for_each_expr_mut(|expr| {
+            if boundary.is_none() {
+                boundary = process_edge_boundary(expr, core_modules, core_items);
+            }
+        });
+        if boundary.is_some() {
+            return boundary;
+        }
+    }
+    None
+}
+
+fn process_edge_boundary(
+    expr: &Expr,
+    core_modules: &HashMap<String, String>,
+    core_items: &HashMap<String, String>,
+) -> Option<Boundary> {
+    let (module, item, span) = match expr {
+        Expr::Call(call) => (
+            core_modules.get(&call.name)?.as_str(),
+            core_items.get(&call.name)?.as_str(),
+            call.name_span,
+        ),
+        Expr::MethodCall {
+            receiver,
+            method,
+            method_span,
+            ..
+        } => {
+            let Expr::Ident(alias, _) = receiver.as_ref() else {
+                return None;
+            };
+            (core_modules.get(alias)?.as_str(), method.as_str(), *method_span)
+        }
+        _ => return None,
+    };
+
+    if matches!((module, item), ("core.sys", "atexit") | ("core.process", "exit")) {
+        return None;
+    }
+
+    process_module_feature(module).map(|feature| Boundary {
+        feature: feature.to_string(),
+        span: Some(span),
+    })
 }
 
 fn scan_stmts_for_mut_arg(
