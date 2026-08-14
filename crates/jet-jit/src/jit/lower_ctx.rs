@@ -24132,6 +24132,24 @@ impl LowerCtx<'_, '_> {
         {
             return Ok(self.call_host(self.host.math.str_concat, &[l, r]));
         }
+        if matches!((&lhs_ty, &rhs_ty), (Type::String, Type::String))
+            && matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+        {
+            // String ordering shares the Prelude text comparison kernel with
+            // the spaceship operator; the host only marshals string handles.
+            let method = self.b.ins().iconst(types::I64, 7);
+            let ordering = self
+                .call_host(self.host.text.string_method, &[l, method, r]);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            let cc = match op {
+                BinOp::Lt => IntCC::SignedLessThan,
+                BinOp::Gt => IntCC::SignedGreaterThan,
+                BinOp::Le => IntCC::SignedLessThanOrEqual,
+                BinOp::Ge => IntCC::SignedGreaterThanOrEqual,
+                _ => unreachable!(),
+            };
+            return Ok(self.bool_from_icmp(cc, ordering, zero));
+        }
         if matches!((&lhs_ty, &rhs_ty), (Type::Int, Type::Int)) {
             match op {
                 BinOp::Add => return Ok(self.call_host(self.host.num.int_add, &[l, r])),
