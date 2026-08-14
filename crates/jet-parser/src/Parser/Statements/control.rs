@@ -1604,7 +1604,13 @@ impl<'a> Parser<'a> {
                 if name == Syntax::KW_DEFER
                     || name == Syntax::KW_ASSERT
                     || name == Syntax::KW_NEXT
-                    || name == Syntax::FOREIGN_CONTINUE
+                    || matches!(
+                        name.as_str(),
+                        Syntax::FOREIGN_FOR
+                            | Syntax::FOREIGN_WHILE
+                            | Syntax::FOREIGN_CONTINUE
+                            | Syntax::FOREIGN_DO
+                    )
         ) || self.looks_like_sigil_binding()
         {
             return self.stmt();
@@ -1695,6 +1701,42 @@ impl<'a> Parser<'a> {
             || (matches!(self.peek().kind, TokKind::Comma) && !self.at_yielding_loop_clause())
     }
 
+    fn foreign_loop_has_block(&self) -> bool {
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        for token in self.toks.iter().skip(self.pos + 2) {
+            match token.kind {
+                TokKind::LParen => parens += 1,
+                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::LBracket => brackets += 1,
+                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::LBrace if parens == 0 && brackets == 0 => return true,
+                TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    if parens == 0 && brackets == 0 => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn at_foreign_loop_word_statement(&self, word: &str) -> bool {
+        match word {
+            Syntax::FOREIGN_FOR => {
+                matches!(self.peek2().kind, TokKind::Ident(_))
+                    && self.foreign_loop_has_block()
+            }
+            Syntax::FOREIGN_WHILE => {
+                !matches!(self.peek2().kind, TokKind::LParen)
+                    && self.foreign_loop_has_block()
+            }
+            Syntax::FOREIGN_CONTINUE => {
+                matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof)
+            }
+            Syntax::FOREIGN_DO => matches!(self.peek2().kind, TokKind::LBrace),
+            _ => false,
+        }
+    }
+
     fn foreign_loop_word_diagnostic(word: &str, span: Span) -> Diagnostic {
         let fix = match word {
             Syntax::FOREIGN_FOR => "write `loop item, source { … }`",
@@ -1706,7 +1748,7 @@ impl<'a> Parser<'a> {
         Diagnostic::error(
             "E0003",
             format!("expected a statement, found `{word}`"),
-            "foreign loop words are not Jet statements; Jet loop statements start with `loop`"
+            "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords"
                 .to_string(),
             fix.to_string(),
             Some(span),
@@ -2103,7 +2145,7 @@ impl<'a> Parser<'a> {
                         | Syntax::FOREIGN_WHILE
                         | Syntax::FOREIGN_CONTINUE
                         | Syntax::FOREIGN_DO
-                ) =>
+                ) && self.at_foreign_loop_word_statement(name) =>
             {
                 let word = name.clone();
                 let span = self.bump().span;

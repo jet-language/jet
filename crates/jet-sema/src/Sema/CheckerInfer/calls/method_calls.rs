@@ -105,6 +105,35 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn missing_instance_method_diagnostic(
+        &self,
+        method: &str,
+        receiver_ty: &Type,
+        type_name: Option<&str>,
+        why: String,
+        span: Span,
+    ) -> Diagnostic {
+        let candidate = self.method_candidate(method, receiver_ty, type_name);
+        let fix = candidate.as_deref().map_or_else(
+            || format!("check the spelling of `{method}`"),
+            |candidate| format!("did you mean `{candidate}`?"),
+        );
+        let mut diagnostic = Diagnostic::error(
+            "E0311",
+            format!("`{method}` isn't a method on this value"),
+            why,
+            fix,
+            Some(span),
+        );
+        if let Some(candidate) = candidate {
+            diagnostic = diagnostic.with_edit(TextEdit {
+                span,
+                new_text: candidate,
+            });
+        }
+        diagnostic
+    }
+
     /// D-FAIL-CARRIER1=A: a fact an error type carries on its report.
     ///
     /// An error type opts into a middle state by carrying it on its report:
@@ -4408,19 +4437,14 @@ impl<'a> Checker<'a> {
             if !builtin_methods.is_empty()
                 && !matches!(&recv_ty, Type::Apply { name, .. } if name == Syntax::TYPE_ITER)
             {
-                let fix = self
-                    .method_candidate(method, &recv_ty, None)
-                    .map_or_else(
-                        || format!("check the spelling of `{method}`"),
-                        |candidate| format!("did you mean `{candidate}`?"),
-                    );
-                self.diags.push(Diagnostic::error(
-                    "E0311",
-                    format!("`{method}` isn't a method on this value"),
+                let diagnostic = self.missing_instance_method_diagnostic(
+                    method,
+                    &recv_ty,
+                    None,
                     Self::missing_receiver_method_why(&recv_ty, method),
-                    fix,
-                    Some(span),
-                ));
+                    span,
+                );
+                self.diags.push(diagnostic);
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
@@ -4431,21 +4455,16 @@ impl<'a> Checker<'a> {
                 Type::Option(inner) => match inner.as_ref() {
                     Type::Named(n) | Type::Apply { name: n, .. } => n.clone(),
                     _ => {
-                        let fix = self
-                            .method_candidate(method, &recv_ty, None)
-                            .map_or_else(
-                                || format!("check the spelling of `{method}`"),
-                                |candidate| format!("did you mean `{candidate}`?"),
-                            );
-                        self.diags.push(Diagnostic::error(
-                            "E0311",
-                            format!("`{}` isn't a method on this value", method),
+                        let diagnostic = self.missing_instance_method_diagnostic(
+                            method,
+                            &recv_ty,
+                            None,
                             format!(
                                 "this value does not expose an instance method named `{method}`"
                             ),
-                            fix,
-                            Some(span),
-                        ));
+                            span,
+                        );
+                        self.diags.push(diagnostic);
                         for a in args.iter_mut() {
                             self.infer(&mut a.expr);
                         }
@@ -4453,21 +4472,16 @@ impl<'a> Checker<'a> {
                     }
                 },
                 _ => {
-                    let fix = self
-                        .method_candidate(method, &recv_ty, None)
-                        .map_or_else(
-                            || format!("check the spelling of `{method}`"),
-                            |candidate| format!("did you mean `{candidate}`?"),
-                        );
-                    self.diags.push(Diagnostic::error(
-                        "E0311",
-                        format!("`{}` isn't a method on this value", method),
+                    let diagnostic = self.missing_instance_method_diagnostic(
+                        method,
+                        &recv_ty,
+                        None,
                         format!(
                             "this value does not expose an instance method named `{method}`"
                         ),
-                        fix,
-                        Some(span),
-                    ));
+                        span,
+                    );
+                    self.diags.push(diagnostic);
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
