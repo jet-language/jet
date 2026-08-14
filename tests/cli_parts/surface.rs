@@ -671,7 +671,7 @@ fn check_json_golden() {
 }
 
 #[test]
-fn machine_report_paths stay_resolvable_across_repository_layouts() {
+fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     let dir = isolated_cwd("machine_report_paths");
     let runner = dir.join("runner");
     fs::create_dir_all(&runner).unwrap();
