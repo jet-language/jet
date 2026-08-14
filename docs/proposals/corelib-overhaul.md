@@ -305,7 +305,7 @@ So: prefer a **consistent tree** over one-off short doors. Do not invent
 - **Cer6 — Prefer methods on domain types** (Path, String, Clock) so the
   hottest work pays no module prefix.
 
-### Grouped `use` list (proposed — D-CORE-USELIST1)
+### Grouped `use` list (ratified 2026-08-06 — D-CORE-USELIST1)
 
 One list form. Use square brackets, the same list shape Jet already uses
 elsewhere. Put `as` next to a name when you want a shorter local name.

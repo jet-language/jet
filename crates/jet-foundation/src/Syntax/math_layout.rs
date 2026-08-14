@@ -423,7 +423,7 @@ pub const FOREIGN_AND: &str = "and";
 pub const FOREIGN_OR: &str = "or";
 pub const FOREIGN_NOT: &str = "not";
 
-/// S16 (ratified M6; amended 2026-06-16, D-S16-USE): file path or module `use`; optional `as`.
+/// S16 (ratified M6; amended 2026-06-16, D-S16-USE, D-CORE-USELIST1): file path or module `use`; optional `as`.
 pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 

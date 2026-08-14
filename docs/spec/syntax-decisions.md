@@ -1363,8 +1363,12 @@ by #343.
 
 ### Modules, visibility & imports
 
-**S16 — `use`** *(D-S16-USE, D-MOD1/2, D-MOD-DIR, D-SELIMPORT1)*: quotes mean
+**S16 — `use`** *(D-S16-USE, D-MOD1/2, D-MOD-DIR, D-SELIMPORT1, D-CORE-USELIST1)*: quotes mean
 a file path, no quotes mean a module; `as alias` optional in both.
+
+**D-CORE-USELIST1=A amends D-SELIMPORT1.** A grouped member import uses one
+bracket list, with `as` beside the member that needs a local name. The former
+brace-group spelling is retired, and wildcard imports do not parse.
 
 ```jet
 use "./lib"                      // file path, namespace lib

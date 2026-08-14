@@ -2612,6 +2612,28 @@ fn web_compute_wasm_bridge_roundtrip() {
 }
 
 #[test]
+fn web_grouped_use_list_wasm_bridge_roundtrip() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web grouped-use-list test (need rustc + node)");
+        return;
+    }
+    let src = r#"#Target(Web)
+use core.math.[abs, min]
+
+#WasmExport
+fn compute() => Int {
+    return abs(-8) + min(9, 4)
+}
+
+#Target(JS)
+fn run() { print(compute()) }
+"#;
+    let dir = build_web_fixture("grouped_use_list", src, "tests/fixtures/web_grouped_use_list.jet");
+    assert_eq!(run_web_app(&dir), "12\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn codable_struct_wasm_bridge_reconstructs_typed_argument() {
     let src = include_str!("ui/web_abi_codable.jet");
     let dir = build_web_fixture("codable_struct", src, "tests/ui/web_abi_codable.jet");

@@ -7,6 +7,9 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
+// D-CORE-USELIST1=A (ratified 2026-08-06, card #1575): grouped `use` imports
+// use one `.[…]` list with an optional `as` beside each member. Brace groups
+// and wildcard imports are retired.
 // D-TESTFAULT1=A: TEST_FAULTS_PARAM is the named configuration slot on the
 // existing KW_TEST marker; it introduces no token or new grammar category.
 // D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A: KW_MARKER is the one

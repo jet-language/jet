@@ -303,7 +303,8 @@ impl<'a> Parser<'a> {
             first_span: Span,
         ) -> Result<crate::AST::ImportDecl, Diagnostic> {
             // Continue eating dots to build the full dotted name. A dot that
-            // introduces `[` (the member list) or `*`
+            // introduces `[` (the member list), `{` (the retired member list),
+            // or `*`
             // (a wildcard) belongs to that suffix, not to the path — otherwise
             // `use core.math.[abs, min]` would demand a name after the last dot.
             let mut name = first;
@@ -311,7 +312,7 @@ impl<'a> Parser<'a> {
             while matches!(self.peek().kind, TokKind::Dot)
                 && !matches!(
                     self.peek2().kind,
-                    TokKind::LBracket | TokKind::Star
+                    TokKind::LBracket | TokKind::LBrace | TokKind::Star
                 )
             {
                 self.bump();
@@ -332,6 +333,16 @@ impl<'a> Parser<'a> {
                     format!("`use {name}.*` would hide where each name comes from"),
                     format!("list each item instead: `use {name}.[item, other]`"),
                     Some(star_span),
+                ));
+            }
+            if matches!(self.peek().kind, TokKind::LBrace) {
+                let brace_span = self.bump().span;
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "brace import groups are not supported".to_string(),
+                    format!("`use {name}.{{…}}` is the retired grouped-import spelling"),
+                    format!("write `use {name}.[item, other as local]`"),
+                    Some(brace_span),
                 ));
             }
             if matches!(self.peek().kind, TokKind::LBracket) {

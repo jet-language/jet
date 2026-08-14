@@ -149,6 +149,9 @@ fn run() {
 /// needs its own program per case (an inline expression alone can't `use`),
 /// so it gets a dedicated differential loop rather than reusing `CASES`.
 const MODULE_CASES: &[&str] = &[
+    // D-CORE-USELIST1=A: comptime resolves each bracket-list member to the
+    // same default local name that runtime code uses.
+    "use core.math.[abs, min]\n@comptime_value :: abs(-8) + min(9, 4)\n\nfn run() {\n    r :: abs(-8) + min(9, 4)\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
     // `("core.string", ...)` was a dead dispatch key (no import resolves to
     // it — `core.text` is the only ratified spelling), so every
     // `text.<method>(...)` call hit E0956. Fixed via `TextLite` (ported
