@@ -1126,6 +1126,15 @@ fn repl_core_math_multiple_calls() {
 }
 
 #[test]
+fn repl_core_grouped_math_use_list_inline() {
+    let out = run_transcript(
+        &["use core.math.[abs, min]", "abs(-8) + min(9, 4)"],
+        None,
+    );
+    assert_eq!(out.trim(), "ok\n12 : Int");
+}
+
+#[test]
 fn repl_core_math_pow_inline() {
     // Another effect-approved math function: math.pow(2.0, 10.0) = 1024.
     let inputs = &["use core.math as math", "math.pow(2.0, 10.0)"];
