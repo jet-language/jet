@@ -44,6 +44,10 @@ allocation adapter reports a typed allocation failure value. An I/O adapter
 reports the existing IOError value. Neither adapter throws a host-only
 exception or makes a policy decision.
 
+The shared fallible-allocation rail is the final internal scheduler channel for
+every non-empty fault plan. It does not add a public selector or change the
+ratified `Fs.Write` spelling.
+
 For Fs.Write, the shipped adapters cover ordinary writes, append/create,
 atomic replacement, write-at, links, renames, directory mutation, temporary
 files, locks, and file-writer flush/write operations. IO.Read, IO.Write, and
@@ -62,14 +66,18 @@ use core.testing as testing
 #Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
     path :: testing.temp_dir("sqlite-fault")
     fs.write(path, "journal") ?? return
+    values := List.try_with_capacity(1) ?? return
+    values.try_push(1) ?? return
+    require(values.len() == 1)
     fs.remove(path) ?? return
 }
 ~~~
 
 The clean run proves the normal path. Each reachable write site then receives
 one injected failure. ?? return handles the injected IOError without a panic,
-so the iteration passes. The same body also proves that later cleanup does not
-turn an earlier write failure into an uncaught panic.
+so the iteration passes. The same body exercises the shared fail-nth allocation
+rail through the typed AllocError result. It also proves that later cleanup
+does not turn an earlier write failure into an uncaught panic.
 
 ## Tier law
 

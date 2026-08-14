@@ -62,6 +62,21 @@ pub(crate) mod text_rt {
             Other(IOContext),
         }
 
+        impl IOError {
+            pub fn other(
+                operation: IOOperation,
+                resource: Option<String>,
+                cause: impl ToString,
+            ) -> Self {
+                Self::Other(IOContext::new(
+                    operation,
+                    resource,
+                    None,
+                    Some(cause.to_string()),
+                ))
+            }
+        }
+
         pub fn io_error_at(operation: IOOperation, path: &str, e: std::io::Error) -> IOError {
             let context = IOContext::new(
                 operation,

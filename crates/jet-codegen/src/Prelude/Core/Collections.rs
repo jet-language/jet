@@ -211,6 +211,9 @@ fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
 // reservations stay here; map storage insertion is a representation hook.
 // AOT, JIT, and TIR-eval marshal these functions.
 fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+    if jet_fault_should_fail_allocation() {
+        return Err(jet_alloc_error(0, "List"));
+    }
     Ok(Vec::new())
 }
 
@@ -220,6 +223,9 @@ fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError
     }
     let capacity = usize::try_from(capacity).map_err(|_| jet_alloc_error(0, "List"))?;
     let requested = capacity.saturating_mul(std::mem::size_of::<T>().max(1));
+    if jet_fault_should_fail_allocation() {
+        return Err(jet_alloc_error(requested, "List"));
+    }
     let mut list = Vec::new();
     list.try_reserve_exact(capacity)
         .map_err(|_| jet_alloc_error(requested, "List"))?;
@@ -228,6 +234,9 @@ fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError
 
 fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
     let requested = std::mem::size_of::<T>().max(1);
+    if jet_fault_should_fail_allocation() {
+        return Err(jet_alloc_error(requested, "List"));
+    }
     xs.try_reserve(1)
         .map_err(|_| jet_alloc_error(requested, "List"))?;
     xs.push(value);
@@ -240,6 +249,9 @@ fn jet_list_try_reserve<T>(xs: &mut Vec<T>, additional: i64) -> JetOutcome<(), A
     }
     let additional = usize::try_from(additional).map_err(|_| jet_alloc_error(0, "List"))?;
     let requested = additional.saturating_mul(std::mem::size_of::<T>().max(1));
+    if jet_fault_should_fail_allocation() {
+        return Err(jet_alloc_error(requested, "List"));
+    }
     xs.try_reserve(additional)
         .map_err(|_| jet_alloc_error(requested, "List"))?;
     Ok(())
@@ -254,12 +266,18 @@ fn jet_map_try_insert<K: Ord + Clone, V: Clone>(
         return Ok(map.insert(key, value));
     }
     let requested = std::mem::size_of::<(K, V)>().max(1);
+    if jet_fault_should_fail_allocation() {
+        return Err(jet_alloc_error(requested, "Map"));
+    }
     jet_map_try_insert_storage(map, key, value)
         .map_err(|_| jet_alloc_error(requested, "Map"))
 }
 
 fn jet_string_try_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
     let requested = addition.len();
+    if jet_fault_should_fail_allocation() {
+        return Err(jet_alloc_error(requested, "String"));
+    }
     text.try_reserve(requested)
         .map_err(|_| jet_alloc_error(requested, "String"))?;
     text.push_str(addition);

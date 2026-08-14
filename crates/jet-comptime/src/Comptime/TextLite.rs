@@ -50,6 +50,21 @@ mod text_kernel {
             Other(IOContext),
         }
 
+        impl IOError {
+            pub fn other(
+                operation: IOOperation,
+                resource: Option<String>,
+                cause: impl ToString,
+            ) -> Self {
+                Self::Other(IOContext::new(
+                    operation,
+                    resource,
+                    None,
+                    Some(cause.to_string()),
+                ))
+            }
+        }
+
         pub fn io_error_at(operation: IOOperation, path: &str, error: std::io::Error) -> IOError {
             let context = IOContext::new(
                 operation,
@@ -110,6 +125,11 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    // TextLite is a compile-time adapter. Runtime fault state is supplied by
+    // the generated Prelude and the JIT include context.
+    fn jet_fault_should_fail(_operation: &str) -> bool {
+        false
+    }
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
 
     pub(super) fn nfd(s: &str) -> String {

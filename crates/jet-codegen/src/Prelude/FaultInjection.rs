@@ -48,6 +48,27 @@ pub(crate) fn jet_fault_should_fail(operation: &str) -> bool {
     })
 }
 
+/// Called by the shared fallible-allocation rail. Allocation is the final
+/// scheduler channel, not a new public fault selector; every configured fault
+/// test explores it with the same fail-nth state as its selected effects.
+pub(crate) fn jet_fault_should_fail_allocation() -> bool {
+    JET_FAULT_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let Some(active) = state.active else { return false };
+        let allocation = state.selectors.len();
+        if active != allocation {
+            return false;
+        }
+        state.counts[active] = state.counts[active].saturating_add(1);
+        if state.counts[active] == state.fail_nth {
+            state.injected = true;
+            true
+        } else {
+            false
+        }
+    })
+}
+
 fn jet_fault_run_once<F: FnMut() -> Result<(), String>>(
     selectors: &[&str],
     active: Option<usize>,
@@ -57,7 +78,7 @@ fn jet_fault_run_once<F: FnMut() -> Result<(), String>>(
     JET_FAULT_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.selectors = selectors.iter().map(|selector| (*selector).to_string()).collect();
-        state.counts = vec![0; selectors.len()];
+        state.counts = vec![0; selectors.len() + 1];
         state.active = active;
         state.fail_nth = fail_nth;
         state.injected = false;
@@ -89,11 +110,12 @@ pub(crate) fn jet_fault_test_loop<F: FnMut() -> Result<(), String>>(
     if let Err(error) = clean {
         return Err(error);
     }
-    let mut next_fail_nth = vec![1; selectors.len()];
+    let mut next_fail_nth = vec![1; selectors.len() + 1];
     loop {
         let mut discovered = false;
         let mut selector_index = 0;
-        while selector_index < selectors.len() {
+        // The final channel is the shared fallible-allocation rail.
+        while selector_index < selectors.len() + 1 {
             let mut fail_nth = next_fail_nth[selector_index];
             while fail_nth <= max_counts[selector_index] {
                 let (result, injected, counts) =

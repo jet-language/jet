@@ -73,6 +73,12 @@ mod collection_semantics {
         panic!("{}", message);
     }
 
+    // Comptime evaluates collection expressions outside the runtime #Test
+    // harness. The runtime Prelude owns the active fault scheduler.
+    fn jet_fault_should_fail_allocation() -> bool {
+        false
+    }
+
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");

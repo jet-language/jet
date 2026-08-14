@@ -50,6 +50,7 @@ mod disjoint_semantics {
 #[allow(dead_code, non_camel_case_types, unused_imports)]
 mod collection_semantics {
     pub use jet_foundation::Outcome::*;
+    use crate::fault_injection::jet_fault_should_fail_allocation;
 
     use jet_foundation::StructuralDebug::jet_debug_map;
     use jet_foundation::StructuralDebug::jet_debug_optional;

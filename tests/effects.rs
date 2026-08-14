@@ -26,6 +26,9 @@ use core.files as fs
 
 #Test(faults: [Fs.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {
     fs.write("fault-loop.txt", "x") ?? return
+    values := List.try_with_capacity(1) ?? return
+    values.try_push(1) ?? return
+    require(values.len() == 1)
     require(true)
 }
 
@@ -45,6 +48,10 @@ fn run() {}
     assert!(
         first.contains("while fail_nth <= max_counts[selector_index]"),
         "test harness must enumerate each reachable fail-nth call:\n{first}"
+    );
+    assert!(
+        first.contains("jet_list_try_with_capacity") && first.contains("jet_list_try_push"),
+        "the SQLite-style body must use the fallible allocation rail:\n{first}"
     );
 }
 
