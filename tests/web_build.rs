@@ -2354,16 +2354,12 @@ fn web_plain_run_loads_wasm_before_dom_print() {
         eprintln!("note: skipping web startup golden (need rustc + node)");
         return;
     }
-    let src = r#"
-#Target(JS)
-fn hello() { print("hello, web") }
-
-fn run() {}
-"#;
+    let shown = "tests/fixtures/web_plain_run_startup.jet";
+    let src = include_str!("../tests/fixtures/web_plain_run_startup.jet");
     let dir = build_web_fixture(
         "plain_run_startup",
         src,
-        "tests/fixtures/web_plain_run_startup.jet",
+        shown,
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
@@ -2381,7 +2377,7 @@ await jet_main();
 hello();
 "#;
     let stdout = run_node_harness(&dir, "plain_run_startup_harness.mjs", harness);
-    assert_eq!(stdout, "hello, web\n");
+    assert_eq!(stdout, "hello, web\n", "web startup golden output changed");
     let _ = fs::remove_dir_all(&dir);
 }
 
