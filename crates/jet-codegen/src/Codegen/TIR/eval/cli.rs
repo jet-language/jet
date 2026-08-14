@@ -625,6 +625,7 @@ pub(super) fn prepare(
                     "fix the command arguments".to_string(),
                     None,
                 )
+            }
             )?,
         )
     } else {
