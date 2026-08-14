@@ -3,7 +3,7 @@
 // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
 pub use jet_sema::{
     CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema,
-    Syntax, TargetMachine, Traits, AST, SHA256,
+    Syntax, TargetMachine, Traits, Policy, AST, SHA256,
 };
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
