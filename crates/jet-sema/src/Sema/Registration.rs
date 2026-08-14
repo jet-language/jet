@@ -312,6 +312,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        self.check_memoized_function(f);
         for mut marker in self.take_targeted_rule_facts(f.span) {
             let Some(arguments) = self.validate_rule_signature(&mut marker) else {
                 if marker.name == Syntax::MARKER_EVERY {

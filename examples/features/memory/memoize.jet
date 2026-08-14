@@ -1,0 +1,24 @@
+// D-MEMO1=A: pure function-result memoization has one bounded default and one
+// explicit unbounded spelling. `name.cache()` exposes the shared counters.
+#Memo fn square(value: Int) =[]=> Int = value * value
+
+#Memo(bound: none) fn cube(value: Int) =[]=> Int = value * value * value
+
+fn run() {
+    first :: square(7)
+    second :: square(7)
+    loop i, 0..<129 {
+        square(i)
+    }
+    evicted :: square(0)
+    square_stats :: square.cache()
+
+    cube_first :: cube(3)
+    cube_second :: cube(3)
+    cube_stats :: cube.cache()
+
+    print("square: {first}, {second}, {evicted}")
+    print("square stats: hits={square_stats.hits}, misses={square_stats.misses}, size={square_stats.size}, bound={square_stats.bound}")
+    print("cube: {cube_first}, {cube_second}")
+    print("cube stats: hits={cube_stats.hits}, misses={cube_stats.misses}, size={cube_stats.size}, bound={cube_stats.bound}")
+}

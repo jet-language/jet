@@ -972,6 +972,29 @@ pub struct KernelMarker {
     pub proof: Option<KernelProof>,
 }
 
+/// D-MEMO1=A: the one semantic memo configuration carried from the marker
+/// registry into every execution tier. `None` means the function is not
+/// memoized; `Some(None)` is the explicit unbounded store.
+pub const DEFAULT_MEMO_BOUND: usize = 128;
+
+pub fn memo_bound_from_markers(markers: &[Marker]) -> Option<Option<usize>> {
+    let marker = markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_MEMO)?;
+    let unbounded = marker.args.len() == 1
+        && marker
+            .arg_labels
+            .first()
+            .and_then(Option::as_ref)
+            .is_some_and(|(name, _)| name == "bound")
+        && matches!(&marker.args[0], Expr::Ident(name, _) if name == "none");
+    Some(if unbounded {
+        None
+    } else {
+        Some(DEFAULT_MEMO_BOUND)
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct Func {
     /// Exact parser-owned declaration boundary, including `fn` through body.

@@ -155,6 +155,23 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     for line in &tir.reactive_upgrades {
         out.push_str(&format!("/* jet-reactive-upgrade: {line} */\n"));
     }
+    if let Some(bound) = tir.memo_bound {
+        emit_tir_memoized_toplevel(
+            tir,
+            cx,
+            out,
+            &params,
+            &ret_clause,
+            &generics,
+            vis,
+            unsafe_kw,
+            abi,
+            inline_attr,
+            kernel_proof,
+            bound,
+        );
+        return;
+    }
     out.push_str(&format!(
         "{kernel_proof}{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
@@ -163,22 +180,130 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         ret = ret_clause,
         abi = abi,
     ));
-    emit_stack_guard(tir, cx, out, 1);
+    emit_tir_function_body(tir, cx, out, 1);
+    out.push_str("}\n\n");
+}
+
+/// D-MEMO1=A: emit one public function wrapper around one private body and one
+/// per-function Prelude store. The wrapper owns only argument/result marshalling;
+/// bound handling, LRU order, and counters remain in `Prelude/Memo.rs`.
+fn emit_tir_memoized_toplevel(
+    tir: &TFunc,
+    cx: &Cx,
+    out: &mut String,
+    params: &str,
+    ret_clause: &str,
+    generics: &str,
+    vis: &str,
+    unsafe_kw: &str,
+    abi: &str,
+    inline_attr: &str,
+    kernel_proof: String,
+    bound: Option<usize>,
+) {
+    let name = cx.mangle_name(&tir.name);
+    let store_name = format!("__jet_memo_store_{name}");
+    let body_name = format!("__jet_memo_body_{name}");
+    let stats_name = format!("__jet_memo_stats_{name}");
+    let key_type = memo_key_type(tir, cx);
+    let value_type = ret_clause
+        .strip_prefix(" -> ")
+        .unwrap_or("()")
+        .to_string();
+    let key_expr = memo_key_expr(tir, cx);
+    let call_args = tir
+        .params
+        .iter()
+        .map(|(rust_name, _, _)| rust_name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let body_call = if tir.is_unsafe {
+        format!("unsafe {{ {body_name}({call_args}) }}")
+    } else {
+        format!("{body_name}({call_args})")
+    };
+    let bound_expr = bound
+        .map(|bound| format!("Some({bound})"))
+        .unwrap_or_else(|| "None".to_string());
+    let body_unsafe = if tir.is_unsafe { "unsafe " } else { "" };
+    let root = &cx.root_prefix;
+    let store_init = format!(
+        "{store_name}.get_or_init(|| ::std::sync::Mutex::new({root}JetMemo::new({bound_expr})))"
+    );
+
+    out.push_str(&format!(
+        "static {store_name}: ::std::sync::OnceLock<::std::sync::Mutex<{root}JetMemo<{key_type}, {value_type}>>> = ::std::sync::OnceLock::new();\n\n"
+    ));
+    out.push_str(&format!(
+        "{body_unsafe}fn {body_name}{generics}({params}){ret_clause} {{\n"
+    ));
+    emit_tir_function_body(tir, cx, out, 1);
+    out.push_str("}\n\n");
+    out.push_str(&format!(
+        "{kernel_proof}{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{generics}({params}){ret_clause} {{\n"
+    ));
+    out.push_str(&format!(
+        "    let __jet_memo_store = {store_init};\n    let __jet_memo_key: {key_type} = {key_expr};\n    {root}jet_memo_call(__jet_memo_store, __jet_memo_key, || {body_call})\n"
+    ));
+    out.push_str("}\n\n");
+    out.push_str(&format!(
+        "pub fn {stats_name}() -> {root}JetMemoStats {{\n    {store_init}.lock().unwrap_or_else(|error| error.into_inner()).stats()\n}}\n\n"
+    ));
+}
+
+fn memo_key_type(tir: &TFunc, cx: &Cx) -> String {
+    let types = tir
+        .params
+        .iter()
+        .map(|(_, ty, _)| cx.rust_type(ty))
+        .collect::<Vec<_>>();
+    match types.as_slice() {
+        [] => "()".to_string(),
+        [ty] => format!("({ty},)"),
+        _ => format!("({})", types.join(", ")),
+    }
+}
+
+fn memo_key_expr(tir: &TFunc, cx: &Cx) -> String {
+    let values = tir
+        .params
+        .iter()
+        .map(|(rust_name, ty, convention)| {
+            let parameter_type = rust_param_type(cx, *convention, ty);
+            if parameter_type.starts_with('&') {
+                format!("(*{rust_name}).clone()")
+            } else {
+                format!("{rust_name}.clone()")
+            }
+        })
+        .collect::<Vec<_>>();
+    match values.as_slice() {
+        [] => "()".to_string(),
+        [value] => format!("({value},)"),
+        _ => format!("({})", values.join(", ")),
+    }
+}
+
+fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
+    emit_stack_guard(tir, cx, out, indent);
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {
-        out.push_str(&format!("    jet_cov({});\n", tir.line));
+        out.push_str(&format!(
+            "{}jet_cov({});\n",
+            "    ".repeat(indent),
+            tir.line
+        ));
     }
     if tir.is_reactive {
-        emit_reactive_wrapped_body(&tir.body, cx, out, 1);
+        emit_reactive_wrapped_body(&tir.body, cx, out, indent);
     } else if matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == "Stream") {
-        emit_generator_wrapped_body(&tir.body, cx, out, 1);
+        emit_generator_wrapped_body(&tir.body, cx, out, indent);
     } else {
-        emit_tir_stmts(&tir.body, cx, out, 1);
+        emit_tir_stmts(&tir.body, cx, out, indent);
     }
     if is_fallible_void_return(&tir.ret) {
-        out.push_str("    Ok(())\n");
+        out.push_str(&format!("{}Ok(())\n", "    ".repeat(indent)));
     }
-    out.push_str("}\n\n");
 }
 
 fn add_hidden_view_lifetime(rust_type: String) -> String {

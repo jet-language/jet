@@ -216,6 +216,7 @@ impl<'a> Checker<'a> {
                     is_extern: false,
                     is_unsafe: false,
                     is_pure: false,
+                    memo_bound: None,
                     is_foreign_thread_safe: false,
                     is_sanitizer: false,
                     is_must_use: false,

@@ -326,6 +326,24 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
+            // D-MEMO1=A: the only explicit bound spelling is the named
+            // unbounded opt-in. A bare `#Memo` uses the registry default;
+            // positional and alternate bound spellings are not a second API.
+            if marker.name == Syntax::MARKER_MEMO
+                && !(marker.args.is_empty()
+                    || marker.args.len() == 1
+                        && marker
+                            .arg_labels
+                            .first()
+                            .and_then(Option::as_ref)
+                            .is_some_and(|(name, _)| name == "bound")
+                        && matches!(&marker.args[0], crate::AST::Expr::Ident(name, _) if name == "none"))
+            {
+                return Err(crate::Policy::marker_argument_shape_error(
+                    &marker.name,
+                    marker.span,
+                ));
+            }
             // `#Rename(name: String)` shares the String signature gate with
             // `#Discriminant(field: String)` — Known string bindings and
             // quoted literals both resolve in sema; wrong types are E0930.

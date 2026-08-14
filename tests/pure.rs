@@ -271,6 +271,7 @@ fn run() {
                     undo: None,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,
+                    memo_bound: jet::AST::memo_bound_from_markers(&f.markers),
                     is_sanitizer: f.is_sanitizer,
                     param_info: f
                         .params
@@ -364,6 +365,7 @@ fn run() {
                     undo: None,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,
+                    memo_bound: jet::AST::memo_bound_from_markers(&f.markers),
                     is_sanitizer: f.is_sanitizer,
                     param_info: f
                         .params
@@ -445,6 +447,7 @@ fn run() {
                     undo: None,
                     is_unsafe: f.is_unsafe,
                     is_pure: f.is_pure,
+                    memo_bound: jet::AST::memo_bound_from_markers(&f.markers),
                     is_sanitizer: f.is_sanitizer,
                     param_info: f
                         .params

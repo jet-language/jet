@@ -1410,6 +1410,12 @@ fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
 }
 
 #[test]
+fn fmt_preserves_memo_bound_marker() {
+    let src = "#Memo(bound: none) fn cube(value: Int) =[]=> Int = value * value * value\n\nfn run() {}\n";
+    assert_fmt_stable(src, "#Memo(bound: none) marker");
+}
+
+#[test]
 fn fmt_keeps_cli_doc_and_default_field_markers() {
     // D-SHAPE2: two field rules share one `#[…]` group; one stays bare.
     let src = "\

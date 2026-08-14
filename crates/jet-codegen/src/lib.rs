@@ -90,6 +90,11 @@ pub mod typed_text {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
 }
+/// D-MEMO1=A: the result-cache substrate compiled from the same Prelude source
+/// used by generated AOT programs and the TIR interpreter.
+pub mod memo {
+    include!("Prelude/Memo.rs");
+}
 /// Card #1751: the one 80x24 terminal default, read by both AOT's
 /// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
 #[path = "Prelude/TerminalDefault.rs"]

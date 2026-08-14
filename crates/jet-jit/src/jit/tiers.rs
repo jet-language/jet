@@ -156,6 +156,20 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
     let mut rows = Vec::new();
 
     for f in &program.funcs {
+        // D-MEMO1=A: the resident engine is an adapter here. Memoized calls
+        // cross the deopt boundary so the canonical TIR evaluator can call
+        // the shared Prelude store; no cache policy is reimplemented in JIT.
+        if f.memo_bound.is_some() {
+            let reason = "memoized function uses the canonical Prelude cache".to_string();
+            deopt.push((f.name.clone(), reason.clone()));
+            rows.push(TierRow {
+                function: f.name.clone(),
+                tier: Tier::Interp,
+                reason,
+                millis: 0.0,
+            });
+            continue;
+        }
         if program.canonical_deopt.contains(&f.name) {
             let reason = "typed decode uses the canonical TIR migration plan".to_string();
             deopt.push((f.name.clone(), reason.clone()));

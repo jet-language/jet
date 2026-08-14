@@ -8206,6 +8206,12 @@ impl<'a> EvalCtx<'a> {
                 return Ok(CtValue::Unit);
             }
         }
+        // D-MEMO1=A: `name.cache()` is lowered to this private call marker;
+        // the evaluator delegates the projection to the same Prelude-backed
+        // store used by AOT instead of maintaining a second statistics path.
+        if let Some(function) = name.strip_prefix(crate::Syntax::MEMO_STATS_CALL_PREFIX) {
+            return self.memo_stats(function);
+        }
         // D-VERDICT-1321-1: variadic print — each argument on its own line.
         if name == "print" {
             let text = argv

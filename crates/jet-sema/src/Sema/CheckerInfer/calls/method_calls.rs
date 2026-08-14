@@ -413,6 +413,22 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        // D-MEMO1=A: `name.cache()` is a read-only projection of one
+        // memoized function's store. It is resolved from the registered
+        // function signature before ordinary receiver/method lookup.
+        if method == Syntax::METHOD_MEMO_CACHE && args.is_empty() {
+            if let Expr::Ident(name, _) = receiver.as_ref() {
+                if self
+                    .funcs
+                    .get(name)
+                    .is_some_and(|signature| signature.memo_bound.is_some())
+                {
+                    let stats = Type::Named(Syntax::TYPE_MEMO_STATS.to_string());
+                    *resolved_ret_out = Some(stats.clone());
+                    return Some(stats);
+                }
+            }
+        }
         if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
         {
             return self.infer_task_surface_method(

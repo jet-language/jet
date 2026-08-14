@@ -18,6 +18,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_PRIORITY_QUEUE,
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
+    Syntax::TYPE_MEMO_STATS,
     Syntax::TYPE_REMOVE_BY,
     Syntax::TYPE_ORDERING,
     Syntax::TYPE_RANGE,

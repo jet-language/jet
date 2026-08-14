@@ -856,6 +856,13 @@ pub const TYPE_BUILD_TARGET: &str = "BuildTarget";
 pub const TYPE_BUILD_TOOLCHAIN: &str = "BuildToolchain";
 pub const TYPE_BUILD_PROBE: &str = "BuildProbe";
 pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
+/// D-MEMO1=A: the read-only statistics record returned by `name.cache()`.
+pub const TYPE_MEMO_STATS: &str = "MemoStats";
+pub const METHOD_MEMO_CACHE: &str = "cache";
+pub const MEMO_STATS_CALL_PREFIX: &str = "\u{0}jet.memo.stats.";
+pub fn memo_stats_call(name: &str) -> String {
+    format!("{MEMO_STATS_CALL_PREFIX}{name}")
+}
 pub const TYPE_TYPE_INFO: &str = "TypeInfo";
 pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
 

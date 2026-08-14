@@ -107,6 +107,7 @@ mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
+    include!("../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub(super) fn zip_fill_at<T: Clone>(

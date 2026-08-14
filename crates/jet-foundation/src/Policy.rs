@@ -872,6 +872,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
         "InlineMode" => &["Hint", "Always", "Never"],
         "JobScope" => crate::Syntax::JOB_SCOPE_VARIANTS,
         "KernelMode" => &["parallel"],
+        "MemoBound" => &["Default", "none"],
         "IntType" => &[
             "I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128",
         ],
@@ -1589,7 +1590,7 @@ mod tests {
     fn every_typed_marker_argument_has_one_core_lang_declaration() {
         // One declaration per typed marker-argument menu, plus the `Track`
         // reflection enum retained by D-RULEARG-TYPES1.
-        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 17);
+        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 18);
         let mut expected = std::collections::BTreeSet::from(["Site", "Track"]);
         for row in super::APPLIED_RULES.iter() {
             expected.extend(row.signature.params.iter().map(|parameter| parameter.source_type));

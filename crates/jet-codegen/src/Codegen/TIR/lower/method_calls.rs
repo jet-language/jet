@@ -845,6 +845,24 @@ pub(crate) fn lower_method_call_with_sig(
     lowered_receiver: Option<TExpr>,
     instantiated_sig: Option<&[(AccessConvention, Type)]>,
 ) -> TExpr {
+    // D-MEMO1=A: sema has already proved `name.cache()` is the memoized
+    // function's statistics projection. Keep it as a named TIR call so AOT,
+    // JIT, and interpreter adapters all enter the same Prelude-backed store.
+    if method == Syntax::METHOD_MEMO_CACHE
+        && args.is_empty()
+        && matches!(resolved_ret, Some(Type::Named(name)) if name == Syntax::TYPE_MEMO_STATS)
+    {
+        if let Expr::Ident(name, _) = receiver {
+            return TExpr {
+                ty: Type::Named(Syntax::TYPE_MEMO_STATS.to_string()),
+                kind: TExprKind::Call {
+                    name: Syntax::memo_stats_call(name),
+                    type_args: Vec::new(),
+                    args: Vec::new(),
+                },
+            };
+        }
+    }
     if let Some(lowered) =
         lower_core_crypto_alias_fast(receiver, method, method_span, args, cx, env)
     {

@@ -617,6 +617,9 @@ renumbered, and no new `W` code may be allocated.
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
+| E0938 | sema | `#Memo` requires a pure function (D-MEMO1=A) |
+| E0939 | sema | `#Memo` argument is not hashable (D-MEMO1=A) |
+| E0940 | sema | `#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A) |
 | E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
 | E0928 | sema  | a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1) |
 | E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
@@ -2180,6 +2183,24 @@ pointer to `docs/spec/syntax-decisions.md`.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `#Rule` expects `{signature}` ``. | Every marker declares one typed signature and uses the ordinary call-argument grammar. | Match the shown positional and named parameters. |
+
+### E0938 — memoized function is not pure (D-MEMO1=A)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Memo` requires a pure function ``. | Memoization reuses a completed result, so the function must have the empty effect row. | Declare the function with `=[]=>` and keep `#Memo`. |
+
+### E0939 — memoization key is not hashable (D-MEMO1=A)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Memo` parameter `{name}` is not hashable ``. | Memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule. | Use an Int, Bool, Char, String, or named hashable value as the argument. |
+
+### E0940 — memoization cannot cache a lazy iterator (D-MEMO1=A)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Memo` cannot cache a lazy `Iter` value ``. | A lazy iterator carries live computation state instead of one completed result. | Materialize the iterator before the memoized boundary. |
 
 ### E0931 — `!` only rejects auto-derived traits
 

@@ -6979,3 +6979,11 @@ closed `@build.settings.<name>` expression is folded by the same Tier-0
 evaluator used for generic-module value arguments, and its normalized value is
 part of the existing instance fingerprint. Semantic instance facts retain the
 profile and declaration provenance; no execution tier reads settings.
+
+**2026-08-13 — D-MEMO1=A** *(card #1871)*: `#Memo` marks one pure function
+result cache. Bare `#Memo` uses the bounded 128-entry LRU default;
+`#Memo(bound: none)` is the one explicit unbounded opt-in. `name.cache()`
+reads hits, misses, current size, and the written bound. A function's argument
+tuple must pass the existing hashability rule, and a lazy `Iter<T>` parameter or
+result is refused. The marker registry owns the spelling and all execution
+tiers call one Prelude cache implementation.

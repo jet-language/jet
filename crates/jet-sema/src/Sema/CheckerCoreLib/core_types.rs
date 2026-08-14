@@ -167,6 +167,7 @@ fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
         "IntType" => "write it only inside `#Layout(tag: I32)`",
         "KernelMode" => "write it only inside `#Kernel(mode: parallel)`",
+        "MemoBound" => "write `#Memo`, or the explicit `#Memo(bound: none)` form",
         "Maturity" => "write it only inside `#Meta(maturity: .Tested)`",
         "NamingCase" => "write it only inside `#RenameAll(case: snake)`",
         "ObligationMode" => "write it only inside `#Unsafe(\"reason\", obligations: .Track)`",
@@ -356,7 +357,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DecodeResult" | "MigrationStatus"
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
-        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
+        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "MemoStats" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
         | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
         | "CompilerSemanticIndex" | "CompilerDefinition" | "CompilerSymbolKind"
         | "CompilerParam" | "CompilerField" | "CompilerViewProvenance"
@@ -463,6 +464,13 @@ pub(crate) fn core_fact_kind_variants(
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_MEMO_STATS {
+        return match field {
+            "hits" | "misses" | "size" => Some(Type::Int),
+            "bound" => Some(Type::String),
+            _ => None,
+        };
+    }
     if type_name == Syntax::TYPE_ERR {
         return match field {
             "message" => Some(Type::String),

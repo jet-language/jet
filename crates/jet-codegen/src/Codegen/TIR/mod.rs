@@ -31,9 +31,10 @@ pub(crate) use super::*;
 mod emit;
 mod eval;
 pub use eval::{
-    install_comptime_bridge, lower_interp_program, run_named_func, run_program,
+    install_comptime_bridge, lower_interp_program, new_memo_state, run_named_func,
+    run_named_func_with_memos, run_program,
     run_program_with_structs, set_native_call_hook, stable_place_address, tir_place_address_key,
-    NativeCallHook,
+    MemoState, NativeCallHook,
 };
 mod lower;
 mod subset;
@@ -2074,6 +2075,9 @@ pub struct TFunc {
     /// D-CABI-CALLBACK1: named pure, monomorphic top-level functions expose a
     /// stable C-convention symbol; sema alone decides whether it may cross C.
     pub is_pure: bool,
+    /// D-MEMO1=A: sema-proved result-cache configuration. TIR carries the
+    /// bound; emitters and evaluators only marshal it into the shared Prelude.
+    pub memo_bound: Option<Option<usize>>,
     /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
     pub is_reactive: bool,
     /// D-DATARACE1=C: upgrade-report lines for reactive boxes that crossed a boundary.

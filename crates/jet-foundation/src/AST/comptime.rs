@@ -139,6 +139,9 @@ pub struct FuncSig {
     /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
     /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
     pub is_pure: bool,
+    /// D-MEMO1=A: sema-proved function-result cache configuration. `Some(None)`
+    /// is the explicit `#Memo(bound: none)` form.
+    pub memo_bound: Option<Option<usize>>,
     /// D-CABI-CALLBACK1: body contains only allocation-free, panic-free scalar
     /// computation and has no generic parameters or runtime/global access.
     pub is_foreign_thread_safe: bool,

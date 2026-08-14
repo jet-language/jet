@@ -626,6 +626,69 @@ pub(crate) fn resolve_static_rule_products(
 }
 
 impl<'a> crate::Sema::Checker<'a> {
+    /// D-MEMO1=A: prove the marker's result-cache contract before TIR lowers
+    /// the function. The existing purity fact and collection hashability gate
+    /// are the only semantic sources; engines never repeat these checks.
+    pub(crate) fn check_memoized_function(&mut self, f: &crate::AST::Func) {
+        let Some(marker) = f
+            .markers
+            .iter()
+            .find(|marker| marker.name == Syntax::MARKER_MEMO)
+        else {
+            return;
+        };
+        if !f.is_pure {
+            self.diags.push(Diagnostic::error(
+                "E0938",
+                "`#Memo` requires a pure function".to_string(),
+                "memoization reuses a completed result, so the function must have the empty effect row".to_string(),
+                "declare the function with `=[]=>` and keep `#Memo`".to_string(),
+                Some(marker.span),
+            ));
+            return;
+        }
+        for parameter in &f.params {
+            let ty = self.resolve_type(if parameter.variadic {
+                crate::AST::Type::List(Box::new(parameter.ty.clone()))
+            } else {
+                parameter.ty.clone()
+            });
+            if is_lazy_memo_iter(&ty) {
+                self.diags.push(Diagnostic::error(
+                    "E0940",
+                    format!("`#Memo` cannot cache lazy `{}` values", Syntax::TYPE_ITER),
+                    "a lazy iterator carries live computation state instead of one completed result".to_string(),
+                    "materialize the iterator before the memoized boundary".to_string(),
+                    Some(marker.span),
+                ));
+                return;
+            }
+            if !crate::Collections::is_hashable_type(&ty) {
+                self.diags.push(Diagnostic::error(
+                    "E0939",
+                    format!("`#Memo` parameter `{}` is not hashable", parameter.name),
+                    "memoization keys are the function's argument tuple, so every argument must pass the existing hashability rule".to_string(),
+                    "use an Int, Bool, Char, String, or named hashable value as the argument".to_string(),
+                    Some(marker.span),
+                ));
+                return;
+            }
+        }
+        if f.return_type
+            .as_ref()
+            .map(|ty| self.resolve_type(ty.clone()))
+            .is_some_and(|ty| is_lazy_memo_iter(&ty))
+        {
+            self.diags.push(Diagnostic::error(
+                "E0940",
+                format!("`#Memo` cannot cache a lazy `{}` result", Syntax::TYPE_ITER),
+                "a lazy iterator carries live computation state instead of one completed result".to_string(),
+                "materialize the iterator before returning from the memoized function".to_string(),
+                Some(marker.span),
+            ));
+        }
+    }
+
     pub(crate) fn validate_rule_signature(
         &mut self,
         marker: &mut Marker,
@@ -707,6 +770,14 @@ impl<'a> crate::Sema::Checker<'a> {
         })?;
         Some(self.rule_facts.remove(index).marker)
     }
+}
+
+fn is_lazy_memo_iter(ty: &crate::AST::Type) -> bool {
+    matches!(
+        ty,
+        crate::AST::Type::Apply { name, args }
+            if name == Syntax::TYPE_ITER && args.len() == 1
+    )
 }
 
 /// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest

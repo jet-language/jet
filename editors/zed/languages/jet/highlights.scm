@@ -106,7 +106,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: () BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Cache Char Complex Computed Condition DBValue DataTree Decimal Deque Derived Effect Err Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON JSONError Key Measurement PriorityQueue Ptr Receiver Sender Set Shared Shared.Weak SharedGuard Signal SortedSet Stream String Subscription TOML Task TaskFailure U16 U32 U64 U8 UTF8Error WatchEvent WatchHandle WatchSet YAML
+; type.builtin: () BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Cache Char Complex Computed Condition DBValue DataTree Decimal Deque Derived Effect Err Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON JSONError Key Measurement MemoStats PriorityQueue Ptr Receiver Sender Set Shared Shared.Weak SharedGuard Signal SortedSet Stream String Subscription TOML Task TaskFailure U16 U32 U64 U8 UTF8Error WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"
@@ -127,7 +127,7 @@
 ] @type.builtin
 
 ; builtin: channel check input join print
-; marker.rule: ABI Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Kernel Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /% /%= /= < << <<= <= <=> == => > >= >> >>= ? ?. ?? ^= | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS

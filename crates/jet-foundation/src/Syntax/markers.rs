@@ -35,6 +35,9 @@ pub const MARKER_PERSIST: &str = "Persist"; // D-PERSIST1
 /// codegen). Never rejected by sema; the compiler is free to ignore it.
 /// Methods stay ordinary functions — no macro-rewrite hooks (D-METHODMACRO1).
 pub const MARKER_INLINE: &str = "Inline"; // D-METHODMACRO1
+/// D-MEMO1=A: `#Memo` marks a pure function result cache. The default is the
+/// bounded 128-entry store; `bound: none` is the one explicit unbounded form.
+pub const MARKER_MEMO: &str = "Memo"; // D-MEMO1
 pub const MARKER_STATIC: &str = "Static"; // D-META-STAGE1
 /// D-CAPBUNDLE1 / D-CONTRACTCASE1: capability bundles on a nominal distinct
 /// type — each re-exposes a curated slice of the base type's operations

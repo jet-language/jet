@@ -517,6 +517,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "GameFrame" | "JetGameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
+        n if n == Syntax::TYPE_MEMO_STATS => {
+            matches!(member, "hits" | "misses" | "size" | "bound")
+        }
         "FieldError" => matches!(member, "path" | "reason"),
         "EncodingLimits" => matches!(member, "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_total_bytes" | "max_expansion_depth" | "max_expansion_bytes"),
         "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
@@ -636,6 +639,13 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     let Type::Named(name) = recv_ty else {
         return None;
     };
+    if name == Syntax::TYPE_MEMO_STATS && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "hits" | "misses" | "size" => Some(Type::Int),
+            "bound" => Some(Type::String),
+            _ => None,
+        };
+    }
     if name == "Claims" && !cx.struct_fields.contains_key(name) {
         return match field {
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),

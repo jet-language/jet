@@ -1,73 +1,51 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
 #[derive(Clone)]
 struct JetCache<K, V> {
-    cap: usize,
-    entries: Vec<(K, V)>,
+    lru: JetLru<K, V>,
 }
 
 impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
     fn new(capacity: i64) -> Self {
         Self {
-            cap: capacity.max(0) as usize,
-            entries: Vec::new(),
+            lru: JetLru::new(Some(capacity.max(0) as usize)),
         }
     }
     fn put(&mut self, key: K, value: V) -> Option<V> {
-        if self.cap == 0 {
-            return None;
-        }
-        let displaced = self.entries.iter().position(|(k, _)| *k == key)
-            .map(|i| self.entries.remove(i).1);
-        self.entries.insert(0, (key, value));
-        if self.entries.len() > self.cap {
-            self.entries.pop();
-        }
-        displaced
+        self.lru.put(key, value)
     }
     fn add_new(&mut self, key: K, value: V) -> bool {
-        if self.cap == 0 || self.entries.iter().any(|(k, _)| *k == key) {
-            return false;
-        }
-        self.entries.insert(0, (key, value));
-        if self.entries.len() > self.cap {
-            self.entries.pop();
-        }
-        true
+        self.lru.add_new(key, value)
     }
     fn get(&mut self, key: &K) -> Option<V> {
-        let i = self.entries.iter().position(|(k, _)| k == key)?;
-        let (k, v) = self.entries.remove(i);
-        let out = v.clone();
-        self.entries.insert(0, (k, v));
-        Some(out)
+        self.lru.get(key)
     }
     fn remove(&mut self, key: &K) -> Option<V> {
-        let i = self.entries.iter().position(|(k, _)| k == key)?;
-        Some(self.entries.remove(i).1)
+        self.lru.remove(key)
     }
     fn contains_key(&self, key: &K) -> bool {
-        self.entries.iter().any(|(k, _)| k == key)
+        self.lru.contains_key(key)
     }
     fn keys(&self) -> Vec<K> {
-        self.entries.iter().map(|(k, _)| k.clone()).collect()
+        self.lru.keys()
     }
     fn len(&self) -> usize {
-        self.entries.len()
+        self.lru.len()
     }
     fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.lru.is_empty()
     }
     fn capacity(&self) -> i64 {
-        self.cap as i64
+        self.lru.capacity()
     }
     fn clear(&mut self) {
-        self.entries.clear();
+        self.lru.clear();
     }
 }
 
 impl<K: JetShow, V: JetShow> JetShow for JetCache<K, V> {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self
+            .lru
             .entries
             .iter()
             .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
@@ -78,6 +56,7 @@ impl<K: JetShow, V: JetShow> JetShow for JetCache<K, V> {
 impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetCache<K, V> {
     fn jet_display(&self) -> String {
         let parts: Vec<String> = self
+            .lru
             .entries
             .iter()
             .map(|(k, v)| format!("{}: {}", k.jet_display(), v.jet_display()))
@@ -88,6 +67,7 @@ impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetCache<K, V> {
 impl<K: JetDebug, V: JetDebug> JetDebug for JetCache<K, V> {
     fn jet_debug(&self) -> String {
         let parts: Vec<String> = self
+            .lru
             .entries
             .iter()
             .map(|(k, v)| format!("{}: {}", k.jet_debug(), v.jet_debug()))

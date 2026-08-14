@@ -575,6 +575,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         undo: f.undo.as_ref().map(|(name, _)| name.clone()),
         is_unsafe: f.is_unsafe,
         is_pure: f.is_pure,
+        memo_bound: crate::AST::memo_bound_from_markers(&f.markers),
         is_foreign_thread_safe: foreign_thread_safe_func(f),
         is_sanitizer: f.is_sanitizer,
         is_must_use: f.is_must_use,
@@ -629,6 +630,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
                 matches!(&p.ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_PTR)
             }),
         is_pure: false,      // extern functions are always considered impure
+        memo_bound: None,
         is_foreign_thread_safe: false,
         is_sanitizer: false, // extern functions can't be sanitizers
         is_must_use: false,

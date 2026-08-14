@@ -79,6 +79,15 @@ use crate::Diagnostics::{Diagnostic, Span};
 /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
 pub type NativeCallHook = fn(&str, &[CtValue]) -> Option<Result<CtValue, Diagnostic>>;
 
+/// D-MEMO1=A: the evaluator/deopt carrier for one run's Prelude memo stores.
+/// The cache implementation remains in `Prelude/Memo.rs`; this type only keeps
+/// one store alive while a tiered run crosses the interpreter boundary.
+pub type MemoState = Arc<Mutex<HashMap<String, crate::memo::JetMemo<Vec<CtValue>, CtValue>>>>;
+
+pub fn new_memo_state() -> MemoState {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
 thread_local! {
     static NATIVE_CALL_HOOK: Cell<Option<NativeCallHook>> = const { Cell::new(None) };
 }
@@ -1107,6 +1116,10 @@ struct EvalRuntime<'a> {
     task_groups: Vec<Arc<crate::task_group::JetTaskGroupRuntime<usize>>>,
     tasks: Vec<Option<EvalTask>>,
     apps: Vec<EvalApp>,
+    /// D-MEMO1=A: one Prelude memo store per memoized function. The evaluator
+    /// keeps only the key/result values; bound, LRU order, and counters live in
+    /// the shared Memo substrate.
+    memos: MemoState,
     completion_order: AtomicU64,
 }
 
@@ -1289,6 +1302,10 @@ struct EvalTaskConfig<'a> {
 
 impl EvalRuntime<'_> {
     fn new() -> Self {
+        Self::with_memos(new_memo_state())
+    }
+
+    fn with_memos(memos: MemoState) -> Self {
         // A fresh interpreter runtime is a teardown boundary. Do not deliver
         // a SIGINT that was marked for a previous dev/restart instance.
         INTERPRETER_INTERRUPT_QUEUE.clear();
@@ -1304,6 +1321,7 @@ impl EvalRuntime<'_> {
             task_groups: Vec::new(),
             tasks: Vec::new(),
             apps: Vec::new(),
+            memos,
             completion_order: AtomicU64::new(0),
         }
     }
@@ -2398,6 +2416,19 @@ impl<'a> EvalCtx<'a> {
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        // D-MEMO1=A: the interpreter adapter marshals the argument tuple to the
+        // same Prelude store used by emitted Rust. Sema has already proved the
+        // tuple safe to cache; this path never rechecks purity or hashability.
+        if let Some(bound) = func.memo_bound {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            let mut memos = runtime.memos.lock().expect("memo state poisoned");
+            let memo = memos
+                .entry(func.name.clone())
+                .or_insert_with(|| crate::memo::JetMemo::new(bound));
+            if let Some(value) = memo.get(&args) {
+                return Ok(value);
+            }
+        }
         if self.call_depth >= jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT {
             if self.runtime_execution {
                 return Err(self.runtime_stop(
@@ -2448,12 +2479,49 @@ impl<'a> EvalCtx<'a> {
         self.source_nesting = previous_source_nesting;
         self.current_span = previous_span;
         self.current_fn = previous_fn;
-        match (result, cleanup_result) {
+        let final_result = match (result, cleanup_result) {
             (Err(error), _) | (Ok(_), Err(error)) => {
                 Err(error)
             }
             (Ok(value), Ok(())) => Ok(value),
+        };
+        if let Some(bound) = func.memo_bound {
+            if let Ok(value) = &final_result {
+                let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                let mut memos = runtime.memos.lock().expect("memo state poisoned");
+                memos
+                    .entry(func.name.clone())
+                    .or_insert_with(|| crate::memo::JetMemo::new(bound))
+                    .put(args, value.clone());
+            }
         }
+        final_result
+    }
+
+    /// D-MEMO1=A: stats are a projection of the function's one shared store;
+    /// an untouched function gets a zeroed store with its ratified bound.
+    fn memo_stats(&self, name: &str) -> Result<CtValue, Diagnostic> {
+        let Some(func) = self.funcs.get(name) else {
+            return Err(unsupported("memoized function", self.span()));
+        };
+        let Some(bound) = func.memo_bound else {
+            return Err(unsupported("memoized function statistics", self.span()));
+        };
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let mut memos = runtime.memos.lock().expect("memo state poisoned");
+        let stats = memos
+            .entry(name.to_string())
+            .or_insert_with(|| crate::memo::JetMemo::new(bound))
+            .stats();
+        Ok(CtValue::Struct {
+            type_name: crate::Syntax::TYPE_MEMO_STATS.to_string(),
+            fields: vec![
+                ("hits".to_string(), CtValue::Int(stats.hits)),
+                ("misses".to_string(), CtValue::Int(stats.misses)),
+                ("size".to_string(), CtValue::Int(stats.size)),
+                ("bound".to_string(), CtValue::Str(stats.bound)),
+            ],
+        })
     }
 
     fn store_callable(&mut self, callable: EvalCallable<'a>) -> CtValue {
@@ -3127,6 +3195,15 @@ fn insert_core_struct_field_types(
     fields: &mut HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) {
     fields.insert(
+        crate::Syntax::TYPE_MEMO_STATS.to_string(),
+        vec![
+            ("hits".to_string(), Type::Int),
+            ("misses".to_string(), Type::Int),
+            ("size".to_string(), Type::Int),
+            ("bound".to_string(), Type::String),
+        ],
+    );
+    fields.insert(
         crate::Syntax::TYPE_IO_CONTEXT.to_string(),
         vec![
             (
@@ -3462,6 +3539,18 @@ pub fn run_named_func(
     args: Vec<CtValue>,
     sink: &mut DevSink,
 ) -> Result<CtValue, Diagnostic> {
+    run_named_func_with_memos(program, name, args, sink, new_memo_state())
+}
+
+/// Run one named function with a caller-owned Prelude memo carrier. The
+/// mixed-tier JIT uses this form so repeated deopt calls see one store.
+pub fn run_named_func_with_memos(
+    program: &JitProgram,
+    name: &str,
+    args: Vec<CtValue>,
+    sink: &mut DevSink,
+    memos: MemoState,
+) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
     let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
@@ -3511,7 +3600,7 @@ pub fn run_named_func(
         distinct_bases: program.distinct_bases.clone(),
         distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
-        runtime: Arc::new(Mutex::new(EvalRuntime::new())),
+        runtime: Arc::new(Mutex::new(EvalRuntime::with_memos(memos))),
         local_cells: local_cell::EvalLocalCells::new(),
         shared_transactions: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,

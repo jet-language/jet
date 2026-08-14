@@ -26,6 +26,9 @@ thread_local! {
     /// Borrowed for the duration of one resident invoke / compile.
     static DEOPT_PROGRAM: RefCell<Option<*const JitProgram>> = const { RefCell::new(None) };
     static DEOPT_NAMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// D-MEMO1=A: one Prelude memo carrier survives every deopt call in the
+    /// current resident run. The evaluator owns cache semantics.
+    static DEOPT_MEMOS: RefCell<Option<TIR::MemoState>> = const { RefCell::new(None) };
     static NATIVE_FNS: RefCell<HashMap<String, NativeFn>> = RefCell::new(HashMap::new());
 }
 
@@ -42,6 +45,7 @@ unsafe impl Sync for NativeFn {}
 pub(crate) fn clear_deopt_state() {
     DEOPT_PROGRAM.with(|s| *s.borrow_mut() = None);
     DEOPT_NAMES.with(|s| s.borrow_mut().clear());
+    DEOPT_MEMOS.with(|s| *s.borrow_mut() = None);
     NATIVE_FNS.with(|s| s.borrow_mut().clear());
     TIR::set_native_call_hook(None);
 }
@@ -49,6 +53,7 @@ pub(crate) fn clear_deopt_state() {
 pub(crate) fn install_deopt_program(program: &JitProgram, deopt_names: &[String]) {
     DEOPT_PROGRAM.with(|s| *s.borrow_mut() = Some(program as *const JitProgram));
     DEOPT_NAMES.with(|s| *s.borrow_mut() = deopt_names.to_vec());
+    DEOPT_MEMOS.with(|s| *s.borrow_mut() = Some(TIR::new_memo_state()));
 }
 
 pub(crate) fn register_native_fn(name: String, code: *const u8, tir: &TFunc) {
@@ -494,10 +499,13 @@ pub(crate) extern "C" fn jet_deopt_call(
             }
         }
         let mut sink = DevSink::new();
+        let memos = DEOPT_MEMOS
+            .with(|state| state.borrow().clone())
+            .unwrap_or_else(TIR::new_memo_state);
         let value = match jet_codegen::Comptime::with_ambient(
             Some(crate::ambient_interp::ambient_core_call),
             Some(crate::ambient_interp::ambient_handle),
-            || TIR::run_named_func(program, &func_name, args, &mut sink),
+            || TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos),
         ) {
             Ok(v) => v,
             Err(d) => return Some(Err(d.what)),

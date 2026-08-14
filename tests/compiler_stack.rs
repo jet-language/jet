@@ -206,6 +206,7 @@ fn tir_func(
         line: 1,
         is_unsafe: false,
         is_pure: true,
+        memo_bound: None,
         is_reactive: false,
         reactive_upgrades: Vec::new(),
         is_inline: false,

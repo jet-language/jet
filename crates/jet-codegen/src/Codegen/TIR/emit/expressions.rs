@@ -911,6 +911,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             type_args,
             args,
         } => {
+            if let Some(function) = name.strip_prefix(crate::Syntax::MEMO_STATS_CALL_PREFIX) {
+                return format!(
+                    "__jet_memo_stats_{}()",
+                    cx.mangle_name(function)
+                );
+            }
             let arg_str = emit_tir_call_args(args, cx);
             let type_args = if type_args.is_empty() {
                 String::new()

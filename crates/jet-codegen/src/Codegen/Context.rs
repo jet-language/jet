@@ -504,6 +504,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // (the generic `DecodeResult<T>` has its own `rust_type` arm below, since
         // this table only covers non-generic names).
         "MigrationStatus" => Some("MigrationStatus"),
+        // D-MEMO1=A: `name.cache()` is a small top-level Prelude record.
+        n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
