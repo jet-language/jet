@@ -62,11 +62,11 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
     {
         return None;
     }
-    if (same_text(module, "core.time")
+    if same_text(module, "core.time"
         && one_of(
             method,
             &["now", "now_utc", "today", "instant", "sleep", "start"],
-        ))
+        )
     {
         return Some(Effect::Time);
     }

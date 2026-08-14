@@ -321,7 +321,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 use super::core_surface::{
-    CLOCK_TYPE, CORE_EMAIL_MODULE, CORE_MOD_MODULE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE,
+    CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE,
     KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR, TYPE_DATETIME, TYPE_ERR,
     TYPE_FRACTION, TYPE_INSTANT, TYPE_PATH, TYPE_REGEX, TYPE_URL,
 };
