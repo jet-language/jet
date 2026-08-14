@@ -272,9 +272,8 @@ fn normalize_workspace_root_paths(stderr: &str, root: &std::path::Path) -> Strin
         .replace(&format!("{root}\\"), "")
 }
 
-/// Run an executable error example through debug AOT, default jet run, and
-/// the forced interpreter. The debug profile keeps the same journey text as
-/// the default JIT and interpreter, so the .err.out file is one byte oracle.
+/// Run an executable error example through debug/release AOT, default jet run,
+/// and the forced interpreter. The .err.out file is one byte oracle.
 pub fn assert_example_cli_error_tiers_agree(
     stem: &str,
     expected_exit_code: i32,
@@ -289,7 +288,8 @@ pub fn assert_example_cli_error_tiers_agree(
     );
     let relative = format!("examples/features/{stem}.jet");
     let modes = [
-        ("aot", Some("--profile=debug"), false),
+        ("debug", Some("--profile=debug"), false),
+        ("release", Some("--release"), false),
         ("default", None, false),
         ("interpret", None, true),
     ];
