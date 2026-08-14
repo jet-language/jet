@@ -147,6 +147,7 @@ pub(crate) fn lower_core_closure_call(
             site
         });
         let spawn_closure = render_spawn_lambda(lam, cx, env);
+        let executable = Box::new(lower_lambda(lam, cx, env));
         return Some(TExpr {
             ty: core_closure_call_return_ty(module, method, body_ty),
             kind: TExprKind::CoreClosureCall {
@@ -154,6 +155,7 @@ pub(crate) fn lower_core_closure_call(
                     group: None,
                     site,
                     spawn_closure,
+                    executable,
                 },
             },
         });

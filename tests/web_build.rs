@@ -2313,7 +2313,7 @@ fn run() { print(summarize(4)) }
         .expect("ordinary Canvas control flow and print must compile through TIR");
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("if (__jet_total > 10)"), "TIR if was not emitted:\n{wasm}");
-    assert!(wasm.contains("println!(\"{}\""), "TIR print was not emitted:\n{wasm}");
+    assert!(wasm.contains("jet_wasm_print("), "TIR print was not emitted:\n{wasm}");
     assert!(
         wasm.contains("__jet_text: &String") || wasm.contains("__jet_text: String"),
         "internal String parameter was rejected:\n{wasm}"
@@ -2344,7 +2344,7 @@ fn run() { print("hello, web") }
         "module tools.dev was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("println!(\"{}\", \"hello, web\".to_string())"),
+        wasm.contains("jet_wasm_print(\"hello, web\".to_string())"),
         "literal TIR print was not emitted:\n{wasm}"
     );
     let js = &web.js_app;

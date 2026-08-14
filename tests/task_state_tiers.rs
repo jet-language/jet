@@ -73,22 +73,53 @@ fn repl_matches_canonical_task_output() {
 }
 
 #[test]
-fn web_keeps_the_existing_task_tir_boundary() {
+fn web_matches_expected_task_output() {
     let scratch = common::Scratch::new("task-state-web");
     let entry = scratch.join("app.jet");
     fs::write(&entry, SOURCE).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["check", entry.to_str().unwrap(), "--target", "web"])
-        .env("NO_COLOR", "1")
+    let shown = entry.to_string_lossy();
+    let output = jet::compile_web_with_path(SOURCE, &shown).unwrap_or_else(|diagnostics| {
+        panic!(
+            "front end rejected web fixture:\n{}",
+            jet::render_diagnostics(&shown, SOURCE, &diagnostics)
+        )
+    });
+    let web = output.web.expect("web target must produce web artifacts");
+    fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+    fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let rustc = Command::new("rustc")
+        .current_dir(&scratch.path)
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            "app_wasm.rs",
+            "-o",
+            "app.wasm",
+        ])
         .output()
-        .expect("spawn jet");
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+        .expect("spawn rustc");
     assert!(
-        !output.status.success() && combined.contains("E-WEB-TIR-UNSUPPORTED"),
-        "web must keep native task code at its existing TIR boundary:\n{combined}"
+        rustc.status.success(),
+        "rustc rejected web task fixture:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
     );
+    let node = Command::new("node")
+        .current_dir(&scratch.path)
+        .arg("app.js")
+        .output()
+        .expect("spawn node");
+    assert!(
+        node.status.success(),
+        "web task fixture failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), EXPECTED);
 }

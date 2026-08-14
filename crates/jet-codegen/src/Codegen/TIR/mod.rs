@@ -4058,6 +4058,7 @@ pub enum TCoreClosureKind {
         group: Option<Box<TExpr>>,
         site: usize,
         spawn_closure: String,
+        executable: Box<TLambda>,
     },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },

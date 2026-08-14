@@ -44,6 +44,7 @@ pub struct WebArtifacts {
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
 const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/RuntimeStop.js"),
+    include_str!("../Prelude/Core/Task.js"),
     "\n",
     include_str!("../Prelude/Core/Option.js"),
     "\n",
@@ -769,6 +770,25 @@ fn web_wasm_stmts_supported(
     })
 }
 
+fn web_wasm_inline_block_supported(
+    stmts: &[TIR::TStmt],
+    bundle: &ProgramBundle,
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> bool {
+    let Some((last, prefix)) = stmts.split_last() else {
+        return true;
+    };
+    web_wasm_stmts_supported(prefix, bundle, file_prefix, reconstructions)
+        && match last {
+            TIR::TStmt::ExprStmt(expr) | TIR::TStmt::Return(Some(expr)) => {
+                web_wasm_expr_supported(expr, bundle, file_prefix, reconstructions)
+            }
+            TIR::TStmt::Return(None) => true,
+            _ => false,
+        }
+}
+
 fn web_wasm_expr_supported(
     expr: &TIR::TExpr,
     bundle: &ProgramBundle,
@@ -785,6 +805,9 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Local(_) => true,
         TIR::TExprKind::CtLit(crate::AST::CtValue::Int(_)
         | crate::AST::CtValue::BigInt(_)) => true,
+        TIR::TExprKind::InlineBlock(stmts) => {
+            web_wasm_inline_block_supported(stmts, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::Uninit => match &expr.ty {
             Type::FixedList { elem, .. } => wasm_internal_ty(elem, bundle).is_some(),
             ty => wasm_internal_ty(ty, bundle).is_some(),
@@ -850,6 +873,14 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Try { inner, .. } => {
             web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Value(fallback),
+            ..
+        } => {
+            web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(fallback, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::Absent => true,
         TIR::TExprKind::DistinctConvert {
             arg, op, fallible, ..
@@ -906,6 +937,30 @@ fn web_wasm_expr_supported(
             }
         },
         TIR::TExprKind::Lambda(lam) => match &lam.executable {
+            TIR::TLambdaBody::Expr(body) => {
+                web_wasm_expr_supported(body, bundle, file_prefix, reconstructions)
+            }
+            TIR::TLambdaBody::Block(body) => {
+                web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+            }
+            TIR::TLambdaBody::SharedBlock(body) => {
+                web_wasm_stmts_supported(&body[..], bundle, file_prefix, reconstructions)
+            }
+        },
+        TIR::TExprKind::HandleMethod { recv, op, args } => {
+            matches!(
+                op,
+                TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach
+            ) && args.is_empty()
+                && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::Spawn {
+                group: None,
+                executable,
+                ..
+            },
+        } => match &executable.executable {
             TIR::TLambdaBody::Expr(body) => {
                 web_wasm_expr_supported(body, bundle, file_prefix, reconstructions)
             }
@@ -1239,6 +1294,7 @@ fn web_js_ui_backend_method_supported(method: &str, argc: usize) -> bool {
 /// Handle calls the JS preflight and emitter both understand (D-WEBTIR1).
 fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
     match op {
+        TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach => argc == 0,
         TIR::THandleOp::UiBackendMethod { method } => {
             web_js_ui_backend_method_supported(method, argc)
         }
@@ -1465,6 +1521,13 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         }
         E::Lambda(lam) => web_lambda_supported(lam),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } | TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => web_lambda_supported(executable),
+        E::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::Spawn {
+                group: None,
+                executable,
+                ..
+            },
+        } => web_lambda_supported(executable),
         E::CoreClosureCall {
             kind: TIR::TCoreClosureKind::UiButtonOnClick {
                 label,
@@ -4251,6 +4314,41 @@ fn wasm_emit_distinct_convert(
     }
 }
 
+fn wasm_emit_inline_block(
+    stmts: &[TIR::TStmt],
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
+    let Some((last, prefix)) = stmts.split_last() else {
+        return Ok("{ () }".to_string());
+    };
+    let mut rendered = String::from("{\n");
+    emit_wasm_body(
+        prefix,
+        &mut rendered,
+        1,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    let pad = "    ";
+    match last {
+        TIR::TStmt::ExprStmt(expr) => rendered.push_str(&format!(
+            "{pad}{}\n",
+            wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
+        )),
+        TIR::TStmt::Return(Some(expr)) => rendered.push_str(&format!(
+            "{pad}return {};\n",
+            wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
+        )),
+        TIR::TStmt::Return(None) => rendered.push_str(&format!("{pad}return;\n")),
+        _ => return Err(()),
+    }
+    rendered.push('}');
+    Ok(rendered)
+}
+
 fn wasm_emit_expr(
     expr: &TIR::TExpr,
     funcs: &[FuncWeb],
@@ -4258,6 +4356,9 @@ fn wasm_emit_expr(
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<String, ()> {
     Ok(match &expr.kind {
+        TIR::TExprKind::InlineBlock(stmts) => {
+            wasm_emit_inline_block(stmts, funcs, file_prefix, reconstructions)?
+        }
         TIR::TExprKind::IntLit(n, _) if matches!(&expr.ty, Type::Int) => {
             format!("JetWasmInt::from_i64({n})")
         }
@@ -4502,7 +4603,10 @@ fn wasm_emit_expr(
                 _ => format!("jet_string_view_copy({value})"),
             }
         },
-        TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
+        TIR::TExprKind::Print(inner) => format!(
+            "jet_wasm_print({})",
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        ),
         TIR::TExprKind::Field { recv, field, boxed: false } => {
             let recv_expr = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
             if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
@@ -4647,6 +4751,15 @@ fn wasm_emit_expr(
                 ),
             }
         }
+        TIR::TExprKind::OrFallback {
+            value,
+            fallback: TIR::TOrFallback::Value(fallback),
+            ..
+        } => format!(
+            "match ({}) {{ Ok(value) => value, Err(_) => {} }}",
+            wasm_emit_expr(value, funcs, file_prefix, reconstructions)?,
+            wasm_emit_expr(fallback, funcs, file_prefix, reconstructions)?
+        ),
         TIR::TExprKind::DistinctConvert {
             name,
             arg,
@@ -4735,6 +4848,30 @@ fn wasm_emit_expr(
         TIR::TExprKind::Lambda(lam) => {
             wasm_tir_lambda(lam, funcs, file_prefix, reconstructions)?
         }
+        TIR::TExprKind::HandleMethod { recv, op, args }
+            if args.is_empty()
+                && matches!(
+                    op,
+                    TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach
+                ) =>
+        {
+            let recv = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            match op {
+                TIR::THandleOp::TaskJoin => format!("jet_task_join({recv})"),
+                TIR::THandleOp::TaskDetach => format!("jet_task_detach({recv})"),
+                _ => unreachable!(),
+            }
+        }
+        TIR::TExprKind::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::Spawn {
+                group: None,
+                executable,
+                ..
+            },
+        } => format!(
+            "jet_task_spawn(|| ({})())",
+            wasm_tir_lambda(executable, funcs, file_prefix, reconstructions)?
+        ),
         TIR::TExprKind::EnumLit {
             enum_type,
             variant,
@@ -6793,6 +6930,12 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                     if kind == "Instant" && method == "elapsed" => {
                         format!("jet_time_sub(jet_time_monotonic_now_ns(), {recv})")
                     }
+                TIR::THandleOp::TaskJoin if a.is_empty() => {
+                    format!("jet_task_join({recv})")
+                }
+                TIR::THandleOp::TaskDetach if a.is_empty() => {
+                    format!("jet_task_detach({recv})")
+                }
                 _ => return Err(()),
             }
         }
@@ -6885,6 +7028,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             }
         }
         E::Lambda(lam) => tir_js_lambda(lam, funcs, file_prefix)?,
+        E::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::Spawn {
+                group: None,
+                executable,
+                ..
+            },
+        } => format!(
+            "jet_task_spawn({})",
+            tir_js_lambda(executable, funcs, file_prefix)?
+        ),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => format!("jetDom.makeEffect({})", tir_js_lambda(executable, funcs, file_prefix)?),
         E::CoreClosureCall {
@@ -7151,6 +7304,11 @@ fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
 /// verbatim. The two adapter doors below marshal a rendered report into the
 /// host's termination mechanism; they do not create a second report shape.
 const WASM_ARITH_PRELUDE: &str = concat!(
+    "#[link(wasm_import_module = \"env\")]\nunsafe extern \"C\" { fn jet_web_print(ptr: u32, len: u32); }\n\n",
+    "fn jet_wasm_print(value: impl std::fmt::Display) {\n",
+    "    let text = value.to_string();\n",
+    "    unsafe { jet_web_print(text.as_ptr() as u32, text.len() as u32); }\n",
+    "}\n\n",
     "#[derive(Debug)]\n",
     "struct JetWasmRuntimeFailure { report: String }\n\n",
     "struct JetWasmHostError { json: String }\n\n",
@@ -7270,6 +7428,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     // D-FAIL-CARRIER1=A: the very same carrier file the native prelude puts
     // first, so `T?` and `T ? E` mean one thing on the web tier too.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
+    "\n",
+    include_str!("../Prelude/Core/TaskWasm.rs"),
     "\n",
     include_str!("../Prelude/Core/Option.rs"),
     "\n",

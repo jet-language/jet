@@ -630,7 +630,17 @@ export async function instantiateWasm(wasmPath, imports = {}) {
     throw new Error("WebAssembly is not available in this runtime");
   }
   const source = await loadBytes(wasmPath);
-  const { instance } = await WebAssembly.instantiate(source, { env: imports });
+  const memory = { current: null };
+  const wasmImports = {
+    jet_web_print(ptr, len) {
+      if (!memory.current) throw new Error("Wasm print called before memory was ready");
+      const bytes = new Uint8Array(memory.current.buffer, Number(ptr), Number(len));
+      print(new TextDecoder().decode(bytes));
+    },
+    ...imports,
+  };
+  const { instance } = await WebAssembly.instantiate(source, { env: wasmImports });
+  memory.current = instance.exports.memory ?? null;
   return instance;
 }
 
