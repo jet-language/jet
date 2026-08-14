@@ -1132,6 +1132,7 @@ extern "C" fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
 
 extern "C" fn jet_jit_file_writer_flush(handle: i64) -> i64 {
     use super::enc_stream::FileWriterSlot;
+    use std::io::Write;
     let err = Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
         let Some(FileWriterSlot::Live(writer)) = rt.file_writers.get_mut(idx) else {
