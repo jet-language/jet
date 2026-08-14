@@ -269,7 +269,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn unit_raw(expr: Expr, type_name: &str, span: Span) -> Expr {
+    fn distinct_raw(expr: Expr, type_name: &str, base: Type, span: Span) -> Expr {
         Expr::MethodCall {
             receiver: Box::new(expr),
             method: "raw".to_string(),
@@ -278,7 +278,7 @@ impl<'a> Checker<'a> {
             type_args: Vec::new(),
             args: Vec::new(),
             recv_type: Some(type_name.to_string()),
-            resolved_ret: Some(Type::Float),
+            resolved_ret: Some(base),
             checked_widen: false,
         }
     }
@@ -348,8 +348,8 @@ impl<'a> Checker<'a> {
     ) -> Expr {
         let raw = Expr::Binary(
             op,
-            Box::new(Self::unit_raw(left, left_name, span)),
-            Box::new(Self::unit_raw(right, right_name, span)),
+            Box::new(Self::distinct_raw(left, left_name, Type::Float, span)),
+            Box::new(Self::distinct_raw(right, right_name, Type::Float, span)),
             span,
         );
         Expr::MethodCall {
@@ -1083,7 +1083,29 @@ impl<'a> Checker<'a> {
                             span,
                         ));
                     }
-                    return self.registry.distinct_base(distinct_name).cloned();
+                    let base = self
+                        .registry
+                        .distinct_base(distinct_name)
+                        .cloned()
+                        .expect("range-constrained distinct type has a base");
+                    // Range loss changes the carrier, not just the result fact. Keep
+                    // the nominal wrapper at the boundary, then expose its base to
+                    // every backend through the existing raw projection seam.
+                    let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                    let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                    *lhs = Box::new(Self::distinct_raw(
+                        *left,
+                        distinct_name,
+                        base.clone(),
+                        span,
+                    ));
+                    *rhs = Box::new(Self::distinct_raw(
+                        *right,
+                        distinct_name,
+                        base.clone(),
+                        span,
+                    ));
+                    return Some(base);
                 }
                 // Same #Numeric distinct type — arithmetic is allowed, returns the same type.
                 return Some(lt);
