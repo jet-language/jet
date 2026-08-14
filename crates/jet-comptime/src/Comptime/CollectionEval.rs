@@ -66,6 +66,7 @@ mod collection_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
