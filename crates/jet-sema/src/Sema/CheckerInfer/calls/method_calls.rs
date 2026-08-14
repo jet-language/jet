@@ -1232,16 +1232,14 @@ impl<'a> Checker<'a> {
                 }
                 if let Some((value, literal_span)) = inline_range_literal(&args[0].expr) {
                     if !exact_integer_fits(&value, i128::from(lo), i128::from(hi)) {
-                        let shown = value.to_string_rep();
-                        self.diags.push(Diagnostic::error(
-                            "E0135",
-                            format!("`{shown}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
-                            format!(
-                                "a range type only holds values inside its bounds; `{shown}` can never be an `Int({lo}..{hi})`"
+                        self.diags.push(
+                            crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
+                                &value,
+                                lo,
+                                hi,
+                                literal_span,
                             ),
-                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
-                            Some(literal_span),
-                        ));
+                        );
                     }
                     *resolved_ret_out = Some(target.clone());
                     return Some(target);

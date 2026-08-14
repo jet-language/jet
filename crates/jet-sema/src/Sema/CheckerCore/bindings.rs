@@ -656,14 +656,14 @@ impl<'a> Checker<'a> {
                         && method.as_str() == Syntax::conversion_method_for_source("Int")
                         && args.len() == 1
                     {
-                        let range_name = format!("Int({lo}..{hi})");
-                        self.diags.push(Diagnostic::error(
-                            "E0136",
-                            format!("making a `{range_name}` from a runtime value can fail"),
-                            "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
-                            format!("write `{range_name}.{method}(raw)?` and handle the failure"),
-                            Some(args[0].expr.span()),
-                        ));
+                        self.diags.push(
+                            crate::Sema::Diagnostics::inline_range_runtime_conversion(
+                                lo,
+                                hi,
+                                method,
+                                args[0].expr.span(),
+                            ),
+                        );
                         it = Some(target);
                     }
                 }

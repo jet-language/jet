@@ -182,17 +182,14 @@ impl<'a> Checker<'a> {
                         i128::from(*lo),
                         i128::from(*hi),
                     ) {
-                        self.diags.push(Diagnostic::error(
-                            "E0135",
-                            format!(
-                                "`-{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"
+                        self.diags.push(
+                            crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
+                                &negated,
+                                *lo,
+                                *hi,
+                                *span,
                             ),
-                            format!(
-                                "a range type only holds values inside its bounds; `-{value}` can never be an `Int({lo}..{hi})`"
-                            ),
-                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
-                            Some(*span),
-                        ));
+                        );
                     }
                     *width = None;
                     Some(Type::InlineRange {
@@ -220,20 +217,16 @@ impl<'a> Checker<'a> {
                     Some(Type::Int)
                 }
                 Type::InlineRange { base, lo, hi } => {
-                    if (*value as i128) < i128::from(*lo)
-                        || (*value as i128) > i128::from(*hi)
-                    {
-                        self.diags.push(Diagnostic::error(
-                            "E0135",
-                            format!(
-                                "`{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"
+                    let exact = super::exact_integer_literal(*value, raw.as_deref());
+                    if !super::exact_integer_fits(&exact, i128::from(*lo), i128::from(*hi)) {
+                        self.diags.push(
+                            crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
+                                &exact,
+                                *lo,
+                                *hi,
+                                *span,
                             ),
-                            format!(
-                                "a range type only holds values inside its bounds; `{value}` can never be an `Int({lo}..{hi})`"
-                            ),
-                            format!("use a value in `{lo}..{hi}`, or widen the type's range"),
-                            Some(*span),
-                        ));
+                        );
                     }
                     *width = None;
                     Some(Type::InlineRange {

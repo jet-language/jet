@@ -21,6 +21,43 @@ pub fn render_registered(
     Diagnostic::error(code, what, why, fix, span)
 }
 
+/// D-RANGETYPE1: one diagnostic root for an inline range literal that cannot
+/// satisfy its destination interval.
+pub(crate) fn inline_range_literal_out_of_bounds(
+    value: &crate::Numeric::CtBigInt,
+    lo: i64,
+    hi: i64,
+    span: Span,
+) -> Diagnostic {
+    let shown = value.to_string_rep();
+    Diagnostic::error(
+        "E0135",
+        format!("`{shown}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
+        format!(
+            "a range type only holds values inside its bounds; `{shown}` can never be an `Int({lo}..{hi})`"
+        ),
+        format!("use a value in `{lo}..{hi}`, or widen the type's range"),
+        Some(span),
+    )
+}
+
+/// D-RANGETYPE1: the explicit fallible conversion required for an unproven
+/// value entering an inline range.
+pub(crate) fn inline_range_runtime_conversion(
+    lo: i64,
+    hi: i64,
+    method: &str,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E0136",
+        format!("making a `Int({lo}..{hi})` from a runtime value can fail"),
+        "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled".to_string(),
+        format!("write `Int({lo}..{hi}).{method}(raw)?` and handle the failure"),
+        Some(span),
+    )
+}
+
 /// E1112 for an empty task combinator. The row owns the report wording.
 pub fn e1112(method: &str, span: Span) -> Diagnostic {
     Diagnostic::from_row("E1112", &[("method", method)], Some(span))
