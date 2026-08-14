@@ -23,7 +23,7 @@ use crate::Sema::{
     effect_covers, effect_root, effect_set_has_root, parse_effect_name, Effect, EffectSet,
     EffectSummary,
 };
-use crate::AST::{Item, ProgramBundle};
+use crate::AST::{ImportKind, Item, ProgramBundle};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// One package's (root, or a dependency) aggregated effect set.
@@ -35,12 +35,30 @@ pub struct PackageEffects {
     /// Function identities where a deniable Panic stop enters the graph.
     /// This is the package-budget provenance used by E1220.
     pub panic_sites: Vec<String>,
+    /// Root-side source location where this dependency crosses the budget
+    /// boundary. Package diagnostics render against the selected root source.
+    pub boundary_span: Option<Span>,
 }
 
 #[derive(Default)]
 struct PackageEffectAggregate {
     effects: EffectSet,
     panic_sites: BTreeSet<String>,
+    boundary_span: Option<Span>,
+}
+
+fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<Span> {
+    bundle.modules.get(bundle.entry)?.imports.iter().find_map(|import| {
+        match &import.kind {
+            ImportKind::Module(name, span) if name == dependency => Some(*span),
+            ImportKind::Unqualified {
+                module_alias,
+                module_alias_span,
+                ..
+            } if module_alias == dependency => Some(*module_alias_span),
+            _ => None,
+        }
+    })
 }
 
 /// Attribute every function's solved effect set (`Sema::check_bundle_with_effect_facts`
@@ -60,10 +78,19 @@ pub fn compute_package_effects(
             .find(|(_, dir)| module.path.starts_with(dir))
             .map(|(name, _)| name.clone())
             .unwrap_or_else(|| "root".to_string());
+        let boundary_span = if owner == "root" {
+            None
+        } else {
+            dependency_boundary_span(bundle, &owner)
+        };
         let out = by_pkg.entry(owner).or_default();
+        if out.boundary_span.is_none() {
+            out.boundary_span = boundary_span;
+        }
         for item in &module.items {
             collect_item_effects(
                 item,
+                &module.alias,
                 solved,
                 summaries,
                 &mut out.effects,
@@ -78,6 +105,7 @@ pub fn compute_package_effects(
             name,
             effects: aggregate.effects,
             panic_sites: aggregate.panic_sites.into_iter().collect(),
+            boundary_span: aggregate.boundary_span,
         })
         .collect()
 }
@@ -123,6 +151,7 @@ fn panic_site(
 
 fn collect_item_effects(
     item: &Item,
+    module_alias: &str,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     out: &mut EffectSet,
@@ -131,7 +160,7 @@ fn collect_item_effects(
     match item {
         Item::Func(f) => {
             collect_effects_for_key(
-                crate::Sema::effect_key(None, &f.name),
+                format!("{module_alias}::{}", crate::Sema::effect_key(None, &f.name)),
                 solved,
                 summaries,
                 out,
@@ -141,7 +170,10 @@ fn collect_item_effects(
         Item::Impl(im) => {
             for m in &im.methods {
                 collect_effects_for_key(
-                    crate::Sema::effect_key(Some(&im.type_name), &m.name),
+                    format!(
+                        "{module_alias}::{}",
+                        crate::Sema::effect_key(Some(&im.type_name), &m.name)
+                    ),
                     solved,
                     summaries,
                     out,
@@ -152,7 +184,10 @@ fn collect_item_effects(
         Item::Struct(s) => {
             for m in &s.methods {
                 collect_effects_for_key(
-                    crate::Sema::effect_key(Some(&s.name), &m.name),
+                    format!(
+                        "{module_alias}::{}",
+                        crate::Sema::effect_key(Some(&s.name), &m.name)
+                    ),
                     solved,
                     summaries,
                     out,
@@ -162,7 +197,10 @@ fn collect_item_effects(
             for block in &s.trait_impls {
                 for m in &block.methods {
                     collect_effects_for_key(
-                        crate::Sema::effect_key(Some(&s.name), &m.name),
+                        format!(
+                            "{module_alias}::{}",
+                            crate::Sema::effect_key(Some(&s.name), &m.name)
+                        ),
                         solved,
                         summaries,
                         out,
@@ -174,7 +212,10 @@ fn collect_item_effects(
         Item::Enum(e) => {
             for m in &e.methods {
                 collect_effects_for_key(
-                    crate::Sema::effect_key(Some(&e.name), &m.name),
+                    format!(
+                        "{module_alias}::{}",
+                        crate::Sema::effect_key(Some(&e.name), &m.name)
+                    ),
                     solved,
                     summaries,
                     out,
@@ -280,7 +321,7 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                         .first()
                         .map(String::as_str)
                         .unwrap_or("a reachable dependency function");
-                    diags.push(e1220_panic(&pkg.name, site));
+                    diags.push(e1220_panic(&pkg.name, site, pkg.boundary_span));
                 } else {
                     diags.push(e1220(&pkg.name, effect));
                 }
@@ -332,7 +373,7 @@ pub fn e1220(dep: &str, effect: &str) -> Diagnostic {
 
 /// E1220 / D-NOPANIC1=D: package denial keeps the panic provenance visible
 /// and gives the same three exits as function-scope prohibition.
-pub fn e1220_panic(dep: &str, panic_site: &str) -> Diagnostic {
+pub fn e1220_panic(dep: &str, panic_site: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E1220",
         format!(
@@ -342,6 +383,6 @@ pub fn e1220_panic(dep: &str, panic_site: &str) -> Diagnostic {
             "the package denies stops from `{panic_site}`; a dependency that can stop cannot cross this budget boundary"
         ),
         "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or allow/grant Panic to this dependency".to_string(),
-        None::<Span>,
+        span,
     )
 }

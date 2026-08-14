@@ -1,0 +1,7 @@
+Error [E1220]: `panicdep` uses the `Panic` effect at `panicdep::parse_port`, which this package's budget doesn't allow
+  --> tests/ui/panic_effect_budget/run.jet:2:5
+    |
+  2 | use panicdep
+    |     ^^^^^^^^
+ Why: the package denies stops from `panicdep::parse_port`; a dependency that can stop cannot cross this budget boundary
+ Fix: return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or allow/grant Panic to this dependency

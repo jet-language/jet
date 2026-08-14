@@ -1228,6 +1228,7 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
         name: "panicdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Panic".to_string()]),
         panic_sites: vec!["panicdep::parse_port".to_string()],
+        boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];
     let diagnostics = jetpack::EffectBudget::enforce(&entries, &manifest);
     assert_eq!(diagnostics.len(), 1);
@@ -1236,6 +1237,7 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
     assert!(diagnostics[0].what.contains("parse_port"));
     assert!(diagnostics[0].fix.contains("fallible result"));
     assert!(diagnostics[0].fix.contains("#Pre"));
+    assert_eq!(diagnostics[0].span, Some(jet::Diagnostics::Span::new(4, 12)));
 }
 
 #[test]
