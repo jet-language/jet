@@ -88,6 +88,28 @@ fn odd(n: Int) => Bool {
         assert!(stderr.is_empty(), "{tier} stderr: {stderr}");
         assert_eq!(exit_code, 0, "{tier} exit code");
     }
+
+    let cli = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("jet run should execute the single script entry");
+    assert!(
+        cli.status.success(),
+        "jet run rejected the script:\n{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&cli.stdout),
+        expected,
+        "jet run must preserve script statement order"
+    );
+    assert!(
+        cli.stderr.is_empty(),
+        "jet run emitted unexpected stderr: {}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 
     if common::have_rustc() {
@@ -273,7 +295,7 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "print(\"script body\")\n#Test(\"script test\") { require(true) }\n",
+        "print(\"script body\")\n#Test(\"script test\") { require(helper()) }\nfn helper() => Bool { return true }\n",
     )
     .unwrap();
     let path = file.to_str().unwrap();
