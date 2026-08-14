@@ -153,7 +153,31 @@ module.exports = grammar({
 
     // A marker that introduces a top-level brace-list declaration:
     // `#UnitFamily(Currency) { usd, eur }` (D-QUAL3) mints one type per member.
-    marker_decl: ($) => seq($.attribute, "{", commaSep($.identifier), "}"),
+    // D-BOUND-SINK1=A: a library-declared checked text head is a separate
+    // marker declaration, not an applied marker: `marker Name on [.Text] {
+    // check … hole … }`.
+    marker_decl: ($) =>
+      choice(
+        $.checked_text_head_decl,
+        seq($.attribute, "{", commaSep($.identifier), "}"),
+      ),
+
+    checked_text_head_decl: ($) =>
+      seq(
+        "marker",
+        field("name", $.marker_name),
+        "on",
+        "[",
+        ".",
+        "Text",
+        "]",
+        "{",
+        "check",
+        field("check", $._expr),
+        "hole",
+        field("hole", $._expr),
+        "}",
+      ),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
     // `use core.encoding.json as json`, `use "./file.jet"`, or a member list
@@ -830,6 +854,7 @@ module.exports = grammar({
         $.multiline_string,
         $.string_literal,
         $.char_literal,
+        $.compiler_fact,
         $.identifier,
         $.typed_literal,
         $.type_identifier,

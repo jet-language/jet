@@ -124,6 +124,9 @@ fn run() {
 }
 "#;
     jet::compile(source).expect("a declared text head should own its checked construction path");
+    let formatted = jet::format_source(source).expect("checked text heads should format");
+    assert!(formatted.contains("marker Pattern on [.Text]"));
+    assert_eq!(jet::format_source(&formatted).unwrap(), formatted);
 
     let invalid = r#"
 marker Pattern on [.Text] {

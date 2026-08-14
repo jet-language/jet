@@ -1,0 +1,18 @@
+// D-BOUND-SINK1=A: a library-declared checked text head is a nominal sink type.
+use core.regex as re
+
+marker Pattern on [.Text] {
+    check @body
+    hole re.escape(@value)
+}
+
+fn accept(pattern: Pattern) {
+    print("accepted")
+}
+
+fn run() {
+    value :: "a.b"
+    pattern :: Pattern.{"prefix {value}"}
+    accept(pattern)
+    accept(Pattern.raw("already checked"))
+}

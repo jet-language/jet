@@ -31,6 +31,7 @@
 (capability_sigil) @operator
 
 ; Applied rules (#Test, #[Codable], #Caps(...), #Grant, ...)
+(marker_name) @attribute
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
 (lower_marker_name) @attribute

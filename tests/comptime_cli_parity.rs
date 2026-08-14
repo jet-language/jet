@@ -4,11 +4,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const COMPTIME_STEMS: [&str; 4] = [
+const TIER_PARITY_STEMS: [&str; 5] = [
     "comptime/embed",
     "comptime/embed_bytes",
     "comptime/find",
     "comptime/find_empty",
+    "tooling/declared_text_head",
 ];
 
 fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String {
@@ -69,11 +70,11 @@ fn run_jet(args: &[&str], project: &Path, cache: &Path) -> Output {
 }
 
 #[test]
-fn comptime_examples_run_through_default_jet_run_and_report_resident_native() {
+fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("comptime_effect_parity");
 
-    for stem in COMPTIME_STEMS {
+    for stem in TIER_PARITY_STEMS {
         let case_dir = scratch.join(&stem.replace('/', "_"));
         fs::create_dir_all(&case_dir).expect("create comptime parity case directory");
         let file_name = copy_comptime_fixture(&root, &case_dir, stem);
