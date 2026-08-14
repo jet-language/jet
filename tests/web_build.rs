@@ -1984,7 +1984,7 @@ try {
     let _ = fs::remove_dir_all(dir);
 }
 
-fn normalize_journey_paths(journey: &str, shown: &str) -> String {
+fn normalize_journey_paths(journey: &str, shown: &str, target_line_offset: i64) -> String {
     let trailing_newline = journey.ends_with('\n');
     let normalized = journey
         .lines()
@@ -1998,7 +1998,15 @@ fn normalize_journey_paths(journey: &str, shown: &str) -> String {
             let Some(colon) = line[..close].rfind(':') else {
                 return line.to_string();
             };
-            format!("{} ({shown}{}", &line[..open], &line[colon..])
+            let Ok(source_line) = line[colon + 1..close].parse::<i64>() else {
+                return line.to_string();
+            };
+            format!(
+                "{} ({shown}:{}{}",
+                &line[..open],
+                source_line - target_line_offset,
+                &line[close..]
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -2010,12 +2018,19 @@ fn normalize_journey_paths(journey: &str, shown: &str) -> String {
 }
 
 fn harness_journey(stdout: &str) -> String {
-    let start = stdout.find("JOURNEY_BEGIN\n").expect("journey start marker");
-    let start = start + "JOURNEY_BEGIN\n".len();
+    harness_field(stdout, "JOURNEY_BEGIN\n", "\nJOURNEY_END")
+}
+
+fn harness_frame(stdout: &str) -> String {
+    harness_field(stdout, "FRAME_BEGIN\n", "\nFRAME_END")
+}
+
+fn harness_field(stdout: &str, begin: &str, end_marker: &str) -> String {
+    let start = stdout.find(begin).expect("harness field start marker") + begin.len();
     let end = stdout[start..]
-        .find("\nJOURNEY_END")
+        .find(end_marker)
         .map(|offset| start + offset)
-        .expect("journey end marker");
+        .expect("harness field end marker");
     stdout[start..end].to_string()
 }
 
@@ -2025,26 +2040,26 @@ fn web_two_hop_journey_matches_all_execution_tiers() {
         eprintln!("note: skipping web two-hop journey parity test (need rustc + node)");
         return;
     }
-    let source = r#"fn load() => Int ? {
+    let source = r#"fn load() => String ? {
     return Err("two-hop", code: "TWOHOP")
 }
 
-fn read() => Int ? {
+fn read() => String ? {
     value :: load()? "reading source"
     return Ok(value)
 }
 
 fn run() ? {
-    value :: read()?
+    value :: read()? "running source"
     print(value)
 }
 "#;
     let shown = "tests/fixtures/web_two_hop_journey.jet";
-    let expected = format!(
+    let expected_journey = format!(
         "error propagated from: read ({shown}:6) via ?: reading source\n\
-error propagated from: run ({shown}:11) via ?\n\
-Error [TWOHOP]: two-hop"
+error propagated from: run ({shown}:11) via ?: running source"
     );
+    let expected_report = format!("{expected_journey}\nError [TWOHOP]: two-hop");
 
     let native_runs = [
         (
@@ -2061,8 +2076,8 @@ Error [TWOHOP]: two-hop"
         assert_eq!(code, 1, "{tier} two-hop run must return an error");
         assert!(stdout.is_empty(), "{tier} two-hop run printed stdout: {stdout:?}");
         assert_eq!(
-            normalize_journey_paths(stderr.trim_end(), shown),
-            expected,
+            normalize_journey_paths(stderr.trim_end(), shown, 0),
+            expected_report,
             "{tier} journey changed"
         );
     }
@@ -2079,6 +2094,9 @@ try {
   console.log("JOURNEY_BEGIN");
   console.log(error.journey);
   console.log("JOURNEY_END");
+  console.log("FRAME_BEGIN");
+  console.log(error.frame);
+  console.log("FRAME_END");
 }
 "#;
     let js_dir = build_web_fixture(
@@ -2086,17 +2104,29 @@ try {
         &format!("#Target(JS)\n{source}"),
         shown,
     );
+    let js_stdout = run_node_harness(&js_dir, "two_hop_journey_harness.mjs", harness);
     assert_eq!(
-        harness_journey(&run_node_harness(&js_dir, "two_hop_journey_harness.mjs", harness)),
-        expected,
+        normalize_journey_paths(&harness_journey(&js_stdout), shown, 1),
+        expected_journey,
         "JS journey changed"
+    );
+    assert_eq!(
+        normalize_journey_paths(&harness_frame(&js_stdout), shown, 1),
+        expected_report,
+        "JS report changed"
     );
 
     let wasm_dir = build_web_fixture("two_hop_journey_wasm", source, shown);
+    let wasm_stdout = run_node_harness(&wasm_dir, "two_hop_journey_harness.mjs", harness);
     assert_eq!(
-        harness_journey(&run_node_harness(&wasm_dir, "two_hop_journey_harness.mjs", harness)),
-        expected,
+        normalize_journey_paths(&harness_journey(&wasm_stdout), shown, 0),
+        expected_journey,
         "Wasm journey changed"
+    );
+    assert_eq!(
+        normalize_journey_paths(&harness_frame(&wasm_stdout), shown, 0),
+        expected_report,
+        "Wasm report changed"
     );
 
     let _ = fs::remove_dir_all(js_dir);
