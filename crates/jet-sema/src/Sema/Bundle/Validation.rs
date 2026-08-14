@@ -1604,6 +1604,7 @@ fn check_func_body_bundle_scoped(
             .collect(),
         binder_ref_types: HashMap::new(),
         expected_type: None,
+        knowledge_gate: None,
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
         lending_view_loop_vars: HashSet::new(),

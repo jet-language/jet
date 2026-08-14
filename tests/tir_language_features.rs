@@ -417,10 +417,10 @@ fn run() {
 }
 
 /// D-RANGETYPE1/D-SHAPE-CONVERT1: range-constrained distinct conversions are
-/// fallible for runtime values (`Severity.from_int(raw)?`), and arithmetic widens to the base `Int`
-/// so codegen must not leave an `Int`-typed expression as raw newtype math.
+/// fallible for runtime values (`Severity.from_int(raw)?`), and arithmetic
+/// loosens to the base `Int` only at the written `wrapping` gate.
 #[test]
-fn range_type_runtime_try_and_arithmetic_widens() {
+fn range_type_runtime_try_and_spelled_arithmetic_gate() {
     if !have_rustc() {
         return;
     }
@@ -437,7 +437,7 @@ fn direct() => Severity { return Severity.from_u8(8) }
 fn run() {
     a :: pass_checked(checked(4)) ?? panic(\"range\")
     b :: checked(6) ?? panic(\"range\")
-    widened :: a + b
+    widened :: wrapping(a + b)
     print(\"{widened}\")
     print(direct().raw())
 }

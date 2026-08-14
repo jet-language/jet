@@ -285,6 +285,7 @@ renumbered, and no new `W` code may be allocated.
 | E0152 | sema  | a bare `String`, interpolated pattern, or invalid pattern is used as a typed `Regex` literal (D-REGEX-LIT1) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
 | E0155 | sema  | typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation (D-BOUND-HEAD1) |
+| E0156 | sema  | a knowledge plane would be loosened without its written gate (D-FACT-LAW1, D-TYPE2-EXACT1) |
 | E0160 | sema  | `++`/`--` operand is not an assignable lvalue (D-INCR1) |
 | E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |
 | E0162 | sema  | `++`/`--` on a non-integer type (D-INCR1) |
@@ -1674,6 +1675,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
 | E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
 | E0155 | a typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation. | Typed literal heads are checked before the program runs; URL and Path holes must stay inside components, and DateTime heads must be complete. | Write a valid typed literal with holes only in URL or Path components, or parse a runtime `String` explicitly. |
+| E0156 | this operation would loosen `{plane}`. | knowledge only tightens silently; loosening `{plane}` must be named with a written gate. | write `{gate}(value)` at this boundary. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
 | E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-capability marker `&` if the function should change it. |

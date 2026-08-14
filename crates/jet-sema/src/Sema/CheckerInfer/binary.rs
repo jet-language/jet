@@ -1076,6 +1076,13 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 if self.registry.distinct_range(distinct_name).is_some() {
+                    if !self.knowledge_gate_allows_range_loss() {
+                        self.diags.push(crate::Sema::knowledge_loss_diagnostic(
+                            crate::Sema::KnowledgePlane::Range,
+                            crate::Syntax::BUILTIN_WRAPPING,
+                            span,
+                        ));
+                    }
                     return self.registry.distinct_base(distinct_name).cloned();
                 }
                 // Same #Numeric distinct type — arithmetic is allowed, returns the same type.

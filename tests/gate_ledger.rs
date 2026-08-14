@@ -48,7 +48,11 @@ fn write_gates(root: &Path) {
 fn write_source_gate_kinds(root: &Path) {
     fs::write(
         root.join("source-gates.jet"),
-        r#"tag Input { deny: [IO] }
+        r#"#UnitFamily(Length, base: meter) {
+    meter
+    thirdish(scale: 2/3)
+}
+tag Input { deny: [IO] }
 #Scrub(Input) fn scrub(raw: #Input String) => String { return ~raw }
 
 fn run() {
@@ -57,6 +61,7 @@ fn run() {
     task.detach()
     approx(1)
     wrapping(1 + 2)
+    Thirdish.from_meter_rounded(1meter, .NearestEven, digits: 0).drop("rounded conversion gate")
 }
 "#,
     )
@@ -151,7 +156,21 @@ fn source_gate_kinds_keep_their_written_reasons() {
     }
     assert!(json.contains("intentional result discard"), "{json}");
     assert!(json.contains("#Scrub(Input)"), "{json}");
+    assert!(json.contains("\"subject\":\"from_meter_rounded\""), "{json}");
     assert!(json.contains("source-gates.jet:"), "{json}");
+}
+
+#[test]
+fn range_knowledge_gate_has_three_tier_example_parity() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = "examples/features/types/range_types.jet";
+    let release = stdout(&run(root, &["run", "--release", example]));
+    let default = stdout(&run(root, &["run", example]));
+    let interpret = stdout(&run(root, &["run", "--interpret", example]));
+    let expected = "7\n3\n10\ntrue\n7\n15\n";
+    assert_eq!(release, expected);
+    assert_eq!(default, expected);
+    assert_eq!(interpret, expected);
 }
 
 #[test]

@@ -1438,6 +1438,9 @@ pub(crate) struct Checker<'a> {
     pub(crate) binder_ref_types: HashMap<String, Type>,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
+    /// The written bounded-arithmetic call currently checking its argument.
+    /// This is a sema-only context; no gate marker reaches TIR or codegen.
+    knowledge_gate: Option<KnowledgeGate>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
     /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
@@ -1580,6 +1583,22 @@ pub(crate) struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn with_knowledge_gate<T>(
+        &mut self,
+        gate: KnowledgeGate,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = self.knowledge_gate.replace(gate);
+        let result = check(self);
+        self.knowledge_gate = previous;
+        result
+    }
+
+    pub(crate) fn knowledge_gate_allows_range_loss(&self) -> bool {
+        self.knowledge_gate
+            .is_some_and(KnowledgeGate::allows_range_loss)
+    }
+
     pub(crate) fn register_binder_refs(&mut self, args: &[crate::AST::CallArg]) {
         for arg in args {
             for (name, _, ty) in &arg.flags.binder_refs {
@@ -2078,8 +2097,11 @@ pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, collect
 mod CheckerReferences;
 mod State;
 mod Taint;
+mod KnowledgeLoss;
 mod App;
 mod WebPartition;
+
+pub(crate) use KnowledgeLoss::{diagnostic as knowledge_loss_diagnostic, KnowledgeGate, KnowledgePlane};
 
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;

@@ -18,7 +18,9 @@ fn run() {
     print("{sev.raw()}")
     from_runtime :: checked(3) ?? Severity.from_int(0)
     print("{from_runtime.raw()}")
-    widened :: sev + from_runtime
+    // D-TYPE2-EXACT1 / D-FACT-LAW1: range knowledge loosens only at a
+    // written bounded-arithmetic gate.
+    widened :: wrapping(sev + from_runtime)
     print("{widened}")
 
     // D-RANGE-VALUE1=A: inclusive and exclusive spellings make the same

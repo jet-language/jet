@@ -2,7 +2,7 @@ use crate::AST::{AccessConvention, BinOp, Call, CallablePolicyChain, Expr, StrPa
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0904, e0905};
 use crate::Sema::Bundle::{fn_types_compatible, func_sig_to_fn_type};
-use crate::Sema::Checker;
+use crate::Sema::{Checker, KnowledgeGate};
 use crate::Sema::CheckerCoreLib::{
     io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
     wrong_core_arity,
@@ -125,12 +125,18 @@ impl<'a> Checker<'a> {
                 // Hand back a plausible type so the use site doesn't cascade.
                 return ty.filter(Type::is_integer).or(Some(Type::Int));
             }
-            let arg_ty = self.infer(&mut call.args[0].expr);
             let is_arith = matches!(
                 &call.args[0].expr,
                 Expr::Binary(op, _, _, _)
                     if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
             );
+            let arg_ty = if is_arith {
+                self.with_knowledge_gate(KnowledgeGate::BoundedArithmetic, |checker| {
+                    checker.infer(&mut call.args[0].expr)
+                })
+            } else {
+                self.infer(&mut call.args[0].expr)
+            };
             let int_ok = arg_ty.as_ref().is_some_and(|t| t.is_integer());
             if !is_arith || !int_ok {
                 self.diags

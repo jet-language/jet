@@ -51,7 +51,13 @@ impl GateKind {
             "force" | "force_pin" => Some(Self::ForcePin),
             "scrub" | "taint" | "taint_scrub" => Some(Self::TaintScrub),
             "drop" | "detach" | "duty" | "duty_drop" => Some(Self::DutyDrop),
-            "approx" | "precision" | "precision_demotion" => Some(Self::PrecisionDemotion),
+            "approx"
+            | "precision"
+            | "precision_demotion"
+            | "rounded"
+            | "wrapping"
+            | "saturating"
+            | "checked" => Some(Self::PrecisionDemotion),
             "nondeterministic" | "determinism" => Some(Self::Nondeterministic),
             _ => None,
         }
@@ -431,16 +437,50 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
                 "recorded",
             ));
         }
-        Expr::Call(call) if call.name == crate::Syntax::BUILTIN_WRAPPING => {
+        Expr::Call(call)
+            if matches!(
+                call.name.as_str(),
+                crate::Syntax::BUILTIN_WRAPPING
+                    | crate::Syntax::BUILTIN_SATURATING
+                    | crate::Syntax::BUILTIN_CHECKED
+            ) =>
+        {
+            let detail = match call.name.as_str() {
+                crate::Syntax::BUILTIN_SATURATING => {
+                    "overflow fact replaced by saturating arithmetic"
+                }
+                crate::Syntax::BUILTIN_CHECKED => {
+                    "overflow fact represented as an optional result"
+                }
+                _ => "overflow fact replaced by wrapping arithmetic",
+            };
             ledger.push(source_entry(
                 GateKind::PrecisionDemotion,
                 "knowledge",
                 "expression",
                 source,
                 call.name_span,
-                "wrapping",
+                &call.name,
                 None,
-                "overflow fact replaced by wrapping arithmetic",
+                detail,
+                "recorded",
+            ));
+        }
+        Expr::MethodCall {
+            method,
+            method_span,
+            args,
+            ..
+        } if is_rounded_conversion(method, args) => {
+            ledger.push(source_entry(
+                GateKind::PrecisionDemotion,
+                "knowledge",
+                "expression",
+                source,
+                *method_span,
+                method,
+                None,
+                "unit conversion rounded with an explicit mode",
                 "recorded",
             ));
         }
@@ -511,6 +551,18 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
         }
         _ => {}
     }
+}
+
+fn is_rounded_conversion(method: &str, args: &[crate::AST::CallArg]) -> bool {
+    // The checker owns validity of the source, mode, and result. The ledger
+    // only recognizes the canonical destination-owned spelling and its
+    // required `digits:` slot, so it does not become a second authority.
+    method.starts_with("from_")
+        && method.ends_with("_rounded")
+        && args.len() == 3
+        && args.iter().any(|arg| {
+            matches!(arg.label.as_ref(), Some((label, _)) if label == "digits")
+        })
 }
 
 fn literal_text(expression: Option<&Expr>) -> Option<String> {

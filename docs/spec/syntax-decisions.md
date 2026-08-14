@@ -6249,12 +6249,13 @@ as today, without the placeholder-zero sentinel.
 
 Amends: D-COMPUTE-TYPE1's stored encoding; its semantics stay unchanged.
 
-**2026-08-06 — D-TYPE2-EXACT1 = A — The conservation law for precision**
-*(card #1497, implementation card #1554)*. The law enters the spec: knowledge
-grows silently, is lost only at a spelled step, and erases at runtime. The two
-existing spellings stay, because each names its own operation well. Approx marks
-accepting a representation's precision; rounded conversions name a mode because
-rounding direction matters there.
+**2026-08-06 — D-TYPE2-EXACT1 = A — The tighten/loosen law for precision**
+*(card #1497, implementation card #1554)*. The knowledge instance of
+D-FACT-LAW1 enters the spec: knowledge tightens silently, loosens only at a
+spelled step, and erases at runtime. The two existing spellings stay, because
+each names its own operation well. Approx marks accepting a representation's
+precision; rounded conversions name a mode because rounding direction matters
+there.
 
 The law binds every future surface: any operation that discards range, exactness,
 unit, state, or classification must require a spelled step, checked in sema.
@@ -6706,7 +6707,7 @@ The named instances, as rows of the one table
 | Instance | Row | Target | Safe direction | Gate words |
 | --- | --- | --- | --- | --- |
 | Marker law zero (`D-VERDICT-1455-1`) | every marker row | written code | `none` | none |
-| The plane law (`D-TYPE2-EXACT1`) | `Exactness` | a value | `gain` | `approx`, `raw`, `wrapping` |
+| The plane law (`D-TYPE2-EXACT1`) | `Exactness` | a value | `gain` | `approx`, `rounded`, `raw`, `wrapping`, `saturating`, `checked` |
 | Flow narrowing (`D-FLOWTYPE1`) | `Flow` | a value | `gain` | none |
 | Taint (`D-TAG-SURFACE1`) | `Taint` | a value | `gain` | `Scrub` |
 | Duty (`D-CONC-JOIN1`) | `Duty` | a value | `discharge` | `detach`, `drop` |
