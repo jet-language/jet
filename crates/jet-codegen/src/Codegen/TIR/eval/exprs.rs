@@ -2112,7 +2112,7 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let root = runtime
             .gc_roots
             .get(root_index)
@@ -2168,7 +2168,7 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let root = runtime
             .gc_roots
             .get(root_index)
@@ -2223,7 +2223,7 @@ impl<'a> EvalCtx<'a> {
         promotion: &crate::AST::GcPromotion,
         scope: &HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let site = gc_runtime::PromotionSite {
+        let site = super::gc_runtime::PromotionSite {
             source: "<tir>",
             span_start: 0,
             span_end: 0,
@@ -2233,7 +2233,7 @@ impl<'a> EvalCtx<'a> {
             type_name: "<tir-value>",
             bytes: 0,
         };
-        let root = gc_runtime::AutomaticRoot::promote(value, site)
+        let root = super::gc_runtime::AutomaticRoot::promote(value, site)
             .map_err(|fault| unsupported(&fault.to_string(), self.span()))?;
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let index = runtime.gc_roots.len();

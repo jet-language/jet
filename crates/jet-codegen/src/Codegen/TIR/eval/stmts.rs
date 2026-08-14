@@ -518,7 +518,7 @@ impl<'a> EvalCtx<'a> {
                 );
                 let prior_allocator_view = self.preserve_allocator_view;
                 self.preserve_allocator_view = preserve_allocator_view;
-                let evaluated = self.eval_expr(init);
+                let evaluated = self.eval_expr(init, scope);
                 self.preserve_allocator_view = prior_allocator_view;
                 let mut v = evaluated?;
                 if let Some(ret) = self.pending_return.take() {
