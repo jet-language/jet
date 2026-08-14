@@ -64,6 +64,10 @@
 // retired environment `profiles:` field, while package/user prose uses
 // generations. The environment selector is `--env`; ENV_FLAG_PROFILE_RETIRED
 // exists only to teach `--preset`.
+// D-CONF-KEY1=A (ratified 2026-08-06, card #1519) gives `settings:` its one
+// typed package/profile surface. BUILD_FIELD_SETTINGS and the retired
+// features/env teaching names live in package_files and are re-exported by
+// this root; no second configuration spelling is allowed.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
