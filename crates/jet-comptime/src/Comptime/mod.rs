@@ -1999,7 +1999,6 @@ pub fn evaluate_text_head_check(
         repl_authorizer: None,
         repl_interruptible: false,
         embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
         globals,
         methods: empty_methods(),
