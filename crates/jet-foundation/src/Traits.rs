@@ -1167,9 +1167,7 @@ impl TraitRegistry {
             | Type::Bool
             | Type::String
             | Type::Char
-            | Type::IntN { .. }
-            | Type::InlineRange { .. }
-            | Type::Float32 => true,
+            | Type::IntN { .. } => true,
             Type::Quantity { base, .. } => {
                 self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
             }
