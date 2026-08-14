@@ -21,16 +21,25 @@ the honesty rules. The owner never has to ask for any of it.
 ## First-session delight lens
 
 Measure the first useful visual result separately from the later project loop.
-For every persona, record these rows:
+For every persona, record both checks in the report, even when the result is
+not applicable. Keep these rows separate from the later project loop:
 
 | check | measure | honest result |
 | --- | --- | --- |
 | `time-to-first-window` | elapsed time from the first command to a usable first-party window | record milliseconds, backend, and input; use `not-applicable` until a windowed backend exists |
 | `first-pixel` | elapsed time from window creation to the first visible rendered pixel | record milliseconds, backend, and frame evidence; never infer it from a window handle |
 
-Keep `not-applicable`, `not-proven`, and `blocked` distinct. A missing windowed
-backend blocks the measurement. It does not justify an invented zero or a
-ship-ready verdict.
+Keep `not-applicable`, `not-proven`, and `blocked` distinct. Use
+`not-applicable` when the persona's project has no window target, `not-proven`
+when a target exists but the run or evidence is missing, and `blocked` when the
+persona cannot complete the first-session loop. A missing windowed backend
+blocks the measurement. It does not justify an invented zero or a ship-ready
+verdict.
+
+For a measured result, record elapsed milliseconds, backend, input, and frame
+evidence where applicable. For an honest non-result, name the missing target,
+run, or evidence in the cell; never leave a blank or infer a pixel from a
+window handle.
 
 ## One persona is always a coding agent
 
