@@ -194,7 +194,7 @@ fn collect_instance_display_paths(
             Item::Struct(definition) => {
                 let display_name = definition
                     .name
-                    .strip_prefix(module_type_prefix(scope_name))
+                    .strip_prefix(&module_type_prefix(scope_name))
                     .unwrap_or(&definition.name);
                 let internal = join_member_path(internal_module_path, &definition.name);
                 let display = format!("{display_module_path}.{display_name}");
@@ -218,7 +218,7 @@ fn collect_instance_display_paths(
             Item::Enum(definition) => {
                 let display_name = definition
                     .name
-                    .strip_prefix(module_type_prefix(scope_name))
+                    .strip_prefix(&module_type_prefix(scope_name))
                     .unwrap_or(&definition.name);
                 let internal = join_member_path(internal_module_path, &definition.name);
                 let display = format!("{display_module_path}.{display_name}");
@@ -242,7 +242,7 @@ fn collect_instance_display_paths(
             Item::Trait(definition) => {
                 let display_name = definition
                     .name
-                    .strip_prefix(module_type_prefix(scope_name))
+                    .strip_prefix(&module_type_prefix(scope_name))
                     .unwrap_or(&definition.name);
                 let internal = join_member_path(internal_module_path, &definition.name);
                 let display = format!("{display_module_path}.{display_name}");
@@ -254,7 +254,7 @@ fn collect_instance_display_paths(
             Item::Tag(definition) => {
                 let display_name = definition
                     .name
-                    .strip_prefix(module_type_prefix(scope_name))
+                    .strip_prefix(&module_type_prefix(scope_name))
                     .unwrap_or(&definition.name);
                 add(
                     paths,
@@ -282,7 +282,7 @@ fn collect_instance_display_paths(
                 let internal = join_member_path(internal_module_path, &implementation.type_name);
                 let display_name = implementation
                     .type_name
-                    .strip_prefix(module_type_prefix(scope_name))
+                    .strip_prefix(&module_type_prefix(scope_name))
                     .unwrap_or(&implementation.type_name);
                 let display = format!("{display_module_path}.{display_name}");
                 add(paths, internal.clone(), display.clone());
