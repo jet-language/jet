@@ -1455,10 +1455,14 @@ fn check_bundle_opts_for_output_inner(
             &bundle.project_root,
             &st.trait_reg,
         ));
-        // D-SHARED-CYCLE1=C: strong Shared cycles are beginner-rejected (E0221);
-        // expert cycles use Shared.Weak and are admitted.
-        check_strong_shared_cycles(&st.registry, &mut diags);
     }
+    // D-SHARED-CYCLE1=C: run one graph/memo pass after every module registry is
+    // complete, so imported types participate in the same cycle decision.
+    let cycle_registries = states
+        .iter()
+        .map(|state| &state.registry)
+        .collect::<Vec<_>>();
+    check_strong_shared_cycles(&cycle_registries, &mut diags);
     // D-BOUND-UNDO1=A: CFFI may re-home a foreign declaration into a synthetic
     // module, while its Jet undo function remains in the source module. Validate
     // against the complete post-registration function view so that re-homing and

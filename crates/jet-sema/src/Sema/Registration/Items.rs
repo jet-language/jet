@@ -1192,25 +1192,19 @@ pub(crate) fn register_struct(
 /// D-SHARED-CYCLE1=C: reject strong `Shared` fields that can form a reference
 /// cycle. Expert cycles use `Shared.Weak<T>` (weak edges do not count).
 pub(crate) fn check_strong_shared_cycles(
-    registry: &TypeRegistry,
+    registries: &[&TypeRegistry],
     diags: &mut Vec<Diagnostic>,
 ) {
-    let struct_names: Vec<String> = registry
-        .types
-        .iter()
-        .filter_map(|(name, def)| match def {
-            TypeDef::Struct { .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
-    for owner in &struct_names {
-        let Some(TypeDef::Struct { fields, .. }) = registry.types.get(owner) else {
+    let mut graph = StrongSharedCycleGraph::new(registries);
+    let mut struct_names: Vec<String> = graph.structs.keys().cloned().collect();
+    struct_names.sort();
+
+    for owner in struct_names {
+        let Some(fields) = graph.structs.get(&owner).cloned() else {
             continue;
         };
-        let fields = fields.clone();
         for (fname, fspan, fty) in &fields {
-            if let Some(through) =
-                strong_shared_cycle_witness(owner, fty, registry, &mut Vec::new())
+            if let Some(through) = graph.strong_shared_cycle_witness(&owner, fty, &mut Vec::new())
             {
                 diags.push(Diagnostic::error(
                     "E0221",
@@ -1228,97 +1222,183 @@ pub(crate) fn check_strong_shared_cycles(
     }
 }
 
-/// Returns the payload type name that closes a strong Shared cycle, if any.
-fn strong_shared_cycle_witness(
-    owner: &str,
-    ty: &Type,
-    registry: &TypeRegistry,
-    stack: &mut Vec<String>,
-) -> Option<String> {
-    match ty {
-        Type::Shared(inner) => {
-            if payload_can_reach_owner(owner, inner, registry, &mut HashSet::new()) {
-                Some(inner.name())
-            } else {
-                None
-            }
-        }
-        Type::Option(inner) | Type::List(inner) | Type::Tagged { inner, .. } => {
-            strong_shared_cycle_witness(owner, inner, registry, stack)
-        }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            strong_shared_cycle_witness(owner, key, registry, stack)
-                .or_else(|| strong_shared_cycle_witness(owner, value, registry, stack))
-        }
-        Type::Tuple(fields) => fields
-            .iter()
-            .find_map(|(_, fty)| strong_shared_cycle_witness(owner, fty, registry, stack)),
-        Type::Union(members) => members
-            .iter()
-            .find_map(|m| strong_shared_cycle_witness(owner, m, registry, stack)),
-        // Weak edges never contribute to a strong cycle.
-        Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => None,
-        Type::Apply { args, .. } => args
-            .iter()
-            .find_map(|m| strong_shared_cycle_witness(owner, m, registry, stack)),
-        Type::Named(n) if registry.is_user_struct(n) => {
-            if stack.iter().any(|s| s == n) {
-                return None;
-            }
-            stack.push(n.clone());
-            let hit = match registry.types.get(n) {
-                Some(TypeDef::Struct { fields, .. }) => fields
-                    .iter()
-                    .find_map(|(_, _, fty)| {
-                        strong_shared_cycle_witness(owner, fty, registry, stack)
-                    }),
-                _ => None,
-            };
-            stack.pop();
-            hit
-        }
-        _ => None,
-    }
+/// One graph and memo table make cycle results independent of module order and
+/// avoid re-walking the same type paths for every strong edge.
+struct StrongSharedCycleGraph {
+    structs: HashMap<String, Vec<(String, Span, Type)>>,
+    reaches: HashMap<(String, String), bool>,
 }
 
-fn payload_can_reach_owner(
-    owner: &str,
-    ty: &Type,
-    registry: &TypeRegistry,
-    seen: &mut HashSet<String>,
-) -> bool {
-    match ty {
-        Type::Named(n) if n == owner => true,
-        Type::Named(n) if registry.is_user_struct(n) => {
-            if !seen.insert(n.clone()) {
-                return false;
-            }
-            match registry.types.get(n) {
-                Some(TypeDef::Struct { fields, .. }) => fields
-                    .iter()
-                    .any(|(_, _, fty)| payload_can_reach_owner(owner, fty, registry, seen)),
-                _ => false,
+impl StrongSharedCycleGraph {
+    fn new(registries: &[&TypeRegistry]) -> Self {
+        let mut structs = HashMap::new();
+        for registry in registries {
+            for (name, def) in &registry.types {
+                if let TypeDef::Struct { fields, .. } = def {
+                    structs
+                        .entry(name.clone())
+                        .or_insert_with(|| fields.clone());
+                }
             }
         }
-        Type::Shared(inner)
-        | Type::Option(inner)
-        | Type::List(inner)
-        | Type::Tagged { inner, .. } => payload_can_reach_owner(owner, inner, registry, seen),
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            payload_can_reach_owner(owner, key, registry, seen)
-                || payload_can_reach_owner(owner, value, registry, seen)
+        Self {
+            structs,
+            reaches: HashMap::new(),
         }
-        Type::Tuple(fields) => fields
-            .iter()
-            .any(|(_, fty)| payload_can_reach_owner(owner, fty, registry, seen)),
-        Type::Union(members) => members
-            .iter()
-            .any(|m| payload_can_reach_owner(owner, m, registry, seen)),
-        Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => false,
-        Type::Apply { args, .. } => args
-            .iter()
-            .any(|m| payload_can_reach_owner(owner, m, registry, seen)),
-        _ => false,
+    }
+
+    /// Returns the payload type name that closes a strong Shared cycle, if any.
+    fn strong_shared_cycle_witness(
+        &mut self,
+        owner: &str,
+        ty: &Type,
+        stack: &mut Vec<String>,
+    ) -> Option<String> {
+        match ty {
+            Type::Shared(inner) => {
+                if self.payload_can_reach_owner(owner, inner) {
+                    Some(inner.name())
+                } else {
+                    None
+                }
+            }
+            Type::Option(inner)
+            | Type::List(inner)
+            | Type::FixedList { elem: inner, .. }
+            | Type::Tagged { inner, .. } => {
+                self.strong_shared_cycle_witness(owner, inner, stack)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => self
+                .strong_shared_cycle_witness(owner, key, stack)
+                .or_else(|| self.strong_shared_cycle_witness(owner, value, stack)),
+            Type::Tuple(fields) => fields
+                .iter()
+                .find_map(|(_, fty)| self.strong_shared_cycle_witness(owner, fty, stack)),
+            Type::Union(members) => members
+                .iter()
+                .find_map(|m| self.strong_shared_cycle_witness(owner, m, stack)),
+            // Weak edges never contribute to a strong cycle.
+            Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => None,
+            Type::Apply { args, .. } => args
+                .iter()
+                .find_map(|m| self.strong_shared_cycle_witness(owner, m, stack)),
+            Type::Named(n) if self.structs.contains_key(n) => {
+                if stack.iter().any(|s| s == n) {
+                    return None;
+                }
+                stack.push(n.clone());
+                let fields = self.structs.get(n).cloned();
+                let hit = fields.as_deref().and_then(|fields| {
+                    fields.iter().find_map(|(_, _, fty)| {
+                        self.strong_shared_cycle_witness(owner, fty, stack)
+                    })
+                });
+                stack.pop();
+                hit
+            }
+            _ => None,
+        }
+    }
+
+    fn payload_can_reach_owner(&mut self, owner: &str, ty: &Type) -> bool {
+        let mut active = HashSet::new();
+        self.payload_can_reach_owner_inner(owner, ty, &mut active).0
+    }
+
+    fn payload_can_reach_owner_inner(
+        &mut self,
+        owner: &str,
+        ty: &Type,
+        active: &mut HashSet<String>,
+    ) -> (bool, bool) {
+        match ty {
+            Type::Named(n) if n == owner => (true, false),
+            Type::Named(n) if self.structs.contains_key(n) => {
+                let key = (owner.to_string(), n.clone());
+                if let Some(reaches) = self.reaches.get(&key) {
+                    return (*reaches, false);
+                }
+                if !active.insert(n.clone()) {
+                    // Do not memoize this negative: the active node may find
+                    // the owner through a later sibling edge in this walk.
+                    return (false, true);
+                }
+                let fields = self.structs.get(n).cloned();
+                let mut reaches = false;
+                let mut cycle_cut = false;
+                if let Some(fields) = fields {
+                    for (_, _, fty) in &fields {
+                        let (hit, cut) =
+                            self.payload_can_reach_owner_inner(owner, fty, active);
+                        cycle_cut |= cut;
+                        if hit {
+                            reaches = true;
+                            break;
+                        }
+                    }
+                }
+                active.remove(n);
+                if reaches || !cycle_cut {
+                    self.reaches.insert(key, reaches);
+                }
+                (reaches, cycle_cut)
+            }
+            Type::Shared(inner)
+            | Type::Option(inner)
+            | Type::List(inner)
+            | Type::FixedList { elem: inner, .. }
+            | Type::Tagged { inner, .. } => {
+                self.payload_can_reach_owner_inner(owner, inner, active)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                let (key_reaches, key_cycle) =
+                    self.payload_can_reach_owner_inner(owner, key, active);
+                if key_reaches {
+                    return (true, key_cycle);
+                }
+                let (value_reaches, value_cycle) =
+                    self.payload_can_reach_owner_inner(owner, value, active);
+                (value_reaches, key_cycle || value_cycle)
+            }
+            Type::Tuple(fields) => {
+                let mut cycle_cut = false;
+                for (_, fty) in fields {
+                    let (reaches, cut) =
+                        self.payload_can_reach_owner_inner(owner, fty, active);
+                    cycle_cut |= cut;
+                    if reaches {
+                        return (true, cycle_cut);
+                    }
+                }
+                (false, cycle_cut)
+            }
+            Type::Union(members) => {
+                let mut cycle_cut = false;
+                for member in members {
+                    let (reaches, cut) =
+                        self.payload_can_reach_owner_inner(owner, member, active);
+                    cycle_cut |= cut;
+                    if reaches {
+                        return (true, cycle_cut);
+                    }
+                }
+                (false, cycle_cut)
+            }
+            Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => (false, false),
+            Type::Apply { args, .. } => {
+                let mut cycle_cut = false;
+                for member in args {
+                    let (reaches, cut) =
+                        self.payload_can_reach_owner_inner(owner, member, active);
+                    cycle_cut |= cut;
+                    if reaches {
+                        return (true, cycle_cut);
+                    }
+                }
+                (false, cycle_cut)
+            }
+            _ => (false, false),
+        }
     }
 }
 
