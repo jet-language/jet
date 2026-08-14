@@ -151,7 +151,7 @@ impl<'a> Parser<'a> {
             ));
         }
     
-        pub(super) fn starts_expr(&self, kind: &TokKind) -> bool {
+        pub(in crate::Parser) fn starts_expr(&self, kind: &TokKind) -> bool {
             matches!(
                 kind,
                 TokKind::Ident(_)
