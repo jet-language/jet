@@ -1,6 +1,106 @@
 use super::*;
 
 #[test]
+fn target_equals_and_space_forms_match_for_build_run_and_dev() {
+    let host = String::from_utf8(
+        Command::new("rustc")
+            .args(["-vV"])
+            .output()
+            .expect("rustc must report its host target")
+            .stdout,
+    )
+    .unwrap()
+    .lines()
+    .find_map(|line| line.strip_prefix("host: ").map(str::to_string))
+    .expect("rustc -vV must include a host target");
+
+    let target = [
+        "wasm32-unknown-unknown",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-gnu",
+    ]
+    .into_iter()
+    .find(|candidate| {
+        if *candidate == host {
+            return false;
+        }
+        let Ok(output) = Command::new("rustc")
+            .args(["--print", "target-libdir", "--target", candidate])
+            .output()
+        else {
+            return false;
+        };
+        output.status.success()
+            && Path::new(String::from_utf8_lossy(&output.stdout).trim()).is_dir()
+    })
+    .expect("rustc must provide an installed non-host target");
+
+    let invoke = |tag: &str, command: &str, source: &str, target: Option<&str>, spaced: bool| {
+        let dir = isolated_cwd(tag);
+        fs::write(dir.join("main.jet"), source).unwrap();
+        let mut args = vec![command.to_string(), "main.jet".to_string()];
+        if spaced {
+            args.push("--target".to_string());
+            if let Some(target) = target {
+                args.push(target.to_string());
+            }
+        } else if let Some(target) = target {
+            args.push(format!("--target={target}"));
+        }
+        Command::new(jet())
+            .args(args)
+            .current_dir(dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+
+    for (command, source) in [
+        ("build", "fn run() { print(\"target\") }\n"),
+        ("run", "fn run() { print(\"target\") }\n"),
+        ("dev", "fn dev() { print(\"target\") }\n"),
+    ] {
+        let equals = invoke(&format!("target_{command}_equals"), command, source, Some(target), false);
+        let space = invoke(&format!("target_{command}_space"), command, source, Some(target), true);
+        assert_eq!(equals.status.code(), Some(0), "{command} equals failed: {}", String::from_utf8_lossy(&equals.stderr));
+        assert_eq!(space.status.code(), Some(0), "{command} space failed: {}", String::from_utf8_lossy(&space.stderr));
+        assert_eq!(equals.stdout, space.stdout, "{command} target forms changed stdout");
+        assert_eq!(equals.stderr, space.stderr, "{command} target forms changed stderr");
+    }
+
+    let unknown = "definitely-not-a-rust-target";
+    for (command, source) in [
+        ("build", "fn run() {}\n"),
+        ("run", "fn run() {}\n"),
+        ("dev", "fn run() {}\n"),
+    ] {
+        let equals = invoke(&format!("target_{command}_unknown_equals"), command, source, Some(unknown), false);
+        let space = invoke(&format!("target_{command}_unknown_space"), command, source, Some(unknown), true);
+        assert_eq!(equals.status.code(), Some(1), "{command} equals did not reject target: {}", String::from_utf8_lossy(&equals.stderr));
+        assert_eq!(space.status.code(), Some(1), "{command} space did not reject target: {}", String::from_utf8_lossy(&space.stderr));
+        assert_eq!(equals.stderr, space.stderr, "{command} target forms changed normalized E3302 output");
+        let stderr = String::from_utf8_lossy(&equals.stderr);
+        assert!(stderr.contains("Error [E3302]:"), "{command} missing E3302: {stderr}");
+        check_snapshot("unknown_target_e3302.txt", &stderr);
+    }
+
+    for (command, source) in [
+        ("build", "fn run() {}\n"),
+        ("run", "fn run() {}\n"),
+        ("dev", "fn run() {}\n"),
+    ] {
+        for (suffix, spaced) in [("space", true), ("equals", false)] {
+            let value = if spaced { None } else { Some("") };
+            let out = invoke(&format!("target_{command}_missing_{suffix}"), command, source, value, spaced);
+            assert_eq!(out.status.code(), Some(2), "{command} missing target value was not rejected: {}", String::from_utf8_lossy(&out.stderr));
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(stderr.contains("Error [E2104]:"), "{command} missing target value lost E2104: {stderr}");
+            assert!(stderr.contains("`--target` needs a value"), "{command} missing target value was not truthful: {stderr}");
+        }
+    }
+}
+
+#[test]
 fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
     fs::write(dir.join("commands.jet"), r#"#CLI

@@ -3114,7 +3114,7 @@ fn native_cache_key_with_toolchain(
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
 /// Runs `rustc --print target-list` and exits with E3302 if the triple is absent.
 /// D-WEBKIND1=A (c123): `web` is a Jet backend target, not a rustc triple — accepted here.
-fn validate_target(triple: &str, mode: OutputMode) {
+pub(crate) fn validate_target(triple: &str, mode: OutputMode) {
     // D-WEBKIND1=A: Jet backend target, not a rustc triple.
     if triple == "web" || triple == jet::Syntax::BUILD_TARGET_WEB {
         return;

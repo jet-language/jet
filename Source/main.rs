@@ -48,7 +48,7 @@ use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
     run_fuzz, run_new, run_jobs, run_test, run_test_opts,
-    run_web_app_dev_entry, FuzzRunOpts, TestRunOpts,
+    run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
@@ -621,11 +621,11 @@ fn first_cli_positional(raw: &[String]) -> Option<&str> {
             skip_next = false;
             continue;
         }
-        if matches!(arg.as_str(), "-p" | "--output" | "--gate" | "--scope" | "--kind") {
+        if matches!(arg.as_str(), "-p" | "--output" | "--gate" | "--scope" | "--kind" | "--target") {
             skip_next = true;
             continue;
         }
-        if arg.starts_with("--output=") || arg.starts_with("--scope=") || arg.starts_with("--kind=") {
+        if arg.starts_with("--output=") || arg.starts_with("--scope=") || arg.starts_with("--kind=") || arg.starts_with("--target=") {
             continue;
         }
         if arg == "-" || !arg.starts_with('-') {
@@ -1070,6 +1070,32 @@ fn is_executable(p: &Path) -> bool {
     p.is_file()
 }
 
+/// Read `--target` in both canonical CLI forms. A flag that needs a value is
+/// never allowed to fall through as a positional file or be ignored.
+fn parse_target_flag(argv: &[String]) -> Result<Option<String>, ()> {
+    let mut index = 0;
+    while index < argv.len() {
+        let arg = &argv[index];
+        if let Some(value) = arg.strip_prefix("--target=") {
+            return if value.is_empty() {
+                Err(())
+            } else {
+                Ok(Some(value.to_string()))
+            };
+        }
+        if arg == "--target" {
+            return argv
+                .get(index + 1)
+                .filter(|value| !value.starts_with('-'))
+                .cloned()
+                .map(Some)
+                .ok_or(());
+        }
+        index += 1;
+    }
+    Ok(None)
+}
+
 fn main() {
     // I2: install first, before any other work, so every uncaught panic
     // (including one triggered before argv parsing) renders the branded
@@ -1151,12 +1177,20 @@ fn main() {
     let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
     let sbom = jet_argv.iter().any(|a| a == "--sbom");
-    // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target=` takes a rustc
-    // triple or a declared machine name; a machine supplies its own triple and
-    // brings its no-OS facts with it.
-    let requested_target: Option<String> = jet_argv
-        .iter()
-        .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target` accepts either
+    // canonical spelling for a rustc triple or declared machine name; a
+    // machine supplies its own triple and brings its no-OS facts with it.
+    let requested_target: Option<String> = match parse_target_flag(jet_argv) {
+        Ok(target) => target,
+        Err(()) => {
+            crate::cli_error!(
+                @fix "E2104",
+                "`--target` needs a value",
+                "write `--target=<triple>` or `--target <triple>` before the source file"
+            );
+            exit(ExitCodes::USAGE);
+        }
+    };
     let selected_machine = requested_target
         .as_deref()
         .and_then(jet::Driver::target_machine_by_name);
@@ -1273,7 +1307,7 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--job" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" {
+            if a == "-p" || a == "--job" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" {
                 skip_next = true;
                 continue;
             }
@@ -1284,6 +1318,9 @@ fn main() {
                 continue;
             }
             if a.starts_with("--scope=") || a.starts_with("--kind=") {
+                continue;
+            }
+            if a.starts_with("--target=") {
                 continue;
             }
             if a.as_str() == "-" || !a.starts_with('-') {
@@ -2033,6 +2070,13 @@ fn main() {
                     exit(ExitCodes::USAGE);
                 }
             };
+            // E2-M15: `jet dev` has the same target validation contract as
+            // build/run, even when its execution tier is the native watcher.
+            // A target flag must never disappear merely because dev selects a
+            // different runner branch below.
+            if let Some(target) = cross_target.as_deref() {
+                validate_target(target, mode);
+            }
             if let Some(profile) = named_profile.as_deref() {
                 let _ = resolve_named_profile(profile, file, mode);
             }
