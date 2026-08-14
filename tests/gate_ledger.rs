@@ -58,7 +58,8 @@ tag Input { deny: [IO] }
 fn run() {
     #Grant(caps: IO) {}
     maybe().drop("intentional result discard")
-    task.detach()
+    detached :: task 42
+    detached.detach()
     approx(1)
     wrapping(1 + 2)
     Thirdish.from_meter_rounded(1meter, .NearestEven, digits: 0).drop("rounded conversion gate")
