@@ -9250,7 +9250,7 @@ impl<'a> EvalCtx<'a> {
             super::term_semantics::jet_term_stdout_is_terminal()
         };
         if tty {
-            let frame = format!("{text}\n");
+            let frame = super::term_semantics::jet_term_print_frame(text);
             if to_stderr {
                 let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
             } else {
@@ -9259,12 +9259,11 @@ impl<'a> EvalCtx<'a> {
             return Ok(());
         }
         let mut sink = sink.lock().expect("evaluator sink poisoned");
+        let frame = super::term_semantics::jet_term_print_frame(text);
         if to_stderr {
-            sink.stderr.push_str(text);
-            sink.stderr.push('\n');
+            sink.stderr.push_str(&frame);
         } else {
-            sink.stdout.push_str(text);
-            sink.stdout.push('\n');
+            sink.stdout.push_str(&frame);
         }
         Ok(())
     }

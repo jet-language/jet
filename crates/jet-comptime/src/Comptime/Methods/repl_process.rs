@@ -147,11 +147,21 @@ pub fn apply_repl_authorized_core_call_with_type(
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
     args = normalize_path_args(module, method, args, span)?;
-    // REPL eprint is the inline transcript sink. It does not need an effect
-    // prompt or a lexical grant; the existing REPL surface keeps it available.
-    if module == "core.term" && method == "eprint" {
+    // Both qualified print spellings are ordinary transcript output. They do
+    // not need an effect prompt or a lexical grant; the qualified twin must
+    // keep the ambient `print` job usable in #NoPrelude REPL turns.
+    if module == "core.term" && matches!(method, "print" | "eprint") {
         return apply_impure_core_call_with_type(
-            module, method, args, span, base_dir, sink, true, None, None, resolved_ret,
+            module,
+            method,
+            args,
+            span,
+            base_dir,
+            sink,
+            true,
+            None,
+            None,
+            resolved_ret,
         );
     }
 

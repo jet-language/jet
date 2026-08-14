@@ -1278,6 +1278,22 @@ fn repl_core_io_eprint_inline() {
 }
 
 #[test]
+fn repl_core_io_print_keeps_variadic_lines_inline() {
+    let inputs = &["use core.term as io", "io.print(\"repl-one\", \"repl-two\")"];
+    let out = run_transcript_with_flags(inputs, None, &[], &["io"]);
+    assert!(
+        out.contains("repl-one") && out.contains("repl-two"),
+        "io.print should preserve every argument in the transcript, got: {:?}",
+        out
+    );
+    assert!(
+        !out.contains("E1803") && !out.contains("E3410") && !out.contains("E0956"),
+        "got: {:?}",
+        out
+    );
+}
+
+#[test]
 fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
     let inputs = &[
         "use core.math.random as random",

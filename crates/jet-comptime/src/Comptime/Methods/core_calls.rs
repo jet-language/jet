@@ -108,6 +108,8 @@ mod term_semantics {
     include!("../../../../jet-codegen/src/Prelude/Term.rs");
 }
 
+pub(crate) use term_semantics::jet_term_print_frame;
+
 mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }

@@ -1087,8 +1087,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_test_print({shown})")
             } else {
                 format!(
-                    "{{ let _ = {}jet_term_write_stdout(&format!(\"{{}}\\n\", {shown}), false); }}",
-                    cx.root_prefix
+                    "{{ let _ = {}jet_term_write_stdout_line(&({}), false); }}",
+                    cx.root_prefix,
+                    shown
                 )
             }
         }

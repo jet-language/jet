@@ -438,6 +438,11 @@ pub(crate) fn write_jit_stdout(text: &str, flush: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn write_jit_stdout_line(text: &str, flush: bool) -> Result<(), String> {
+    let frame = crate::IO::term_prelude::jet_term_print_frame(text);
+    write_jit_stdout(&frame, flush)
+}
+
 pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
     let terminal = crate::IO::term_prelude::jet_term_stderr_is_terminal();
     let direct = terminal || Concurrency::active_runtime_ptr().is_none();
@@ -781,26 +786,27 @@ extern "C" fn jet_jit_intn_to_string(value: i64, signed: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_print_i64(v: i64) {
-    let _ = write_jit_stdout(&format!("{v}\n"), false);
+    let _ = write_jit_stdout_line(&v.to_string(), false);
 }
 
 extern "C" fn jet_jit_print_f64(v: f64) {
-    let _ = write_jit_stdout(&format!("{}\n", jet_rt::display_f64(v)), false);
+    let text = jet_rt::display_f64(v);
+    let _ = write_jit_stdout_line(&text, false);
 }
 
 extern "C" fn jet_jit_print_bool(v: i8) {
-    let _ = write_jit_stdout(if v == 0 { "false\n" } else { "true\n" }, false);
+    let _ = write_jit_stdout_line(if v == 0 { "false" } else { "true" }, false);
 }
 
 extern "C" fn jet_jit_print_char(v: i32) {
     let ch = char::from_u32(v as u32).unwrap_or('?');
-    let _ = write_jit_stdout(&format!("{ch}\n"), false);
+    let _ = write_jit_stdout_line(&ch.to_string(), false);
 }
 
 extern "C" fn jet_jit_print_str(id: i64) {
     let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id));
     if let Some(text) = text {
-        let _ = write_jit_stdout(&format!("{text}\n"), false);
+        let _ = write_jit_stdout_line(&text, false);
     }
 }
 

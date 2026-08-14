@@ -3025,12 +3025,12 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
         ("core.term", "eprint") => format!(
-            "{{ let _ = {}jet_term_write_stderr(&format!(\"{{}}\\n\", ({}).jet_show()), false); }}",
+            "{{ let _ = {}jet_term_write_stderr_line(&(({}).jet_show()), false); }}",
             cx.root_prefix,
             arg(0)
         ),
         ("core.term", "print") => format!(
-            "{{ let _ = {}jet_term_write_stdout(&format!(\"{{}}\\n\", ({}).jet_show()), false); }}",
+            "{{ let _ = {}jet_term_write_stdout_line(&(({}).jet_show()), false); }}",
             cx.root_prefix,
             arg(0)
         ),

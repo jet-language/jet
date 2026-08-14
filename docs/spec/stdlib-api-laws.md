@@ -107,8 +107,8 @@ The family has one job per spelling. Beginners learn ambient `print` first.
 
 | Spelling | Job | Status and default |
 | --- | --- | --- |
-| `print(value)` | Display a value and end the line. | Beginner default; no import. |
-| `term.print(value)` | The same line-ending print through `core.term`. | Qualified twin for `#NoPrelude` files. |
+| `print(value, ...)` | Display each value and end each line. | Beginner default; no import. |
+| `term.print(value, ...)` | The same one-line-per-value print through `core.term`. | Qualified twin for `#NoPrelude` files. |
 | `term.println(value)` | No distinct job from `term.print`. | Retired; `jet fmt` and `jet fix` rewrite it to `term.print`. |
 | `term.sprint(value)` | No distinct job from interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value}"`. |
 | `term.repr(value)` | No distinct job from debug interpolation. | Retired; `jet fmt` and `jet fix` rewrite it to `"{value:Debug}"`. |

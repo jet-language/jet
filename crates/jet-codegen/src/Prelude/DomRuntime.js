@@ -1,12 +1,14 @@
 // D-DOMGEN1=A (c123 M2): first-party DOM/runtime shim for generated web JS.
 // Generated `app.js` imports these primitives; the loader wires WASM exports.
 
-export function print(value) {
-  const text = String(value);
+export function print(...values) {
+  const texts = values.map((value) => String(value));
   if (typeof console !== "undefined" && console.log) {
-    console.log(text);
+    for (const text of texts) {
+      console.log(text);
+    }
   }
-  return text;
+  return texts.length ? texts[texts.length - 1] : "";
 }
 
 // D-FAIL-EDGE1=A: every browser-visible failure keeps the report frame from

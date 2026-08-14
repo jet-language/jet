@@ -2107,8 +2107,8 @@ extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_show_text(rt, list, kind);
-        rt.stdout.push_str(&text);
-        rt.stdout.push('\n');
+        let frame = crate::IO::term_prelude::jet_term_print_frame(&text);
+        rt.stdout.push_str(&frame);
     });
 }
 
@@ -2398,7 +2398,8 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
             && !crate::runtime_host::jit_result_is_ok(rt, packed).unwrap_or(false))
             || (!result_abi && packed == 0)
         {
-            rt.stdout.push_str("null\n");
+            let frame = crate::IO::term_prelude::jet_term_print_frame("null");
+            rt.stdout.push_str(&frame);
             return;
         }
         let kind = if result_abi { kind - 10 } else { kind };
@@ -2407,35 +2408,36 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
         } else {
             packed.wrapping_sub(1)
         };
+        let mut shown = String::new();
         match kind {
             1 => {
                 let text = rt.heap.clone_string(payload).unwrap_or_default();
-                rt.stdout.push_str(&text);
+                shown.push_str(&text);
             }
             2 => {
-                rt.stdout
-                    .push_str(&jet_rt::display_f64(f64::from_bits(payload as u64)));
+                shown.push_str(&jet_rt::display_f64(f64::from_bits(payload as u64)));
             }
             3 | 4 => {
-                rt.stdout.push_str(
+                shown.push_str(
                     &jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
                 );
             }
-            5 => rt.stdout.push_str(&crate::Net::show_value(rt, payload)),
-            6 => rt.stdout.push_str(&(payload != 0).to_string()),
+            5 => shown.push_str(&crate::Net::show_value(rt, payload)),
+            6 => shown.push_str(&(payload != 0).to_string()),
             7 => {
                 let text = char::from_u32(payload as u32)
                     .map(|character| character.to_string())
                     .unwrap_or_default();
-                rt.stdout.push_str(&text);
+                shown.push_str(&text);
             }
-            8 => rt.stdout.push_str(&crate::CoreHost::show_path(rt, payload)),
-            9 => rt.stdout.push_str(&crate::Time::show_value(rt, payload)),
+            8 => shown.push_str(&crate::CoreHost::show_path(rt, payload)),
+            9 => shown.push_str(&crate::Time::show_value(rt, payload)),
             _ => {
-                rt.stdout.push_str(&payload.to_string());
+                shown.push_str(&payload.to_string());
             }
         }
-        rt.stdout.push('\n');
+        let frame = crate::IO::term_prelude::jet_term_print_frame(&shown);
+        rt.stdout.push_str(&frame);
     });
 }
 
@@ -4128,8 +4130,8 @@ extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let name = packed_enum_name(name_ptr, name_len);
         let text = show_packed_enum(packed, &name, &rt.heap);
-        rt.stdout.push_str(&text);
-        rt.stdout.push('\n');
+        let frame = crate::IO::term_prelude::jet_term_print_frame(&text);
+        rt.stdout.push_str(&frame);
     });
 }
 

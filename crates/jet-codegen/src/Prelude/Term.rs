@@ -113,6 +113,24 @@ pub(crate) fn jet_term_write_stderr_bytes(bytes: &[u8], flush: bool) -> std::io:
     Ok(())
 }
 
+/// D-VERDICT-1321-1: one print value becomes one line frame. Display
+/// conversion happens at the caller's typed boundary; line framing belongs to
+/// this shared terminal kernel so AOT, JIT, interpreter, and comptime sinks do
+/// not each invent a trailing-newline rule.
+pub(crate) fn jet_term_print_frame(text: &str) -> String {
+    format!("{text}\n")
+}
+
+pub(crate) fn jet_term_write_stdout_line(text: &str, flush: bool) -> std::io::Result<()> {
+    let frame = jet_term_print_frame(text);
+    jet_term_write_stdout(&frame, flush)
+}
+
+pub(crate) fn jet_term_write_stderr_line(text: &str, flush: bool) -> std::io::Result<()> {
+    let frame = jet_term_print_frame(text);
+    jet_term_write_stderr(&frame, flush)
+}
+
 pub(crate) fn jet_term_width(get: impl Fn(&str) -> Option<String>) -> i64 {
     jet_term_positive_env_int(get("COLUMNS"))
         .or_else(|| jet_term_size_from_stty().map(|(width, _)| width))

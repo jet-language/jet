@@ -28,7 +28,7 @@ use jet_foundation::Names::{mangle, mangle_path};
 use super::core_calls::{
     apply_core_call_with_type, apply_data_line_call,
     apply_impure_core_call_with_type, as_float, display_core_pure_value,
-    eval_regex_replace_all_with, sketch_add, solver_new, solver_require,
+    eval_regex_replace_all_with, jet_term_print_frame, sketch_add, solver_new, solver_require,
 };
 use super::repl_process::{
     apply_repl_authorized_core_call_with_type,
@@ -799,23 +799,24 @@ impl<'a> Interp<'a> {
         // these are unreachable (the purity check rejects them first, E3401).
         if name == "print" || name == "eprint" {
             if self.sink.is_some() {
-                let text = match args.first() {
-                    // D-DISPLAYDBG1/2: same Display-impl-aware rendering as
-                    // `{value}` string interpolation (`show_value`) — `print`
-                    // is bare-Display too, never the `:Debug` form.
-                    Some(a) => {
+                // D-VERDICT-1321-1: the AST/dev interpreter must preserve the
+                // same one-line-per-argument contract as TIR's joined form.
+                let text = args
+                    .iter()
+                    .map(|a| {
+                        // D-DISPLAYDBG1/2: same Display-impl-aware rendering
+                        // as `{value}` interpolation — never `:Debug`.
                         let v = self.eval(&a.expr, scope)?;
-                        self.show_value(&v, a.expr.span())?
-                    }
-                    None => String::new(),
-                };
+                        self.show_value(&v, a.expr.span())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join("\n");
+                let frame = jet_term_print_frame(&text);
                 let sink = self.sink.as_mut().expect("dev-mode sink");
                 if name == "print" {
-                    sink.stdout.push_str(&text);
-                    sink.stdout.push('\n');
+                    sink.stdout.push_str(&frame);
                 } else {
-                    sink.stderr.push_str(&text);
-                    sink.stderr.push('\n');
+                    sink.stderr.push_str(&frame);
                 }
                 return Ok(CtValue::Unit);
             }

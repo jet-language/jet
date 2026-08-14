@@ -1458,7 +1458,11 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         }
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => {
-            let arity_ok = if method == "mount" {
+            let arity_ok = if module == "core.term" && method == "print" {
+                // D-PRELUDEX1 / D-VERDICT-1321-1: the qualified print twin
+                // reaches the same DOM print kernel as ambient `print`.
+                !args.is_empty()
+            } else if method == "mount" {
                 // D-UI-MOUNT1=A: 2-arg or 3-arg (constraint) — same as tir_core_call.
                 matches!(args.len(), 2 | 3)
             } else {
@@ -7165,6 +7169,12 @@ fn tir_core_call(
     } else {
         None
     };
+    if module == "term" && method == "print" {
+        if a.is_empty() {
+            return Err(());
+        }
+        return Ok(format!("jetDom.print({})", a.join(", ")));
+    }
     let required = web_core_arity(module, method);
     if let Some(required) = required {
         if a.len() != required {

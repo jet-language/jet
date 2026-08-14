@@ -338,7 +338,7 @@ pub fn apply_impure_core_call_with_type(
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(s) = sink {
-                let frame = format!("{text}\n");
+                let frame = super::term_semantics::jet_term_print_frame(&text);
                 if super::term_semantics::jet_term_stdout_is_terminal() {
                     let _ = super::term_semantics::jet_term_write_stdout(&frame, true);
                 } else {
@@ -354,7 +354,7 @@ pub fn apply_impure_core_call_with_type(
                 .collect::<Vec<_>>()
                 .join("\n");
             if let Some(s) = sink {
-                let frame = format!("{text}\n");
+                let frame = super::term_semantics::jet_term_print_frame(&text);
                 if super::term_semantics::jet_term_stderr_is_terminal() {
                     let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
                 } else {
