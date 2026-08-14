@@ -701,7 +701,7 @@ mod tests {
             src_path.to_str().unwrap(),
             crate::Sema::CompileMode::Run,
             false,
-            false,
+            crate::Policy::GateSet::default(),
             false,
             None,
         )
@@ -858,7 +858,7 @@ mod tests {
             path,
             crate::Sema::CompileMode::Run,
             false,
-            false,
+            crate::Policy::GateSet::default(),
             false,
             None,
         )
@@ -887,7 +887,7 @@ mod tests {
             negative,
             crate::Sema::CompileMode::Run,
             false,
-            false,
+            crate::Policy::GateSet::default(),
             false,
             None,
         )
