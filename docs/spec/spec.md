@@ -2110,6 +2110,9 @@ empty `Iter<Unit>` and one input is identity. `partition(f)` returns
 `(false_: [T], true_: [T])`. These adapters are lazy on the `Iter` plane;
 concrete list/map/set `map` and `filter` are eager under D-CORE-EAGER1,
 and `.lazy()` enters the deferred plane explicitly.
+`first()` is the consuming positional terminal: use `skip(n).first()` for a
+zero-based pick, yielding `T?`; an index past the end returns `None`. This is
+the only positional-pick path; `nth` is not part of the API.
 
 D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
 parse errors. Current lambda syntax is `(x) => …`. D-SHAPE-PIPE1=C assigns a
