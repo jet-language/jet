@@ -708,7 +708,11 @@ pub(crate) fn run_compile_cmd(
             jet::Driver::check_file_with_effect_facts(file, None, false);
         if let Some(bundle) = &effect_bundle {
             let entries =
-                jet::EffectBudget::compute_package_effects(bundle, &effect_facts.solved);
+                jet::EffectBudget::compute_package_effects(
+                    bundle,
+                    &effect_facts.solved,
+                    &effect_facts.summaries,
+                );
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
             // host registers zero host imports, so any effect used by the
             // plugin's own code would fail to instantiate at load time. Catch
@@ -2547,10 +2551,10 @@ fn collect_stmts_implicit_copy_spans(
     for statement in statements {
         let mut statement = statement.clone();
         statement.for_each_expr_mut(|expr| {
-            if let jet::AST::Expr::Copy(inner, copy_span) = expr
-                && *copy_span == inner.span()
-            {
-                spans.push(*copy_span);
+            if let jet::AST::Expr::Copy(inner, copy_span) = expr {
+                if *copy_span == inner.span() {
+                    spans.push(*copy_span);
+                }
             }
         });
     }
@@ -2617,10 +2621,10 @@ fn collect_item_implicit_copy_spans(
                 for expression in [&text.check, &text.hole] {
                     let mut expression = expression.clone();
                     expression.for_each_expr_mut(|expr| {
-                        if let jet::AST::Expr::Copy(inner, copy_span) = expr
-                            && *copy_span == inner.span()
-                        {
-                            spans.push(*copy_span);
+                        if let jet::AST::Expr::Copy(inner, copy_span) = expr {
+                            if *copy_span == inner.span() {
+                                spans.push(*copy_span);
+                            }
                         }
                     });
                 }
