@@ -1,6 +1,6 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, Call, CallArg, CallArgFlags, CtReport, CtValue, EnumLitArg,
+    AccessConvention, BinOp, CallArg, CallArgFlags, CtReport, CtValue, EnumLitArg,
     Expr, ForKind, Func, ImplDef, IndexKind, Item, LValue, Param, PatSlot, Pattern, Stmt,
     SwitchArm, TryConvert, Type, TypeParam, VariantPayload,
 };

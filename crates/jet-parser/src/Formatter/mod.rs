@@ -45,9 +45,11 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
         &prog.default_target,
         &prog.html_path,
         &prog.no_alloc_policy,
-        &prog.policy_declarations,
-        &prog.applied_rules,
-        &prog.rule_facts,
+        (
+            &prog.policy_declarations,
+            &prog.applied_rules,
+            &prog.rule_facts,
+        ),
     ))
 }
 

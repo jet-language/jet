@@ -7,7 +7,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BinOp, CtFloat, CtKey, CtReport, CtValue, Type};
 
 use super::super::super::Builtins::{as_bool, as_int, cmp};
-use super::super::super::Diagnostics::{index_oob, overflow, unsupported};
+use super::super::super::Diagnostics::{index_oob, unsupported};
 use super::super::super::Interpreter::Interp;
 
 pub(super) enum SequenceOutcome {

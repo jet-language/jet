@@ -2969,7 +2969,7 @@ impl<'a> EvalCtx<'a> {
                     {
                         Ok(CtValue::Int(value.as_f64() as i64))
                     }
-                    Some(("Text", Some(CtValue::Str(value)))) => crate::Numeric::CtBigInt::from_str(value.trim())
+                    Some(("Text", Some(CtValue::Str(value)))) => jet_foundation::Numeric::CtBigInt::from_str(value.trim())
                         .map(exact_int_value)
                         .map_err(|_| {
                             decode_error(

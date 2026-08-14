@@ -71,7 +71,7 @@ fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
             .parse::<f64>()
             .map(|f| CtValue::Float(CtFloat::f64(f)))
             .map_err(|_| format!("expected Float, got `{cell}`")),
-        Type::Int => crate::Numeric::CtBigInt::from_str(cell)
+        Type::Int => jet_foundation::Numeric::CtBigInt::from_str(cell)
             .map(exact_int_value)
             .map_err(|_| format!("expected Int, got `{cell}`")),
         Type::IntN { .. } => cell
@@ -88,7 +88,7 @@ fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
             .parse::<f64>()
             .map(|f| CtValue::Float(CtFloat::f64(f)))
             .map_err(|_| format!("expected Float, got `{cell}`")),
-        Type::Named(n) if n == "Int" => crate::Numeric::CtBigInt::from_str(cell)
+        Type::Named(n) if n == "Int" => jet_foundation::Numeric::CtBigInt::from_str(cell)
             .map(exact_int_value)
             .map_err(|_| format!("expected Int, got `{cell}`")),
         Type::Named(n) if n == "Bool" => parse_cell(&Type::Bool, cell),

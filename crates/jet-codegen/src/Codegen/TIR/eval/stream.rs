@@ -265,8 +265,8 @@ fn str_tuple(canonical: &[(String, Type)], binds: &[(String, Type, String)]) -> 
         .zip(binds.iter())
         .map(|((_, ty), (_, _, raw))| match ty {
             Type::Int => exact_int_value(
-                crate::Numeric::CtBigInt::from_str(raw)
-                    .unwrap_or_else(|_| crate::Numeric::CtBigInt::from_int(0)),
+                jet_foundation::Numeric::CtBigInt::from_str(raw)
+                    .unwrap_or_else(|_| jet_foundation::Numeric::CtBigInt::from_int(0)),
             ),
             Type::IntN { .. } => CtValue::Int(raw.parse::<i64>().unwrap_or(0)),
             Type::Float | Type::Float32 => {

@@ -1730,7 +1730,7 @@ impl<'a> Fmt<'a> {
             || self.span_has_comment(span.start, span.end)
     }
 
-    fn fmt_or_fallback(&mut self, fb: &OrFallback) {
+    pub(super) fn fmt_or_fallback(&mut self, fb: &OrFallback) {
         match fb {
             OrFallback::Value(e) => self.fmt_expr(e, Prec::OrFallback),
             OrFallback::Block { body, value, .. } => {
