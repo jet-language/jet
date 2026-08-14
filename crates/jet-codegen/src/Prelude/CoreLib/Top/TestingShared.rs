@@ -3,18 +3,43 @@ const JET_TESTING_DIFF_MAX_LINES: usize = 256;
 const JET_TESTING_DIFF_MAX_OUTPUT: usize = 32 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct JetTestingFailure {
-    pub(crate) message: String,
-    pub(crate) detail: String,
+pub(crate) enum JetTestingFailure {
+    GoldenMissing { path: String },
+    GoldenUnreadable { path: String },
+    GoldenMismatch { path: String, diff: String },
+    FixtureMissing { path: String },
+    FixtureUnreadable { path: String },
+}
+
+impl JetTestingFailure {
+    pub(crate) fn message(&self) -> String {
+        match self {
+            Self::GoldenMissing { path } => format!("golden file is missing: {path}"),
+            Self::GoldenUnreadable { path } => format!("golden file cannot be read: {path}"),
+            Self::GoldenMismatch { path, .. } => format!("golden file differs: {path}"),
+            Self::FixtureMissing { path } => format!("fixture is missing: {path}"),
+            Self::FixtureUnreadable { path } => format!("fixture cannot be read: {path}"),
+        }
+    }
+
+    pub(crate) fn detail(&self) -> String {
+        match self {
+            Self::GoldenMismatch { path, diff } => format!("path: {path}\n{diff}"),
+            Self::GoldenMissing { path }
+            | Self::GoldenUnreadable { path }
+            | Self::FixtureMissing { path }
+            | Self::FixtureUnreadable { path } => format!("path: {path}"),
+        }
+    }
 }
 
 thread_local! {
     static JET_TESTING_FAILURE: std::cell::RefCell<Option<JetTestingFailure>> = const { std::cell::RefCell::new(None) };
 }
 
-fn jet_testing_record_failure(message: String, detail: String) {
+fn jet_testing_record_failure(failure: JetTestingFailure) {
     JET_TESTING_FAILURE.with(|slot| {
-        *slot.borrow_mut() = Some(JetTestingFailure { message, detail });
+        *slot.borrow_mut() = Some(failure);
     });
 }
 
@@ -137,7 +162,7 @@ fn jet_testing_unified_diff(path: &str, expected: &str, actual: &str) -> String 
             col += 1;
         } else if col < actual_lines.lines.len()
             && (row == expected_lines.lines.len()
-                || lcs[row * cols + col + 1] >= lcs[(row + 1) * cols + col])
+                || lcs[row * cols + col + 1] > lcs[(row + 1) * cols + col])
         {
             jet_testing_diff_line(&mut output, &mut truncated, '+', actual_lines.lines[col]);
             col += 1;

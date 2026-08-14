@@ -385,7 +385,7 @@ fn jet_test_fail_then_fixed() {
 }
 
 #[test]
-fn jet_testing_file_failures_keep_report_context() {
+fn criterion_1_2_3_4_6_testing_file_failures_are_typed_and_path_bearing() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
     if !have_rustc() || !jet.exists() {
@@ -406,7 +406,13 @@ fn jet_testing_file_failures_keep_report_context() {
     assert!(stderr.contains("fixture is missing: tests/fixtures/testing_failure_reports.missing"));
     assert!(stderr.contains("--- expected tests/fixtures/testing_failure_reports.golden"));
     assert!(stderr.contains("+++ actual tests/fixtures/testing_failure_reports.golden"));
-    assert!(stderr.contains("-expected\n+actual\n"));
+    let removal = stderr
+        .find("-expected\n")
+        .expect("mismatch report must show expected removal");
+    let addition = stderr
+        .find("+actual\n")
+        .expect("mismatch report must show actual addition");
+    assert!(removal < addition, "diff order must be deterministic: {stderr}");
     assert_eq!(stderr.matches("Stop [E3001]").count(), 4, "stderr: {stderr}");
     assert_eq!(stderr.matches("-->").count(), 4, "stderr: {stderr}");
 

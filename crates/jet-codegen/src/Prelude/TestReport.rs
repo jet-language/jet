@@ -205,8 +205,8 @@ pub fn jet_test_failure(
         caret,
     );
     if let Some(pending) = jet_testing_take_failure() {
-        report.message = pending.message;
-        report.detail = Some(pending.detail);
+        report.message = pending.message();
+        report.detail = Some(pending.detail());
     }
     let message = report.message.clone();
     JET_TEST_FAILURE.with(|slot| *slot.borrow_mut() = Some(report));

@@ -1072,24 +1072,19 @@ fn jet_testing_golden(path: &String, actual: &String) -> bool {
     match std::fs::read_to_string(path) {
         Ok(expected) if expected == *actual => true,
         Ok(expected) => {
-            let detail = format!(
-                "path: {}\n{}",
-                path,
-                jet_testing_unified_diff(path, &expected, actual)
-            );
-            jet_testing_record_failure(
-                format!("golden file differs: {}", path),
-                detail,
-            );
+            jet_testing_record_failure(JetTestingFailure::GoldenMismatch {
+                path: path.clone(),
+                diff: jet_testing_unified_diff(path, &expected, actual),
+            });
             false
         }
         Err(error) => {
-            let message = if error.kind() == std::io::ErrorKind::NotFound {
-                format!("golden file is missing: {}", path)
+            let failure = if error.kind() == std::io::ErrorKind::NotFound {
+                JetTestingFailure::GoldenMissing { path: path.clone() }
             } else {
-                format!("golden file cannot be read: {}", path)
+                JetTestingFailure::GoldenUnreadable { path: path.clone() }
             };
-            jet_testing_record_failure(message, format!("path: {}", path));
+            jet_testing_record_failure(failure);
             false
         }
     }
@@ -1099,12 +1094,12 @@ fn jet_testing_fixture(path: &String) -> String {
     match std::fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) => {
-            let message = if error.kind() == std::io::ErrorKind::NotFound {
-                format!("fixture is missing: {}", path)
+            let failure = if error.kind() == std::io::ErrorKind::NotFound {
+                JetTestingFailure::FixtureMissing { path: path.clone() }
             } else {
-                format!("fixture cannot be read: {}", path)
+                JetTestingFailure::FixtureUnreadable { path: path.clone() }
             };
-            jet_testing_record_failure(message, format!("path: {}", path));
+            jet_testing_record_failure(failure);
             String::new()
         }
     }
