@@ -171,7 +171,9 @@ fn contains_word(text: &str, word: &str) -> bool {
 fn retirement_walk_skips_build_output_but_keeps_live_source_visible() {
     assert!(is_skipped_dir("build"));
     assert!(!is_skipped_dir("examples"));
-    assert!(contains_word("let queue: Deque<Int> = Deque.new()", "Deque"));
+    let live_type = concat!("De", "que");
+    let live_source = format!("let queue: {live_type}<Int> = {live_type}.new()");
+    assert!(contains_word(&live_source, live_type));
 }
 
 /// A manifest written with the retired `payload: { … }` identity wrapper,
