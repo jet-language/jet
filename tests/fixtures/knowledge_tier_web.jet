@@ -1,0 +1,52 @@
+#Target(Web)
+
+#Numeric Severity :: distinct Int(0..10)
+
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+}
+
+tag Input { deny: [IO] }
+#Scrub(Input) fn clean(raw: #Input String) => String {
+    return ~raw
+}
+
+enum ReservationStage { Created, Paid }
+
+fn exactness_value() => Bool {
+    lossy :: Int.{9007199254740993}
+    return (approx(lossy) + 0.0) == 9007199254740992.0
+}
+
+fn unit_value() => Float {
+    value :: Meter.from_float(5.0)
+    return value.raw()
+}
+
+fn state_value() => String {
+    stage :: ReservationStage.Paid
+    if stage == { .Paid -> { return "state" } }
+    return "invalid"
+}
+
+fn classification_value() => String {
+    raw :: #Input "world"
+    return clean(raw)
+}
+
+fn run() {
+    left :: Severity.from_int(4)
+    right :: Severity.from_int(5)
+    total :: wrapping(left + right)
+    exactness :: exactness_value()
+    unit :: unit_value()
+    state :: state_value()
+    classification :: classification_value()
+    print("42")
+    print("exactness={exactness}")
+    print("unit={unit}")
+    print("state={state}")
+    print("classification={classification}")
+    print("range={total}")
+}

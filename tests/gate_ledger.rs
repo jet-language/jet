@@ -75,73 +75,11 @@ fn write_tier_fixture(root: &Path) {
 }
 
 fn knowledge_tier_source() -> &'static str {
-    r#"#Numeric Severity :: distinct Int(0..10)
-
-#UnitFamily(Length, base: meter) {
-    meter
-    half(scale: 1/2)
+    include_str!("fixtures/knowledge_tier.jet")
 }
 
-state Reservation { Pending, Confirmed }
-
-struct Reservation {
-    guest: String
-}
-
-impl Reservation {
-    #Transition(_, Pending) fn book(guest: String) => Reservation :: .{guest: ~guest}
-
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
-        return self
-    }
-}
-
-#Scrub(Input) fn clean(raw: #Input String) => String {
-    return ~raw
-}
-
-@answer :: 40 + 2
-@gated_answer :: wrapping(4 + 5)
-
-fn exactness_value() => Bool {
-    lossy :: Int.{9007199254740993}
-    return (approx(lossy) + 0.0) == 9007199254740992.0
-}
-
-fn unit_value() => Float {
-    source :: Half.from_float(5.0)
-    value :: Meter.from_half_rounded(source, .NearestEven, digits: 0) ?? panic("unit gate")
-    return value.raw()
-}
-
-fn state_value() => String {
-    reservation := Reservation.book("state")
-    reservation = reservation.pay()
-    return reservation.guest
-}
-
-fn classification_value() => String {
-    raw :: #Input "world"
-    return clean(raw)
-}
-
-fn run() {
-    left :: Severity.from_int(4)
-    right :: Severity.from_int(5)
-    total :: wrapping(left + right)
-    exactness :: exactness_value()
-    unit :: unit_value()
-    state :: state_value()
-    classification :: classification_value()
-    print("{@answer}")
-    print("{@gated_answer}")
-    print("exactness={exactness}")
-    print("unit={unit}")
-    print("state={state}")
-    print("classification={classification}")
-    print("range={total}")
-}
-    "#
+fn knowledge_tier_web_source() -> &'static str {
+    include_str!("fixtures/knowledge_tier_web.jet")
 }
 
 fn have_tool(name: &str) -> bool {
@@ -160,7 +98,11 @@ fn assert_tier_output(output: Output) {
 fn assert_tier_text(text: &str) {
     for expected in [
         "42",
-        "9",
+        "comptime_range=9",
+        "comptime_exactness=true",
+        "comptime_unit=5.0",
+        "comptime_state=state",
+        "comptime_classification=world",
         "exactness=true",
         "unit=5.0",
         "state=state",
@@ -452,12 +394,11 @@ fn i9_jit_and_dev_tiers_keep_the_fixture_behavior() {
 fn i9_comptime_tier_keeps_the_compile_time_value() {
     let scratch = common::Scratch::new("gate-tier-comptime");
     write_tier_fixture(&scratch.path);
-    let rust = stdout(&run(&scratch.path, &["emit", "--rust", "tier.jet"]));
-    assert!(rust.contains("42"), "comptime value was not emitted: {rust}");
-    assert!(rust.contains("9"), "comptime knowledge gate was not emitted: {rust}");
-    for plane in ["exactness=", "unit=", "state=", "classification=", "range="] {
-        assert!(rust.contains(plane), "comptime fixture lost {plane}: {rust}");
-    }
+    let text = stdout(&run(&scratch.path, &["run", "tier.jet"]));
+    assert_eq!(
+        text,
+        "42\ncomptime_range=9\ncomptime_exactness=true\ncomptime_unit=5.0\ncomptime_state=state\ncomptime_classification=world\nexactness=true\nunit=5.0\nstate=state\nclassification=world\nrange=9\n"
+    );
 }
 
 #[test]
@@ -479,7 +420,7 @@ fn i9_repl_tier_keeps_the_fixture_behavior() {
         .stdin
         .as_mut()
         .expect("REPL stdin")
-        .write_all(b":load tier.jet\n:quit\n")
+        .write_all(b":load tier.jet\nrun()\n:quit\n")
         .expect("write REPL input");
     let output = child.wait_with_output().expect("finish REPL");
     let text = stdout(&output);
@@ -496,7 +437,7 @@ fn i9_web_tier_keeps_the_fixture_buildable() {
     let scratch = common::Scratch::new("gate-tier-web");
     fs::write(
         scratch.join("web.jet"),
-        format!("#Target(Web)\n{}", knowledge_tier_source()),
+        knowledge_tier_web_source(),
     )
     .unwrap();
     let _ = stdout(&run(

@@ -206,6 +206,7 @@ pub(crate) fn eval_comptime_items(
             &mut ignored_early_serde_diags,
         );
         let mut funcs: HashMap<String, &Func> = HashMap::new();
+        let mut methods: HashMap<(String, String), &Func> = HashMap::new();
         let mut structs = HashMap::new();
         let mut externs: HashSet<String> = HashSet::new();
         for item in &eval_items {
@@ -213,21 +214,33 @@ pub(crate) fn eval_comptime_items(
                 Item::Func(f) => {
                     funcs.insert(f.name.clone(), f);
                 }
-                Item::Impl(implementation)
-                    if matches!(
-                        implementation.trait_name.as_deref(),
-                        Some(crate::Generics::ENCODE | crate::Generics::DECODE)
-                    ) =>
-                {
+                Item::Impl(implementation) => {
                     for method in &implementation.methods {
-                        funcs.insert(
-                            format!("{}::{}", implementation.type_name, method.name),
+                        if matches!(
+                            implementation.trait_name.as_deref(),
+                            Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+                        ) {
+                            funcs.insert(
+                                format!("{}::{}", implementation.type_name, method.name),
+                                method,
+                            );
+                        }
+                        methods.insert(
+                            (implementation.type_name.clone(), method.name.clone()),
                             method,
                         );
                     }
                 }
                 Item::Struct(s) => {
                     structs.insert(s.name.clone(), s);
+                    for method in &s.methods {
+                        methods.insert((s.name.clone(), method.name.clone()), method);
+                    }
+                }
+                Item::Enum(e) => {
+                    for method in &e.methods {
+                        methods.insert((e.name.clone(), method.name.clone()), method);
+                    }
                 }
                 Item::ExternRust(b) => {
                     for ef in &b.functions {
@@ -307,6 +320,7 @@ pub(crate) fn eval_comptime_items(
                 crate::Policy::GateSet::default(),
                 0,
                 &structs,
+                &methods,
                 None,
                 build_facts,
             ) {

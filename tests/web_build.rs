@@ -117,6 +117,10 @@ fn build_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
     dir
 }
 
+fn knowledge_tier_web_source() -> &'static str {
+    include_str!("fixtures/knowledge_tier_web.jet")
+}
+
 #[test]
 fn anonymous_unions_build_for_web() {
     let shown = "examples/features/types/anonymous_unions.jet";
@@ -124,6 +128,35 @@ fn anonymous_unions_build_for_web() {
     let dir = build_web_fixture("anonymous_unions", &src, shown);
     let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(wasm_rust.contains("__JetUnion_Int_String"));
+}
+
+#[test]
+fn knowledge_tier_web_js_and_wasm_runtime_values_match() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping knowledge web parity test (need rustc + node)");
+        return;
+    }
+    let source = knowledge_tier_web_source();
+    let dir = build_web_fixture(
+        "knowledge_tier",
+        source,
+        "tests/fixtures/knowledge_tier_web.jet",
+    );
+    let expected = "42\nexactness=true\nunit=5.0\nstate=state\nclassification=world\nrange=9\n";
+    assert_eq!(run_web_app(&dir), expected, "JS web bridge output changed");
+
+    let harness = r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)) throw new Error("unexpected Wasm diagnostic");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "knowledge_tier_wasm_harness.mjs", harness),
+        expected,
+        "Wasm runtime output changed",
+    );
+    let _ = fs::remove_dir_all(dir);
 }
 
 fn run_web_app(dir: &PathBuf) -> String {

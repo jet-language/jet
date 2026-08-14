@@ -729,6 +729,7 @@ pub fn evaluate_closed_value(
         jet_foundation::Policy::GateSet::default(),
         0,
         &HashMap::new(),
+        empty_methods(),
         None,
         build_facts,
     )
@@ -748,11 +749,12 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
     gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
+    methods: &HashMap<(String, String), &'a Func>,
     mutated: Option<&mut HashMap<String, CtValue>>,
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let closed = fold_build_facts(init, build_facts);
-    evaluate_with_imports_opts_collecting_structs(
+    evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
         funcs,
         extern_names,
@@ -762,6 +764,7 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
         gates,
         initial_impure_depth,
         structs,
+        methods,
         mutated,
     )
 }
@@ -915,6 +918,34 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     structs: &HashMap<String, &'a StructDef>,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+    evaluate_with_imports_opts_collecting_structs_and_methods(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        gates,
+        initial_impure_depth,
+        structs,
+        empty_methods(),
+        mutated,
+    )
+}
+
+fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &'a Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    gates: jet_foundation::Policy::GateSet,
+    initial_impure_depth: usize,
+    structs: &HashMap<String, &'a StructDef>,
+    methods: &HashMap<(String, String), &'a Func>,
+    mutated: Option<&mut HashMap<String, CtValue>>,
+) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
@@ -922,7 +953,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     let val = TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
-        methods: empty_methods(),
+        methods,
         extern_names,
         base_dir,
         globals,
