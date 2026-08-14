@@ -7,6 +7,7 @@ use jet_codegen::scheduler::{
     jet_scheduler_panic_should_unwind,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+    jet_std_time_duration_to_millis,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
     jet_scheduler_task_group_wait, jet_scheduler_yield_now, jet_task_delay_ms_defaulted,
     jet_task_interval_ms_defaulted,
@@ -1001,8 +1002,8 @@ extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
 }
 
 /// D-CONCSELECT1=A: `g.select().recv(…).after(duration[, v]).wait()`.
-/// `after_list` is a scheduler-ms adapter flat list `[ms0, val0, …]` (even
-/// length). Empty → no timers.
+/// `after_list` is a canonical Duration-nanosecond flat list `[ns0, val0, …]`
+/// (even length). The shared Prelude owns the scheduler-ms projection.
 extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
     let (channels, timers) = with_runtime_mut(|rt| {
         let ch_ids = task_ids_from_list(rt, recv_list);
@@ -1020,7 +1021,7 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
         let mut i = 0;
         while i + 1 < after_flat.len() {
             timers.push((
-                jet_task_delay_ms_defaulted(after_flat[i]),
+                jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(after_flat[i])),
                 after_flat[i + 1],
             ));
             i += 2;
@@ -1036,7 +1037,7 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
 }
 
 /// `tasks.after(duration, value)` — one-shot timer channel that receives `value`.
-extern "C" fn jet_jit_after_value(ms: i64, value: i64) -> i64 {
+extern "C" fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
     // Sender is stashed in `rt.senders` so `with_runtime_mut` stays `Default`-safe.
     let (ch_id, sender_id) = with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
@@ -1057,7 +1058,7 @@ extern "C" fn jet_jit_after_value(ms: i64, value: i64) -> i64 {
         )
     })
     .expect("jit after_value without active runtime");
-    let delay = jet_task_delay_ms_defaulted(ms);
+    let delay = jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(duration_ns));
     let inherited_deadline = jet_ctx_deadline_ms();
     let control = JetTaskControl::new();
     let _join = jet_scheduler_spawn_blocking_with_control(
@@ -1077,7 +1078,7 @@ extern "C" fn jet_jit_after_value(ms: i64, value: i64) -> i64 {
 }
 
 /// `tasks.interval(duration)` — ticking channel sending 1, 2, …
-extern "C" fn jet_jit_interval(ms: i64) -> i64 {
+extern "C" fn jet_jit_interval(duration_ns: i64) -> i64 {
     let (ch_id, sender_id) = with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
         let ch = JetSchedulerChannel::new();
@@ -1097,7 +1098,7 @@ extern "C" fn jet_jit_interval(ms: i64) -> i64 {
         )
     })
     .expect("jit interval without active runtime");
-    let delay = jet_task_interval_ms_defaulted(ms);
+    let delay = jet_task_interval_ms_defaulted(jet_std_time_duration_to_millis(duration_ns));
     // Detached ticker thread — matches prelude `interval` (std::thread::spawn).
     std::thread::spawn(move || {
         let mut tick = 1i64;

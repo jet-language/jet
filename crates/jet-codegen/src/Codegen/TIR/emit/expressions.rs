@@ -5880,7 +5880,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             value,
         } => {
             let b = emit_tir_expr(builder, cx);
-            let ms = format!("({}).as_millis()", emit_tir_expr(duration, cx));
+            let duration = emit_tir_expr(duration, cx);
+            let ms = format!(
+                "{}jet_std_time_duration_to_millis(({}).ns)",
+                cx.root_prefix,
+                duration
+            );
             if let Some(value) = value {
                 let v = emit_tir_expr(value, cx);
                 format!("{b}.after_value({ms}, {v})")

@@ -1865,10 +1865,10 @@ impl<'a> EvalCtx<'a> {
                     CtValue::List(
                         afters
                             .into_iter()
-                            .map(|(ms, value)| CtValue::Struct {
+                            .map(|(duration_ns, value)| CtValue::Struct {
                                 type_name: TIR_SELECT_AFTER.to_string(),
                                 fields: vec![
-                                    ("ms".to_string(), CtValue::Int(ms)),
+                                    ("duration_ns".to_string(), CtValue::Int(duration_ns)),
                                     ("value".to_string(), value),
                                 ],
                             })
@@ -1911,14 +1911,14 @@ impl<'a> EvalCtx<'a> {
                         if type_name != TIR_SELECT_AFTER {
                             return None;
                         }
-                        let ms = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-                            ("ms", CtValue::Int(ms)) => Some(*ms),
+                        let duration_ns = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+                            ("duration_ns", CtValue::Int(duration_ns)) => Some(*duration_ns),
                             _ => None,
                         })?;
                         let payload = fields
                             .iter()
                             .find_map(|(name, value)| (name == "value").then(|| value.clone()))?;
-                        Some((ms, payload))
+                        Some((duration_ns, payload))
                     })
                     .collect::<Option<Vec<_>>>(),
                 _ => None,
@@ -1976,7 +1976,7 @@ impl<'a> EvalCtx<'a> {
             type_name: "Receiver".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
         };
-        let duration_ms = duration_ns.saturating_div(1_000_000);
+        let duration_ms = crate::scheduler::jet_std_time_duration_to_millis(duration_ns);
         let delay = if repeating {
             crate::scheduler::jet_task_interval_ms_defaulted(duration_ms)
         } else {
@@ -2093,12 +2093,12 @@ impl<'a> EvalCtx<'a> {
     pub(super) fn eval_select_after(
         &self,
         builder: CtValue,
-        millis: i64,
+        duration_ns: i64,
         value: CtValue,
     ) -> Result<CtValue, Diagnostic> {
         let (receivers, mut afters) = Self::select_builder_parts(&builder)
             .ok_or_else(|| unsupported("select builder", self.span()))?;
-        afters.push((millis, value));
+        afters.push((duration_ns, value));
         Ok(Self::select_builder_value(receivers, afters))
     }
 
@@ -2127,9 +2127,11 @@ impl<'a> EvalCtx<'a> {
             .collect();
         let timers = after_values
             .into_iter()
-            .map(|(ms, value)| {
+            .map(|(duration_ns, value)| {
                 (
-                    crate::scheduler::jet_task_delay_ms_defaulted(ms),
+                    crate::scheduler::jet_task_delay_ms_defaulted(
+                        crate::scheduler::jet_std_time_duration_to_millis(duration_ns),
+                    ),
                     Some(value),
                 )
             })

@@ -15145,20 +15145,19 @@ impl LowerCtx<'_, '_> {
                 }
                 if module == "core.tasks" && method == "after" {
                     let duration_ns = self.lower_expr(&args[0])?;
-                    let scale = self.b.ins().iconst(types::I64, 1_000_000);
-                    let ms = self.b.ins().sdiv(duration_ns, scale);
                     let value = if args.len() >= 2 {
                         self.lower_expr(&args[1])?
                     } else {
                         self.b.ins().iconst(types::I64, 0)
                     };
-                    return Ok(self.call_host(self.host.conc.after_value, &[ms, value]));
+                    return Ok(self.call_host(
+                        self.host.conc.after_value,
+                        &[duration_ns, value],
+                    ));
                 }
                 if module == "core.tasks" && method == "interval" && args.len() == 1 {
                     let duration_ns = self.lower_expr(&args[0])?;
-                    let scale = self.b.ins().iconst(types::I64, 1_000_000);
-                    let ms = self.b.ins().sdiv(duration_ns, scale);
-                    return Ok(self.call_host(self.host.conc.interval, &[ms]));
+                    return Ok(self.call_host(self.host.conc.interval, &[duration_ns]));
                 }
                 if module == "core.tasks" && method == "yield_now" && args.is_empty() {
                     let status = self.call_host(self.host.conc.task_yield, &[]);
@@ -16122,8 +16121,7 @@ impl LowerCtx<'_, '_> {
                 let mut after_flat = Vec::new();
                 for (duration, value) in afters {
                     let duration_ns = self.lower_expr(duration)?;
-                    let scale = self.b.ins().iconst(types::I64, 1_000_000);
-                    after_flat.push(self.b.ins().sdiv(duration_ns, scale));
+                    after_flat.push(duration_ns);
                     after_flat.push(match value {
                         Some(v) => self.lower_expr(v)?,
                         None => self.b.ins().iconst(types::I64, 0),

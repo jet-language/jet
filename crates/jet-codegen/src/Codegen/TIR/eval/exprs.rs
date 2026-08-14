@@ -8746,15 +8746,14 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let builder = self.eval_expr_child(builder, scope)?;
                 let duration = self.eval_expr_child(duration, scope)?;
-                let duration = duration_ns(&duration)
+                let duration_ns = duration_ns(&duration)
                     .ok_or_else(|| unsupported("select timer duration", self.span()))?;
-                let millis = duration.saturating_div(1_000_000);
                 let value = value
                     .as_ref()
                     .map(|value| self.eval_expr_child(value, scope))
                     .transpose()?
                     .unwrap_or(CtValue::Unit);
-                self.eval_select_after(builder, millis, value)
+                self.eval_select_after(builder, duration_ns, value)
             }
             TExprKind::SelectRead { builder, stream } => {
                 let builder = self.eval_expr_child(builder, scope)?;

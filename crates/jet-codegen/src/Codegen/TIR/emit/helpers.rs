@@ -239,7 +239,12 @@ pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec
                 duration,
                 value,
             } => {
-                let ms = format!("({}).as_millis()", emit_tir_expr(duration, cx));
+                let duration = emit_tir_expr(duration, cx);
+                let ms = format!(
+                    "{}jet_std_time_duration_to_millis(({}).ns)",
+                    cx.root_prefix,
+                    duration
+                );
                 let value = value
                     .as_ref()
                     .map(|v| emit_tir_expr(v, cx))

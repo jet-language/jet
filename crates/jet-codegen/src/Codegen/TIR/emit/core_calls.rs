@@ -551,7 +551,8 @@ fn emit_plain_core_call(
     if module == "core.tasks" && method == "interval" {
         let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
         return Some(format!(
-            "{}jet_std::interval(({}).as_millis())",
+            "{}jet_std::interval({}jet_std_time_duration_to_millis(({}).ns))",
+            helper(""),
             helper(""),
             duration
         ));
@@ -830,7 +831,11 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         ("core.tasks", "after") => {
-            let duration = format!("({}).as_millis()", arg(0));
+            let duration = format!(
+                "{}jet_std_time_duration_to_millis(({}).ns)",
+                cx.root_prefix,
+                arg(0)
+            );
             if args.len() == 1 {
                 format!("{}jet_std::after({duration})", cx.root_prefix)
             } else {

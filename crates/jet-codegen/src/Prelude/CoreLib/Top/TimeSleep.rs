@@ -41,8 +41,15 @@ pub fn jet_std_time_sleep(millis: i64) {
     jet_deadline_check("time sleep");
 }
 
+/// D-TYPE2-TIME1=A: one shared boundary from the canonical Duration carrier
+/// to the scheduler's millisecond ABI. Engines call this Prelude function;
+/// they do not re-encode the Time unit themselves.
+pub fn jet_std_time_duration_to_millis(nanos: i64) -> i64 {
+    nanos.saturating_div(1_000_000)
+}
+
 /// D-TYPE2-TIME1=A: the core sleep call receives the canonical Duration
 /// carrier and only this Prelude adapter projects it to scheduler milliseconds.
 pub fn jet_std_time_sleep_duration_ns(nanos: i64) {
-    jet_std_time_sleep(nanos.saturating_div(1_000_000));
+    jet_std_time_sleep(jet_std_time_duration_to_millis(nanos));
 }
