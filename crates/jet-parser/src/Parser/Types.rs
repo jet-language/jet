@@ -758,7 +758,11 @@ impl<'a> Parser<'a> {
         // D-TYPE2-SPELL1 / card #1549: an inline range is the same literal-only
         // interval grammar used by a named distinct range, but may appear in
         // every type position. The carrier is intentionally fixed to `Int`.
-        let base = if matches!(self.peek().kind, TokKind::LParen) {
+        // A consumed `>>` leaves one virtual outer `>` pending. The following
+        // `(` belongs to the enclosing call, not to an inline range.
+        let base = if !self.pending_type_gt
+            && matches!(self.peek().kind, TokKind::LParen)
+        {
             let open = self.bump().span;
             let (lo, lo_span) = self.expect_range_bound_int("as the range's lower bound")?;
             self.expect(TokKind::DotDot, "between the range's bounds")?;

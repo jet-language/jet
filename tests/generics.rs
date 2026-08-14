@@ -723,18 +723,18 @@ fn run() {
 
 #[test]
 fn generic_call_formatter_keeps_adjacent_angles() {
-    let source = "fn run() {\n    value :: identity<Int>(1)\n    nested :: empty<Map<String, [Int]>>()\n    comparison :: 1 < 2\n    json.decode<Order>(text)\n}";
+    let source = "fn run() {\n    value :: identity<Int>(1)\n    nested :: empty<Map<String, Wrap<Int>>>()\n    comparison :: 1 < 2\n    json.decode<Wrap<Int>>(text)\n}";
     let formatted = jet::format_source(source).expect("generic call syntax should format");
     assert!(formatted.contains("identity<Int>(1)"), "{formatted}");
     assert!(
-        formatted.contains("empty<Map<String, [Int]>>()"),
+        formatted.contains("empty<Map<String, Wrap<Int>>>()"),
         "nested generic call arguments must keep both closing angles: {formatted}"
     );
     assert!(
         formatted.contains("comparison :: 1 < 2"),
         "spaced angles must remain a comparison: {formatted}"
     );
-    assert!(formatted.contains("json.decode<Order>(text)"), "{formatted}");
+    assert!(formatted.contains("json.decode<Wrap<Int>>(text)"), "{formatted}");
     assert_eq!(
         formatted,
         jet::format_source(&formatted).expect("formatted generic calls should reformat")
