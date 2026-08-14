@@ -2600,7 +2600,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let resource = match &call.args[0].expr {
                     Expr::Ident(name, _) if env.is_resource(name) => TExpr {
                         ty: env.ty_of(name).unwrap_or_else(unit_type),
-                        kind: TExprKind::ResourceTake(env.rust_name_of(name)),
+                        kind: TExprKind::ResourceTake(env.resource_take_place(name)),
                     },
                     expr => lower_expr(expr, cx, env),
                 };
@@ -4775,7 +4775,7 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         let Expr::Ident(name, _) = e else { unreachable!() };
         TExpr {
             ty: lowered.ty,
-            kind: TExprKind::ResourceTake(env.rust_name_of(name)),
+            kind: TExprKind::ResourceTake(env.resource_take_place(name)),
         }
     } else if reads_borrowed_place(e, env) && !lowered.ty.is_scalar() {
         let ty = lowered.ty.clone();

@@ -1220,12 +1220,120 @@ fn lower_stmts_with_markers(
     }
 }
 
+fn mark_resource_binding_mutability(stmt: &mut TStmt, targets: &HashSet<String>) {
+    match stmt {
+        TStmt::Let { name, kw, .. } => {
+            if *kw == "let" && targets.contains(&mangle(name)) {
+                *kw = "let mut";
+            }
+        }
+        TStmt::ContractScope { body, .. }
+        | TStmt::TaskGroup { body, .. }
+        | TStmt::Loop { body, .. }
+        | TStmt::While { body, .. }
+        | TStmt::Range { body, .. }
+        | TStmt::ForIn { body, .. }
+        | TStmt::Unsafe { body, .. }
+        | TStmt::SentryPolicy { body, .. }
+        | TStmt::Region(body)
+        | TStmt::Impure(body)
+        | TStmt::Live { body }
+        | TStmt::Shield { body }
+        | TStmt::ScopeMember { body, .. }
+        | TStmt::Transact { body, .. }
+        | TStmt::ContextBlock { body, .. }
+        | TStmt::Layout { body, .. }
+        | TStmt::Inline(body)
+        | TStmt::DebugOnly(body) => mark_resource_bindings_mutable(body, targets),
+        TStmt::GcEdit { stmt, .. } => mark_resource_binding_mutability(stmt, targets),
+        TStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            mark_resource_bindings_mutable(then_body, targets);
+            if let Some(else_body) = else_body {
+                mark_resource_bindings_mutable(else_body, targets);
+            }
+        }
+        TStmt::CountedLoop {
+            init, step, body, ..
+        } => {
+            mark_resource_binding_mutability(init, targets);
+            if let Some(step) = step {
+                mark_resource_binding_mutability(step, targets);
+            }
+            mark_resource_bindings_mutable(body, targets);
+        }
+        TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
+            for arm in arms {
+                mark_resource_bindings_mutable(&mut arm.body, targets);
+            }
+            if let Some(else_body) = else_body {
+                mark_resource_bindings_mutable(else_body, targets);
+            }
+        }
+        TStmt::RangeSwitch {
+            arms, else_body, ..
+        } => {
+            for (_, _, body) in arms {
+                mark_resource_bindings_mutable(body, targets);
+            }
+            mark_resource_bindings_mutable(else_body, targets);
+        }
+        TStmt::MixedSwitch {
+            arms, else_body, ..
+        } => {
+            for (_, body) in arms {
+                mark_resource_bindings_mutable(body, targets);
+            }
+            if let Some(else_body) = else_body {
+                mark_resource_bindings_mutable(else_body, targets);
+            }
+        }
+        TStmt::Reactive { executable, .. } => {
+            if let crate::Codegen::TIR::TLambdaBody::Block(body) = &mut executable.as_mut().executable {
+                mark_resource_bindings_mutable(body, targets);
+            }
+        }
+        TStmt::SplitViews { .. }
+        | TStmt::TupleDestructure { .. }
+        | TStmt::StructDestructure { .. }
+        | TStmt::ListDestructure { .. }
+        | TStmt::Assign { .. }
+        | TStmt::Return(_)
+        | TStmt::ExprStmt(_)
+        | TStmt::DeferClose { .. }
+        | TStmt::Break(_)
+        | TStmt::BreakValue { .. }
+        | TStmt::Continue(_)
+        | TStmt::IndexAssign { .. }
+        | TStmt::IndexFieldAssign(_)
+        | TStmt::IndexHookAssign { .. }
+        | TStmt::MathSwizzleAssign { .. }
+        | TStmt::Contract { .. }
+        | TStmt::LineMarker(_)
+        | TStmt::SourceSpan(_) => {}
+    }
+}
+
+fn mark_resource_bindings_mutable(stmts: &mut [TStmt], targets: &HashSet<String>) {
+    for stmt in stmts {
+        mark_resource_binding_mutability(stmt, targets);
+    }
+}
+
 #[inline(never)]
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     // Child blocks are heap tasks. A nested source block therefore resumes its
     // parent through `LowerBlock::resume` instead of keeping the parent lowering
     // frame on the native stack.
-    lower_stmts_with_markers(stmts, cx, env, true)
+    let mut lowered = lower_stmts_with_markers(stmts, cx, env, true);
+    let targets = env.resource_take_targets();
+    mark_resource_bindings_mutable(&mut lowered, &targets);
+    lowered
 }
 
 #[derive(Clone)]

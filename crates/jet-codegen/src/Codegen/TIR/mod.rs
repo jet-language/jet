@@ -2712,10 +2712,11 @@ pub enum TStmt {
     /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
     /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
     /// flag AND the forced-mut cases — a handle binding FileReader/FileWriter/
-    /// TcpStream/HTTPRouter/Arena/… needs `let mut` even when bound immutably, and an
-    /// escaping FnMut lambda binding); `let_ty` is the structured annotation (emit
-    /// spells the `: …` clause). The binding's resolved type is carried on the
-    /// `LowerEnv` slot (for downstream facts), so it is not duplicated on the node.
+    /// TcpStream/HTTPRouter/Arena/… needs `let mut` even when bound immutably, an
+    /// escaping FnMut lambda binding, or an owned `ResourceTake`); `let_ty` is the
+    /// structured annotation (emit spells the `: …` clause). The binding's resolved
+    /// type is carried on the `LowerEnv` slot (for downstream facts), so it is not
+    /// duplicated on the node.
     Let {
         name: String,
         kw: &'static str,

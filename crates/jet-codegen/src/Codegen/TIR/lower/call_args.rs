@@ -191,7 +191,7 @@ pub(crate) fn lower_call_arg_value(
         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
             TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::ResourceTake(env.rust_name_of(name)),
+                kind: TExprKind::ResourceTake(env.resource_take_place(name)),
             }
         }
         (Expr::Ident(name, _), Some((_, ty)))

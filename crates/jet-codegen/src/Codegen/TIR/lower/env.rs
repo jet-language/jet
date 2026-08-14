@@ -49,6 +49,10 @@ pub(crate) struct LowerEnv {
     pub(super) string_view_locals: HashSet<String>,
     pub(super) borrowed_locals: HashSet<String>,
     pub(super) resource_locals: HashSet<String>,
+    /// Exact Rust places consumed by `ResourceTake`. This is shared by child
+    /// lowering environments so the enclosing TIR body can repair only the
+    /// declarations that need mutable access to `JetResource::take`.
+    pub(super) resource_take_targets: Rc<RefCell<HashSet<String>>>,
     pub(super) gc_locals: HashSet<String>,
     /// Fixed-list locals created with `Type.{ uninit }`. TIR marks their
     /// index writes so AOT can use the vetted `jet_mem` storage wrapper.
@@ -90,6 +94,7 @@ impl LowerEnv {
             string_view_locals: HashSet::new(),
             borrowed_locals: HashSet::new(),
             resource_locals: HashSet::new(),
+            resource_take_targets: Rc::new(RefCell::new(HashSet::new())),
             gc_locals: HashSet::new(),
             uninit_fixed_locals: HashSet::new(),
             gc_return: false,
@@ -126,6 +131,16 @@ impl LowerEnv {
     }
     pub(super) fn is_resource(&self, name: &str) -> bool {
         self.resource_locals.contains(name)
+    }
+    /// Resolve and record one owned resource transfer. Child environments share
+    /// this fact with their enclosing lowering pass.
+    pub(super) fn resource_take_place(&mut self, name: &str) -> String {
+        let place = self.rust_name_of(name);
+        self.resource_take_targets.borrow_mut().insert(place.clone());
+        place
+    }
+    pub(super) fn resource_take_targets(&self) -> HashSet<String> {
+        self.resource_take_targets.borrow().clone()
     }
     pub(super) fn mark_gc(&mut self, name: &str) {
         self.gc_locals.insert(name.to_string());
