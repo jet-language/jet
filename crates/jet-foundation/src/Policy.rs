@@ -1815,7 +1815,7 @@ mod tests {
     #[test]
     fn contribution_law_orders_all_scopes_and_layers() {
         let key = super::FactKey::new("Build.Profile");
-        let contribution = |value, scope, layer, source| {
+        let contribution = |value: &str, scope, layer, source| {
             super::FactContribution::new(
                 "Build.Profile",
                 super::FactValue::Text(value.to_string()),
