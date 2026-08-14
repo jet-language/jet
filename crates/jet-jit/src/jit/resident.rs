@@ -141,6 +141,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         regex_values: Vec::new(),
         decimal_values: Vec::new(),
         fraction_values: Vec::new(),
+        complex_values: Vec::new(),
         trapped: None,
         exit_code: None,
         deadline_exceeded: None,

@@ -800,7 +800,8 @@ fn web_wasm_expr_supported(
                         | Type::Float
                         | Type::Float32
                         | Type::Bool
-                ) || is_string_like(&value.ty))
+                ) || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
+                    || is_string_like(&value.ty))
                     && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
             }
         }),
@@ -813,6 +814,13 @@ fn web_wasm_expr_supported(
                 && args.iter().all(|arg| {
                     web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
                 })
+        }
+        TIR::TExprKind::PreciseBuiltin {
+            type_name,
+            func,
+            args,
+        } if web_complex_precise_supported(type_name, func, args.len()) => {
+            args.iter().all(|arg| web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions))
         }
         TIR::TExprKind::Unary { operand, .. }
         | TIR::TExprKind::Clone(operand)
@@ -1031,6 +1039,16 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Unit => true,
         _ => false,
     }
+}
+
+fn web_complex_precise_supported(type_name: &str, func: &str, arity: usize) -> bool {
+    type_name == Syntax::TYPE_COMPLEX
+        && matches!(
+            (func, arity),
+            ("from_parts", 2)
+                | ("add" | "sub" | "mul" | "div", 2)
+                | ("abs" | "to_string", 1)
+        )
 }
 
 fn wasm_callee_bucket(bundle: &ProgramBundle, name: &str) -> Option<WebBucket> {
@@ -3248,6 +3266,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::IntN { signed: false, .. } => Some("u64"),
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
+        Type::Named(name) if name == Syntax::TYPE_COMPLEX => Some("JetComplex"),
         Type::String => Some("String"),
         Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => Some("String"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::InlineRange { .. }) => Some("Vec<JetWasmInt>"),
@@ -3267,6 +3286,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
         Type::InlineRange { base, .. } => wasm_storage_ty(base)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Int => "JetWasmInt".to_string(),
         Type::IntN { signed: true, .. } => "i64".to_string(),
         Type::Named(name)
@@ -3309,6 +3329,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
         Type::InlineRange { base, .. } => wasm_internal_ty(base, bundle)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Named(name)
             if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => "i64".to_string(),
         Type::Named(name) if name == Syntax::DURATION_RANGE_ERROR_TYPE => {
@@ -4306,6 +4327,32 @@ fn wasm_emit_expr(
                 wasm_storage_ty(ty).ok_or(())?
             ),
         },
+        TIR::TExprKind::PreciseBuiltin {
+            type_name,
+            func,
+            args,
+        } if web_complex_precise_supported(type_name, func, args.len()) => {
+            let parts = args
+                .iter()
+                .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?;
+            match func.as_str() {
+                "from_parts" => format!("jet_complex_from_parts({}, {})", parts[0], parts[1]),
+                "add" | "sub" | "mul" | "div" => {
+                    let helper = match func.as_str() {
+                        "add" => "jet_complex_add",
+                        "sub" => "jet_complex_sub",
+                        "mul" => "jet_complex_mul",
+                        "div" => "jet_complex_div",
+                        _ => unreachable!(),
+                    };
+                    format!("{helper}(&({}), &({}))", parts[0], parts[1])
+                }
+                "abs" => format!("jet_complex_abs({})", parts[0]),
+                "to_string" => format!("jet_complex_to_string(&({}))", parts[0]),
+                _ => return Err(()),
+            }
+        }
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the shared Prelude
         // helpers (Prelude/Core/Power.rs, Prelude/Core/Division.rs) — the same
         // source the native build runs — because Rust spells neither operator.
@@ -7072,6 +7119,12 @@ fn wasm_math_core_helper(
     };
     if args.len() != arity {
         return None;
+    }
+    if method == "abs"
+        && matches!(&args[0].ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
+        && *ret_ty == Type::Float
+    {
+        return Some("jet_complex_abs");
     }
     let scalar_ty = &args.first()?.ty;
     if args.iter().any(|arg| &arg.ty != scalar_ty) || ret_ty != scalar_ty {

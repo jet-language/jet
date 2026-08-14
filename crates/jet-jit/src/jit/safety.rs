@@ -1888,6 +1888,13 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             1
                         ) | ("add" | "sub" | "mul" | "div" | "equal", 2)
                     )))
+                || (type_name == jet_foundation::Syntax::TYPE_COMPLEX
+                    && matches!(
+                        (func.as_str(), args.len()),
+                        ("from_parts", 2)
+                            | ("add" | "sub" | "mul" | "div", 2)
+                            | ("abs" | "to_string", 1)
+                    )))
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TExprKind::StructLit { fields, .. } => {

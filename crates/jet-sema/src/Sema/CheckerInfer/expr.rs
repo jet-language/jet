@@ -1583,6 +1583,41 @@ impl<'a> Checker<'a> {
                     && self.registry.distinct_is_numeric(&type_name)
                     && self.registry.distinct_base(&type_name) == Some(&Type::Float);
                 if !is_unit_member {
+                    // D-TYPE2-IMAG1=A: `4i` is the one special suffix on the
+                    // existing unit-literal AST path. An in-scope unit member
+                    // wins first, so a user `#UnitFamily` member named `i`
+                    // shadows the imaginary fallback exactly like any unit.
+                    if suffix == Syntax::UNIT_SUFFIX_IMAGINARY {
+                        let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
+                        let call_span = *span;
+                        *e = Expr::Call(Call {
+                            name: Syntax::TYPE_COMPLEX.to_string(),
+                            name_span: *suffix_span,
+                            type_args: Vec::new(),
+                            args: vec![
+                                CallArg {
+                                    convention: AccessConvention::Read,
+                                    expr: Expr::Float(0.0, call_span, false),
+                                    span: call_span,
+                                    flags: CallArgFlags::default(),
+                                    label: None,
+                                    spread: false,
+                                },
+                                CallArg {
+                                    convention: AccessConvention::Read,
+                                    expr: Expr::Float(value, call_span, false),
+                                    span: call_span,
+                                    flags: CallArgFlags::default(),
+                                    label: None,
+                                    spread: false,
+                                },
+                            ],
+                            resolved_ret: None,
+                            range_checked: false,
+                            widen_approx: false,
+                        });
+                        return self.infer(e);
+                    }
                     self.diags.push(Diagnostic::error(
                         "E0134",
                         format!("`{}` isn't a unit in scope", suffix),

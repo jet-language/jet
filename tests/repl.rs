@@ -542,6 +542,18 @@ fn repl_function_declare_and_call() {
 }
 
 #[test]
+fn repl_imaginary_literal_uses_the_unit_path() {
+    let out = run_transcript(
+        &["use core.math.[abs]", "z :: 3 + 4i", "z * z", "abs(z)", "i :: 9", "i"],
+        None,
+    );
+    assert!(!out.contains("error ["), "imaginary REPL transcript failed: {out}");
+    assert!(out.contains("-7 + 24i"), "square missing from transcript: {out}");
+    assert!(out.contains("5.0"), "magnitude missing from transcript: {out}");
+    assert!(out.contains("9 : Int"), "bare i did not stay an Int: {out}");
+}
+
+#[test]
 fn repl_range_fact_proves_fixed_list_index() {
     let out = run_transcript(
         &[

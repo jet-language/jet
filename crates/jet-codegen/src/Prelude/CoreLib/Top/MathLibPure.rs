@@ -1,6 +1,87 @@
 // Shared core.math helpers (I9). Included by AOT prelude, JIT math_rt, and comptime ambient.
 // Keep std-only; no jet_std / host types.
 
+/// D-TYPE2-IMAG1=A: the one runtime value for imaginary literals. The type and
+/// all arithmetic stay in this shared Prelude source so AOT, JIT, comptime,
+/// and web cannot grow different complex-number rules.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JetComplex {
+    pub real: f64,
+    pub imaginary: f64,
+}
+
+impl JetComplex {
+    pub fn from_parts(real: f64, imaginary: f64) -> Self {
+        Self { real, imaginary }
+    }
+
+    pub fn add(&self, other: &Self) -> Self {
+        Self::from_parts(self.real + other.real, self.imaginary + other.imaginary)
+    }
+
+    pub fn sub(&self, other: &Self) -> Self {
+        Self::from_parts(self.real - other.real, self.imaginary - other.imaginary)
+    }
+
+    pub fn mul(&self, other: &Self) -> Self {
+        Self::from_parts(
+            self.real * other.real - self.imaginary * other.imaginary,
+            self.real * other.imaginary + self.imaginary * other.real,
+        )
+    }
+
+    pub fn div(&self, other: &Self) -> Self {
+        let denominator = other.real * other.real + other.imaginary * other.imaginary;
+        Self::from_parts(
+            (self.real * other.real + self.imaginary * other.imaginary) / denominator,
+            (self.imaginary * other.real - self.real * other.imaginary) / denominator,
+        )
+    }
+
+    pub fn abs(self) -> f64 {
+        self.real.hypot(self.imaginary)
+    }
+
+    pub fn to_string_rep(&self) -> String {
+        let sign = if self.imaginary.is_sign_negative() { '-' } else { '+' };
+        format!("{} {} {}i", self.real, sign, self.imaginary.abs())
+    }
+}
+
+impl std::fmt::Display for JetComplex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_string_rep())
+    }
+}
+
+pub fn jet_complex_from_parts(real: f64, imaginary: f64) -> JetComplex {
+    JetComplex::from_parts(real, imaginary)
+}
+
+pub fn jet_complex_add(left: &JetComplex, right: &JetComplex) -> JetComplex {
+    left.add(right)
+}
+
+pub fn jet_complex_sub(left: &JetComplex, right: &JetComplex) -> JetComplex {
+    left.sub(right)
+}
+
+pub fn jet_complex_mul(left: &JetComplex, right: &JetComplex) -> JetComplex {
+    left.mul(right)
+}
+
+pub fn jet_complex_div(left: &JetComplex, right: &JetComplex) -> JetComplex {
+    left.div(right)
+}
+
+pub fn jet_complex_abs(value: JetComplex) -> f64 {
+    value.abs()
+}
+
+pub fn jet_complex_to_string(value: &JetComplex) -> String {
+    value.to_string_rep()
+}
+
 pub fn jet_std_math_abs_i64(value: i64) -> i64 {
     value.abs()
 }

@@ -1140,6 +1140,13 @@ pub fn apply_core_call_with_type(
                 Ok(exact_int_value(value.abs()))
             }
             CtValue::Float(f) => Ok(CtValue::Float(core_math_float_abs(*f))),
+            value if matches!(
+                &value,
+                CtValue::Struct { type_name, .. }
+                    if type_name == crate::Syntax::TYPE_COMPLEX
+            ) => crate::Comptime::ComplexParity::abs(&value)
+                .map(|magnitude| CtValue::Float(CtFloat::f64(magnitude)))
+                .ok_or_else(|| unsupported("malformed Complex value", span)),
             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
         },
         ("core.math", "pow") => {

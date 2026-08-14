@@ -2620,6 +2620,8 @@ fn fmt_preserves_unit_literal() {
 fn run() {
     a :: 500ms
     print(a)
+    z :: 4i
+    print(z)
 }
 ";
     assert_fmt_stable(src, "unit literal");

@@ -6,6 +6,7 @@
 
 use super::{Concurrency, JitRuntime};
 use jet_foundation::Numeric::{CtDecimal, CtFraction};
+use crate::MathExtra::math_rt::JetComplex;
 
 fn trap_decimal(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
@@ -49,6 +50,23 @@ fn with_fraction<R>(handle: i64, f: impl FnOnce(&CtFraction) -> R) -> Option<R> 
         rt.fraction_values
             .get(idx)
             .and_then(|s| s.as_ref())
+            .map(f)
+    })
+}
+
+fn push_complex(value: JetComplex) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.complex_values.push(Some(value));
+        rt.complex_values.len() as i64
+    })
+}
+
+fn with_complex<R>(handle: i64, f: impl FnOnce(&JetComplex) -> R) -> Option<R> {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = handle.saturating_sub(1) as usize;
+        rt.complex_values
+            .get(idx)
+            .and_then(|value| value.as_ref())
             .map(f)
     })
 }
@@ -578,6 +596,44 @@ extern "C" fn jet_jit_fraction_is_zero(a: i64) -> i8 {
     with_fraction(a, |f| f.numerator == 0).unwrap_or(false) as i8
 }
 
+extern "C" fn jet_jit_complex_from_parts(real: f64, imaginary: f64) -> i64 {
+    push_complex(JetComplex::from_parts(real, imaginary))
+}
+
+extern "C" fn jet_jit_complex_add(a: i64, b: i64) -> i64 {
+    let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    push_complex(left.add(&right))
+}
+
+extern "C" fn jet_jit_complex_sub(a: i64, b: i64) -> i64 {
+    let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    push_complex(left.sub(&right))
+}
+
+extern "C" fn jet_jit_complex_mul(a: i64, b: i64) -> i64 {
+    let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    push_complex(left.mul(&right))
+}
+
+extern "C" fn jet_jit_complex_div(a: i64, b: i64) -> i64 {
+    let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
+    push_complex(left.div(&right))
+}
+
+extern "C" fn jet_jit_complex_abs(a: i64) -> f64 {
+    with_complex(a, |value| value.abs()).unwrap_or(0.0)
+}
+
+extern "C" fn jet_jit_complex_to_string(a: i64) -> i64 {
+    let text = with_complex(a, |value| value.to_string_rep())
+        .unwrap_or_else(|| "0 + 0i".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
 host_fns! {
     struct NumericHostFns;
     register: register_numeric_symbols;
@@ -606,6 +662,10 @@ host_fns! {
         let mut sig_unary_f64 = Signature::new(cc);
         sig_unary_f64.params.push(AbiParam::new(types::I64));
         sig_unary_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_complex_parts = Signature::new(cc);
+        sig_complex_parts.params.push(AbiParam::new(types::F64));
+        sig_complex_parts.params.push(AbiParam::new(types::F64));
+        sig_complex_parts.returns.push(AbiParam::new(types::I64));
 
 
     }
@@ -682,4 +742,11 @@ host_fns! {
     fraction_to_string: "jet_jit_fraction_to_string" => jet_jit_fraction_to_string: sig_unary;
     fraction_to_float: "jet_jit_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     fraction_is_zero: "jet_jit_fraction_is_zero" => jet_jit_fraction_is_zero: sig_unary_bool;
+    complex_from_parts: "jet_jit_complex_from_parts" => jet_jit_complex_from_parts: sig_complex_parts;
+    complex_add: "jet_jit_complex_add" => jet_jit_complex_add: sig_binary;
+    complex_sub: "jet_jit_complex_sub" => jet_jit_complex_sub: sig_binary;
+    complex_mul: "jet_jit_complex_mul" => jet_jit_complex_mul: sig_binary;
+    complex_div: "jet_jit_complex_div" => jet_jit_complex_div: sig_binary;
+    complex_abs: "jet_jit_complex_abs" => jet_jit_complex_abs: sig_unary_f64;
+    complex_to_string: "jet_jit_complex_to_string" => jet_jit_complex_to_string: sig_unary;
 }

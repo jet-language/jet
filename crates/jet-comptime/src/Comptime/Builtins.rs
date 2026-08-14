@@ -410,6 +410,28 @@ pub fn eval_binop(
                 std::option::Option::None => Err(unsupported("this math operator", span)),
             }
         }
+        // D-TYPE2-IMAG1=A: Complex arithmetic uses the same Prelude kernel as
+        // runtime precise builtins; this arm only marshals CtValue fields.
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    CtValue::Struct { type_name: left_name, .. },
+                    CtValue::Struct { type_name: right_name, .. },
+                ) if left_name == crate::Syntax::TYPE_COMPLEX
+                    && right_name == crate::Syntax::TYPE_COMPLEX
+            ) =>
+        {
+            let method = match op {
+                BinOp::Add => "add",
+                BinOp::Sub => "sub",
+                BinOp::Mul => "mul",
+                BinOp::Div => "div",
+                _ => unreachable!("Complex arithmetic guard"),
+            };
+            super::ComplexParity::binary(method, &left, &right)
+                .ok_or_else(|| unsupported("malformed Complex value", span))
+        }
         (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), left, right)
             if matches!(
                 (&left, &right),

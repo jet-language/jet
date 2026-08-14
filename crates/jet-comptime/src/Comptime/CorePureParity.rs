@@ -576,6 +576,9 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     if core_type == "Path" {
         return path_string(value, Span::new(0, 0)).ok();
     }
+    if core_type == crate::Syntax::TYPE_COMPLEX {
+        return crate::Comptime::ComplexParity::to_string(value);
+    }
     if core_type == "DateTime" {
         return datetime_string(value, Span::new(0, 0)).ok();
     }

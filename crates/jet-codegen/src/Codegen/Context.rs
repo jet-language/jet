@@ -2117,6 +2117,13 @@ impl Cx {
                     layout_handle_rust_type(name).unwrap()
                 )
             }
+            // D-TYPE2-IMAG1=A: Complex lives in the shared MathLibPure root,
+            // not in the JetStd namespace used by the older precise numerics.
+            Type::Named(name)
+                if name == Syntax::TYPE_COMPLEX && !self.type_names.contains(name) =>
+            {
+                format!("{}JetComplex", self.root_prefix)
+            }
             // A user struct/enum sharing a built-in Core type name (e.g. a user
             // `Vec3`) wins — it keeps its own `__jet_<Name>` lowering. Only fall to the
             // built-in jet_std struct when the name is NOT a user type.

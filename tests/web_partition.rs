@@ -171,6 +171,28 @@ fn web_partition_report_generated_for_web_compile() {
 }
 
 #[test]
+fn web_wasm_imaginary_literal_uses_shared_complex_prelude() {
+    let source = r#"
+#Target(Web)
+use core.math.[abs]
+
+fn run() {
+    z :: 3 + 4i
+    print(z * z)
+    print(abs(z))
+}
+"#;
+    let result = jet::compile_web_with_path(source, "tests/fixtures/web_imaginary.jet")
+        .expect("imaginary literal should compile for Wasm web output")
+        .web
+        .expect("web compilation should produce artifacts");
+    assert!(result.wasm_rust.contains("JetComplex"));
+    assert!(result.wasm_rust.contains("jet_complex_mul"));
+    assert!(result.wasm_rust.contains("jet_complex_abs"));
+    assert!(!result.wasm_rust.contains("4i"));
+}
+
+#[test]
 fn browser_effect_partition_metadata() {
     let src = r#"
 use core.ui as ui

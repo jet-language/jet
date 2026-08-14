@@ -224,7 +224,8 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.type_names.contains(&c.name);
             let is_precise_ctor = !locals.contains(&c.name)
                 && (c.name == crate::Syntax::TYPE_DECIMAL
-                    || c.name == crate::Syntax::TYPE_FRACTION)
+                    || c.name == crate::Syntax::TYPE_FRACTION
+                    || c.name == crate::Syntax::TYPE_COMPLEX)
                 && !cx.type_names.contains(&c.name);
             // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call
             // sema rewrote a typed literal into (see `lower_expr`'s matching case).

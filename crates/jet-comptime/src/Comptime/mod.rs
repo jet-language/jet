@@ -16,6 +16,7 @@
 //! `String` (S41), and `BTreeMap` ordering (S38).
 
 pub mod Build;
+pub(crate) mod ComplexParity;
 /// Host/builtin surface shared by the canonical TIR evaluator (#777) and
 /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
 /// eval can dispatch without a second builtin table.

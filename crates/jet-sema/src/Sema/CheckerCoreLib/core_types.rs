@@ -228,6 +228,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "RaylibWindow" | "RaylibColor" | "RaylibSound"
         // D-DECIMAL1: exact decimal arithmetic.
         | "Decimal"
+        // D-TYPE2-IMAG1=A: imaginary literals construct the shared Complex value.
+        | "Complex"
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.

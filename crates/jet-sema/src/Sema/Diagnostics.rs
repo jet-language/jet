@@ -1064,6 +1064,7 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
         name,
         "Mime"
             | "ServiceUpgradeReceipt"
+            | "Complex"
             | "Url"
             | "Path"
             | "Date"
@@ -1524,6 +1525,9 @@ pub(crate) fn type_is_copy(ty: &Type) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char)
         || is_u8_ty(ty)
+        // D-TYPE2-IMAG1=A: the shared Complex carrier is two f64 values and
+        // is Copy at every runtime tier.
+        || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_RANGE)
 }
 

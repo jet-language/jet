@@ -1231,10 +1231,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             args,
         } => {
             let parts: Vec<String> = args.iter().map(|a| emit_tir_expr(a, cx)).collect();
-            let prefix = if type_name == "Fraction" {
-                "jet_fraction"
-            } else {
-                "jet_decimal"
+            let prefix = match type_name.as_str() {
+                "Fraction" => "jet_fraction",
+                "Complex" => "jet_complex",
+                _ => "jet_decimal",
             };
             let call = if func == "from_str" {
                 format!("{}{}_{}(&({}))", cx.root_prefix, prefix, func, parts[0])

@@ -915,6 +915,34 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("Decimal", 0, &Type::String, &mut call.args[0]);
                 return Some(Some(Type::Named(call.name.clone())));
             }
+
+            // D-TYPE2-IMAG1=A: `Complex(real, imaginary)` is the canonical
+            // constructor used by the unit-literal rewrite and remains
+            // available for explicit expert construction.
+            if self.funcs.get(&call.name).is_none()
+                && !self.registry.contains(&call.name)
+                && call.name == crate::Syntax::TYPE_COMPLEX
+            {
+                if call.args.len() != 2 {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!(
+                            "`Complex` takes exactly two arguments, got {}",
+                            call.args.len()
+                        ),
+                        "`Complex` takes the real part first and the imaginary part second".to_string(),
+                        "write `Complex(real, imaginary)`".to_string(),
+                        Some(call.name_span),
+                    ));
+                    for a in call.args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(Some(Type::Named(call.name.clone())));
+                }
+                self.expect_core_arg("Complex", 0, &Type::Float, &mut call.args[0]);
+                self.expect_core_arg("Complex", 1, &Type::Float, &mut call.args[1]);
+                return Some(Some(Type::Named(call.name.clone())));
+            }
     
             // D-SHAPE-CONVERT1=A: `Type(value)` is not a conversion alias.
             // Distinct and unit values use the same destination-owned spelling

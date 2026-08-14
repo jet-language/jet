@@ -2095,10 +2095,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         Expr::ComptimeName {
             value: Some(value), ..
-        } => TExpr {
-            ty: value.jet_type(),
-            kind: TExprKind::CtLit(value.clone()),
-        },
+        } => {
+            let ty = value.jet_type();
+            let kind = lower_comptime_scalar(Some(value), Some(&ty))
+                .unwrap_or_else(|| TExprKind::CtLit(value.clone()));
+            TExpr { ty, kind }
+        }
         Expr::ComptimeName { name, .. } if super::is_eval_fragment() => {
             // `@name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
             if !env.locals.contains_key(name) {
@@ -2477,7 +2479,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if lm || rm {
                     crate::Sema::math_binop_result(*op, ln, rn).unwrap_or_else(|| lhs.ty.clone())
                 } else if ln == rn
-                    && ln == crate::Syntax::TYPE_DECIMAL
                     && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
                 {
                     lhs.ty.clone()
@@ -2487,17 +2488,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             } else {
                 lhs.ty.clone()
             };
-            // D-DECIMAL1: `+`/`-`/`*` lower to prelude helpers.
+            // D-DECIMAL1 / D-TYPE2-IMAG1=A: precise arithmetic lowers through
+            // the shared typed-value Prelude helpers.
             if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
                 if ln == rn
-                    && ln == crate::Syntax::TYPE_DECIMAL
                 {
                     if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
-                        if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) {
+                        if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) {
                             let func = match op {
                                 BinOp::Add => "add",
                                 BinOp::Sub => "sub",
                                 BinOp::Mul => "mul",
+                                BinOp::Div => "div",
                                 _ => unreachable!(),
                             };
                             return TExpr {
@@ -3144,6 +3146,26 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::PreciseBuiltin {
                         type_name: call.name.clone(),
                         func: "from_str".to_string(),
+                        args: targs,
+                    },
+                };
+            }
+            // D-TYPE2-IMAG1=A: unit-literal elaboration and explicit
+            // construction share the precise builtin constructor seam.
+            if !env.locals.contains_key(&call.name)
+                && call.name == crate::Syntax::TYPE_COMPLEX
+                && !cx.type_names.contains(&call.name)
+            {
+                let targs: Vec<TExpr> = call
+                    .args
+                    .iter()
+                    .map(|a| lower_expr(&a.expr, cx, env))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(call.name.clone()),
+                    kind: TExprKind::PreciseBuiltin {
+                        type_name: call.name.clone(),
+                        func: "from_parts".to_string(),
                         args: targs,
                     },
                 };

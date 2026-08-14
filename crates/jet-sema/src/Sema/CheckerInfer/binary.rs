@@ -31,6 +31,45 @@ fn is_written_negative_int(expr: &Expr) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    fn is_complex_type(ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
+    }
+
+    fn is_complex_scalar(ty: &Type) -> bool {
+        matches!(ty, Type::Int | Type::IntN { .. } | Type::Float | Type::Float32)
+    }
+
+    fn complexize_operand(&mut self, expr: &mut Box<Expr>, span: Span) -> Option<Type> {
+        let original = std::mem::replace(expr, Box::new(Expr::Absent(span)));
+        *expr = Box::new(Expr::Call(crate::AST::Call {
+            name: crate::Syntax::TYPE_COMPLEX.to_string(),
+            name_span: span,
+            type_args: Vec::new(),
+            args: vec![
+                crate::AST::CallArg {
+                    convention: crate::AST::AccessConvention::Read,
+                    expr: *original,
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                },
+                crate::AST::CallArg {
+                    convention: crate::AST::AccessConvention::Read,
+                    expr: Expr::Float(0.0, span, false),
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                },
+            ],
+            resolved_ret: None,
+            range_checked: false,
+            widen_approx: false,
+        }));
+        self.infer(expr.as_mut())
+    }
+
     fn is_bare_integer_literal(expr: &Expr) -> bool {
         match expr {
             Expr::Paren(inner, _) => Self::is_bare_integer_literal(inner),
@@ -1328,6 +1367,25 @@ impl<'a> Checker<'a> {
                 return None;
             }
             None => {}
+        }
+
+        // D-TYPE2-IMAG1=A: Complex shares the precise-builtin path, while a
+        // scalar operand is promoted through the same explicit constructor.
+        let lhs_complex = Self::is_complex_type(&lt);
+        let rhs_complex = Self::is_complex_type(&rt);
+        if lhs_complex || rhs_complex {
+            if lhs_complex && !rhs_complex && Self::is_complex_scalar(&rt) {
+                rt = self.complexize_operand(rhs, span)?;
+            } else if rhs_complex && !lhs_complex && Self::is_complex_scalar(&lt) {
+                lt = self.complexize_operand(lhs, span)?;
+            }
+            if Self::is_complex_type(&lt) && Self::is_complex_type(&rt) {
+                if let Some(result) = precise_binop_result(op, crate::Syntax::TYPE_COMPLEX, crate::Syntax::TYPE_COMPLEX) {
+                    return Some(result);
+                }
+            }
+            self.op_mismatch(op, &lt, &rt, span);
+            return None;
         }
 
         // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math

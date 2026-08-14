@@ -2911,7 +2911,8 @@ impl<'a> Checker<'a> {
                     };
                     let ty = self.infer(&mut arg.expr)?;
                     // D-FLOATW1: abs also works on F32.
-                    if !matches!(ty, Type::Int | Type::Float | Type::Float32) {
+                    let is_complex = matches!(&ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX);
+                    if !matches!(&ty, Type::Int | Type::Float | Type::Float32) && !is_complex {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!("`abs` needs Int, Float, or F32, not {}", ty.show()),
@@ -2921,7 +2922,11 @@ impl<'a> Checker<'a> {
                         ));
                         return None;
                     }
-                    return Some(ty);
+                    return Some(if is_complex {
+                        Type::Float
+                    } else {
+                        ty
+                    });
                 }
                 ("core.math", "min" | "max") => {
                     if args.len() != 2 {

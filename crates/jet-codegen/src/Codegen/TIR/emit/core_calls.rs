@@ -98,6 +98,9 @@ pub(crate) fn core_math_scalar_helper(method: &str, ty: &Type) -> Option<&'stati
         ("max", Type::Float) => Some("jet_std_math_max_f64"),
         ("clamp", Type::Float) => Some("jet_std_math_clamp_f64"),
         ("abs", Type::Float32) => Some("jet_std_math_abs_f32"),
+        ("abs", Type::Named(name)) if name == crate::Syntax::TYPE_COMPLEX => {
+            Some("jet_complex_abs")
+        }
         ("min", Type::Float32) => Some("jet_std_math_min_f32"),
         ("max", Type::Float32) => Some("jet_std_math_max_f32"),
         ("clamp", Type::Float32) => Some("jet_std_math_clamp_f32"),

@@ -95,6 +95,43 @@ fn omitted_base_without_dimension_or_conversion_stays_none() {
 }
 
 #[test]
+fn imaginary_literal_uses_unit_path_and_keeps_bare_i_ordinary() {
+    let source = r#"
+#UnitFamily(ImaginaryShadow) { i }
+
+fn run() {
+    i :: 9
+    shadowed :: 4i
+    print(i)
+    print(shadowed.raw())
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("imaginary_unit_shadow", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "9\n4.0\n");
+}
+
+#[test]
+fn imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal() {
+    let source = r#"
+use core.math.[abs]
+
+fn run() {
+    z :: 3 + 4i
+    print(z * z)
+    print(abs(z))
+    i :: 9
+    print(i)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "imaginary_literal_tiers",
+        source,
+        "-7 + 24i\n5.0\n9\n",
+    );
+}
+
+#[test]
 fn derived_dimension_requires_one_scale_one_anchor() {
     let src = "#UnitFamily(Energy, dimension: Force * Length) { joule }";
     let (tokens, diagnostics) = jet::Lexer::lex(src);

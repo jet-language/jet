@@ -27,6 +27,10 @@ use super::{
     ViewMutPathStep,
 };
 
+mod math_lib_pure {
+    include!("../../../Prelude/CoreLib/Top/MathLibPure.rs");
+}
+
 struct EvalOptionValue(CtValue);
 
 /// D-FACT-READ1=A: project the typed plane fact from the reflected TypeInfo
@@ -9829,6 +9833,47 @@ fn eval_precise_builtin(
     span: crate::Diagnostics::Span,
 ) -> Result<CtValue, Diagnostic> {
     use jet_foundation::Numeric::CtDecimal;
+
+    fn complex_part(value: &CtValue) -> Option<f64> {
+        match value {
+            CtValue::Int(value) => Some(*value as f64),
+            CtValue::Float(value) => Some(value.as_f64()),
+            _ => None,
+        }
+    }
+
+    fn complex_value(value: math_lib_pure::JetComplex) -> CtValue {
+        CtValue::Struct {
+            type_name: crate::Syntax::TYPE_COMPLEX.to_string(),
+            fields: vec![
+                ("real".to_string(), CtValue::Float(CtFloat::f64(value.real))),
+                (
+                    "imaginary".to_string(),
+                    CtValue::Float(CtFloat::f64(value.imaginary)),
+                ),
+            ],
+        }
+    }
+
+    fn complex_value_from_ct(value: &CtValue) -> Option<math_lib_pure::JetComplex> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != crate::Syntax::TYPE_COMPLEX {
+            return None;
+        }
+        let part = |name: &str| {
+            fields
+                .iter()
+                .find(|(field, _)| field == name)
+                .and_then(|(_, value)| complex_part(value))
+        };
+        Some(math_lib_pure::JetComplex::from_parts(
+            part("real")?,
+            part("imaginary")?,
+        ))
+    }
+
     match (type_name, func) {
         ("Decimal", "from_str") => match args.into_iter().next() {
             Some(CtValue::Str(s)) => CtDecimal::from_str(&s)
@@ -9848,6 +9893,51 @@ fn eval_precise_builtin(
             };
             let rest: Vec<_> = it.collect();
             crate::Comptime::Builtins::apply_method(&recv, func, rest, span)
+        }
+        ("Complex", "from_parts") => {
+            let [real, imaginary] = args.as_slice() else {
+                return Err(unsupported("`Complex` needs real and imaginary parts", span));
+            };
+            let real = complex_part(real)
+                .ok_or_else(|| unsupported("`Complex` needs numeric parts", span))?;
+            let imaginary = complex_part(imaginary)
+                .ok_or_else(|| unsupported("`Complex` needs numeric parts", span))?;
+            Ok(complex_value(math_lib_pure::JetComplex::from_parts(
+                real, imaginary,
+            )))
+        }
+        ("Complex", "add" | "sub" | "mul" | "div") => {
+            let [left, right] = args.as_slice() else {
+                return Err(unsupported(&format!("`Complex.{func}`"), span));
+            };
+            let left = complex_value_from_ct(left)
+                .ok_or_else(|| unsupported("malformed Complex value", span))?;
+            let right = complex_value_from_ct(right)
+                .ok_or_else(|| unsupported("malformed Complex value", span))?;
+            let value = match func {
+                "add" => left.add(&right),
+                "sub" => left.sub(&right),
+                "mul" => left.mul(&right),
+                "div" => left.div(&right),
+                _ => unreachable!(),
+            };
+            Ok(complex_value(value))
+        }
+        ("Complex", "abs") => {
+            let [value] = args.as_slice() else {
+                return Err(unsupported("`Complex.abs`", span));
+            };
+            let value = complex_value_from_ct(value)
+                .ok_or_else(|| unsupported("malformed Complex value", span))?;
+            Ok(CtValue::Float(CtFloat::f64(value.abs())))
+        }
+        ("Complex", "to_string") => {
+            let [value] = args.as_slice() else {
+                return Err(unsupported("`Complex.to_string`", span));
+            };
+            let value = complex_value_from_ct(value)
+                .ok_or_else(|| unsupported("malformed Complex value", span))?;
+            Ok(CtValue::Str(value.to_string_rep()))
         }
         _ => Err(unsupported(
             &format!("precise `{type_name}.{func}`"),

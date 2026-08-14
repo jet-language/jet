@@ -907,6 +907,22 @@ impl<'a> Interp<'a> {
                 _ => Err(unsupported("`Decimal` with a non-String argument", span)),
             };
         }
+        // D-TYPE2-IMAG1=A: explicit Complex construction is the interpreter
+        // adapter for the same constructor used by `4i` and TIR precise nodes.
+        if name == crate::Syntax::TYPE_COMPLEX
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            if args.len() != 2 {
+                return Err(unsupported(
+                    "`Complex` takes exactly two arguments",
+                    span,
+                ));
+            }
+            let real = as_float(&self.eval(&args[0].expr, scope)?, span)?;
+            let imaginary = as_float(&self.eval(&args[1].expr, scope)?, span)?;
+            return Ok(crate::Comptime::ComplexParity::from_parts(real, imaginary));
+        }
         // D-SIMD2 / D-LINALG1: `Vec3(…)` / `F32x4(…)` / `Mat3(…)` constructors.
         if (name == crate::Syntax::LINALG_VEC2_TYPE
             || name == crate::Syntax::LINALG_VEC3_TYPE

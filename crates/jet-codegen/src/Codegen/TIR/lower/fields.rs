@@ -1,6 +1,6 @@
 use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::{LowerEnv, TExpr, TExprKind};
 use crate::Codegen::TIR::lower_expr;
 use crate::Syntax;
 use std::collections::HashSet;
@@ -1063,6 +1063,38 @@ pub(crate) fn lower_comptime_scalar(
         crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),
         crate::AST::CtValue::Str(text) => {
             Some(TExprKind::StrLit(vec![TStrPart::Lit(text.clone())]))
+        }
+        // D-TYPE2-IMAG1=A: a folded Complex still enters the canonical
+        // precise constructor seam. This keeps AOT, resident JIT, and web
+        // from treating its CtValue struct as an unrelated user record.
+        crate::AST::CtValue::Struct { type_name, fields }
+            if type_name == Syntax::TYPE_COMPLEX => {
+            let part = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .and_then(|(_, value)| match value {
+                        crate::AST::CtValue::Int(value) => Some(*value as f64),
+                        crate::AST::CtValue::Float(value) => Some(value.as_f64()),
+                        _ => None,
+                    })
+            };
+            let real = part("real")?;
+            let imaginary = part("imaginary")?;
+            Some(TExprKind::PreciseBuiltin {
+                type_name: Syntax::TYPE_COMPLEX.to_string(),
+                func: "from_parts".to_string(),
+                args: vec![
+                    TExpr {
+                        ty: Type::Float,
+                        kind: TExprKind::FloatLit(real),
+                    },
+                    TExpr {
+                        ty: Type::Float,
+                        kind: TExprKind::FloatLit(imaginary),
+                    },
+                ],
+            })
         }
         _ => None,
     }

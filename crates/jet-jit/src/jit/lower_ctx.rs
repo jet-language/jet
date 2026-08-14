@@ -8372,6 +8372,9 @@ impl LowerCtx<'_, '_> {
             Type::Named(name) if name == "Path" => {
                 Ok(self.call_host(self.host.core.path_to_string, &[value]))
             }
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_COMPLEX => {
+                Ok(self.call_host(self.host.num.complex_to_string, &[value]))
+            }
             Type::Named(name) if name == "ServiceUpgradeReceipt" => {
                 Ok(self.call_host(self.host.service_show, &[value]))
             }
@@ -14842,6 +14845,11 @@ impl LowerCtx<'_, '_> {
                                 Type::Int => self.host.math_extra.abs_i64,
                                 Type::Float => self.host.math_extra.abs_f64,
                                 Type::Float32 => self.host.math_extra.abs_f32,
+                                Type::Named(name)
+                                    if name == jet_foundation::Syntax::TYPE_COMPLEX =>
+                                {
+                                    self.host.num.complex_abs
+                                }
                                 other => {
                                     return Err(format!(
                                         "jit core.math.abs unsupported type: {other:?}"
@@ -17314,12 +17322,15 @@ impl LowerCtx<'_, '_> {
                 func,
                 args,
             } => self.lower_math_dispatch(type_name, func, None, args, &expr.ty),
-            // D-DECIMAL1: precise numeric ctor/binop.
+            // D-DECIMAL1 / D-TYPE2-IMAG1=A: precise numeric ctor/binop.
             TExprKind::PreciseBuiltin {
                 type_name,
                 func,
                 args,
-            } if type_name == "Decimal" || type_name == "Fraction" => {
+            } if type_name == "Decimal"
+                || type_name == "Fraction"
+                || type_name == jet_foundation::Syntax::TYPE_COMPLEX =>
+            {
                 let host_fn = match (type_name.as_str(), func.as_str()) {
                     ("Decimal", "from_str") => self.host.num.decimal_from_str,
                     ("Decimal", "add") => self.host.num.decimal_add,
@@ -17336,6 +17347,13 @@ impl LowerCtx<'_, '_> {
                     ("Fraction", "to_string") => self.host.num.fraction_to_string,
                     ("Fraction", "to_float") => self.host.num.fraction_to_float,
                     ("Fraction", "is_zero") => self.host.num.fraction_is_zero,
+                    ("Complex", "from_parts") => self.host.num.complex_from_parts,
+                    ("Complex", "add") => self.host.num.complex_add,
+                    ("Complex", "sub") => self.host.num.complex_sub,
+                    ("Complex", "mul") => self.host.num.complex_mul,
+                    ("Complex", "div") => self.host.num.complex_div,
+                    ("Complex", "abs") => self.host.num.complex_abs,
+                    ("Complex", "to_string") => self.host.num.complex_to_string,
                     _ => {
                         return Err(format!(
                             "jit precise numeric builtin unsupported: {type_name}.{func}"
