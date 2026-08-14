@@ -528,6 +528,8 @@ const TYPE_CONTAINER = {
   X25519SecretKey: "core.crypto",
   X25519PublicKey: "core.crypto",
   PasswordHash: "core.crypto",
+  TestSuite: "core.testing",
+  BenchSuite: "core.testing",
   Bytes: "Bytes",
   Queue: "Queue",
   Set: "Set",
@@ -740,7 +742,6 @@ const RATIFIED_DECLINES = {
   "gap.core.testing.benchmark": ["D-CORESURF-SMALL1", "#Bench marker block + `jet bench`"],
   "gap.core.testing.fail": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
   "gap.core.testing.main": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
-  "gap.core.testing.run": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
   "gap.core.testing.runtests": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
   "gap.core.testing.skip": ["D-CORESURF-SMALL1", "#Test marker block's .skip(reason) + `jet test`"],
   "gap.core.testing.stop": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
@@ -1230,7 +1231,14 @@ function discoverTables(sources) {
   for (const arm of matchArms(functionBody(entry, "builtin_method_return"), "match recv_ty")) {
     const rhs = arm.rhs.trim();
     if (arm.lhs.trim() === "_" || rhs === "None") continue;
-    if (rhs.includes("match (method")) { inlineArms.push(arm); continue; }
+    if (
+      rhs.includes("match (method")
+      || arm.lhs.includes('"TestSuite"')
+      || arm.lhs.includes('"BenchSuite"')
+    ) {
+      inlineArms.push(arm);
+      continue;
+    }
     // Anchored: an unanchored scan matched "ome" inside Some(...).
     const inner = rhs.replace(/^\{\s*/, "").trim();
     const call = /^(?:crate::)?(?:[A-Za-z_][A-Za-z0-9_]*::)*([a-z_][a-z0-9_]*)\s*\(/.exec(inner);

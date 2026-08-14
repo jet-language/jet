@@ -7,7 +7,7 @@ This page is the durable review index. The JSON file beside it is the
 machine-readable source that card #1398 reads. Do not keep a second
 hand-written workflow inventory.
 
-Generated on: 2026-08-13
+Generated on: 2026-08-14
 
 ## What decides a row
 
@@ -51,38 +51,38 @@ Generated on: 2026-08-13
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1131 |
-| Collection method rows | 724 |
-| Jet-side rows | 1855 |
-| Total rows | 10270 |
+| Module members | 1132 |
+| Collection method rows | 731 |
+| Jet-side rows | 1863 |
+| Total rows | 10277 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 404 |
-| Equal | 880 |
-| Jet loses (two or more languages agree) | 158 |
-| Single witness (recorded, not scored) | 8149 |
-| Exported type, not an operation | 156 |
+| Jet wins | 406 |
+| Equal | 885 |
+| Jet loses (two or more languages agree) | 155 |
+| Single witness (recorded, not scored) | 8152 |
+| Exported type, not an operation | 157 |
 | Not compared | 415 |
-| Deliberately declined | 108 |
+| Deliberately declined | 107 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 362 | 10 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 415 | 51 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 4 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 245 | 17 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 327 | 26 |
-| TypeScript | runtime introspection | 724 | 229 | 43 |
-| Ruby | runtime introspection | 1294 | 348 | 29 |
-| Elixir | runtime introspection | 1270 | 379 | 47 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 288 | 50 |
+| Rust | standard-library source (rust-src component) | 1032 | 366 | 10 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 416 | 50 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 187 | 4 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 248 | 18 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 331 | 25 |
+| TypeScript | runtime introspection | 724 | 233 | 43 |
+| Ruby | runtime introspection | 1294 | 352 | 29 |
+| Elixir | runtime introspection | 1270 | 383 | 47 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 287 | 53 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 52 | 0 |
-| Python | runtime introspection | 2232 | 432 | 86 |
+| Python | runtime introspection | 2232 | 435 | 85 |
 
 ## Loss clusters
 
@@ -98,19 +98,18 @@ while losses remain.
 | core.tasks | 17 | #1468 | done | closed |
 | core.time | 14 | #1466 | done | closed |
 | core.math | 10 | #1464 | done | closed |
-| core.crypto | 9 | #1725 | building | live |
-| core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
 | core.os | 9 | #1465 | done | closed |
 | Bytes | 8 | #1467 | done | closed |
-| core.archive | 5 | #1470 | done | closed |
-| core.regex | 4 | #1471 | done | closed |
+| core.crypto | 8 | #1725 | building | live |
+| core.log | 8 | #1474 | done | closed |
+| core.archive | 4 | #1470 | done | closed |
+| core.io | 3 | #1480 | done | closed |
+| core.regex | 3 | #1471 | done | closed |
 | core.tls | 2 | #1593 | ready | live |
-| Bits | 1 | #1493 | ready | live |
 | Set | 2 | #1584 | done | closed |
 | core.process | 1 | #1590 | done | closed |
 | core.uuid | 1 | #1590 | done | closed |
-| Queue | 1 | #1475 | done | closed |
 | Map | 1 | #1477 | done | closed |
 | String | 1 | #1581 | done | closed |
 
