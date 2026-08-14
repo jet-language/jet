@@ -69,8 +69,6 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
         (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
         (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
-        // Wall-clock read — same JetDate::today_utc as AOT/JIT hosts (I9).
-        (CoreCallPureRoute::Date, "today") => Ok(Date::today_utc().value()),
         (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
         // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
         (CoreCallPureRoute::SketchHll, "new") => Ok(hll_new()),
@@ -1680,10 +1678,6 @@ impl Date {
 
     fn new(year: i64, month: i64, day: i64) -> Self {
         Self::from_inner(super::time_kernel::JetDate::new(year, month, day))
-    }
-
-    fn today_utc() -> Self {
-        Self::from_inner(super::time_kernel::JetDate::today_utc())
     }
 
     fn parse(value: &str) -> Result<Self, String> {
