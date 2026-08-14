@@ -42,10 +42,24 @@ fn autodiff_sparse_simd_and_streams_use_real_paths() {
 
 #[test]
 fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
+    let ml_source = include_str!("../examples/features/tooling/compute_ml.jet");
+    let ml_output = include_str!("../examples/features/expected/tooling/compute_ml.out");
     assert_tiers_agree(
         "compute_ml_targeted",
-        include_str!("../examples/features/tooling/compute_ml.jet"),
-        "before:[0.0, 0.0, 0.0, 0.0]\nloss:[1.0]\nafter:[0.25, 0.25, 0.25, 0.25]\ntrained_loss:[0.5625]\nwire:shape=2,2;data=0.25,0.25,0.25,0.25;profile=F64Strict+Reproducible;checksum=8551306b599382c8\nround:[0.25, 0.25, 0.25, 0.25]\nf32_before:[2.0]\nf32_loss:[4.0]\nf32_after:[4.0]\nf32_trained_loss:[0.0]\nf32_round:[2.0]\nf32_placement:Placement(requested=CPU, selected=CPU, backend=cpu-oracle, version=builtin, profile=F32Strict+Reproducible, cache=none, capabilities=[\"ranked-storage\", \"strided-view\", \"checked-bounds\", \"f32-arithmetic\", \"cpu-simd-dispatch\", \"simd-tail\", \"blocked-matmul\", \"differential-oracle\"], reason=deserialized canonical Tensor)\n",
+        ml_source,
+        ml_output,
+    );
+    let (resident_code, resident_stdout, resident_stderr) =
+        run_default_multi("compute_ml_resident", "main.jet", &[("main.jet", ml_source)]);
+    assert_eq!(resident_code, 0, "resident ML `jet run` failed: {resident_stderr}");
+    assert_eq!(resident_stdout, ml_output, "resident ML output drifted: {resident_stderr}");
+    assert!(
+        resident_stderr.contains("tier1 native"),
+        "ML training/inference did not execute in resident JIT:\n{resident_stderr}"
+    );
+    assert!(
+        !resident_stderr.contains("tier0 interp"),
+        "ML training/inference fell back to the interpreter:\n{resident_stderr}"
     );
     assert_tiers_agree(
         "compute_ml_f32_wire",
