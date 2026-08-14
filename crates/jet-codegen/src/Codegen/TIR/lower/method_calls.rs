@@ -4636,6 +4636,26 @@ fn lower_method_call_impl(
     // on the AST side, where `recv_type` is always `Some` for these).
     if let Some(numeric_name) = recv_type {
         if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
+            if matches!(&recv_ty, Type::IntN { .. }) {
+                if let Some((prefix, op, _)) =
+                    crate::Collections::numeric_overflow_method(method, args.len())
+                {
+                    let lhs = lower_expr(receiver, cx, env);
+                    let rhs = lower_expr(&args[0].expr, cx, env);
+                    let result_ty = resolved_ret
+                        .cloned()
+                        .unwrap_or_else(|| builtin_result_ty(method, args.len(), Some(&recv_ty)));
+                    return TExpr {
+                        ty: result_ty,
+                        kind: TExprKind::OverflowOpt {
+                            prefix: prefix.to_string(),
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                    };
+                }
+            }
             // `origin` needs the lowered receiver's binding metadata, so complete
             // that payload here instead of letting a tier rediscover it.
             let resolved_op = resolve_numeric_op(method, numeric_name);

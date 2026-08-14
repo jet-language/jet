@@ -2157,8 +2157,8 @@ Full user-facing reference: **docs/reference/core-library.md**.
 
 Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
 generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
-math, random, time, args, sized numeric types with checked-by-default
-overflow, and unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
+math, random, time, args, exact default and fixed-width numeric types, and
+unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
 one `DataTree` value, plus `#Codable` derive). Every fallible call returns
 `T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually

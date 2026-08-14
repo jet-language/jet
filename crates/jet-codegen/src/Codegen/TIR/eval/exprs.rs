@@ -8626,6 +8626,7 @@ impl<'a> EvalCtx<'a> {
                     "sub" => crate::AST::BinOp::Sub,
                     "mul" => crate::AST::BinOp::Mul,
                     "div" => crate::AST::BinOp::Div,
+                    "rem" => crate::AST::BinOp::Rem,
                     other => {
                         return Err(unsupported(
                             &format!("OverflowOpt op `{other}`"),

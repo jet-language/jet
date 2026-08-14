@@ -952,17 +952,23 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
         return expr_in_subset(receiver, cx, locals);
     }
-    // Shape (g) [c109 Phase 12]: a numeric predicate / bit-population query
-    // (`is_nan`/`count_ones` — D-NUMOPS1). Sema sets
+    // Shape (g) [c109 Phase 12]: a numeric query or fixed-width overflow-policy
+    // method (`is_nan`/`count_ones`/`checked_add` — D-INTBIG1/D-NUMOPS1). Sema sets
     // `recv_type == Some(<numeric name>)` for a numeric receiver (CheckerInfer
     // ~L2248), so a numeric method is uniquely a `MethodCall` whose `recv_type` parses
     // as a numeric type name (`Int`/`Float`/`F32`/`I8..U64`) and whose `method` is a
-    // covered numeric op. All numeric ops are nullary (no args).
+    // covered numeric op. Query methods are nullary; overflow methods take one
+    // same-width integer argument.
     if let Some(numeric_name) = recv_type {
-        if crate::AST::numeric_type_from_name(numeric_name).is_some()
-            && is_covered_numeric_method(method, args.len())
-        {
-            return expr_in_subset(receiver, cx, locals);
+        if let Some(numeric_ty) = crate::AST::numeric_type_from_name(numeric_name) {
+            let is_overflow_method =
+                crate::Collections::numeric_overflow_method(method, args.len()).is_some();
+            if (!is_overflow_method || matches!(&numeric_ty, Type::IntN { .. }))
+                && is_covered_numeric_method(method, args.len())
+            {
+                return expr_in_subset(receiver, cx, locals)
+                    && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            }
         }
     }
     // Core enum equality is sema-resolved as `Equatable.equal`, but the

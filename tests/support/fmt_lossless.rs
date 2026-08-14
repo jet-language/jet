@@ -66,7 +66,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/if_expr_branch_type_mismatch.jet",
     "tests/ui/if_expr_missing_else.jet",
     "tests/ui/impl_colon_separator.jet",
-    "tests/ui/int_too_big.jet",
     "tests/ui/interp_debug_label_empty.jet",
     "tests/ui/interp_empty.jet",
     "tests/ui/interp_unclosed.jet",

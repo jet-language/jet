@@ -1,4 +1,4 @@
-//! D-NUMOPS1: checked-by-default integer overflow. Plain `+`/`-`/`*`/`/` on a
+//! D-INTBIG1/D-NUMOPS1: default `Int` is exact; plain arithmetic on a
 //! fixed-width integer traps at runtime (exit 70) instead of wrapping silently.
 
 mod common;
@@ -65,17 +65,15 @@ fn generic_div_bound_keeps_source_location() {
 }
 
 #[test]
-fn int_multiplication_overflow_traps() {
+fn default_int_multiplication_is_exact() {
     if !have_rustc() {
         return;
     }
-    // i64::MAX * 2 overflows the default Int.
+    // The former i64 default would trap here. D-INTBIG1 keeps the exact result.
     let src = "fn run() {\n    big :: 9223372036854775807\n    print(big * 2)\n}\n";
-    let (code, _stdout, stderr) = build_and_run("int_mul_overflow", src);
-    assert_eq!(
-        code, 70,
-        "Int multiplication overflow should trap: {stderr}"
-    );
+    let (code, stdout, stderr) = build_and_run("int_mul_exact", src);
+    assert_eq!(code, 0, "exact Int multiplication should run: {stderr}");
+    assert_eq!(stdout.trim(), "18446744073709551614");
 }
 
 #[test]
@@ -107,6 +105,19 @@ fn overflow_opt_ins_do_not_trap() {
         ["44", "255", "0"],
         "wrapping/saturating/checked outputs"
     );
+}
+
+#[test]
+fn fixed_width_overflow_methods_do_not_trap() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "fn run() {\n    a :: U8.{ 200 }\n    b :: U8.{ 100 }\n    fb :: U8.{ 0 }\n    \
+               print(a.wrapping_add(b))\n    print(a.saturating_add(b))\n    \
+               print(a.checked_add(b) ?? fb)\n}\n";
+    let (code, stdout, stderr) = build_and_run("u8_overflow_methods", src);
+    assert_eq!(code, 0, "fixed-width methods must not trap: {stderr}");
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), ["44", "255", "0"]);
 }
 
 #[test]

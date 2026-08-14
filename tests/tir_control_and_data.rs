@@ -254,8 +254,8 @@ fn run() {
     assert_eq!(stdout, "42\n");
 }
 
-/// Checked-by-default integer overflow must still trap when the function is on
-/// the TIR path (the `overflow` flag is computed at lowering, not in codegen).
+/// Fixed-width integer overflow must still trap when the function is on the
+/// TIR path (the `overflow` flag is computed at lowering, not in codegen).
 #[test]
 fn overflow_still_traps_on_tir_path() {
     if !have_rustc() {

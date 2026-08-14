@@ -3912,7 +3912,7 @@ pub enum TExprKind {
     /// `checked(e)` (D-NUMOPS1). The single integer `Expr::Binary` argument lowers to
     /// Rust's matching
     /// method: `(lhs).{prefix}_{op}(rhs)` where `prefix ∈ {wrapping, saturating,
-    /// checked}` and `op ∈ {add, sub, mul, div}`. PLAIN operands (no overflow trap).
+    /// checked}` and `op ∈ {add, sub, mul, div, rem}`. PLAIN operands (no overflow trap).
     /// `prefix` + `op` are resolved at lowering (total facts), emit only assembles.
     OverflowOpt {
         prefix: String,

@@ -1188,6 +1188,28 @@ mod tests {
     }
 
     #[test]
+    fn exact_int_small_path_and_spill_boundary() {
+        let mut arena = JetArena::default();
+        let before = arena.values.len();
+
+        let inline = arena.int_add(JetArena::INT_SMALL_MAX - 1, 1);
+        assert_eq!(inline, JetArena::INT_SMALL_MAX);
+        assert_eq!(
+            arena.values.len(),
+            before,
+            "small exact Int arithmetic must not allocate a spill value"
+        );
+
+        let positive_spill = arena.int_add(JetArena::INT_SMALL_MAX, 1);
+        assert_eq!(arena.values.len(), before + 1);
+        assert_eq!(arena.int_to_string(positive_spill), "4611686018427387904");
+
+        let negative_spill = arena.int_sub(JetArena::INT_SMALL_MIN, 1);
+        assert_eq!(arena.values.len(), before + 2);
+        assert_eq!(arena.int_to_string(negative_spill), "-4611686018427387905");
+    }
+
+    #[test]
     fn string_helpers_match_prelude_semantics() {
         assert_eq!(string_len_chars("aé日"), 3);
         assert_eq!(string_trim("  jet\n"), "jet");

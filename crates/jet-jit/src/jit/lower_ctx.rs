@@ -18063,6 +18063,7 @@ impl LowerCtx<'_, '_> {
                     "sub" => BinOp::Sub,
                     "mul" => BinOp::Mul,
                     "div" => BinOp::Div,
+                    "rem" => BinOp::Rem,
                     _ => return Err("jit overflow opt-out operator unsupported".to_string()),
                 };
                 let mode = match prefix.as_str() {

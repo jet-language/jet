@@ -880,11 +880,12 @@ fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, 
     }
     let _ = report.flush();
 }
-// D-NUMOPS1: plain integer arithmetic traps on overflow (safe by default) — a
-// silent corruption becomes a caught bug. Each arithmetic operator on a fixed-width
-// integer lowers to one of these, which reports E3010 with the source location
-// instead of wrapping. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the use
-// site. Floats and `#Numeric` distinct types keep the plain Rust operators.
+// D-INTBIG1/D-NUMOPS1: plain arithmetic on a fixed-width integer traps on
+// overflow (safe by default) — a silent corruption becomes a caught bug. Each
+// fixed-width operator lowers to one of these, which reports E3010 with the
+// source location instead of wrapping. Exact default `Int` uses packed Prelude
+// helpers. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the fixed-width
+// use site. Floats and `#Numeric` distinct types keep plain Rust operators.
 trait JetArith: Copy {
     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;

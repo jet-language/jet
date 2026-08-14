@@ -229,6 +229,8 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
+    "checked_add checked_sub checked_mul checked_div checked_rem saturating_add saturating_sub saturating_mul ",
+    "wrapping_add wrapping_sub wrapping_mul ",
     "flat_map flatten float float_range flush fold from from_bytes from_keys from_text functions generate ",
     "generated_lines get get_buffer get_disjoint_write get_or_set group_by guard_edit guard_read has has_key has_method hex ",
     "hole home ids implements index_of indexed indexes init insert int intersection intersperse ",
@@ -780,10 +782,45 @@ fn int_conv_widening(src: (bool, u8), dst: (bool, u8)) -> bool {
     dlo <= slo && shi <= dhi
 }
 
+/// D-INTBIG1: fixed-width integers keep explicit overflow policy on the
+/// receiver. Exact `Int` has no overflow conversion methods because it does
+/// not overflow; these names belong only to `IntN` values.
+pub fn numeric_overflow_method(
+    method: &str,
+    nargs: usize,
+) -> Option<(&'static str, &'static str, bool)> {
+    if nargs != 1 {
+        return None;
+    }
+    Some(match method {
+        "checked_add" => ("checked", "add", true),
+        "checked_sub" => ("checked", "sub", true),
+        "checked_mul" => ("checked", "mul", true),
+        "checked_div" => ("checked", "div", true),
+        "checked_rem" => ("checked", "rem", true),
+        "wrapping_add" => ("wrapping", "add", false),
+        "wrapping_sub" => ("wrapping", "sub", false),
+        "wrapping_mul" => ("wrapping", "mul", false),
+        "saturating_add" => ("saturating", "add", false),
+        "saturating_sub" => ("saturating", "sub", false),
+        "saturating_mul" => ("saturating", "mul", false),
+        _ => return None,
+    })
+}
+
 /// D-SG9/D-NUMOPS1: numeric query methods and `to_string` for any numeric
 /// receiver (`Int`, `Float`, and the fixed widths). Returns `None` for names
 /// this doesn't own so callers can keep trying other tables.
 fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    if matches!(ty, Type::IntN { .. }) {
+        if let Some((_, _, checked)) = numeric_overflow_method(method, nargs) {
+            return Some(Some(if checked {
+                Type::Option(Box::new(ty.clone()))
+            } else {
+                ty.clone()
+            }));
+        }
+    }
     if method == "to_string" && nargs == 0 {
         return Some(Some(Type::String));
     }
@@ -2215,6 +2252,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         return builtin_method_arg_types(inner, method);
     }
     if recv_ty.is_numeric() {
+        if matches!(recv_ty, Type::IntN { .. })
+            && numeric_overflow_method(method, 1).is_some()
+        {
+            return Some(vec![recv_ty.clone()]);
+        }
         if let Some(source) = crate::Syntax::numeric_conversion_source(method)
             .and_then(crate::AST::numeric_type_from_name)
         {

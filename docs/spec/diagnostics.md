@@ -165,7 +165,7 @@ renumbered, and no new `W` code may be allocated.
 | E0004 | parse | *retired in M1* (was: parameters staged)  |
 | E0005 | parse | *retired in M1* (was: variables staged)   |
 | E0006 | parse | *retired in M4* (was: `?` staged)         |
-| E0007 | jet   | integer too large for 64 bits             |
+| E0007 | jet   | *retired by D-INTBIG1* (was: integer too large for 64 bits) |
 | E0008 | parse | *retired by D-S14-PAUSE* (was: `def`/`func` teaching) |
 | E0009 | parse | *retired by D-S14-PAUSE* (was: `let`/`let mut` teaching) |
 | E0010 | parse | *retired by D-S14-PAUSE* (was: `set` teaching) |

@@ -520,6 +520,7 @@ fn run() {
     print((I16.{0} + -129) == I16.{-129})
     print((U64.{0} + 9223372036854775807) == U64.{9223372036854775807})
 }
+
 "#;
     assert_all_tiers(
         "numeric_minimal_literal_join",
@@ -534,22 +535,39 @@ fn run() {
         "{rendered}"
     );
 
-    for value in [
-        "9223372036854775808",
-        "18446744073709551615",
-        "18446744073709551616",
-    ] {
+    for value in ["18446744073709551616"] {
         let rendered = compile_error(&format!("fn run() {{ _ :: U64.{{{value}}} }}"));
         assert!(
-            rendered.contains("[E0007]")
-                && rendered.contains("numbers currently top out at 9223372036854775807"),
+            rendered.contains("[E1003]")
+                && rendered.contains("a U64 holds 0..18446744073709551615"),
             "{rendered}"
         );
     }
-    let rendered = compile_error("fn run() { _ :: -9223372036854775808 + I64.{0} }");
+    let rendered = compile_error("fn run() { _ :: I64.{9223372036854775808} }");
     assert!(
-        rendered.contains("[E0007]")
-            && rendered.contains("numbers currently top out at 9223372036854775807"),
+        rendered.contains("[E1003]")
+            && rendered.contains("an I64 holds -9223372036854775808..9223372036854775807"),
         "{rendered}"
+    );
+}
+
+#[test]
+fn fixed_width_overflow_methods_match_all_execution_tiers() {
+    let source = r#"
+fn run() {
+    a :: U8.{200}
+    b :: U8.{100}
+    fb :: U8.{0}
+    print(a.wrapping_add(b))
+    print(a.saturating_add(b))
+    print(a.checked_add(b) ?? fb)
+    print(a.checked_rem(b) ?? fb)
+}
+"#;
+    assert_all_tiers(
+        "numeric_overflow_methods",
+        source,
+        0,
+        "44\n255\n0\n0\n",
     );
 }

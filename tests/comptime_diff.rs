@@ -4,7 +4,7 @@
 //! Rust). The program prints both; the two lines MUST be byte-identical.
 //!
 //! Divergence is a P0 miscompile-class bug (S26 rule 6: comptime implements
-//! runtime semantics exactly — i64 Int, IEEE f64 Float with S21 display,
+//! runtime semantics exactly — exact Int, IEEE f64 Float with S21 display,
 //! char-counted Strings (S41), BTreeMap ordering (S38)).
 
 use std::fs;
@@ -474,6 +474,29 @@ fn comptime_exact_int_matches_runtime() {
     for (i, expr) in cases {
         check_comptime_case(i, expr);
     }
+}
+
+#[test]
+fn comptime_generic_alias_matches_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping generic alias differential");
+        return;
+    }
+    let src = r#"alias Answer<T> :: T
+
+fn answer() => Answer<Int> {
+    return 42
+}
+
+@expected :: answer()
+
+fn run() {
+    actual :: answer()
+    print("{@expected}")
+    print("{actual}")
+}
+"#;
+    check_comptime_src(32_005, "generic alias resident and AOT agreement", src);
 }
 
 fn check_comptime_case(i: usize, expr: &str) {

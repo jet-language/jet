@@ -2408,9 +2408,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // shapes the AST replay cannot see still trap (I2 / #1484). The
             // AST replay remains for cases where lowering types are not yet
             // integer-shaped but the source operand structurally is.
-            // D-NUMOPS1: `+`/`-`/`*`/`/` trap on value overflow; `<<`/`>>`
-            // trap on a bit-count out of the type's width (both via the `JetArith`
-            // helpers, so no raw Rust overflow panic leaks — I2). A shift's
+            // D-INTBIG1/D-NUMOPS1: fixed-width `+`/`-`/`*`/`/` trap on value
+            // overflow; exact default `Int` uses packed Prelude helpers.
+            // Fixed-width `<<`/`>>` trap on a bit-count out of the type's width
+            // (both via the `JetArith` helpers, so no raw Rust overflow panic
+            // leaks — I2). A shift's
             // overflow is governed by its LEFT operand's integer-ness (the value),
             // never the count.
             // D-INTDIV1=A: `Int / Int` is widened to Float before lowering, so

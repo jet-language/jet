@@ -634,15 +634,20 @@ linalg types; user structs use methods.
 
 **S11 — Built-in type names**: `Int`, `Float`, `Bool`, `String` (capitalized).
 
-**S42 — Numeric types & conversions**: `Int` (i64) / `Float` (f64) are the
-defaults; sized menu `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` for experts/FFI.
+**S42 — Numeric types & conversions**: `Int` (exact arbitrary precision) /
+`Float` (f64) are the defaults; sized menu `I8 I16 I32 I64 U8 U16 U32 U64 F32
+F64` for experts/FFI. `Int` uses a machine-word fast path and spills only when
+the value needs it.
 Conversions are destination-owned named methods only (`Float.from_int(n)`,
 `U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ? ParseError`);
 no `as`, cast punctuation, or source-owned `to_*` aliases.
-**D-NUMOPS1/2**: plain integer arithmetic **traps on overflow** at every
-width; opt in per-op with `wrapping(…)` / `saturating(…)` /
-`checked(…) => T?`. Per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON`,
-bit ops. **D-FLOATW1**: `core.math` is width-generic.
+**D-NUMOPS1/2**: plain arithmetic on a fixed-width integer **traps on
+overflow**; exact default `Int` arithmetic does not overflow. Fixed-width
+code may opt in per operation with `wrapping(…)` / `saturating(…)` /
+`checked(…) => T?`, or with receiver methods such as
+`value.wrapping_add(other)`, `value.saturating_add(other)`, and
+`value.checked_add(other)`. Per-type `MIN`/`MAX`, float
+`INFINITY`/`NAN`/`EPSILON`, bit ops. **D-FLOATW1**: `core.math` is width-generic.
 
 **D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
 2026-07-28)*: one numeric widening law applies to operators, arguments,
@@ -968,12 +973,26 @@ bracket forms; shipped today: `Set<T>`, `Rank<T>`, `Queue<T>`,
 implementations.
 
 **D-ALIAS-OP1=B** *(ratified 2026-08-06, card #1513; amends D-TYPEALIAS1)*:
-Alias declarations bind with `::`; the retired `=` spelling emits E0378.
+Alias declarations bind with `::`; the retired `=` spelling emits E0378. The
+canonical executable proof is `examples/features/types/type_alias.jet` with
+`examples/features/expected/types/type_alias.out`; the old spelling remains
+covered by `tests/ui/type_alias_old_syntax.jet`.
 
-**D-BIGINT1** *(amended by D-TYPE2-NUM1=A, 2026-08-06)*: the former public
-`BigInt` spelling and its explicit constructors are retired. `Int` is now the
-exact arbitrary-precision beginner type; the limb carrier is internal runtime
-machinery only. **D-DECIMAL1**:
+**D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
+`Int` is the exact arbitrary-precision whole-number default. Small values use a
+machine-word representation; values outside that fast path spill to the same
+internal limb carrier across AOT, resident JIT, interpreter/comptime, and web
+adapters. Default `Int` arithmetic never takes an overflow-trap path. Fixed
+width integers keep trap-by-default arithmetic and expose explicit
+`checked_*`, `wrapping_*`, and `saturating_*` receiver methods; fixed-width and
+FFI conversions range-check and report E1003. The canonical executable proof is
+`examples/features/text/bigint.jet` with
+`examples/features/expected/text/bigint.out`.
+
+**D-BIGINT1** *(superseded by D-INTBIG1 and amended by D-TYPE2-NUM1=A,
+2026-08-06)*: the former public `BigInt` spelling and its explicit constructors
+are retired. `Int` now owns the exact arbitrary-precision language meaning; the
+limb carrier is internal runtime machinery only. **D-DECIMAL1**:
 arbitrary-precision base-10 `Decimal` in `core.math`; default-on lint L0504
 fires when a money-named field holds a float (`#[allow(float_money)]`
 suppresses).

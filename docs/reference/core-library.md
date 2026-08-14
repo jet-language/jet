@@ -3290,7 +3290,7 @@ decoding, which belongs to `core.text`'s `Cursor`, not a byte reader.
 
 ---
 
-## Numeric surface (D-NUMOPS1)
+## Numeric surface (D-INTBIG1 / D-NUMOPS1)
 
 `Int` and `Float` are the beginner defaults. `Int` is exact arbitrary precision
 with a small machine-word fast path; `Float` is 64-bit. The explicit-width menu
@@ -3312,9 +3312,11 @@ destination types are **E0112** or **E0108**. The sized types erase to their
 Rust equivalents (`u8`…`i64`, `f32`) at codegen, so they cross the C ABI by
 value (S59). Explicit narrowing uses destination-owned named methods.
 
-Plain integer arithmetic (`+` `-` `*` `/`) **traps on overflow** at every width —
-a result outside the type's range stops the program with a Jet panic instead of
-silently wrapping. Opt a single op out at the use site:
+Plain arithmetic on a fixed-width integer (`+` `-` `*` `/`) **traps on
+overflow** — a result outside the type's range stops the program with a Jet
+panic instead of silently wrapping. Default `Int` is exact arbitrary precision,
+so its arithmetic has no overflow-trap path. Fixed-width code may opt a single
+operation out at the use site:
 
 ```jet
 fn run() {
@@ -3332,6 +3334,15 @@ lo: U8 :: 100
 | `wrapping(a + b)` | `T` | Wraps around the type's range |
 | `saturating(a + b)` | `T` | Clamps to `MIN`/`MAX` |
 | `checked(a + b)` | `T?` | `None` on overflow |
+
+Fixed-width integers also expose the same policy as receiver methods. The
+checked form returns `T?`; wrapping and saturating forms return `T`:
+
+```jet
+print(hi.wrapping_add(lo))
+print(hi.saturating_add(lo))
+print(hi.checked_add(lo) ?? 0)
+```
 
 Each wrapper takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005**.
 

@@ -59,7 +59,7 @@ ready :: true // Bool (S11)
 }
 
 // Built-in scalar types (S11): Int, Float, Bool, String, Char (S41).
-// Default numerics are Int (i64) / Float (f64) (S42).
+// Default numerics are exact Int / Float (f64) (S42, D-INTBIG1).
 // Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
 fn sized() {
 small :: U8.{ 255 }
@@ -72,13 +72,14 @@ wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
     n :: Int.from_float(f) ?? 0
 }
 
-// # RATIFIED, NOT YET IMPLEMENTED (D-NUMOPS1)
-// Integer arithmetic traps on overflow by default; experts opt a single op into
-// wrapping/saturating/checked, visible at the use site.
+// D-INTBIG1/D-NUMOPS1: default Int arithmetic is exact; fixed-width arithmetic
+// traps by default. Fixed-width receiver methods make the policy explicit.
 // fn overflow_surface() {
-//     a :: wrapping(255 + 1)
-//     b :: saturating(big_int + 1)
-//     c :: checked(x + y)            // result: T?
+//     a :: U8.{200}
+//     b :: U8.{100}
+//     print(a.wrapping_add(b))       // 44
+//     print(a.saturating_add(b))      // 255
+//     print(a.checked_add(b) ?? 0)    // 0
 // }
 
 

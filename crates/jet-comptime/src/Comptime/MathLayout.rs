@@ -704,6 +704,7 @@ pub fn overflow_opt(
             BinOp::Sub => a.checked_sub(b),
             BinOp::Mul => a.checked_mul(b),
             BinOp::Div => a.checked_div(b),
+            BinOp::Rem => a.checked_rem(b),
             _ => None,
         }
     };

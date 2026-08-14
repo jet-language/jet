@@ -2674,7 +2674,8 @@ mod project_part_tests {
         assert!(inlined.contains("\"title\":\"Inline `same`\""), "{inlined}");
         let _ = std::fs::remove_dir_all(bool_root);
 
-        // Int == is total (no overflow trap); Int arithmetic stays rejected elsewhere.
+        // Int == is total (no overflow trap); this refactor matrix keeps Int
+        // arithmetic out of the code-action coverage slice.
         let int_src =
             "fn run(left: Int, right: Int) {\n    same :: left == right\n    print(same)\n}\n";
         let int_root = std::env::temp_dir().join(format!(
@@ -2716,7 +2717,7 @@ mod project_part_tests {
         assert!(inlined.contains("\"title\":\"Inline `same`\""), "{inlined}");
         let _ = std::fs::remove_dir_all(int_root);
 
-        // Int + still rejected (overflow traps).
+        // Int + remains outside this code-action coverage slice.
         let add_src =
             "fn run(left: Int, right: Int) {\n    total :: left + right\n    print(total)\n}\n";
         let add_root = std::env::temp_dir().join(format!(

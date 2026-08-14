@@ -2005,6 +2005,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         | TExprKind::CharLit(_) => true,
         TExprKind::CtLit(
             jet_foundation::AST::CtValue::Int(_)
+            | jet_foundation::AST::CtValue::BigInt(_)
             | jet_foundation::AST::CtValue::Bool(_)
             | jet_foundation::AST::CtValue::Char(_)
             | jet_foundation::AST::CtValue::Str(_)
@@ -2201,7 +2202,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             rhs,
         } => {
             matches!(prefix.as_str(), "wrapping" | "saturating" | "checked")
-                && matches!(*op, "add" | "sub" | "mul" | "div")
+                && matches!(*op, "add" | "sub" | "mul" | "div" | "rem")
                 && intish_ty(&lhs.ty)
                 && intish_ty(&rhs.ty)
                 && resident_safe_expr(lhs, callees)

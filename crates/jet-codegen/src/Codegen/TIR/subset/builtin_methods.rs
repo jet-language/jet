@@ -630,30 +630,31 @@ pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
     }
 }
 
-/// Is `method` (with `nargs` args) a numeric predicate / bit-op the TIR lowers?
-/// This is the D-NUMOPS1 slice of
+/// Is `method` (with `nargs` args) a numeric method the TIR lowers?
+/// This is the D-INTBIG1/D-NUMOPS1 slice of
 /// `emit_builtin_method` keyed on a numeric receiver (`recv_type == Some(numeric)`):
 /// the float predicates (`is_nan`/`is_infinite`/`is_finite`), the integer bit-pop
-/// queries (`count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`). All are
-/// nullary. `to_string` on a numeric receiver is NOT here — it sets
+/// queries (`count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`), and the
+/// fixed-width overflow-policy methods. `to_string` on a numeric receiver is NOT here — it sets
 /// `recv_type == Some(numeric)` too, but the AST routes it through the plain
 /// `to_string` arm (`(recv).jet_show()`), which is the Phase-9 `BuiltinMethod` shape;
 /// a numeric `to_string` carries `recv_type == Some`, so it never reaches the Phase-9
 /// `recv_type.is_none()` gate — it must be covered here as a distinct op.
 pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
-    nargs == 0
-        && matches!(
-            method,
-            "is_nan"
-                | "is_infinite"
-                | "is_finite"
-                | "origin"
-                | "count_ones"
-                | "count_zeros"
-                | "leading_zeros"
-                | "trailing_zeros"
-                | "to_string"
-        )
+    crate::Collections::numeric_overflow_method(method, nargs).is_some()
+        || (nargs == 0
+            && matches!(
+                method,
+                "is_nan"
+                    | "is_infinite"
+                    | "is_finite"
+                    | "origin"
+                    | "count_ones"
+                    | "count_zeros"
+                    | "leading_zeros"
+                    | "trailing_zeros"
+                    | "to_string"
+            ))
 }
 
 /// c109 Phase 28: is `member` a per-type numeric bounds constant (`U8.MAX`,
