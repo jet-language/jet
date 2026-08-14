@@ -99,6 +99,8 @@ pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
 // D-FAIL-CTX1: shared development journey state and rendering. Each `?`
 // adapter claims its source site here, so AOT, JIT, and TIR-eval print one
 // journey vocabulary and collapse only consecutive duplicate hops.
+const JET_JOURNEY_DIAGNOSTIC_CODE: &str = "E3002";
+
 thread_local! {
     static JET_JOURNEY_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
         const { std::cell::RefCell::new(None) };
@@ -133,6 +135,11 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(
     fn_name: &str,
     note: F,
 ) -> Option<String> {
+    debug_assert_eq!(
+        crate::Registry::diagnostic(JET_JOURNEY_DIAGNOSTIC_CODE).map(|row| row.code),
+        Some(JET_JOURNEY_DIAGNOSTIC_CODE),
+        "journey frames must remain registered as E3002",
+    );
     let site = (fn_name.to_string(), file.to_string(), line);
     let fresh = JET_JOURNEY_LAST.with(|last| {
         let mut slot = last.borrow_mut();
