@@ -28183,16 +28183,15 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_iter_flat_map(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
-        let set_int = matches!(
-            &recv.ty,
-            Type::Apply { name, args }
-                if name == "Set"
-                    && matches!(args.as_slice(), [Type::Int])
-        );
-        if !set_int && !jit_list_of_int_list_type(&recv.ty) {
+        let scalar_source = matches!(jit_closure_elem_type_for(&recv.ty), Some(Type::Int));
+        let nested_source = jit_list_of_int_list_type(&recv.ty);
+        if !scalar_source && !nested_source {
             return Err("jit closure method unsupported".to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        if !matches!(&body_expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::Int)) {
+            return Err("jit closure method unsupported".to_string());
+        }
         let recv_val = self.lower_closure_source(recv)?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
@@ -28232,14 +28231,22 @@ impl LowerCtx<'_, '_> {
             .declare_func_in_func(self.host.coll.list_get, self.b.func);
         let line = self.b.ins().iconst(types::I32, 0);
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
-        let inner_list = self.b.inst_results(get_call)[0];
+        let element = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
         let pull = self.progress_source_pull(coll, idx);
         let pending = self.b.use_var(pending_var);
         let pending = self.b.ins().iadd(pending, pull);
         self.b.def_var(pending_var, pending);
-        let list_ty = Type::List(Box::new(Type::Int));
-        let mapped = self.with_bound_local(&param_place, list_ty, inner_list, |this| this.lower_expr(body_expr))?;
+        let mapped = if scalar_source {
+            self.with_bound_local(&param_place, Type::Int, element, |this| {
+                this.lower_expr(body_expr)
+            })?
+        } else {
+            let list_ty = Type::List(Box::new(Type::Int));
+            self.with_bound_local(&param_place, list_ty, element, |this| {
+                this.lower_expr(body_expr)
+            })?
+        };
 
         let inner_header = self.b.create_block();
         let inner_body = self.b.create_block();

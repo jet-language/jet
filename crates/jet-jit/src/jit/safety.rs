@@ -2805,13 +2805,21 @@ fn resident_safe_closure_method(
                 )
         }
         TIR::TClosureOp::FlatMap => {
-            let set_int = matches!(
-                &recv.ty,
-                Type::Apply { name, args }
-                    if name == jet_foundation::Syntax::TYPE_SET
-                        && matches!(args.as_slice(), [Type::Int])
+            let callback_returns_int_list = matches!(
+                args.first().and_then(|arg| match &arg.kind {
+                    TExprKind::Lambda(lambda) => match &lambda.executable {
+                        TIR::TLambdaBody::Expr(body) => Some(&body.ty),
+                        TIR::TLambdaBody::Block(_) | TIR::TLambdaBody::SharedBlock(_) => None,
+                    },
+                    _ => None,
+                }),
+                Some(Type::List(inner)) if matches!(inner.as_ref(), Type::Int)
             );
-            (set_int || jit_list_of_int_list_type(&recv.ty))
+            (matches!(
+                jit_closure_elem_type_for(&recv.ty),
+                Some(Type::Int)
+            ) || jit_list_of_int_list_type(&recv.ty))
+                && callback_returns_int_list
                 && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::DedupBy | TIR::TClosureOp::IsSortedBy => {
