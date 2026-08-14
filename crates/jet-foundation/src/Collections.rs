@@ -234,7 +234,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
     "to_int to_list to_lower to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
-    "trailing_zeros trim trim_end trim_start true_ try_collect types union unsubscribe unzip update upgrade ",
+    "trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade ",
     "value values view wait weighted_pick why windows with_capacity write write_byte write_bytes write_to ",
     "write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
 );

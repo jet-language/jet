@@ -49,11 +49,15 @@ impl<'a> Checker<'a> {
         type_name: Option<&str>,
     ) -> Option<String> {
         let mut candidates = Collections::builtin_method_names(receiver_ty);
-        if candidates.is_empty() {
-            if let Some(type_name) = type_name {
-                candidates = self.method_names_for_type_name(type_name);
-            }
+        let receiver_type_name = match receiver_ty {
+            Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(type_name) = type_name.or(receiver_type_name) {
+            candidates.extend(self.method_names_for_type_name(type_name));
         }
+        candidates.sort_unstable();
+        candidates.dedup();
         let mut best: Option<(String, usize)> = None;
         let mut ambiguous = false;
         for candidate in candidates {
