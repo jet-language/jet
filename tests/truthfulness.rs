@@ -1476,6 +1476,7 @@ fn stdlib_api_laws_doc_exists() {
         .split_once("| Surface | Current option shape | D4 result | Card home |")
         .map(|(_, rest)| {
             rest.lines()
+                .skip_while(|line| line.trim().is_empty())
                 .take_while(|line| line.trim().starts_with('|'))
                 .filter(|line| !line.trim().starts_with("|---"))
                 .map(|line| {
@@ -1515,6 +1516,7 @@ fn stdlib_api_laws_doc_exists() {
         .split_once("| Door | Bare default | Explicit control |")
         .map(|(_, rest)| {
             rest.lines()
+                .skip_while(|line| line.trim().is_empty())
                 .take_while(|line| line.trim().starts_with('|'))
                 .filter(|line| !line.trim().starts_with("|---"))
                 .map(|line| {
