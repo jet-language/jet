@@ -968,6 +968,18 @@ fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
         !commented_out.contains(" :: 42"),
         "commented bodies must stay braced:\n{commented_out}"
     );
+
+    let nested_commented = "fn noted() => Point {\n    return Point.{x: 1, y: 2} // keep this note\n}\n";
+    let nested_commented_out = jet::format_source_with_options(&nested_commented, options)
+        .expect("nested commented simplify input should format");
+    assert!(
+        !nested_commented_out.contains(" :: "),
+        "comments after nested literals must keep bodies braced:\n{nested_commented_out}"
+    );
+    assert!(
+        nested_commented_out.contains("// keep this note"),
+        "nested literal comment was lost:\n{nested_commented_out}"
+    );
 }
 
 #[test]

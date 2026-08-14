@@ -1284,13 +1284,23 @@ impl<'a> Fmt<'a> {
     /// braces can't be found (defensive; the body then expands).
     fn single_stmt_braces(&self, stmt: &Stmt) -> Option<(usize, usize)> {
         let start = stmt_start(stmt);
-        let end = stmt_end(stmt);
         let open = self.src.get(..start)?.rfind('{')? + 1;
         if !self.source_gap_is_trivia(open, start) {
             return None;
         }
-        let close = end + self.src.get(end..)?.find('}')?;
-        (open <= close).then_some((open, close))
+        let mut depth = 1usize;
+        for token in self.source_toks {
+            if token.span.start < open {
+                continue;
+            }
+            match &token.kind {
+                TokKind::LBrace => depth += 1,
+                TokKind::RBrace if depth == 1 => return Some((open, token.span.start)),
+                TokKind::RBrace => depth -= 1,
+                _ => {}
+            }
+        }
+        None
     }
 
     fn source_gap_is_trivia(&self, start: usize, end: usize) -> bool {
