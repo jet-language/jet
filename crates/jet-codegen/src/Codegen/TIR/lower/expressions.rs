@@ -2522,11 +2522,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 && call.args.len() == 1
             {
                 let source = &call.args[0].expr;
-                if let Expr::Call(inner) = source
-                    && inner.name == Syntax::KW_FREEZE
-                    && inner.args.len() == 1
-                {
-                    return lower_expr(source, cx, env);
+                if let Expr::Call(inner) = source {
+                    if inner.name == Syntax::KW_FREEZE && inner.args.len() == 1 {
+                        return lower_expr(source, cx, env);
+                    }
                 }
                 let operand = lower_expr(source, cx, env);
                 let view_owned_ty = match &operand.ty {
