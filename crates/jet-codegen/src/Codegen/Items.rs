@@ -875,7 +875,7 @@ fn emit_job_wrapper(
     let serve_app = function
         .return_type
         .as_ref()
-        .is_some_and(returns_web_app);
+        .is_some_and(returns_app);
     out.push_str(&format!("fn {wrapper}(__argv: &[String]) {{\n"));
     if params.is_empty() {
         out.push_str("    if __argv.get(1).is_some_and(|arg| arg == \"--help\") {\n        println!(\"Usage: {}\", __argv.first().map(String::as_str).unwrap_or(\"\"));\n        return;\n    }\n");
@@ -961,7 +961,6 @@ fn emit_job_wrapper(
             &arg_expr,
             entry_error,
             serve_app,
-            wrapper,
             out,
         );
         return;
@@ -978,7 +977,6 @@ fn emit_cli_subcommand_job_wrapper(
     arg_expr: &dyn Fn(&str) -> String,
     entry_error: Option<EntryError>,
     serve_app: bool,
-    wrapper: &str,
     out: &mut String,
 ) {
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
