@@ -1445,6 +1445,7 @@ fn stdlib_api_laws_doc_exists() {
         .split_once("| Gap | API | Law | Follow-up |")
         .map(|(_, rest)| {
             rest.lines()
+                .skip_while(|line| line.trim().is_empty())
                 .take_while(|line| line.trim().starts_with('|'))
                 .filter(|line| !line.trim().starts_with("|-----"))
                 .map(|line| {
