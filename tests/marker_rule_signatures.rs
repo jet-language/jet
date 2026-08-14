@@ -24,6 +24,19 @@ fn codes(source: &str) -> Vec<String> {
     checked(source, jet::Sema::CompileMode::Check).1
 }
 
+fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_marker_rule_signatures_diagnostics_{}_{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    std::fs::write(&path, source).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
+}
+
 fn parse_codes(source: &str) -> Vec<String> {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");

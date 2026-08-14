@@ -89,9 +89,6 @@ fn spelling(row: &AppliedRule) -> String {
     if row.name == "UnitFamily" {
         return "#UnitFamily(Length, dimension)".to_string();
     }
-    if row.name == "Invariant" {
-        return "#Invariant(\"value >= 0 && value < 4\")".to_string();
-    }
     if matches!(row.name, "Pre" | "Post") {
         args[0] = "true".to_string();
     }
@@ -133,9 +130,6 @@ fn program_at(marker: &str, site: RuleSite) -> Option<String> {
         ),
         RuleSite::Type if marker.starts_with("#UnitFamily") => {
             format!("{marker} {{ meter }}\n\nfn run() {{\n}}\n")
-        }
-        RuleSite::Type if marker.starts_with("#Invariant") => {
-            format!("{marker} Index4 :: distinct Int\n\nfn run() {{\n}}\n")
         }
         RuleSite::Type => format!("{marker}\nstruct W {{\n    a: Int\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Field if marker.starts_with("#Short") || marker.starts_with("#Env") || marker.starts_with("#Flag") => format!(
