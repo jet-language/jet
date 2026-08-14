@@ -1,6 +1,6 @@
 use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::{LowerEnv, TExpr, TExprKind};
+use crate::Codegen::TIR::{LowerEnv, TExpr};
 use crate::Codegen::TIR::lower_expr;
 use crate::Syntax;
 use std::collections::HashSet;

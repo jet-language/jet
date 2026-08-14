@@ -27,6 +27,7 @@ use super::{
     ViewMutPathStep,
 };
 
+#[allow(dead_code)]
 mod math_lib_pure {
     include!("../../../Prelude/CoreLib/Top/MathLibPure.rs");
 }
