@@ -1,5 +1,6 @@
 use super::*;
 use crate::AST::KnowledgeVector;
+use crate::Names::NameLedger;
 
 pub(crate) fn name_defined(
     name: &str,
@@ -1192,27 +1193,34 @@ pub(crate) fn register_struct(
 /// D-SHARED-CYCLE1=C: reject strong `Shared` fields that can form a reference
 /// cycle. Expert cycles use `Shared.Weak<T>` (weak edges do not count).
 pub(crate) fn check_strong_shared_cycles(
-    registries: &[&TypeRegistry],
+    states: &[ModuleState],
+    name_ledger: &NameLedger,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let mut graph = StrongSharedCycleGraph::new(registries);
-    let mut struct_names: Vec<String> = graph.structs.keys().cloned().collect();
-    struct_names.sort();
+    let mut graph = StrongSharedCycleGraph::new(states, name_ledger);
+    let mut struct_ids: Vec<StructId> = graph.structs.keys().cloned().collect();
+    struct_ids.sort();
 
-    for owner in struct_names {
+    for owner in struct_ids {
         let Some(fields) = graph.structs.get(&owner).cloned() else {
             continue;
         };
         for (fname, fspan, fty) in &fields {
-            if let Some(through) = graph.strong_shared_cycle_witness(&owner, fty, &mut Vec::new())
-            {
+            if let Some(through) = graph.strong_shared_cycle_witness(
+                &owner,
+                owner.module,
+                fty,
+                &mut Vec::new(),
+            ) {
                 diags.push(Diagnostic::error(
                     "E0221",
                     format!(
-                        "field `{fname}` on `{owner}` can form a strong `Shared` cycle"
+                        "field `{fname}` on `{}` can form a strong `Shared` cycle",
+                        owner.name
                     ),
                     format!(
-                        "a strong `Shared` edge through `{through}` can point back at `{owner}`, so reference counting alone cannot free the graph"
+                        "a strong `Shared` edge through `{through}` can point back at `{}`, so reference counting alone cannot free the graph",
+                        owner.name
                     ),
                     "use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong `Shared` handle".to_string(),
                     Some(*fspan),
@@ -1224,39 +1232,135 @@ pub(crate) fn check_strong_shared_cycles(
 
 /// One graph and memo table make cycle results independent of module order and
 /// avoid re-walking the same type paths for every strong edge.
-struct StrongSharedCycleGraph {
-    structs: HashMap<String, Vec<(String, Span, Type)>>,
-    reaches: HashMap<(String, String), bool>,
+struct StrongSharedCycleGraph<'a> {
+    states: &'a [ModuleState],
+    name_ledger: &'a NameLedger,
+    structs: HashMap<StructId, Vec<(String, Span, Type)>>,
+    reaches: HashMap<(StructId, StructId), bool>,
 }
 
-impl StrongSharedCycleGraph {
-    fn new(registries: &[&TypeRegistry]) -> Self {
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct StructId {
+    module: usize,
+    name: String,
+}
+
+impl StructId {
+    fn new(module: usize, name: &str) -> Self {
+        Self {
+            module,
+            name: name.to_string(),
+        }
+    }
+}
+
+impl<'a> StrongSharedCycleGraph<'a> {
+    fn new(states: &'a [ModuleState], name_ledger: &'a NameLedger) -> Self {
         let mut structs = HashMap::new();
-        for registry in registries {
-            for (name, def) in &registry.types {
+        for (module, state) in states.iter().enumerate() {
+            for (name, def) in &state.registry.types {
                 if let TypeDef::Struct { fields, .. } = def {
-                    structs
-                        .entry(name.clone())
-                        .or_insert_with(|| fields.clone());
+                    structs.insert(StructId::new(module, name), fields.clone());
                 }
             }
         }
         Self {
+            states,
+            name_ledger,
             structs,
             reaches: HashMap::new(),
         }
     }
 
+    fn struct_key(&self, module: usize, name: &str) -> Option<StructId> {
+        let key = StructId::new(module, name);
+        self.structs.contains_key(&key).then_some(key)
+    }
+
+    fn imported_struct(
+        &self,
+        from_module: usize,
+        namespace: &str,
+        name: &str,
+    ) -> Option<StructId> {
+        let owner = self
+            .states
+            .get(from_module)?
+            .imports
+            .get(namespace)
+            .copied()
+            .or_else(|| {
+                self.name_ledger
+                    .alias(from_module, namespace)
+                    .and_then(|alias| alias.target_module)
+            })?;
+        let key = self.struct_key(owner, name)?;
+        self.name_ledger
+            .visible(from_module, owner, name)
+            .then_some(key)
+    }
+
+    fn resolve_struct(&self, from_module: usize, name: &str) -> Option<StructId> {
+        if let Some(key) = self.struct_key(from_module, name) {
+            return Some(key);
+        }
+
+        if let Some((namespace, leaf)) = name.rsplit_once("::") {
+            if let Some(owner) = self.name_ledger.nominal_module(name) {
+                if let Some(key) = self.struct_key(owner, leaf) {
+                    return Some(key);
+                }
+            }
+            return self.imported_struct(from_module, namespace, leaf);
+        }
+        if let Some((namespace, leaf)) = name.rsplit_once('.') {
+            if let Some(key) = self.imported_struct(from_module, namespace, leaf) {
+                return Some(key);
+            }
+        }
+
+        if let Some(alias) = self.name_ledger.alias(from_module, name) {
+            if let Some(owner) = alias.target_module {
+                let leaf = alias
+                    .target
+                    .rsplit_once("::")
+                    .or_else(|| alias.target.rsplit_once('.'))
+                    .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+                if let Some(key) = self.struct_key(owner, leaf) {
+                    if self.name_ledger.visible(from_module, owner, leaf) {
+                        return Some(key);
+                    }
+                }
+            }
+        }
+
+        let mut found = None;
+        for key in self.structs.keys().filter(|key| key.name == name) {
+            if !self
+                .name_ledger
+                .visible(from_module, key.module, name)
+            {
+                continue;
+            }
+            if found.as_ref().is_some_and(|previous| previous != key) {
+                return None;
+            }
+            found = Some(key.clone());
+        }
+        found
+    }
+
     /// Returns the payload type name that closes a strong Shared cycle, if any.
     fn strong_shared_cycle_witness(
         &mut self,
-        owner: &str,
+        owner: &StructId,
+        from_module: usize,
         ty: &Type,
-        stack: &mut Vec<String>,
+        stack: &mut Vec<StructId>,
     ) -> Option<String> {
         match ty {
             Type::Shared(inner) => {
-                if self.payload_can_reach_owner(owner, inner) {
+                if self.payload_can_reach_owner(owner, from_module, inner) {
                     Some(inner.name())
                 } else {
                     None
@@ -1266,31 +1370,38 @@ impl StrongSharedCycleGraph {
             | Type::List(inner)
             | Type::FixedList { elem: inner, .. }
             | Type::Tagged { inner, .. } => {
-                self.strong_shared_cycle_witness(owner, inner, stack)
+                self.strong_shared_cycle_witness(owner, from_module, inner, stack)
             }
             Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => self
-                .strong_shared_cycle_witness(owner, key, stack)
-                .or_else(|| self.strong_shared_cycle_witness(owner, value, stack)),
+                .strong_shared_cycle_witness(owner, from_module, key, stack)
+                .or_else(|| {
+                    self.strong_shared_cycle_witness(owner, from_module, value, stack)
+                }),
             Type::Tuple(fields) => fields
                 .iter()
-                .find_map(|(_, fty)| self.strong_shared_cycle_witness(owner, fty, stack)),
+                .find_map(|(_, fty)| {
+                    self.strong_shared_cycle_witness(owner, from_module, fty, stack)
+                }),
             Type::Union(members) => members
                 .iter()
-                .find_map(|m| self.strong_shared_cycle_witness(owner, m, stack)),
+                .find_map(|m| self.strong_shared_cycle_witness(owner, from_module, m, stack)),
             // Weak edges never contribute to a strong cycle.
             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_WEAK => None,
             Type::Apply { args, .. } => args
                 .iter()
-                .find_map(|m| self.strong_shared_cycle_witness(owner, m, stack)),
-            Type::Named(n) if self.structs.contains_key(n) => {
-                if stack.iter().any(|s| s == n) {
+                .find_map(|m| self.strong_shared_cycle_witness(owner, from_module, m, stack)),
+            Type::Named(n) => {
+                let Some(target) = self.resolve_struct(from_module, n) else {
+                    return None;
+                };
+                if stack.iter().any(|s| s == &target) {
                     return None;
                 }
-                stack.push(n.clone());
-                let fields = self.structs.get(n).cloned();
+                stack.push(target.clone());
+                let fields = self.structs.get(&target).cloned();
                 let hit = fields.as_deref().and_then(|fields| {
                     fields.iter().find_map(|(_, _, fty)| {
-                        self.strong_shared_cycle_witness(owner, fty, stack)
+                        self.strong_shared_cycle_witness(owner, target.module, fty, stack)
                     })
                 });
                 stack.pop();
@@ -1300,36 +1411,47 @@ impl StrongSharedCycleGraph {
         }
     }
 
-    fn payload_can_reach_owner(&mut self, owner: &str, ty: &Type) -> bool {
+    fn payload_can_reach_owner(&mut self, owner: &StructId, from_module: usize, ty: &Type) -> bool {
         let mut active = HashSet::new();
-        self.payload_can_reach_owner_inner(owner, ty, &mut active).0
+        self.payload_can_reach_owner_inner(owner, from_module, ty, &mut active)
+            .0
     }
 
     fn payload_can_reach_owner_inner(
         &mut self,
-        owner: &str,
+        owner: &StructId,
+        from_module: usize,
         ty: &Type,
-        active: &mut HashSet<String>,
+        active: &mut HashSet<StructId>,
     ) -> (bool, bool) {
         match ty {
-            Type::Named(n) if n == owner => (true, false),
-            Type::Named(n) if self.structs.contains_key(n) => {
-                let key = (owner.to_string(), n.clone());
+            Type::Named(n) => {
+                let Some(target) = self.resolve_struct(from_module, n) else {
+                    return (false, false);
+                };
+                if &target == owner {
+                    return (true, false);
+                }
+                let key = (owner.clone(), target.clone());
                 if let Some(reaches) = self.reaches.get(&key) {
                     return (*reaches, false);
                 }
-                if !active.insert(n.clone()) {
+                if !active.insert(target.clone()) {
                     // Do not memoize this negative: the active node may find
                     // the owner through a later sibling edge in this walk.
                     return (false, true);
                 }
-                let fields = self.structs.get(n).cloned();
+                let fields = self.structs.get(&target).cloned();
                 let mut reaches = false;
                 let mut cycle_cut = false;
                 if let Some(fields) = fields {
                     for (_, _, fty) in &fields {
-                        let (hit, cut) =
-                            self.payload_can_reach_owner_inner(owner, fty, active);
+                        let (hit, cut) = self.payload_can_reach_owner_inner(
+                            owner,
+                            target.module,
+                            fty,
+                            active,
+                        );
                         cycle_cut |= cut;
                         if hit {
                             reaches = true;
@@ -1337,7 +1459,7 @@ impl StrongSharedCycleGraph {
                         }
                     }
                 }
-                active.remove(n);
+                active.remove(&target);
                 if reaches || !cycle_cut {
                     self.reaches.insert(key, reaches);
                 }
@@ -1348,23 +1470,35 @@ impl StrongSharedCycleGraph {
             | Type::List(inner)
             | Type::FixedList { elem: inner, .. }
             | Type::Tagged { inner, .. } => {
-                self.payload_can_reach_owner_inner(owner, inner, active)
+                self.payload_can_reach_owner_inner(owner, from_module, inner, active)
             }
             Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                let (key_reaches, key_cycle) =
-                    self.payload_can_reach_owner_inner(owner, key, active);
+                let (key_reaches, key_cycle) = self.payload_can_reach_owner_inner(
+                    owner,
+                    from_module,
+                    key,
+                    active,
+                );
                 if key_reaches {
                     return (true, key_cycle);
                 }
-                let (value_reaches, value_cycle) =
-                    self.payload_can_reach_owner_inner(owner, value, active);
+                let (value_reaches, value_cycle) = self.payload_can_reach_owner_inner(
+                    owner,
+                    from_module,
+                    value,
+                    active,
+                );
                 (value_reaches, key_cycle || value_cycle)
             }
             Type::Tuple(fields) => {
                 let mut cycle_cut = false;
                 for (_, fty) in fields {
-                    let (reaches, cut) =
-                        self.payload_can_reach_owner_inner(owner, fty, active);
+                    let (reaches, cut) = self.payload_can_reach_owner_inner(
+                        owner,
+                        from_module,
+                        fty,
+                        active,
+                    );
                     cycle_cut |= cut;
                     if reaches {
                         return (true, cycle_cut);
@@ -1375,8 +1509,12 @@ impl StrongSharedCycleGraph {
             Type::Union(members) => {
                 let mut cycle_cut = false;
                 for member in members {
-                    let (reaches, cut) =
-                        self.payload_can_reach_owner_inner(owner, member, active);
+                    let (reaches, cut) = self.payload_can_reach_owner_inner(
+                        owner,
+                        from_module,
+                        member,
+                        active,
+                    );
                     cycle_cut |= cut;
                     if reaches {
                         return (true, cycle_cut);
@@ -1388,8 +1526,12 @@ impl StrongSharedCycleGraph {
             Type::Apply { args, .. } => {
                 let mut cycle_cut = false;
                 for member in args {
-                    let (reaches, cut) =
-                        self.payload_can_reach_owner_inner(owner, member, active);
+                    let (reaches, cut) = self.payload_can_reach_owner_inner(
+                        owner,
+                        from_module,
+                        member,
+                        active,
+                    );
                     cycle_cut |= cut;
                     if reaches {
                         return (true, cycle_cut);

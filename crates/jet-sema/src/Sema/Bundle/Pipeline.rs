@@ -1456,13 +1456,6 @@ fn check_bundle_opts_for_output_inner(
             &st.trait_reg,
         ));
     }
-    // D-SHARED-CYCLE1=C: run one graph/memo pass after every module registry is
-    // complete, so imported types participate in the same cycle decision.
-    let cycle_registries = states
-        .iter()
-        .map(|state| &state.registry)
-        .collect::<Vec<_>>();
-    check_strong_shared_cycles(&cycle_registries, &mut diags);
     // D-BOUND-UNDO1=A: CFFI may re-home a foreign declaration into a synthetic
     // module, while its Jet undo function remains in the source module. Validate
     // against the complete post-registration function view so that re-homing and
@@ -2349,6 +2342,11 @@ fn check_bundle_opts_for_output_inner(
     }
 
     populate_name_ledger(bundle, &states, &mut name_ledger);
+
+    // D-SHARED-CYCLE1=C: run one graph/memo pass after registry and import
+    // identities are complete, so a qualified field type resolves to its
+    // owning module instead of a registry-order-dependent leaf name.
+    check_strong_shared_cycles(&states, &name_ledger, &mut diags);
 
     for idx in 0..bundle.modules.len() {
         for item in &bundle.modules[idx].items {
