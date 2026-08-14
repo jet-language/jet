@@ -326,6 +326,20 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
+            if marker.name == Syntax::MARKER_ALLOW {
+                for argument in &marker.args {
+                    let crate::AST::Expr::Ident(name, _) = argument else {
+                        continue;
+                    };
+                    if let Some(diagnostic) = jet_foundation::LintPolicy::selection_code_error(
+                        name,
+                        "`#allow(...)`",
+                        Some(argument.span()),
+                    ) {
+                        return Err(diagnostic);
+                    }
+                }
+            }
             // D-MEMO1=A: the only explicit bound spelling is the named
             // unbounded opt-in. A bare `#Memo` uses the registry default;
             // positional and alternate bound spellings are not a second API.

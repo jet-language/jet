@@ -174,13 +174,19 @@ impl PkgResolution {
 fn collect_pkg_resolution(raw: &str) -> Result<PkgResolution, Diagnostic> {
     let mut declared_deps = HashSet::new();
     let facts = crate::Package::PackageFacts::parse(raw, "package.jet").map_err(|error| {
-        Diagnostic::error(
-            "E1206",
-            "invalid package manifest".to_string(),
-            error.to_string(),
-            "fix the fields in package.jet before loading the project".to_string(),
-            None,
-        )
+        match &error {
+            crate::Package::PackageParseError::Composition(detail)
+                if detail.contains("is a diagnostic code") => {
+                    crate::Manifest::manifest_parse_diagnostic(Path::new("package.jet"), &error)
+                }
+            _ => Diagnostic::error(
+                "E1206",
+                "invalid package manifest".to_string(),
+                error.to_string(),
+                "fix the fields in package.jet before loading the project".to_string(),
+                None,
+            ),
+        }
     })?;
     for (name, source) in &facts.deps {
         // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
@@ -498,18 +504,25 @@ fn load_entry_with_overlays_mode_with_sink(
                 ));
             }
             Err(error) => {
+                let diagnostic = match &error {
+                    crate::Package::PackageParseError::Composition(detail)
+                        if detail.contains("is a diagnostic code") => {
+                            crate::Manifest::manifest_parse_diagnostic(&pack_path, &error)
+                        }
+                    _ => Diagnostic::error(
+                        "E1206",
+                        "invalid package manifest".to_string(),
+                        error.to_string(),
+                        "fix the fields in package.jet before loading the project".to_string(),
+                        None,
+                    ),
+                };
                 return Err(record_loader_error(
                     &mut sink,
                     LoaderError::at(
                         &pack_path.display().to_string(),
                         &raw,
-                        vec![Diagnostic::error(
-                            "E1206",
-                            "invalid package manifest".to_string(),
-                            error.to_string(),
-                            "fix the fields in package.jet before loading the project".to_string(),
-                            None,
-                        )],
+                        vec![diagnostic],
                     ),
                 ));
             }

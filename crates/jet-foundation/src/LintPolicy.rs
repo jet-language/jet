@@ -1,6 +1,6 @@
 //! D-LINTPOLICY1=A: one package lint wall for every sema lint.
 
-use crate::Diagnostics::{Diagnostic, Severity};
+use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Syntax;
 
 /// One stable user-facing name for one registered lint.
@@ -44,6 +44,7 @@ pub const REGISTERED_LINTS: &[RegisteredLint] = &[
     RegisteredLint { name: "heap_growth_in_loop", code: "L0505" },
     RegisteredLint { name: "hidden_context_allocation", code: "L0506" },
     RegisteredLint { name: "branch_arm_table", code: "L0507" },
+    RegisteredLint { name: "arrow_loop_value_drop", code: "L0508" },
     AUTO_DERIVE_LINT,
     RegisteredLint { name: "prelude_alias_shadow", code: "L0510" },
     RegisteredLint { name: "err_fallback_shadow", code: "L0511" },
@@ -99,6 +100,34 @@ pub fn policy_error_fix(detail: &str) -> String {
             "use a registered lint name in `policy.lints.deny` instead of a diagnostic code"
                 .to_string()
         })
+}
+
+/// Build the registered refusal for a source-level lint allowance that used
+/// a rendered diagnostic code. `#allow(...)` is a user-typed lint selector,
+/// so it follows the same name-only law as package policy.
+pub fn selection_code_error(value: &str, surface: &str, span: Option<Span>) -> Option<Diagnostic> {
+    if !is_diagnostic_code_shape(value) {
+        return None;
+    }
+    let (what, fix) = if let Some(name) = name_for_code(value) {
+        (
+            format!("`{value}` is a diagnostic code; {surface} takes lint names"),
+            format!("write `{name}` in {surface} instead of `{value}`"),
+        )
+    } else {
+        (
+            format!("`{value}` is a diagnostic code; {surface} takes registered lint names"),
+            format!("write a registered lint name in {surface} instead of `{value}`"),
+        )
+    };
+    Some(Diagnostic::error(
+        "E0927",
+        what,
+        "lint selectors use stable snake_case names; diagnostic codes are rendered report identities"
+            .to_string(),
+        fix,
+        span,
+    ))
 }
 
 /// Parse the `lints:` part of a package policy.

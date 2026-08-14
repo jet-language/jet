@@ -189,17 +189,25 @@ fn writes_canonical_ref(text: &str) -> bool {
         .any(|(_, right)| REF_PROVIDERS.contains(&right.as_str()))
 }
 
-/// Whether a line writes a package lint policy value, and whether its first
-/// value is a retired diagnostic code. Test fixtures under `tests/ui` are
-/// excluded by `content_files`; this only counts repository content that can
-/// become a live package/config source.
+/// Whether a line writes a package lint policy value or source-level lint
+/// allowance, and whether its first value is a retired diagnostic code. Test
+/// fixtures under `tests/ui` are excluded by `content_files`; this only counts
+/// repository content that can become live package/config/source input.
 fn lint_policy_value_is_code(line: &str) -> Option<bool> {
-    let lints = line.find("lints")?;
-    let deny = line[lints..].find("deny")? + lints;
-    let open = line[deny..].find('[')? + deny;
-    let value = line[open + 1..].trim_start();
+    let value = if let Some(lints) = line.find("lints") {
+        let deny = line[lints..].find("deny")? + lints;
+        let open = line[deny..].find('[')? + deny;
+        &line[open + 1..]
+    } else if let Some(allow) = line.find("#allow(") {
+        &line[allow + "#allow(".len()..]
+    } else {
+        return None;
+    }
+    .trim_start();
     let token = value
-        .split(|character: char| character == ',' || character == ']' || character.is_whitespace())
+        .split(|character: char| {
+            character == ',' || character == ']' || character == ')' || character.is_whitespace()
+        })
         .next()
         .unwrap_or("")
         .trim_matches('"');

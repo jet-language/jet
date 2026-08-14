@@ -3289,13 +3289,19 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
             checked.file.path.display().to_string(),
         )
         .map_err(|error| {
-            vec![Diagnostic::error(
-                "E1206",
-                "invalid package manifest".to_string(),
-                error.to_string(),
-                "fix the fields in package.jet before loading the project".to_string(),
-                None,
-            )]
+            vec![match &error {
+                crate::Package::PackageParseError::Composition(detail)
+                    if detail.contains("is a diagnostic code") => {
+                        crate::Manifest::manifest_parse_diagnostic(&checked.file.path, &error)
+                    }
+                _ => Diagnostic::error(
+                    "E1206",
+                    "invalid package manifest".to_string(),
+                    error.to_string(),
+                    "fix the fields in package.jet before loading the project".to_string(),
+                    None,
+                ),
+            }]
         })?;
         resolver
             .revalidate_file(&checked.file)
