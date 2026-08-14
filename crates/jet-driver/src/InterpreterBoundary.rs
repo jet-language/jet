@@ -183,7 +183,7 @@ fn process_edge_boundary(
         _ => return None,
     };
 
-    if matches!((module, item), ("core.sys", "atexit") | ("core.process", "exit")) {
+    if is_interpreter_supported_process_leaf(module, item) {
         return None;
     }
 
@@ -191,6 +191,16 @@ fn process_edge_boundary(
         feature: feature.to_string(),
         span: Some(span),
     })
+}
+
+fn is_interpreter_supported_process_leaf(module: &str, item: &str) -> bool {
+    matches!(
+        (module, item),
+        ("core.process", "argv")
+            | ("core.process", "exit")
+            | ("core.sys", "atexit")
+            | ("core.sys", "stop")
+    )
 }
 
 fn scan_stmts_for_mut_arg(
