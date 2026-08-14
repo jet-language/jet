@@ -296,6 +296,14 @@ fn build_and_run_full_inner(
     rustc_cmd.args([
         "--edition",
         "2021",
+        "--crate-name",
+    ]);
+    rustc_cmd.arg(jet::Syntax::sanitize_crate_name(
+        rs.file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("out"),
+    ));
+    rustc_cmd.args([
         rs.to_str().unwrap(),
         "-o",
         bin.to_str().unwrap(),
@@ -364,6 +372,14 @@ pub fn build_and_run_multi(
         .args([
             "--edition",
             "2021",
+            "--crate-name",
+        ])
+        .arg(jet::Syntax::sanitize_crate_name(
+            rs.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("out"),
+        ))
+        .args([
             rs.to_str().unwrap(),
             "-o",
             bin.to_str().unwrap(),

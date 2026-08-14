@@ -430,6 +430,27 @@ pub fn generated_suffix(name: &str) -> &str {
     name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(name)
 }
 
+/// Sanitize a generated Rust crate name from a source-file stem.
+pub fn sanitize_crate_name(raw: &str) -> String {
+    let mut name: String = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        name.push_str("out");
+    }
+    if name.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        name.insert(0, '_');
+    }
+    name
+}
+
 /// D-SHAPE-INTERNAL1 / D-SHAPE-DUNDER2: the one prefix classification used by
 /// the lexer, sema, publishing, and tools. Bare `_` remains the pattern/binding
 /// spelling; only longer names participate in the public-name contract.
@@ -574,7 +595,10 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
 
 #[cfg(test)]
 mod generated_name_tests {
-    use super::{generated_name, generated_path, generated_suffix, is_reserved_generated_name};
+    use super::{
+        generated_name, generated_path, generated_suffix, is_reserved_generated_name,
+        sanitize_crate_name,
+    };
     use crate::Syntax::{classify_identifier, IdentifierClass};
 
     #[test]
@@ -585,6 +609,16 @@ mod generated_name_tests {
         assert_eq!(generated_path("__jet_grades__curve"), "__jet_grades__curve");
         assert_eq!(generated_path("__jet_grades.curve"), "__jet_grades__curve");
         assert_eq!(generated_suffix("__jet_run"), "run");
+    }
+
+    #[test]
+    fn crate_names_are_rust_safe() {
+        assert_eq!(
+            sanitize_crate_name("panic_lexical_task.group"),
+            "panic_lexical_task_group"
+        );
+        assert_eq!(sanitize_crate_name("3d-demo"), "_3d_demo");
+        assert_eq!(sanitize_crate_name(""), "out");
     }
     #[test]
     fn canonical_core_names_are_reserved_for_generated_names() {

@@ -206,6 +206,12 @@ pub fn add_generated_rust(
         .arg("--edition")
         .arg("2021")
         .args(rustc_flags.iter().copied())
+        .arg("--crate-name")
+        .arg(jet::Syntax::sanitize_crate_name(
+            path.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("out"),
+        ))
         .arg(path);
     prepared.add_rustc_args(command);
 }
