@@ -1692,6 +1692,61 @@ try {
         "JS overlay lost the frame"
     );
 
+    let dom_harness = r#"
+class FakeElement {
+  constructor(tag) {
+    this.tagName = tag.toUpperCase();
+    this.style = {};
+    this.children = [];
+    this.textContent = "";
+    this.id = "";
+    this.hidden = true;
+  }
+  appendChild(child) { this.children.push(child); return child; }
+}
+class FakeDocument {
+  constructor() {
+    this._byId = new Map();
+    this.body = new FakeElement("body");
+    const append = this.body.appendChild.bind(this.body);
+    this.body.appendChild = (element) => {
+      if (element.id) this._byId.set(element.id, element);
+      return append(element);
+    };
+  }
+  createElement(tag) { return new FakeElement(tag); }
+  getElementById(id) { return this._byId.get(id) ?? null; }
+}
+globalThis.document = new FakeDocument();
+
+const { showRuntimeError } = await import("./jet_dom_runtime.js");
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  throw new Error("unexpected success");
+} catch (error) {
+  const returnedFrame = showRuntimeError(error);
+  const overlay = document.getElementById("jet-runtime-overlay");
+  if (!overlay || overlay.hidden || returnedFrame !== error.frame || overlay.textContent !== error.frame) {
+    throw new Error("DOM overlay did not render the shared report frame");
+  }
+  console.log(JSON.stringify({
+    kind: error.constructor?.name,
+    code: error.code,
+    cause: error.cause?.message ?? null,
+    journey: error.journey ?? "",
+    frame: error.frame,
+    overlay: { id: overlay.id, hidden: overlay.hidden, textContent: overlay.textContent },
+  }));
+}
+"#;
+    let dom_expected = include_str!("../examples/features/expected/web/default_err_edge.harness.out");
+    assert_eq!(
+        run_node_harness(&js_dir, "failure_edge_dom_harness.mjs", dom_harness),
+        dom_expected,
+        "DOM edge snapshot changed"
+    );
+
     let _ = fs::remove_dir_all(wasm_dir);
     let _ = fs::remove_dir_all(js_dir);
     let _ = fs::remove_dir_all(cli_dir);
