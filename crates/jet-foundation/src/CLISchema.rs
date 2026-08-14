@@ -2,13 +2,16 @@
 //! inspection. The entry parameter type remains source truth; consumers never
 //! reconstruct shell names, requiredness, defaults, or help independently.
 
-use crate::AST::{CtValue, Expr, Field, Item, Marker, ProgramBundle, StrPart, StructDef, Type, VariantPayload};
+use crate::AST::{
+    CtFloat, CtValue, Expr, Field, Func, Item, Marker, ProgramBundle, StrPart,
+    StructDef, Type, VariantPayload,
+};
 use crate::Syntax;
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
 /// D-CLI-DOCS1=A bumps the record so #Doc-derived descriptions are part of
 /// help, dossier, and the embedded command schema.
-pub const RECORD_VERSION: u16 = 4;
+pub const RECORD_VERSION: u16 = 5;
 pub const ELF_SECTION: &str = ".jet_command";
 pub const PE_SECTION: &str = ".jetcmd";
 pub const MACH_SECTION: &str = "__jetcmd";
@@ -137,6 +140,11 @@ pub struct CLICommandSchema {
     pub description: Option<String>,
     pub inputs: Vec<CLIInputSchema>,
     pub commands: Vec<CLISubcommandSchema>,
+    /// D-CLI-GLOBAL1=E: `#CLI(Standard)` adds the standard root pack.
+    pub standard: bool,
+    /// The package version used by the standard `--version` flag.
+    /// `None` is intentional for an unversioned schema projection.
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,6 +164,8 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CLICommandSchema {
         description: None,
         inputs: Vec::new(),
         commands: Vec::new(),
+        standard: false,
+        version: None,
     })
 }
 
@@ -173,15 +183,63 @@ fn selected_entry_type(items: &[Item]) -> Option<&str> {
             Type::Named(name) => Some(name.as_str()),
             _ => None,
         }
-    }).or_else(|| items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
-            match &function.params[0].ty {
-                Type::Named(name) => Some(name.as_str()),
-                _ => None,
+    }).or_else(|| {
+        items.iter().find_map(|item| {
+            let Item::Func(function) = item else { return None };
+            if function.name != "run" {
+                return None;
+            }
+            if function.params.len() == 1 {
+                if let Type::Named(name) = &function.params[0].ty {
+                    let is_local_type = items.iter().any(|item| {
+                        matches!(item, Item::Struct(s) if s.name == name.as_str())
+                            || matches!(item, Item::Enum(e) if e.name == name.as_str())
+                    });
+                    if is_local_type || name.contains('.') {
+                        return Some(name.as_str());
+                    }
+                }
+            }
+            direct_run_function(items).is_some().then_some("run")
+        })
+    })
+}
+
+fn direct_run_function(items: &[Item]) -> Option<&Func> {
+    items.iter().find_map(|item| {
+        let Item::Func(function) = item else { return None };
+        if function.name != "run"
+            || function.params.is_empty()
+            || function_inputs(function).is_none()
+        {
+            return None;
+        }
+        if function.params.len() == 1 {
+            if let Type::Named(name) = &function.params[0].ty {
+                let is_local_type = items.iter().any(|item| {
+                    matches!(item, Item::Struct(s) if s.name == name.as_str())
+                        || matches!(item, Item::Enum(e) if e.name == name.as_str())
+                });
+                if is_local_type || name.contains('.') {
+                    return None;
+                }
             }
         }
-        _ => None,
-    }))
+        Some(function)
+    })
+}
+
+pub fn is_direct_run_entry(items: &[Item]) -> bool {
+    let has_selected_executable = items.iter().any(|item| {
+        matches!(
+            item,
+            Item::Const(value)
+                if value.resolved_output.as_ref().is_some_and(|output| {
+                    output.selected && output.kind == crate::AST::OutputKind::Executable
+                })
+        )
+    });
+    !has_selected_executable && direct_run_function(items).is_some()
 }
 
 fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
@@ -202,14 +260,23 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
     }) {
         return Some(selected);
     }
-    entry.items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == "run" && function.params.len() == 1 => {
-            match &function.params[0].ty {
-                Type::Named(name) => Some((bundle.entry, name.as_str())),
-                _ => None,
+    entry.items.iter().find_map(|item| {
+        let Item::Func(function) = item else { return None };
+        if function.name != "run" {
+            return None;
+        }
+        if function.params.len() == 1 {
+            if let Type::Named(name) = &function.params[0].ty {
+                let is_local_type = entry.items.iter().any(|item| {
+                    matches!(item, Item::Struct(s) if s.name == name.as_str())
+                        || matches!(item, Item::Enum(e) if e.name == name.as_str())
+                });
+                if is_local_type || name.contains('.') {
+                    return Some((bundle.entry, name.as_str()));
+                }
             }
         }
-        _ => None,
+        direct_run_function(&entry.items).map(|_| (bundle.entry, "run"))
     })
 }
 
@@ -244,6 +311,8 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
             .and_then(marker_string),
         inputs: Vec::new(),
         commands,
+        standard: cli_standard(&enumeration.type_markers),
+        version: None,
     })
 }
 
@@ -252,6 +321,13 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
 pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     let (source, name) = selected_entry_type_source(bundle)?;
     let entry = &bundle.modules[source];
+    if name == "run"
+        && entry.items.iter().any(|item| {
+            matches!(item, Item::Func(function) if function.name == "run")
+        })
+    {
+        return Some(source);
+    }
     let (wanted_alias, leaf) = name
         .split_once('.')
         .map_or((None, name), |(alias, leaf)| (Some(alias), leaf));
@@ -279,16 +355,36 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
 /// Checked schema for a typed `fn run`, including a CLI type declared in a
 /// directly imported module. Codegen, dossier, metadata, and completion share it.
 pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CLICommandSchema> {
-    let (_, name) = selected_entry_type_source(bundle)?;
+    let (source, name) = selected_entry_type_source(bundle)?;
     let leaf = name.rsplit('.').next().unwrap_or(name);
     let module = entry_type_module(bundle)?;
-    schema_for_type(&bundle.modules[module].items, leaf)
+    let mut schema = if leaf == "run"
+        && source == bundle.entry
+        && is_direct_run_entry(&bundle.modules[source].items)
+    {
+        direct_run_function(&bundle.modules[source].items)
+            .and_then(function_schema)
+            .expect("direct run entry has a canonical function schema")
+    } else {
+        schema_for_type(&bundle.modules[module].items, leaf)?
+    };
+    if schema.standard {
+        schema.version = Some(bundle.build_facts.package_version.clone());
+    }
+    Some(schema)
 }
 
 /// Checked schema for a typed `fn run` in one module.
 pub fn entry_schema(items: &[Item]) -> Option<CLICommandSchema> {
     let name = selected_entry_type(items)?;
-    schema_for_type(items, name.rsplit('.').next().unwrap_or(name))
+    let leaf = name.rsplit('.').next().unwrap_or(name);
+    if leaf == "run" {
+        if is_direct_run_entry(items) {
+            return direct_run_function(items).and_then(function_schema);
+        }
+        return schema_for_type(items, leaf);
+    }
+    schema_for_type(items, leaf)
 }
 
 /// Canonical, versioned JetCommandSchema record. The digest makes corruption
@@ -298,6 +394,8 @@ pub fn encode_record(schema: &CLICommandSchema) -> Vec<u8> {
     let mut payload = Vec::new();
     put_string(&mut payload, &schema.entry_type);
     put_optional_string(&mut payload, schema.description.as_deref());
+    payload.push(u8::from(schema.standard));
+    put_optional_string(&mut payload, schema.version.as_deref());
     put_u32(&mut payload, schema.inputs.len() as u32);
     for input in &schema.inputs {
         encode_input(&mut payload, input);
@@ -373,6 +471,12 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
     let mut cursor = Cursor::new(payload);
     let entry_type = cursor.string()?;
     let description = cursor.optional_string()?;
+    let standard = match cursor.byte()? {
+        0 => false,
+        1 => true,
+        _ => return Err(MetadataError::Malformed("invalid standard bit")),
+    };
+    let version = cursor.optional_string()?;
     let count = cursor.u32()? as usize;
     if count > MAX_INPUTS { return Err(MetadataError::Malformed("too many inputs")); }
     let mut inputs = Vec::with_capacity(count);
@@ -392,7 +496,14 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
         commands.push(CLISubcommandSchema { name, description, inputs: command_inputs });
     }
     if !cursor.done() { return Err(MetadataError::Malformed("trailing payload bytes")); }
-    Ok(CLICommandSchema { entry_type, description, inputs, commands })
+    Ok(CLICommandSchema {
+        entry_type,
+        description,
+        inputs,
+        commands,
+        standard,
+        version,
+    })
 }
 
 fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
@@ -735,12 +846,27 @@ pub fn embed_wasm_record(wasm: &mut Vec<u8>, record: &[u8]) -> Result<(), Metada
 }
 
 impl CLICommandSchema {
-    /// Candidates legal before any subcommand is selected.
-    pub fn completion_words(&self) -> Vec<String> {
-        let mut words = vec!["--help".to_string()];
-        // Positionals first (D-CLI-POS1 help/completion order), then flags.
-        let mut positionals: Vec<&CLIInputSchema> = self
-            .inputs
+    pub fn standard_completion_words(&self) -> Vec<String> {
+        if self.standard {
+            let mut words = vec![
+                "--verbose".to_string(),
+                "-v".to_string(),
+                "--quiet".to_string(),
+                "-q".to_string(),
+                "--color".to_string(),
+            ];
+            if self.version.is_some() {
+                words.push("--version".to_string());
+            }
+            words
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn input_words(inputs: &[CLIInputSchema]) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut positionals: Vec<&CLIInputSchema> = inputs
             .iter()
             .filter(|input| input.positional.is_some())
             .collect();
@@ -748,12 +874,43 @@ impl CLICommandSchema {
         for input in positionals {
             words.push(input.flag.clone());
         }
-        words.extend(self.inputs.iter().map(|input| format!("--{}", input.flag)));
+        words.extend(inputs.iter().map(|input| format!("--{}", input.flag)));
         words.extend(
-            self.inputs
+            inputs
                 .iter()
                 .filter_map(|input| input.short.as_ref().map(|short| format!("-{short}"))),
         );
+        words
+    }
+
+    /// Inputs accepted after a callable member command. Shared root inputs
+    /// remain legal after the command word, so completion must expose the
+    /// same merged projection as the Args Prelude parser.
+    pub fn command_inputs(&self, command: &CLISubcommandSchema) -> Vec<CLIInputSchema> {
+        let mut inputs = self.inputs.clone();
+        inputs.extend(command.inputs.clone());
+        inputs
+    }
+
+    /// Candidates legal after a subcommand is selected.
+    pub fn command_completion_words(&self, command: &CLISubcommandSchema) -> Vec<String> {
+        let mut words = vec!["--help".to_string()];
+        words.extend(self.standard_completion_words());
+        words.extend(Self::input_words(&self.command_inputs(command)));
+        words
+    }
+
+    /// Candidates legal at the root while a subcommand is still pending.
+    pub fn root_completion_words(&self) -> Vec<String> {
+        let mut words = vec!["--help".to_string()];
+        words.extend(self.standard_completion_words());
+        words.extend(Self::input_words(&self.inputs));
+        words
+    }
+
+    /// Candidates legal before any subcommand is selected.
+    pub fn completion_words(&self) -> Vec<String> {
+        let mut words = self.root_completion_words();
         for command in &self.commands {
             words.push(command.name.clone());
         }
@@ -821,10 +978,31 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
                 short,
                 env,
                 help,
-                metavar: (!matches!(shape, CLIInputShape::Flag)).then_some(metavar),
+                metavar: (!matches!(&shape, CLIInputShape::Flag)).then_some(metavar),
                 shape,
                 positional,
             }
+        })
+        .collect();
+
+    let computed: std::collections::HashSet<&str> = structure
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_some())
+        .map(|field| field.name.as_str())
+        .collect();
+    let commands = structure
+        .methods
+        .iter()
+        .filter(|function| !computed.contains(function.name.as_str()))
+        .filter_map(|function| {
+            let inputs = function_inputs(function)?;
+            Some(CLISubcommandSchema {
+                name: function.name.to_lowercase(),
+                description: marker(&function.markers, Syntax::MARKER_DOC)
+                    .and_then(marker_string),
+                inputs,
+            })
         })
         .collect();
 
@@ -833,7 +1011,99 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
         description: marker(&structure.type_markers, Syntax::MARKER_DOC)
             .and_then(marker_string),
         inputs,
+        commands,
+        standard: cli_standard(&structure.type_markers),
+        version: None,
+    })
+}
+
+fn function_schema(function: &Func) -> Option<CLICommandSchema> {
+    Some(CLICommandSchema {
+        entry_type: "run".to_string(),
+        description: marker(&function.markers, Syntax::MARKER_DOC).and_then(marker_string),
+        inputs: function_inputs(function)?,
         commands: Vec::new(),
+        standard: cli_standard(&function.markers),
+        version: None,
+    })
+}
+
+fn function_inputs(function: &Func) -> Option<Vec<CLIInputSchema>> {
+    let mut positional_order = 0u16;
+    function
+        .params
+        .iter()
+        .filter(|param| param.name != Syntax::KW_SELF)
+        .map(|param| {
+            let flag = param.call_label().replace('_', "-");
+            let shape = match &param.ty {
+                Type::Bool => CLIInputShape::Flag,
+                Type::Option(inner) => CLIInputShape::Value {
+                    kind: scalar_kind(inner)?,
+                    optional: true,
+                    default: None,
+                },
+                ty => {
+                    let default = param.default.as_deref().and_then(expr_default);
+                    if param.default.is_some() && default.is_none() {
+                        return None;
+                    }
+                    CLIInputShape::Value {
+                        kind: scalar_kind(ty)?,
+                        optional: false,
+                        default,
+                    }
+                }
+            };
+            let positional = match &shape {
+                CLIInputShape::Value {
+                    optional: false,
+                    default: None,
+                    ..
+                } => {
+                    let order = positional_order;
+                    positional_order = positional_order.saturating_add(1);
+                    Some(order)
+                }
+                _ => None,
+            };
+            Some(CLIInputSchema {
+                field: param.name.clone(),
+                flag,
+                short: None,
+                env: None,
+                help: format!("value for --{}", param.call_label().replace('_', "-")),
+                metavar: (!matches!(&shape, CLIInputShape::Flag))
+                    .then(|| param.call_label().replace('-', "_").to_uppercase()),
+                shape,
+                positional,
+            })
+        })
+        .collect()
+}
+
+fn expr_default(expr: &Expr) -> Option<CLIDefault> {
+    match expr.without_parens() {
+        Expr::Int(value, _, _, _) => Some(CLIDefault::Value(CtValue::Int(*value))),
+        Expr::Float(value, _, is_f32) => Some(CLIDefault::Value(CtValue::Float(if *is_f32 {
+            CtFloat::f32(*value as f32)
+        } else {
+            CtFloat::f64(*value)
+        }))),
+        Expr::Bool(value, _) => Some(CLIDefault::Value(CtValue::Bool(*value))),
+        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+            StrPart::Lit(value) => Some(CLIDefault::Value(CtValue::Str(value.clone()))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn cli_standard(markers: &[Marker]) -> bool {
+    marker(markers, Syntax::MARKER_CLI).is_some_and(|marker| {
+        marker.args.iter().any(|arg| {
+            matches!(arg, Expr::Ident(name, _) if name == "Standard")
+        })
     })
 }
 
@@ -899,6 +1169,8 @@ mod tests {
                 positional: Some(0),
             }],
             commands: Vec::new(),
+            standard: false,
+            version: None,
         }
     }
 
@@ -1036,8 +1308,8 @@ mod tests {
         assert_eq!(read_executable(&nested_fat_mach(&record)), Err(MetadataError::Malformed("nested universal Mach-O slice")));
 
         let mut unsupported = record.clone();
-        unsupported[8..10].copy_from_slice(&5u16.to_le_bytes());
-        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(5)));
+        unsupported[8..10].copy_from_slice(&6u16.to_le_bytes());
+        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(6)));
         let mut corrupt = record;
         *corrupt.last_mut().unwrap() ^= 1;
         assert_eq!(decode_record(&corrupt), Err(MetadataError::Malformed("digest mismatch")));

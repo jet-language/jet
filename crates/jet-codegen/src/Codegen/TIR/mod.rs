@@ -472,7 +472,7 @@ fn register_union_type(
 
 /// c139 M3: every lowered function the JIT may compile from the entry module.
 ///
-/// Returns `None` when there is no plain top-level `run`, or when `run` is
+/// Returns `None` when there is no runnable top-level `run`, or when `run` is
 /// outside the existing `tir_covers` gate.
 pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
     lower_jit_program(bundle).map(|p| {
@@ -1211,9 +1211,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         let has_cli_schema = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
         module.items.iter().find_map(|item| match item {
             Item::Func(function)
-                if function.name == "run"
-                    && function.params.len() == 1
-                    && has_cli_schema =>
+                if function.name == "run" && has_cli_schema =>
             {
                 Some(function.name.clone())
             }
@@ -1494,6 +1492,8 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+        imported_cx.jit_local_call_prefix =
+            Some(format!("{}::", mangle(&imported.alias)));
         for (owner, sources) in memo_dependency_facts(&imported_cx) {
             let target = memo_dependencies.entry(owner).or_default();
             for (source, fields) in sources {
@@ -1539,9 +1539,30 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         let mut mangled_function = function.clone();
                         mangled_function.name =
                             jet_foundation::Names::member_name(&code_module.name, &function.name);
-                        let mut lowered = lower_func(&mangled_function, &imported_cx);                        lowered.name =
+                        let mut lowered = lower_func(&mangled_function, &imported_cx);
+                        lowered.name =
                             format!("{}::{}", mangle(&code_module.name), mangle(&function.name));
                         funcs.push(lowered);
+                    }
+                }
+                Item::Struct(definition) if definition.type_params.is_empty() => {
+                    imported_cx.jit_local_call_prefix =
+                        Some(format!("{}::", mangle(&imported.alias)));
+                    for owner in imported_type_owners(bundle, module_idx) {
+                        let qualified = imported_type_name(&owner, &definition.name);
+                        for method in &definition.methods {
+                            if !tir_covers_method(method, &qualified, &imported_cx) {
+                                continue;
+                            }
+                            let mut lowered = lower_method_for_owner(
+                                method,
+                                &qualified,
+                                Type::Named(qualified.clone()),
+                                &imported_cx,
+                            );
+                            lowered.name = format!("{}::{}", qualified, method.name);
+                            funcs.push(lowered);
+                        }
                     }
                 }
                 Item::Impl(implementation)
@@ -2053,7 +2074,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
                 .map(|_| super::mangle_generated("cli_main"))
         });
     let Some(selected) = selected else {
-        return "no zero-parameter runnable entry".to_string();
+        return "no runnable entry".to_string();
     };
     let entry_check = if selected == super::mangle_generated("cli_main") {
         "run".to_string()

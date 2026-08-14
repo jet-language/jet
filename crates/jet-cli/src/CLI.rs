@@ -1352,6 +1352,7 @@ pub fn completions_for_program(
 ) -> Option<String> {
     debug_assert!(!command_name.chars().any(char::is_control));
     let root_words = schema.completion_words();
+    let root_input_words = schema.root_completion_words();
     match shell {
         "bash" => {
             if schema.commands.is_empty() {
@@ -1365,20 +1366,22 @@ pub fn completions_for_program(
             let cases = schema.commands.iter().map(|command| format!(
                 "        {}) flags={} ;;",
                 shell_single_quote(&command.name),
-                shell_single_quote(&input_words(&command.inputs).join(" ")),
+                shell_single_quote(&schema.command_completion_words(command).join(" ")),
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
                 "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {}\n",
                 jet_foundation::CLISchema::RECORD_VERSION,
                 shell_single_quote(&root_words.join(" ")),
-                shell_single_quote(&input_words(&schema.inputs).join(" ")),
+                shell_single_quote(&root_input_words.join(" ")),
                 cases,
                 shell_single_quote(command_name),
             ))
         }
         "zsh" => {
             if schema.commands.is_empty() {
-                let args = zsh_input_specs(&schema.inputs).join(" \\\n");
+                let mut specs = zsh_standard_specs(schema.standard, schema.version.is_some());
+                specs.extend(zsh_input_specs(&schema.inputs));
+                let args = specs.join(" \\\n");
                 return Some(format!(
                     "#compdef {}\n# zsh completion from JetCommandSchema v{}\n_arguments \\\n{}\n",
                     shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, args,
@@ -1388,7 +1391,11 @@ pub fn completions_for_program(
             let cases = schema.commands.iter().map(|command| format!(
                 "        {}) _arguments \\\n{} ;;",
                 shell_single_quote(&command.name),
-                zsh_input_specs(&command.inputs).join(" \\\n"),
+                {
+                    let mut specs = zsh_standard_specs(schema.standard, schema.version.is_some());
+                    specs.extend(zsh_input_specs(&schema.command_inputs(command)));
+                    specs.join(" \\\n")
+                },
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
                 "#compdef {}\n# zsh completion from JetCommandSchema v{}\nif (( CURRENT == 2 )); then\n    _values 'command' '--help[show help]' {}\nelse\n    case $words[2] in\n{}\n    esac\nfi\n",
@@ -1399,6 +1406,14 @@ pub fn completions_for_program(
             let mut out = format!("# fish completion from JetCommandSchema v{}\n", jet_foundation::CLISchema::RECORD_VERSION);
             let root_condition = if schema.commands.is_empty() { "" } else { " -n '__fish_use_subcommand'" };
             out.push_str(&format!("complete -c {}{} -l help -d 'show help'\n", fish_single(command_name), root_condition));
+            if schema.standard {
+                out.push_str(&format!("complete -c {}{} -l verbose -s v -d 'print extra detail'\n", fish_single(command_name), root_condition));
+                out.push_str(&format!("complete -c {}{} -l quiet -s q -d 'suppress normal output'\n", fish_single(command_name), root_condition));
+                out.push_str(&format!("complete -c {}{} -l color -r -d 'control terminal color'\n", fish_single(command_name), root_condition));
+                if schema.version.is_some() {
+                    out.push_str(&format!("complete -c {}{} -l version -d 'show version'\n", fish_single(command_name), root_condition));
+                }
+            }
             for input in &schema.inputs {
                 let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
                 out.push_str(&format!("complete -c {} -l {}{} -d {}{}\n", fish_single(command_name), input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
@@ -1406,7 +1421,16 @@ pub fn completions_for_program(
             for command in &schema.commands {
                 out.push_str(&format!("complete -c {} -n '__fish_use_subcommand' -a {}\n", fish_single(command_name), fish_single(&command.name)));
                 out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l help -d 'show help'\n", fish_single(command_name), command.name));
-                for input in &command.inputs {
+                if schema.standard {
+                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l verbose -s v -d 'print extra detail'\n", fish_single(command_name), command.name));
+                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l quiet -s q -d 'suppress normal output'\n", fish_single(command_name), command.name));
+                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l color -r -d 'control terminal color'\n", fish_single(command_name), command.name));
+                    if schema.version.is_some() {
+                        out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l version -d 'show version'\n", fish_single(command_name), command.name));
+                    }
+                }
+                let command_inputs = schema.command_inputs(command);
+                for input in &command_inputs {
                     let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
                     out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l {}{} -d {}{}\n", fish_single(command_name), command.name, input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
                 }
@@ -1418,11 +1442,11 @@ pub fn completions_for_program(
             if schema.commands.is_empty() {
                 return Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)));
             }
-            let flags = input_words(&schema.inputs).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
+            let flags = root_input_words.iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
             let command_flags = schema.commands.iter().map(|command| format!(
                 "{} = @({})",
                 ps_single(&command.name),
-                input_words(&command.inputs).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(","),
+                schema.command_completion_words(command).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(","),
             )).collect::<Vec<_>>().join("; ");
             Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)))
         }
@@ -1443,23 +1467,19 @@ pub fn completion_command_name(program: &str) -> Result<String, &'static str> {
     Ok(name.to_string())
 }
 
-fn input_words(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<String> {
-    let mut words = vec!["--help".to_string()];
-    let mut positionals: Vec<&jet_foundation::CLISchema::CLIInputSchema> = inputs
-        .iter()
-        .filter(|input| input.positional.is_some())
-        .collect();
-    positionals.sort_by_key(|input| input.positional.unwrap());
-    for input in positionals {
-        words.push(input.flag.clone());
+fn zsh_standard_specs(standard: bool, version: bool) -> Vec<String> {
+    if !standard {
+        return Vec::new();
     }
-    words.extend(inputs.iter().map(|input| format!("--{}", input.flag)));
-    words.extend(
-        inputs
-            .iter()
-            .filter_map(|input| input.short.as_ref().map(|short| format!("-{short}"))),
-    );
-    words
+    let mut specs = vec![
+        "    '(-v --verbose){-v,--verbose}[print extra detail]'".to_string(),
+        "    '(-q --quiet){-q,--quiet}[suppress normal output]'".to_string(),
+        "    '--color[control terminal color]:MODE:(auto always never)'".to_string(),
+    ];
+    if version {
+        specs.push("    '--version[show version]'".to_string());
+    }
+    specs
 }
 
 fn zsh_input_specs(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<String> {
@@ -1583,6 +1603,8 @@ mod tests {
             description: None,
             inputs: Vec::new(),
             commands: Vec::new(),
+            standard: false,
+            version: None,
         };
         assert_eq!(completion_command_name("build/greeter"), Ok("greeter".to_string()));
         assert_eq!(

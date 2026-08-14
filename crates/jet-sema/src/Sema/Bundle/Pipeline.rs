@@ -2376,9 +2376,15 @@ fn check_bundle_opts_for_output_inner(
             Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         }) {
-            // S12/D-CLIFLAG1: `run` is the only program entry name. It is
-            // zero-arg, or one typed CLI-spec parameter (`#[CLI]` struct / enum).
-            if run_fn.params.len() == 1 {
+            // S12/D-CLIFLAG1: `run` is the only program entry name. Its
+            // canonical CLI schema owns both direct scalar inputs and the
+            // one typed CLI-spec parameter (`#[CLI]` struct / enum).
+            let direct_cli = jet_foundation::CLISchema::is_direct_run_entry(entry_items);
+            if direct_cli {
+                // The canonical schema producer has already classified every
+                // direct input and its default. Keep this gate in sema, but do
+                // not reconstruct that policy here.
+            } else if run_fn.params.len() == 1 {
                 let param = &run_fn.params[0];
                 let cli_module = jet_foundation::CLISchema::entry_type_module(bundle)
                     .unwrap_or(bundle.entry);

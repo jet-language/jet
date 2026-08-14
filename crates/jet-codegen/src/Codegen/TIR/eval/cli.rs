@@ -4,7 +4,7 @@
 //! This module only turns the checked `CLISchema` projection into Prelude
 //! handles and turns the resulting scalar values into `CtValue`s.
 
-use crate::AST::{CtReport, CtValue, EnumDef, Item, StructDef, Type, VariantPayload};
+use crate::AST::{CtReport, CtValue, EnumDef, Func, Item, Param, StructDef, Type, VariantPayload};
 use jet_foundation::CLISchema::{
     CLIDefault, CLICommandSchema, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
@@ -15,7 +15,10 @@ use super::unsupported;
 
 pub(super) enum Dispatch {
     Run(CtValue),
+    Direct { function: String, args: Vec<CtValue> },
+    Invoke { function: String, receiver: Option<CtValue>, args: Vec<CtValue> },
     Help(String),
+    Version(String),
     Error(String),
 }
 
@@ -114,6 +117,8 @@ fn add_inputs(
 fn build_spec(
     inputs: &[CLIInputSchema],
     description: Option<&str>,
+    standard: bool,
+    version: Option<&str>,
     argv0: &str,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
@@ -132,6 +137,47 @@ fn build_spec(
             span,
         )?;
     }
+    if standard {
+        spec = args_call(
+            "ArgsSpecFlagShort",
+            &mut spec,
+            vec![
+                CtValue::Str("verbose".to_string()),
+                CtValue::Str("v".to_string()),
+                CtValue::Str("print extra detail".to_string()),
+            ],
+            span,
+        )?;
+        spec = args_call(
+            "ArgsSpecFlagShort",
+            &mut spec,
+            vec![
+                CtValue::Str("quiet".to_string()),
+                CtValue::Str("q".to_string()),
+                CtValue::Str("suppress normal output".to_string()),
+            ],
+            span,
+        )?;
+        spec = args_call(
+            "ArgsSpecOptionChoice",
+            &mut spec,
+            vec![
+                CtValue::Str("color".to_string()),
+                CtValue::Str("control terminal color".to_string()),
+                CtValue::Str("MODE".to_string()),
+                CtValue::Str("auto,always,never".to_string()),
+            ],
+            span,
+        )?;
+        if let Some(version) = version {
+            spec = args_call(
+                "ArgsSpecVersion",
+                &mut spec,
+                vec![CtValue::Str(version.to_string())],
+                span,
+            )?;
+        }
+    }
     add_inputs(spec, inputs, span)
 }
 
@@ -140,12 +186,23 @@ fn build_command_spec(
     argv0: &str,
     span: Span,
 ) -> Result<(CtValue, Vec<(String, CtValue)>), Diagnostic> {
-    let mut root = build_spec(&schema.inputs, schema.description.as_deref(), argv0, span)?;
+    let mut root = build_spec(
+        &schema.inputs,
+        schema.description.as_deref(),
+        schema.standard,
+        schema.version.as_deref(),
+        argv0,
+        span,
+    )?;
     let mut commands = Vec::new();
     for command in &schema.commands {
+        let mut nested_inputs = schema.inputs.clone();
+        nested_inputs.extend(command.inputs.clone());
         let nested = build_spec(
-            &command.inputs,
+            &nested_inputs,
             command.description.as_deref(),
+            schema.standard,
+            schema.version.as_deref(),
             &format!("{} {}", program_name(argv0), command.name),
             span,
         )?;
@@ -237,6 +294,13 @@ fn path_value(value: String) -> CtValue {
 
 fn scalar_from_text(ty: &Type, text: &str, flag: &str) -> Result<CtValue, String> {
     match ty {
+        Type::Bool => match text.to_ascii_lowercase().as_str() {
+            "true" => Ok(CtValue::Bool(true)),
+            "false" => Ok(CtValue::Bool(false)),
+            _ => Err(format!(
+                "invalid value for --{flag}: `{text}` is not true or false"
+            )),
+        },
         Type::Int => text
             .parse::<i64>()
             .map(CtValue::Int)
@@ -253,6 +317,7 @@ fn scalar_from_text(ty: &Type, text: &str, flag: &str) -> Result<CtValue, String
 
 fn type_default(ty: &Type) -> CtValue {
     match ty {
+        Type::Bool => CtValue::Bool(false),
         Type::Int => CtValue::Int(0),
         Type::Float => CtValue::Float(crate::AST::CtFloat::f64(0.0)),
         Type::String => CtValue::Str(String::new()),
@@ -291,6 +356,7 @@ fn missing_value(input: &CLIInputSchema, ty: &Type, help: &str) -> Result<CtValu
 
 fn decode_struct(
     structure: &StructDef,
+    type_name: &str,
     inputs: &[CLIInputSchema],
     parsed: &mut CtValue,
     help: &str,
@@ -302,38 +368,72 @@ fn decode_struct(
             .iter()
             .find(|input| input.field == field.name)
             .ok_or_else(|| format!("missing CLI input for `{}`", field.name))?;
-        let value = match &input.shape {
-            CLIInputShape::Flag => {
-                if !matches!(&field.ty, Type::Bool) {
-                    return Err(format!("CLI flag `{}` has a non-Bool field", input.flag));
-                }
-                CtValue::Bool(parsed_flag(parsed, &input.flag, span).map_err(|d| d.what)?)
-            }
-            CLIInputShape::Value { optional: true, .. } => {
-                let Type::Option(inner) = &field.ty else {
-                    return Err(format!("CLI option `{}` has a non-Option field", input.flag));
-                };
-                match parsed_option(parsed, &input.flag, span).map_err(|d| d.what)? {
-                    Some(value) => CtValue::Present(Box::new(
-                        scalar_from_text(inner, &value, &input.flag)?,
-                    )),
-                    None => CtValue::absent((**inner).clone()),
-                }
-            }
-            CLIInputShape::Value { optional: false, .. } => {
-                let raw = parsed_option(parsed, &input.flag, span).map_err(|d| d.what)?;
-                match raw {
-                    Some(value) => scalar_from_text(&field.ty, &value, &input.flag)?,
-                    None => missing_value(input, &field.ty, help)?,
-                }
-            }
-        };
+        let value = decode_input(input, &field.ty, parsed, help, span)?;
         fields.push((field.name.clone(), value));
     }
     Ok(CtValue::Struct {
-        type_name: structure.name.clone(),
+        type_name: type_name.to_string(),
         fields,
     })
+}
+
+fn decode_input(
+    input: &CLIInputSchema,
+    ty: &Type,
+    parsed: &mut CtValue,
+    help: &str,
+    span: Span,
+) -> Result<CtValue, String> {
+    match &input.shape {
+        CLIInputShape::Flag => {
+            if !matches!(ty, Type::Bool) {
+                return Err(format!("CLI flag `{}` has a non-Bool field", input.flag));
+            }
+            Ok(CtValue::Bool(
+                parsed_flag(parsed, &input.flag, span).map_err(|d| d.what)?,
+            ))
+        }
+        CLIInputShape::Value { optional: true, .. } => {
+            let Type::Option(inner) = ty else {
+                return Err(format!("CLI option `{}` has a non-Option field", input.flag));
+            };
+            match parsed_option(parsed, &input.flag, span).map_err(|d| d.what)? {
+                Some(value) => Ok(CtValue::Present(Box::new(scalar_from_text(
+                    inner,
+                    &value,
+                    &input.flag,
+                )?))),
+                None => Ok(CtValue::absent((**inner).clone())),
+            }
+        }
+        CLIInputShape::Value { optional: false, .. } => {
+            let raw = parsed_option(parsed, &input.flag, span).map_err(|d| d.what)?;
+            match raw {
+                Some(value) => scalar_from_text(ty, &value, &input.flag),
+                None => missing_value(input, ty, help),
+            }
+        }
+    }
+}
+
+fn decode_params(
+    params: &[Param],
+    inputs: &[CLIInputSchema],
+    parsed: &mut CtValue,
+    help: &str,
+    span: Span,
+) -> Result<Vec<CtValue>, String> {
+    params
+        .iter()
+        .filter(|param| param.name != crate::Syntax::KW_SELF)
+        .map(|param| {
+            let input = inputs
+                .iter()
+                .find(|input| input.field == param.name)
+                .ok_or_else(|| format!("missing CLI input for `{}`", param.name))?;
+            decode_input(input, &param.ty, parsed, help, span)
+        })
+        .collect()
 }
 
 fn find_struct<'a>(items: &'a [Item], name: &str) -> Option<&'a StructDef> {
@@ -346,6 +446,13 @@ fn find_struct<'a>(items: &'a [Item], name: &str) -> Option<&'a StructDef> {
 fn find_enum<'a>(items: &'a [Item], name: &str) -> Option<&'a EnumDef> {
     items.iter().find_map(|item| match item {
         Item::Enum(enumeration) if enumeration.name == name => Some(enumeration),
+        _ => None,
+    })
+}
+
+fn find_func<'a>(items: &'a [Item], name: &str) -> Option<&'a Func> {
+    items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == name => Some(function),
         _ => None,
     })
 }
@@ -364,6 +471,16 @@ pub(super) fn prepare(
         .rsplit('.')
         .next()
         .unwrap_or(&schema.entry_type);
+    let nominal_name = |name: &str| {
+        if module == bundle.entry {
+            name.to_string()
+        } else {
+            bundle
+                .name_ledger
+                .nominal_identity(module, name)
+                .unwrap_or_else(|| name.to_string())
+        }
+    };
     let span = Span::new(0, 0);
     let (mut spec, command_specs) = build_command_spec(
         &schema,
@@ -379,7 +496,7 @@ pub(super) fn prepare(
         let mut help_spec = if let Some(command) = parsed_subcommand(&mut parsed, span)? {
             command_specs
                 .iter()
-                .find(|(name, _)| name == &command)
+                .find(|(name, _)| name.as_str() == command.as_str())
                 .map(|(_, spec)| spec.clone())
                 .unwrap_or_else(|| spec.clone())
         } else {
@@ -389,11 +506,48 @@ pub(super) fn prepare(
         return Ok(Dispatch::Help(help));
     }
 
+    if schema.standard && parsed_flag(&mut parsed, "version", span)? {
+        if let Some(version) = schema.version.clone() {
+            return Ok(Dispatch::Version(version));
+        }
+    }
+
     if schema.commands.is_empty() {
+        if type_name == "run"
+            && jet_foundation::CLISchema::is_direct_run_entry(
+                &bundle.modules[bundle.entry].items,
+            )
+        {
+            let function = find_func(items, "run")
+                .ok_or_else(|| unsupported("typed CLI direct entry", span))?;
+            let help = spec_help(&mut spec, span)?;
+            return decode_params(&function.params, &schema.inputs, &mut parsed, &help, span)
+                .map(|args| Dispatch::Direct {
+                    function: function.name.clone(),
+                    args,
+                })
+                .map_err(|error| {
+                    Diagnostic::error(
+                        "E2201",
+                        error,
+                        "typed CLI decoding failed".to_string(),
+                        "fix the command arguments".to_string(),
+                        None,
+                    )
+                });
+        }
         let structure = find_struct(items, type_name)
             .ok_or_else(|| unsupported("typed CLI entry struct", span))?;
         let help = spec_help(&mut spec, span)?;
-        return decode_struct(structure, &schema.inputs, &mut parsed, &help, span)
+        let value_type_name = nominal_name(type_name);
+        return decode_struct(
+            structure,
+            &value_type_name,
+            &schema.inputs,
+            &mut parsed,
+            &help,
+            span,
+        )
             .map(Dispatch::Run)
             .map_err(|error| {
                 Diagnostic::error(
@@ -412,27 +566,87 @@ pub(super) fn prepare(
     let command_schema = schema
         .commands
         .iter()
-        .find(|candidate| candidate.name == command)
+        .find(|candidate| candidate.name.as_str() == command.as_str())
         .ok_or_else(|| unsupported("typed CLI subcommand", span))?;
-    let enumeration = find_enum(items, type_name)
-        .ok_or_else(|| unsupported("typed CLI entry enum", span))?;
-    let variant = enumeration
-        .variants
-        .iter()
-        .find(|variant| variant.name.to_lowercase() == command)
-        .ok_or_else(|| unsupported("typed CLI subcommand variant", span))?;
-    let VariantPayload::Single(Type::Named(payload_name), _) = &variant.payload else {
-        return Err(unsupported("typed CLI subcommand payload", span));
-    };
-    let payload = find_struct(items, payload_name)
-        .ok_or_else(|| unsupported("typed CLI subcommand payload struct", span))?;
     let mut help_spec = command_specs
         .iter()
-        .find(|(name, _)| name == &command)
+        .find(|(name, _)| name.as_str() == command.as_str())
         .map(|(_, spec)| spec.clone())
         .unwrap_or_else(|| spec.clone());
     let help = spec_help(&mut help_spec, span)?;
-    let payload = decode_struct(payload, &command_schema.inputs, &mut parsed, &help, span)
+    if let Some(enumeration) = find_enum(items, type_name) {
+        let variant = enumeration
+            .variants
+            .iter()
+            .find(|variant| variant.name.to_lowercase() == command.as_str())
+            .ok_or_else(|| unsupported("typed CLI subcommand variant", span))?;
+        let VariantPayload::Single(Type::Named(payload_name), _) = &variant.payload else {
+            return Err(unsupported("typed CLI subcommand payload", span));
+        };
+        let payload = find_struct(items, payload_name)
+            .ok_or_else(|| unsupported("typed CLI subcommand payload struct", span))?;
+        let value_type_name = nominal_name(payload_name);
+        let payload = decode_struct(
+            payload,
+            &value_type_name,
+            &command_schema.inputs,
+            &mut parsed,
+            &help,
+            span,
+        )
+            .map_err(|error| {
+                Diagnostic::error(
+                    "E2201",
+                    error,
+                    "typed CLI decoding failed".to_string(),
+                    "fix the command arguments".to_string(),
+                    None,
+                )
+        })?;
+        return Ok(Dispatch::Run(CtValue::Enum {
+            type_name: nominal_name(&enumeration.name),
+            variant: variant.name.clone(),
+            args: vec![(None, payload)],
+        }));
+    }
+
+    let structure = find_struct(items, type_name)
+        .ok_or_else(|| unsupported("typed CLI entry struct", span))?;
+    let method = structure
+        .methods
+        .iter()
+        .find(|method| method.name.to_lowercase() == command.as_str())
+        .ok_or_else(|| unsupported("typed CLI command method", span))?;
+    let receiver = if method
+        .params
+        .iter()
+        .any(|param| param.name == crate::Syntax::KW_SELF)
+    {
+        let value_type_name = nominal_name(type_name);
+        Some(
+            decode_struct(
+                structure,
+                &value_type_name,
+                &schema.inputs,
+                &mut parsed,
+                &help,
+                span,
+            )
+            .map_err(|error| {
+                    Diagnostic::error(
+                        "E2201",
+                        error,
+                        "typed CLI decoding failed".to_string(),
+                        "fix the command arguments".to_string(),
+                        None,
+                    )
+                }
+            )?,
+        )
+    } else {
+        None
+    };
+    let args = decode_params(&method.params, &command_schema.inputs, &mut parsed, &help, span)
         .map_err(|error| {
             Diagnostic::error(
                 "E2201",
@@ -442,9 +656,10 @@ pub(super) fn prepare(
                 None,
             )
         })?;
-    Ok(Dispatch::Run(CtValue::Enum {
-        type_name: enumeration.name.clone(),
-        variant: variant.name.clone(),
-        args: vec![(None, payload)],
-    }))
+    let function_owner = nominal_name(&structure.name);
+    Ok(Dispatch::Invoke {
+        function: format!("{}::{}", function_owner, method.name),
+        receiver,
+        args,
+    })
 }

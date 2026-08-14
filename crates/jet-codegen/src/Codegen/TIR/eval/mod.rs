@@ -3507,12 +3507,19 @@ fn run_program_with_structs_at_stage_and_cli(
     cli_bundle: Option<&ProgramBundle>,
     package_hardened: bool,
 ) -> Result<CtValue, Diagnostic> {
-    let cli_args = if let Some(bundle) = cli_bundle.filter(|_| {
+    let cli_dispatch = if let Some(bundle) = cli_bundle.filter(|_| {
         program.entry == crate::Codegen::mangle_generated("cli_main")
     }) {
         let argv = Comptime::runtime_argv().unwrap_or_else(|| std::env::args().collect());
         match cli::prepare(bundle, &argv)? {
-            cli::Dispatch::Run(args) => Some(args),
+            dispatch @ (cli::Dispatch::Run(_)
+            | cli::Dispatch::Direct { .. }
+            | cli::Dispatch::Invoke { .. }) => Some(dispatch),
+            cli::Dispatch::Version(version) => {
+                sink.stdout.push_str(&version);
+                sink.stdout.push('\n');
+                return Ok(CtValue::Unit);
+            }
             cli::Dispatch::Help(help) => {
                 sink.stdout.push_str(&help);
                 if !help.ends_with('\n') {
@@ -3553,7 +3560,7 @@ fn run_program_with_structs_at_stage_and_cli(
                         struct_fields,
                         struct_field_types,
                         stage,
-                        cli_args,
+                        cli_dispatch,
                         package_hardened,
                     )
                 })
@@ -3573,7 +3580,7 @@ fn run_program_with_structs_on_stack(
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
     stage: Comptime::PurityStage,
-    cli_args: Option<CtValue>,
+    cli_dispatch: Option<cli::Dispatch>,
     package_hardened: bool,
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
@@ -3587,11 +3594,22 @@ fn run_program_with_structs_on_stack(
         struct_field_types.entry(name).or_insert(fields);
     }
     let funcs = program_funcs(program);
-    let cli_entry = cli_args.is_some();
-    let entry_name = if cli_entry {
-        "run".to_string()
-    } else {
-        program.entry.clone()
+    let entry_name = match &cli_dispatch {
+        Some(cli::Dispatch::Run(_)) => "run".to_string(),
+        Some(cli::Dispatch::Direct { function, .. })
+        | Some(cli::Dispatch::Invoke { function, .. }) => function.clone(),
+        Some(cli::Dispatch::Help(_))
+        | Some(cli::Dispatch::Version(_))
+        | Some(cli::Dispatch::Error(_)) => {
+            return Err(crate::Sema::Diagnostics::render_registered(
+                "E2201",
+                "CLI control dispatch reached the evaluator".to_string(),
+                "help and error dispatches must return before TIR execution".to_string(),
+                "report this as a compiler bug".to_string(),
+                None,
+            ));
+        }
+        None => program.entry.clone(),
     };
     let entry = funcs.get(&entry_name).copied().ok_or_else(|| {
         crate::Sema::Diagnostics::render_registered(
@@ -3663,9 +3681,23 @@ fn run_program_with_structs_on_stack(
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
+    let entry_args = match cli_dispatch {
+        Some(cli::Dispatch::Run(args)) | Some(cli::Dispatch::Direct { args, .. }) => args,
+        Some(cli::Dispatch::Invoke {
+            receiver, args, ..
+        }) => {
+            if let Some(receiver) = receiver {
+                scope.insert("self".to_string(), receiver);
+            }
+            args
+        }
+        None => Vec::new(),
+        Some(cli::Dispatch::Help(_))
+        | Some(cli::Dispatch::Version(_))
+        | Some(cli::Dispatch::Error(_)) => Vec::new(),
+    };
     let result = ctx.with_task_dispatcher(|ctx| {
-        let args = cli_args.into_iter().collect();
-        let result = ctx.run_func(entry, args, &mut scope);
+        let result = ctx.run_func(entry, entry_args, &mut scope);
         if returns_app(entry.ret.as_ref()) {
             result.and_then(|value| serve_entry_value(ctx, value))
         } else {

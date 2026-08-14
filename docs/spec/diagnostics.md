@@ -1296,6 +1296,7 @@ server built on top. E28xx is the block for M10.
 | E2807 | Route `{path}` is registered both by `{a}` and `{b}`. | Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1). | Remove one registration, or rename the convention file. |
 | E2810 | `{kind}` `{name}` is not a statically known handler. | D-WEBAPP1 records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge. | Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees. |
 | E-APP-TARGET-CAPABILITY | App capability `.{capability}` needs target `{required}`, but the resolved target is `{target}`. | App is one type across targets, but each capability must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9). | Choose a build target that supports `.{capability}` (for example `#Target(JS)` for browser capabilities or a native target for server capabilities), or remove that capability. |
+| L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `task { … }` so each connection runs in its own task. |
 
 ## Testing and tooling diagnostics (E2-M11)
 

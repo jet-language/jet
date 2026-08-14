@@ -204,7 +204,7 @@ fn entry_command_schema(
     let items = &bundle.modules.get(bundle.entry)?.items;
     items.iter().find_map(|item| match item {
         jet::AST::Item::Func(function)
-            if function.name == "run" && function.params.len() == 1 =>
+            if function.name == "run" && !function.params.is_empty() =>
         {
             Some(())
         }
@@ -284,13 +284,20 @@ fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
         .map(|word| json_string(word))
         .collect::<Vec<_>>()
         .join(",");
+    let version = command
+        .version
+        .as_deref()
+        .map(json_string)
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"source\":{},\"entry_type\":{},\"description\":{},\"inputs\":[{}],\"commands\":[{}],\"completion_words\":[{}]}}",
+        "{{\"source\":{},\"entry_type\":{},\"description\":{},\"inputs\":[{}],\"commands\":[{}],\"standard\":{},\"version\":{},\"completion_words\":[{}]}}",
         json_string(&format!("fn run(args: {})", command.entry_type)),
         json_string(&command.entry_type),
         description,
         inputs,
         commands,
+        command.standard,
+        version,
         completion,
     )
 }
@@ -302,6 +309,12 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
     let mut out = format!("command schema\n  entry: fn run(args: {})\n", command.entry_type);
     if let Some(description) = &command.description {
         out.push_str(&format!("  description: {description}\n"));
+    }
+    if command.standard {
+        out.push_str("  standard: true\n");
+        if let Some(version) = &command.version {
+            out.push_str(&format!("  version: {version}\n"));
+        }
     }
     for input in &command.inputs {
         write_command_input(&mut out, input, "  ");

@@ -89,6 +89,180 @@ fn unpack_memo_return(
     }
 }
 
+fn cli_frame_value(
+    module: &mut JITModule,
+    host: &HostFns,
+    builder: &mut FunctionBuilder<'_>,
+    frame: Value,
+    index: usize,
+    ty: &Type,
+    abi_ty: types::Type,
+) -> Result<Value, String> {
+    let index = builder.ins().iconst(types::I64, index as i64);
+    let getter = if matches!(ty, Type::String) {
+        host.struct_get_str
+    } else if abi_ty == types::F64 {
+        host.struct_get_f64
+    } else if abi_ty == types::I8 {
+        host.struct_get_bool
+    } else if abi_ty == types::I32 {
+        host.struct_get_char
+    } else {
+        host.struct_get_i64
+    };
+    let getter = module.declare_func_in_func(getter, builder.func);
+    Ok(builder.ins().call(getter, &[frame, index])[0])
+}
+
+fn cli_target_args(
+    module: &mut JITModule,
+    host: &HostFns,
+    builder: &mut FunctionBuilder<'_>,
+    target: &TFunc,
+    frame: Value,
+    frame_is_value: bool,
+    meta: &JitMeta<'_>,
+) -> Result<Vec<Value>, String> {
+    if frame_is_value {
+        return Ok(vec![frame]);
+    }
+    let mut args = Vec::new();
+    let mut index = 0usize;
+    if func_has_receiver(target) {
+        let receiver_ty = receiver_clif_ty(target, meta);
+        args.push(cli_frame_value(
+            module,
+            host,
+            builder,
+            frame,
+            index,
+            &Type::Named("CLIReceiver".to_string()),
+            receiver_ty,
+        )?);
+        index += 1;
+    }
+    for (_, ty, convention) in &target.params {
+        if matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
+            return Err(format!("jit CLI does not support Range parameter `{}`", target.name));
+        }
+        let scalar_write = matches!(
+            convention,
+            jet_foundation::AST::AccessConvention::Write
+        ) && matches!(
+            ty,
+            Type::Int
+                | Type::IntN { .. }
+                | Type::Float
+                | Type::Float32
+                | Type::Bool
+                | Type::Char
+        );
+        let value_ty = clif_ty(ty).ok_or_else(|| {
+            format!("jit CLI parameter type unsupported in `{}`: {ty:?}", target.name)
+        })?;
+        let value = cli_frame_value(module, host, builder, frame, index, ty, value_ty)?;
+        if scalar_write {
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                u32::from(value_ty.bytes()),
+                0,
+            ));
+            builder.ins().stack_store(value, slot, 0);
+            let pointer = builder.ins().stack_addr(
+                module.target_config().pointer_type(),
+                slot,
+                0,
+            );
+            args.push(pointer);
+        } else {
+            args.push(value);
+        }
+        index += 1;
+    }
+    Ok(args)
+}
+
+fn cli_pack_return(
+    builder: &mut FunctionBuilder<'_>,
+    target: &TFunc,
+    result: Option<Value>,
+) -> Result<Value, String> {
+    let Some(ret) = target.ret.as_ref() else {
+        return Ok(builder.ins().iconst(types::I64, 0));
+    };
+    if matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
+        return Err(format!("jit CLI does not support Range return `{}`", target.name));
+    }
+    let Some(result) = result else {
+        return Ok(builder.ins().iconst(types::I64, 0));
+    };
+    match clif_ty(ret) {
+        Some(ty) if ty == types::F64 => Ok(builder.ins().bitcast(
+            types::I64,
+            MemFlags::new().with_endianness(Endianness::Little),
+            result,
+        )),
+        Some(ty) if ty == types::I8 || ty == types::I32 => {
+            Ok(builder.ins().uextend(types::I64, result))
+        }
+        Some(ty) if ty == types::I64 => Ok(result),
+        Some(ty) => Err(format!(
+            "jit CLI return type unsupported in `{}`: {ty:?}",
+            target.name
+        )),
+        None => Ok(builder.ins().iconst(types::I64, 0)),
+    }
+}
+
+fn define_cli_adapter(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    target: &TFunc,
+    target_id: FuncId,
+    adapter_id: FuncId,
+    frame_is_value: bool,
+) -> Result<(), String> {
+    let mut ctx = module.make_context();
+    let cc = module.target_config().default_call_conv;
+    let mut signature = Signature::new(cc);
+    signature.params.push(AbiParam::new(types::I64));
+    signature.returns.push(AbiParam::new(types::I64));
+    ctx.func.signature = signature;
+    let mut fbcx = FunctionBuilderContext::new();
+    {
+        let mut builder = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = builder.create_block();
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        let frame = builder.block_params(entry)[0];
+        let args = cli_target_args(
+            module,
+            host,
+            &mut builder,
+            target,
+            frame,
+            frame_is_value,
+            meta,
+        )?;
+        let callee = module.declare_func_in_func(target_id, builder.func);
+        let call = builder.ins().call(callee, &args);
+        let result = builder
+            .inst_results(call)
+            .first()
+            .copied();
+        let packed = cli_pack_return(&mut builder, target, result)?;
+        builder.ins().return_(&[packed]);
+        builder.finalize();
+    }
+    module
+        .define_function(adapter_id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    module.clear_context(&mut ctx);
+    Ok(())
+}
+
 fn memo_slot(tir: &TFunc, field: &str) -> i64 {
     jet_codegen::Codegen::TIR::stable_place_address(&format!("memo::{}::{field}", tir.name))
 }
@@ -1687,6 +1861,7 @@ pub(crate) fn compile_program_tiered(
                     .is_some_and(|ty| !matches!(ty, Type::Named(name) if name == "Unit"))
         });
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
+    let mut cli_adapters: Vec<(String, FuncId, bool)> = Vec::new();
     let mut cli_import_id: Option<FuncId> = None;
     if cli_entry {
         cli_import_id = Some(host.cli_main);
@@ -1723,6 +1898,34 @@ pub(crate) fn compile_program_tiered(
                 .map_err(|e| e.to_string())?
         };
         func_ids.insert(f.name.clone(), id);
+    }
+    if cli_entry {
+        let targets = crate::CLI::cli_function_targets();
+        if targets.is_empty() {
+            return Err("jit CLI plan missing callable targets".to_string());
+        }
+        let run_requires_adapter = crate::CLI::cli_run_requires_adapter();
+        for (index, target_name) in targets.into_iter().enumerate() {
+            if target_name == "run" && !run_requires_adapter {
+                continue;
+            }
+            if !func_ids.contains_key(&target_name) {
+                return Err(format!("jit CLI target `{target_name}` missing from lowered TIR"));
+            }
+            let cc = module.target_config().default_call_conv;
+            let mut signature = Signature::new(cc);
+            signature.params.push(AbiParam::new(types::I64));
+            signature.returns.push(AbiParam::new(types::I64));
+            let adapter_id = module
+                .declare_function(
+                    &format!("__jet_cli_adapter_{index}"),
+                    Linkage::Local,
+                    &signature,
+                )
+                .map_err(|error| error.to_string())?;
+            let frame_is_value = target_name == "run" && crate::CLI::cli_run_frame_is_value();
+            cli_adapters.push((target_name, adapter_id, frame_is_value));
+        }
     }
     let mut generator_body_ids = HashMap::new();
     for f in &program.funcs {
@@ -1793,6 +1996,27 @@ pub(crate) fn compile_program_tiered(
         }
     }
 
+    for (target_name, adapter_id, frame_is_value) in &cli_adapters {
+        let target = program
+            .funcs
+            .iter()
+            .find(|function| function.name == *target_name)
+            .ok_or_else(|| format!("jit CLI target `{target_name}` missing from lowered TIR"))?;
+        let target_id = func_ids
+            .get(target_name)
+            .copied()
+            .ok_or_else(|| format!("jit CLI target `{target_name}` has no function id"))?;
+        define_cli_adapter(
+            module,
+            host,
+            &meta,
+            target,
+            target_id,
+            *adapter_id,
+            *frame_is_value,
+        )?;
+    }
+
     if cli_entry {
         // Export `__jet_jit_main` as a thin wrapper around the host trampoline.
         // Cranelift cannot `get_finalized_function` an Import for direct invoke.
@@ -1831,13 +2055,23 @@ pub(crate) fn compile_program_tiered(
     module.finalize_definitions().map_err(|e| e.to_string())?;
     crate::Data::bind_lazy_callables(module);
     if cli_entry {
-        let run_name = "run";
-        let run_id = func_ids
-            .get(run_name)
-            .copied()
-            .ok_or_else(|| "jit CLI entry missing `run`".to_string())?;
-        let code = module.get_finalized_function(run_id);
-        crate::CLI::install_cli_run_ptr(code);
+        if let Some((_, adapter_id, _)) = cli_adapters.iter().find(|(name, _, _)| name == "run") {
+            let code = module.get_finalized_function(*adapter_id);
+            crate::CLI::install_cli_run_ptr(code);
+        } else {
+            let run_id = func_ids
+                .get("run")
+                .copied()
+                .ok_or_else(|| "jit CLI entry missing `run`".to_string())?;
+            let code = module.get_finalized_function(run_id);
+            crate::CLI::install_cli_run_ptr(code);
+        }
+        for (function, adapter_id, _) in &cli_adapters {
+            if function != "run" {
+                let code = module.get_finalized_function(*adapter_id);
+                crate::CLI::install_cli_command_ptr(function, code);
+            }
+        }
     }
     // Snapshot before any run mutates/clears the arena so warm-run cache +
     // reset_run_heap can reinstall the same handles Cranelift baked in.

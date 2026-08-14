@@ -7,7 +7,7 @@ Mark a top-level function with `#Job` to make it a project job. Use `#Job(.Dev)`
 
 ```jet
 #[Job(.Dev), Doc("Seed local data"), Every(2h)]
-fn seed() {
+fn seed_data() {
     // ...
 }
 ```
@@ -17,10 +17,10 @@ Run `jet jobs` in the project directory to list all declared jobs. Scheduled job
 
 ```text
 $ jet jobs
-seed  [dev] Seed local data (every 2h)
+seed_data  [dev] Seed local data (every 2h)
 ```
 
-Run a job with `jet run app.jet -- seed`. Cross-job dependencies are ordinary function calls.
+Run a job with `jet run app.jet -- seed_data`. Cross-job dependencies are ordinary function calls.
 
 In a workspace, use `jet jobs -p member` to list jobs for one member.
 A bare `jet jobs` names the members when the choice is ambiguous.
