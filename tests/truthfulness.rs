@@ -1357,6 +1357,223 @@ fn stdlib_api_laws_doc_exists() {
         path.is_file(),
         "docs/spec/stdlib-api-laws.md is missing — required by D-STDRUBRIC1 (c44)"
     );
+
+    let doc = fs::read_to_string(&path).expect("stdlib API law doc must be readable");
+    let rule_ids = [
+        "C1", "C2", "C3", "D1", "D2", "D3", "D4", "F1", "F2", "F3", "T1", "T2",
+        "T3", "N1", "N2", "L-A", "L-B", "L-C", "L-D", "E1", "E2",
+    ];
+
+    let doctrine = doc
+        .split_once("## Extended Core API doctrine")
+        .map(|(_, rest)| rest)
+        .expect("stdlib API law doc must carry the extended doctrine");
+    let rule_table = doctrine
+        .split_once("| Rule | Current test |")
+        .map(|(_, rest)| rest)
+        .expect("extended doctrine must carry its rule table");
+    let mut table_ids = HashSet::new();
+    let mut saw_table_row = false;
+    for line in rule_table.lines() {
+        let line = line.trim();
+        if !line.starts_with('|') {
+            if saw_table_row {
+                break;
+            }
+            continue;
+        }
+        saw_table_row = true;
+        let cells: Vec<_> = line
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect();
+        let id = cells.first().copied().unwrap_or_default();
+        if id == "---" {
+            continue;
+        }
+        assert!(rule_ids.contains(&id), "unexpected extended-doctrine row `{id}`");
+        assert!(table_ids.insert(id), "duplicate extended-doctrine row `{id}`");
+    }
+    for id in rule_ids {
+        assert!(table_ids.contains(id), "missing extended-doctrine row `{id}`");
+    }
+
+    for required_text in [
+        "### Part A relation map",
+        "### Worked review failures",
+        "parse(text, true)",
+        "parse(text, on_error: .Lenient)",
+        "find_or_minus_one",
+        "-1 means absent",
+        "### D4 options audit",
+        "Named policy enums with dot-shorthand.",
+        "### Magic defaults and expert overrides",
+        "| Door | Bare default | Explicit control |",
+        "## Known drift (follow-up cards)",
+        "#1725",
+        "#1273",
+        "#301",
+        "#712",
+        "#1471",
+        "#300",
+        "#1470",
+        "#1472",
+        "#1465",
+    ] {
+        assert!(doc.contains(required_text), "stdlib API law doc is missing `{required_text}`");
+    }
+    for relation in [
+        "| L1 naming | N1, N2 |",
+        "| L2 fallibility | F1, F2 |",
+        "| L5 allocation | L-A, L-B |",
+        "| L8 one way | D3, L-D, E1 |",
+        "| new ground | C1–C3, D1, D2, D4, T1, T3, E2 |",
+    ] {
+        assert!(doc.contains(relation), "Part A relation map is missing `{relation}`");
+    }
+    assert!(
+        !doc.contains("None recorded after the Core namespace cutover"),
+        "known drift must not claim an empty inventory without evidence"
+    );
+
+    let drift = doc
+        .split_once("## Known drift (follow-up cards)")
+        .map(|(_, rest)| rest)
+        .expect("known drift heading must be present");
+    let drift_rows: Vec<Vec<_>> = drift
+        .split_once("| Gap | API | Law | Follow-up |")
+        .map(|(_, rest)| {
+            rest.lines()
+                .take_while(|line| line.trim().starts_with('|'))
+                .filter(|line| !line.trim().starts_with("|-----"))
+                .map(|line| {
+                    line.trim()
+                        .trim_matches('|')
+                        .split('|')
+                        .map(str::trim)
+                        .collect()
+                })
+                .collect()
+        })
+        .expect("known drift must carry its table");
+    assert_eq!(drift_rows.len(), 9, "known drift inventory changed unexpectedly");
+    for row in &drift_rows {
+        assert!(row.len() >= 4, "known drift row must have four cells");
+        assert!(row[3].contains('#'), "known drift row must name a card: {row:?}");
+    }
+
+    let audit = doc
+        .split_once("### D4 options audit")
+        .map(|(_, rest)| rest)
+        .expect("D4 audit heading must be present");
+    let audit = audit
+        .split_once("### Magic defaults and expert overrides")
+        .map(|(section, _)| section)
+        .expect("D4 audit must end before the defaults table");
+    let audit_rows: Vec<Vec<_>> = audit
+        .split_once("| Surface | Current option shape | D4 result | Card home |")
+        .map(|(_, rest)| {
+            rest.lines()
+                .take_while(|line| line.trim().starts_with('|'))
+                .filter(|line| !line.trim().starts_with("|---"))
+                .map(|line| {
+                    line.trim()
+                        .trim_matches('|')
+                        .split('|')
+                        .map(str::trim)
+                        .collect()
+                })
+                .collect()
+        })
+        .expect("D4 audit must carry its table");
+    assert_eq!(audit_rows.len(), 7, "D4 audit inventory changed unexpectedly");
+    for row in &audit_rows {
+        assert!(row.len() >= 4, "D4 audit row must have four cells");
+        if row[2].contains("Existing drift") {
+            assert!(row[3].contains('#'), "D4 drift row must name a card: {row:?}");
+        }
+    }
+    for surface in [
+        "`core.http.client`",
+        "`core.http.server.static_files`",
+        "`core.http.server.cors_policy`",
+        "`core.encoding`",
+        "`core.regex.flags`",
+        "`core.net.set_nodelay`",
+        "`HTTPProxy`, `HTTPRedirectPolicy`, `HTTPRetryPolicy`, `HTTPCorsOrigins`",
+    ] {
+        assert!(audit.contains(surface), "D4 audit is missing `{surface}`");
+    }
+
+    let defaults = doc
+        .split_once("### Magic defaults and expert overrides")
+        .map(|(_, rest)| rest)
+        .expect("defaults heading must be present");
+    let default_rows: Vec<Vec<_>> = defaults
+        .split_once("| Door | Bare default | Explicit control |")
+        .map(|(_, rest)| {
+            rest.lines()
+                .take_while(|line| line.trim().starts_with('|'))
+                .filter(|line| !line.trim().starts_with("|---"))
+                .map(|line| {
+                    line.trim()
+                        .trim_matches('|')
+                        .split('|')
+                        .map(str::trim)
+                        .collect()
+                })
+                .collect()
+        })
+        .expect("defaults section must carry its table");
+    assert_eq!(default_rows.len(), 9, "defaults inventory changed unexpectedly");
+    for row in &default_rows {
+        assert!(row.len() >= 3, "defaults row must have three cells");
+        assert!(!row[2].is_empty(), "defaults row must name explicit control: {row:?}");
+    }
+    for door in [
+        "`files.read(path)`",
+        "`http.get(url)`",
+        "`http.client`",
+        "`http.server.static_files(mux, prefix, root)`",
+        "`http.server.cors_policy(origins)`",
+        "`encoding.*.reader`",
+        "`list.map`",
+        "`time.now`",
+        "`crypto`",
+    ] {
+        assert!(defaults.contains(door), "defaults table is missing `{door}`");
+    }
+
+    let review = doc
+        .split_once("## Review template")
+        .map(|(_, rest)| rest)
+        .expect("review template heading must be present");
+    let review = review
+        .split_once("## Known drift (follow-up cards)")
+        .map(|(section, _)| section)
+        .expect("review template must end before known drift");
+    for field in [
+        "Changed call sites:",
+        "Defaults rows:",
+        "D4 audit:",
+        "Drift cards:",
+        "Required evidence:",
+    ] {
+        assert!(review.contains(field), "review template is missing `{field}`");
+    }
+    for id in [
+        "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "C1", "C2", "C3", "D1", "D2",
+        "D3", "D4", "F1", "F2", "F3", "T1", "T2", "T3", "N1", "N2", "L-A", "L-B", "L-C",
+        "L-D", "E1", "E2",
+    ] {
+        let marker = format!("`{id}`");
+        assert_eq!(
+            review.matches(marker.as_str()).count(),
+            1,
+            "review checklist must contain `{id}` exactly once"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

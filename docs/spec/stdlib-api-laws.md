@@ -120,37 +120,84 @@ debug representation selector; it is not a second print API.
 
 ## Review template
 
-When submitting a new Core API for merge, include this checklist in the PR:
+When submitting a new or changed Core API for merge, copy this checklist into
+the review record. It is self-contained: a reviewer records the real call
+sites, the defaults rows, the options audit, and the drift cards here. No
+proposal lookup is required.
 
 ```
 ## Core API review
 
 Function/type: `<name>`
 Ratified decision(s): <D-XXX / S-YYY>
+Changed call sites: <file:line and the call read aloud>
+Defaults rows: <table rows or `none`>
+D4 audit: <scope, result, and every exception>
+Drift cards: <card number for every existing exception, or `none`>
+Required evidence: <example, diagnostic snapshot, and focused proof>
 
-- [ ] L1 Naming: plain English, predicate prefixed, S66 acronyms
-- [ ] L2 Fallibility: correct return type, panic only on programmer error
-- [ ] L3 Ownership: view vs ownership vs mutation explicit
-- [ ] L4 Effects: all capability markers declared
-- [ ] L5 Allocation: budget documented if non-obvious, streaming form provided
-- [ ] L6 Diagnostics: UI snapshot for error paths
-- [ ] L7 Examples: golden-tested example in examples/features/
-- [ ] L8 One way: no duplicate of existing API
+- [ ] `L1` Naming is plain English, predicate-prefixed, and uses S66 acronyms.
+- [ ] `L2` Fallibility is in the return type; panic is only for programmer error.
+- [ ] `L3` View, ownership, and mutation are explicit.
+- [ ] `L4` All capability markers and effects are declared.
+- [ ] `L5` Non-obvious allocation is budgeted and the streaming form is present.
+- [ ] `L6` Every error path has the required diagnostic copy and UI snapshot.
+- [ ] `L7` A golden-tested example exists under `examples/features/`.
+- [ ] `L8` No duplicate API or overload family remains.
+- [ ] `C1` The actual call site is useful and was judged before the declaration.
+- [ ] `C2` Required values are positional; ambiguous or uncommon options are labeled.
+- [ ] `C3` The common dataflow reads left to right through methods and `?`.
+- [ ] `D1` The bare call performs the safest common operation with no setup ceremony.
+- [ ] `D2` Every magic default has one row here and an explicit override.
+- [ ] `D3` Defaulted labeled options replace option-only overloads.
+- [ ] `D4` Every policy option is a dedicated enum; no Boolean or bare-string flag remains.
+- [ ] `F1` Expected failure is `T ? E`, and propagation is one `?`.
+- [ ] `F2` Every lookup returns `T?`; no sentinel, empty-status, or follow-up status check remains.
+- [ ] `F3` Every failure says what happened, why, and how to fix it.
+- [ ] `T1` Domain values use domain types while obvious beginner literals work at the boundary.
+- [ ] `T2` Core values are immutable; mutation belongs to containers.
+- [ ] `T3` Distinct concepts have distinct types and one simple entry door.
+- [ ] `N1` The name follows the one subject-first grammar.
+- [ ] `N2` Pure and mutating operations use their systematic noun/past-participle and imperative pairs.
+- [ ] `L-A` The I/O domain has both a whole-value call and its streaming seam.
+- [ ] `L-B` Concrete containers are eager; `.lazy` uses the same adapter vocabulary.
+- [ ] `L-C` A new container implements the one iteration protocol and inherits its adapters.
+- [ ] `L-D` Beginner presets compose expert primitives instead of forking them.
+- [ ] `E1` Superseded spellings and implementations are deleted in this change.
+- [ ] `E2` A measured gap-filler is absorbed with the useful wrapper defaults.
 ```
+
+The constructor and collection-verb rows remain governed by D-ONCE-VERB1; this
+checklist does not reopen that reconciliation.
 
 ---
 
 ## Known drift (follow-up cards)
 
-Items below existed before this rubric and have acknowledged gaps. Each has a
-Tower card tracking the fix; this list is the authoritative inventory.
+This is the current audit inventory, not a grandfather list. A row can point to
+a completed owner card when that card shipped the surface but did not reconcile
+the later doctrine rule. Such a row remains drift until a later decision and
+implementation close it.
 
 | Gap | API | Law | Follow-up |
 |-----|-----|-----|-----------|
-| — | None recorded after the Core namespace cutover | — | — |
+| Layering split between the typed/raw and one-shot/configurable rungs | `core.crypto.expert`, `core.http.client`, `core.time`, `core.mem` | `L-A`, `L-D` | #1725 |
+| Boolean client policy controls (`protocols`, `allow_http_downgrade`, and `same_origin_credentials`) | `core.http.client` / `HTTPRedirectPolicy.Follow` | `D4` | #301, #1725 |
+| Boolean static-file policy controls (`index`, `dotfiles`, `follow_links`) | `core.http.server.static_files` | `D4` | #1273 |
+| Boolean CORS policy control (`credentials`) | `core.http.server.cors_policy` | `D4` | #1273 |
+| Boolean encoding policy controls (`canonical`, `require_canonical`, `comments`, and edition-gated `allow_*` flags) | `core.encoding` | `D4` | #712 |
+| Three Boolean regex policy flags | `core.regex.flags` | `D4` | #1471 |
+| Boolean socket policy setter | `core.net.set_nodelay` | `D4` | #300 |
+| Empty-byte lookup result on missing or invalid archive entry | `core.archive.tar_get` | `F2` | #1470 |
+| Empty-string absence results and process-status sentinels | `core.url` accessors and `core.sys` facts | `F2` | #1472, #1465 |
 
-*Resolved gaps leave this table empty; new drift gets a ratified owner card before
-it is listed here.*
+Evidence boundary for this inventory: the 2026-08-14 scan covered the current
+Core declarations in `crates/jet-sema/src/Sema/CheckerCoreLib`, the matching
+Prelude surfaces, and `docs/reference/core-library.md` plus the ratified
+encoding scope in `docs/spec/encoding-decisions.md`. Boolean results, data
+fields, predicates, implementation parameters, and constructor sentinels are
+not D4 options. The rows above are the policy and lookup exceptions found in
+that scan; every exception has a card home and none is approved by this table.
 
 Resolved disposition, #1691: `core.crypto.expert` now uses distinct
 `x25519_raw` / `hkdf_sha256_raw` names, and
@@ -233,15 +280,101 @@ and examples.
 | E1 | A retired spelling is deleted in the same greenfield cutover. |
 | E2 | A measured gap-filler is absorbed with the wrapper's useful defaults. |
 
+### Part A relation map
+
+This is the proposal's mapping from the existing laws to the Part A extension.
+It records which rule is extended and which rule is new ground.
+
+| Existing law | Part A rule(s) | Effect |
+|---|---|---|
+| L1 naming | N1, N2 | extends: grammar test, side-effect pairs |
+| L2 fallibility | F1, F2 | extends: one-character test, sentinel ban |
+| L3 ownership | T2 | unchanged; values immutable |
+| L4 effects | — | unchanged |
+| L5 allocation | L-A, L-B | extends: whole-value layer, eager default |
+| L6 diagnostics | F3 | unchanged, restated |
+| L7 examples | — | unchanged |
+| L8 one way | D3, L-D, E1 | extends: defaults not overloads, presets not forks |
+| new ground | C1–C3, D1, D2, D4, T1, T3, E2 | new laws |
+
+### Worked review failures
+
+These examples show the rejection, the reason, and the reviewable replacement.
+They are doctrine examples, not additional API declarations.
+
+#### D4: Boolean policy option
+
+```jet
+// Rejected: the call does not say what `true` selects.
+parse(text, true)
+```
+
+The option is a policy choice, so the call names the choice with a dedicated
+enum and a label:
+
+```jet
+parse(text, on_error: .Lenient)
+```
+
+Returning a Boolean fact, accepting a Boolean data value, or storing a Boolean
+inside an enum payload is not this D4 failure. The audit below covers only
+user-facing policy and configuration choices.
+
+#### F2: Sentinel lookup result
+
+```jet
+// Rejected: the same Int is both an index and the "absent" signal.
+find_or_minus_one(items, needle) // returns Int; -1 means absent
+```
+
+The lookup result carries absence in its type instead:
+
+```jet
+items.find(needle) // illustrative result: Item?
+```
+
+The caller handles `None` as absence or propagates it with the ordinary
+optional path. It does not compare a valid value with a sentinel or inspect a
+second status result.
+
+### D4 options audit
+
+The audit covers user-facing policy and configuration choices in the current
+Core declarations and the ratified edition-gated encoding surface. It excludes
+Boolean results, predicates, data fields, enum payload data, implementation
+parameters, and compiler-only handles. An existing Boolean option is marked
+drift; it is not a grandfathered exception.
+
+| Surface | Current option shape | D4 result | Card home |
+|---|---|---|---|
+| `core.http.client` / `HTTPRedirectPolicy.Follow` | `protocols`, `allow_http_downgrade`, and `same_origin_credentials` are Boolean policy values. | Existing drift; replace with named enum choices in a later reconciled change. | #301, #1725 |
+| `core.http.server.static_files` | `index`, `dotfiles`, and `follow_links` are Boolean policy values. | Existing drift; the safe bare mount remains documented. | #1273 |
+| `core.http.server.cors_policy` | `credentials` is a Boolean policy value. | Existing drift; the `.Any` safety rejection remains a separate policy fact. | #1273 |
+| `core.encoding` | `json.writer` `canonical`, `CBOROptions.require_canonical`, `XMLCanonical.comments`, and edition-gated `allow_*` flags are Boolean policy values. | Existing edition and encoding-surface drift; no new encoding behavior is chosen here. | #712 |
+| `core.regex.flags` | Three Boolean flag arguments configure the regex policy. | Existing drift; the regex surface stays on its owner card. | #1471 |
+| `core.net.set_nodelay` | A Boolean argument selects socket behavior. | Existing drift; low-level control remains on the typed network surface. | #300 |
+| `HTTPProxy`, `HTTPRedirectPolicy`, `HTTPRetryPolicy`, `HTTPCorsOrigins` | Named policy enums with dot-shorthand. | Conforms to D4. | — |
+
+The audit is closed for review only when every current exception has a card
+home and the changed surface has no new Boolean or bare-string policy option.
+The known-drift table above is the card ledger for the exceptions found in the
+same audit.
+
 ### Magic defaults and expert overrides
 
-This is the one current defaults table for the common Core doors. New entries
-must extend this table or reuse an existing option.
+This is the one current defaults table for the Part A worked doors and every
+current option-bearing Core surface in the D4 audit. APIs with no magic default
+do not need a row. New entries must extend this table or reuse an existing
+option.
 
 | Door | Bare default | Explicit control |
 |---|---|---|
 | `files.read(path)` / `files.write(path, text)` | Whole-value UTF-8 file operation; write is safe for the normal path. | `open`, `create`, `append_all`, or labeled write mode. |
-| `http.get(url)` | One-shot request with the safe client defaults. | `http.client` for timeout, redirect, retry, and transport policy. |
+| `http.get(url)` | One-shot HTTPS request with the safe client defaults: bounded redirects, safe stale-connection retry, environment proxy use, and no HTTPS-to-HTTP downgrade. | `http.client` for timeout, redirect, retry, proxy, and transport policy. |
+| `http.client` | Follow at most 10 redirects, keep same-origin credentials, use safe retries, use the environment proxy, and deny HTTPS-to-HTTP downgrade; cookies stay opt-in. | `.redirects(.Follow.{ max:, same_origin_credentials: })`, `.retries(.Safe/.Idempotent/.None)`, `.proxy(HTTPProxy)`, `.allow_http_downgrade(Bool)`, and `.cookies(.Memory)`; current Boolean controls remain D4 drift. |
+| `http.server.static_files(mux, prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links`; current Boolean controls remain D4 drift. |
+| `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; the safe constructor rejects an unsafe origin/credential combination. | `methods`, `headers`, `credentials`, and `max_age`; `credentials` remains D4 drift. |
+| `encoding.*.reader` / `encoding.*.writer` | `EncodingLimits.safe()` bounds the codec; JSON writing is non-canonical unless requested. | `limits: …` and JSON `canonical: …`; the current Boolean canonical control remains D4 drift. |
 | `list.map` / `list.filter` | Eager plain collection. | `.lazy` for a deferred view. |
 | `time.now` | Local current instant with the standard clock door. | `time.now_utc` or an injected `Clock` for explicit zone/reproducibility. |
 | `crypto` | Typed safe values and fail-closed defaults. | `crypto.expert` inside the audited raw-byte boundary. |
