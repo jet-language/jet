@@ -66,7 +66,7 @@ fn builtin_math_family_has_named_field_parity_on_both_lenses() {
 #[test]
 fn measured_values_propagate_first_order_uncertainty() {
     let source = r#"
-use core.science.measurement as measurement
+use core.units as measurement
 
 fn run() {
     gravity :: measurement.from(9.8, 0.1)

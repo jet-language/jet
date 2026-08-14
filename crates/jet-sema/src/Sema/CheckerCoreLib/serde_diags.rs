@@ -103,6 +103,19 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
     )
 }
 
+pub(crate) fn unknown_core_module(module: &str, span: Span) -> Diagnostic {
+    if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(module, span) {
+        return diagnostic;
+    }
+    Diagnostic::error(
+        "E1001",
+        format!("there is no core module `{module}`"),
+        "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
+        format!("import one of: {}", Syntax::core_modules_list()),
+        Some(span),
+    )
+}
+
 /// E2411 (D-SERDE): a type used with an encoding verb can't be (de)serialized — it
 /// holds something with no wire form (a closure, handle, …), or a user type that
 /// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.

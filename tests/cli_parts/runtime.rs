@@ -77,7 +77,7 @@ fn already_migrated() {
 fn jet_fix_reports_one_print_family_migration_per_retired_spelling() {
     let dir = isolated_cwd("print_family_fix");
     let file = dir.join("run.jet");
-    let source = "use core.io as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
+    let source = "use core.term as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
     fs::write(&file, source).unwrap();
 
     let preview = Command::new(jet())
@@ -112,7 +112,7 @@ fn jet_fix_reports_one_print_family_migration_per_retired_spelling() {
     );
     assert_eq!(
         fs::read_to_string(&file).unwrap(),
-        "use core.io as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
+        "use core.term as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
     );
 }
 

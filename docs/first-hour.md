@@ -156,10 +156,10 @@ before running it.
 Save the following program as `ship.jet`:
 
 ```jet
-use core.io as io
+use core.process as process
 
 fn run() {
-    args :: io.args()
+    args :: process.argv()
     project :: if args.len() > 1 {
         args.get(1) ?? "first-hour"
     } else {
@@ -202,7 +202,7 @@ jet run ship.jet -- dashboard
 ```
 
 The delimiter tells Jet to forward later arguments to your program.
-`io.args()` reads them. The complete program is the
+`process.argv()` reads them. The complete program is the
 [golden-tested first-hour example](../examples/features/basics/first_hour.jet).
 
 ## Expert checkpoint
@@ -216,8 +216,9 @@ jet build --release ship.jet
 ```
 
 Use `--json` for machine-readable diagnostics. Use
-[`core.io`](reference/core-library.md#coreio--terminal-and-arguments) for
-terminal streams and command-line arguments. Read the
+[`core.term`](reference/core-library.md#coreterm--terminal) for terminal
+streams and [`core.process`](reference/core-library.md#coreprocess--exit-and-subprocesses)
+for command-line arguments. Read the
 [language spec](spec/spec.md) for exact semantics and
 [syntax decisions](spec/syntax-decisions.md) for ratified spellings.
 

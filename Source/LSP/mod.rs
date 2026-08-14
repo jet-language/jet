@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn retired_print_family_has_one_shared_quick_fix_per_spelling() {
         let project = TestProject::new();
-        let source = "use core.io as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
+        let source = "use core.term as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
         let fixes = collect_fixes(project.entry(), source);
         let print_fixes: Vec<_> = fixes
             .iter()
@@ -144,7 +144,7 @@ mod tests {
         assert_eq!(print_fixes.len(), 3);
         assert_eq!(
             apply_all(source, &print_fixes.into_iter().cloned().collect::<Vec<_>>()),
-            "use core.io as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
+            "use core.term as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
         );
     }
 

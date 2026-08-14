@@ -90,14 +90,14 @@ fn fixed_interpolation_selector_is_stable() {
 
 #[test]
 fn fmt_migrates_each_retired_print_spelling_to_one_canonical_job() {
-    let source = "use core.io as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
+    let source = "use core.term as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
     let edits = jet::Formatter::retired_print_family_edits(source);
     assert_eq!(edits.len(), 3, "one migration edit per retired spelling");
 
     let once = jet::format_source(source).expect("retired print family should format");
     assert_eq!(
         once,
-        "use core.io as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
+        "use core.term as io\n\nfn run() {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{value}\")\n    print(\"{value:Debug}\")\n}\n"
     );
     assert!(jet::Formatter::retired_print_family_edits(&once).is_empty());
     assert_eq!(

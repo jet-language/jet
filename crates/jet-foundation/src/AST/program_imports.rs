@@ -116,12 +116,10 @@ pub enum CoreListPath {
 /// D-CORE-USELIST1=A: the std path prefix a `use <prefix>.[…]` list walks, or
 /// `None` when the prefix names something else. The prefix may be any depth, so
 /// `use core.encoding.[json]` walks to `core.encoding.json` exactly as
-/// `use core.[encoding.json]` does. `jet` is the retired spelling of the same
-/// root and resolves to `core`.
+/// `use core.[encoding.json]` does. Retired `jet` spellings do not enter this
+/// path.
 pub fn core_list_prefix(module_alias: &str) -> Option<String> {
-    let rest = module_alias
-        .strip_prefix(Syntax::CORE_SHORT)
-        .or_else(|| module_alias.strip_prefix("jet"))?;
+    let rest = module_alias.strip_prefix(Syntax::CORE_SHORT)?;
     (rest.is_empty() || rest.starts_with('.'))
         .then(|| format!("{}{rest}", Syntax::CORE_SHORT))
 }

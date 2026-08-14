@@ -50,6 +50,37 @@ const CEILINGS: &[(&str, usize)] = &[
     ("set-replace", 0),
     ("allow-impure", 0),
     ("core-path-free-functions", 0),
+    ("core-namespace-io", 0),
+    ("core-namespace-path", 0),
+    ("core-namespace-time-date", 0),
+    ("core-namespace-time-datetime", 0),
+    ("core-namespace-text-unicode", 0),
+    ("core-namespace-fmt", 0),
+    ("core-namespace-random", 0),
+    ("core-namespace-env", 0),
+    ("core-namespace-os", 0),
+    ("core-namespace-tls", 0),
+    ("core-namespace-ws", 0),
+    ("core-namespace-url", 0),
+    ("core-namespace-mime", 0),
+    ("core-namespace-uuid", 0),
+    ("core-namespace-vault", 0),
+    ("core-namespace-raylib", 0),
+    ("core-namespace-browser", 0),
+    ("core-namespace-solve", 0),
+    ("core-namespace-sketch", 0),
+    ("core-namespace-sketch-hll", 0),
+    ("core-namespace-sketch-tdigest", 0),
+    ("core-namespace-sketch-reservoir", 0),
+    ("core-namespace-sketch-cms", 0),
+    ("core-namespace-compress", 0),
+    ("core-namespace-compress-gzip", 0),
+    ("core-namespace-compress-zstd", 0),
+    ("core-namespace-measurement", 0),
+    ("core-namespace-mem-alloc", 0),
+    ("core-namespace-scope", 0),
+    ("core-namespace-lang", 0),
+    ("core-namespace-binary", 0),
     ("target-plugin", 0),
     ("core-container-queue", 0),
     ("core-container-rank", 0),
@@ -483,6 +514,22 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if text.contains("use core.path") || text.contains("core.path.") {
                     retired += 1;
                 } else if text.contains("Path.from") || text.contains("Path.home") {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        id if id.starts_with("core-namespace-") => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains(row.retired) {
+                    retired += 1;
+                } else if text.contains(row.canonical) {
                     canonical += 1;
                 }
             }

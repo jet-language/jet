@@ -2028,6 +2028,9 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
                 ImportKind::Module(_, span) => *span,
                 ImportKind::File(_, _) | ImportKind::Unqualified { .. } => imp.span,
             };
+            if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(&module, span) {
+                return Err(diagnostic);
+            }
             return Err(Diagnostic::error(
                 "E1001",
                 format!("there is no core module `{}`", module),
@@ -2061,7 +2064,10 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
                     "E0341",
                     format!("`use jet.{ring}` is the old first-party library spelling"),
                     "first-party libraries moved to the `core.*` namespace (D-CORENS1)".to_string(),
-                    format!("write `use core.{ring}` instead"),
+                    format!(
+                        "write `use {}` instead",
+                        Syntax::canonical_ring_module(ring)
+                    ),
                     Some(*span),
                 ));
             }

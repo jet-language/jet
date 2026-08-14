@@ -260,7 +260,7 @@ fn jet_app_live_bind_sink(query: &JetLiveQuery, sink: JetLiveSink) -> JetLiveQue
     jet_live_query(query.id, record)
 }
 
-/// Register one core.ws connection as a live transport. WebSocket writes are
+/// Register one core.net.ws connection as a live transport. WebSocket writes are
 /// supplied by the existing connection adapter; the live runtime owns only
 /// bounded registration and event fan-out.
 pub(crate) fn jet_app_ws_register(sink: JetLiveSink) -> u64 {

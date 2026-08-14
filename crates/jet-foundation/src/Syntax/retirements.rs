@@ -32,6 +32,7 @@ use super::{
     RETIRED_TYPE_QUEUE, RETIRED_TYPE_RANK, RETIRED_TYPE_TALLY, TARGET_SANDBOX, TYPE_BITS,
     TYPE_BYTES, TYPE_QUEUE, TYPE_RANK, TYPE_TALLY,
 };
+use crate::Diagnostics::{Diagnostic, Span};
 
 const RETIRED_JET_TIME_NOW: &str = concat!("jet", ".time", ".now");
 const RETIRED_JET_TIME_FORMAT: &str = concat!("jet", ".time", ".format");
@@ -213,6 +214,285 @@ pub const RETIREMENTS: &[Retirement] = &[
         code: Some("E1001"),
     },
     Retirement {
+        id: "core-namespace-io",
+        retired: "core.io",
+        canonical: "core.term, core.process, or the prelude",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-path",
+        retired: "core.path",
+        canonical: "core.files",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-time-date",
+        retired: "core.time.date",
+        canonical: "core.time",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-time-datetime",
+        retired: "core.time.datetime",
+        canonical: "core.time",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-text-unicode",
+        retired: "core.text.unicode",
+        canonical: "core.text",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-fmt",
+        retired: "core.fmt",
+        canonical: "core.text.fmt",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-random",
+        retired: "core.random",
+        canonical: "core.math.random",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-env",
+        retired: "core.env",
+        canonical: "core.sys",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-os",
+        retired: "core.os",
+        canonical: "core.sys",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-tls",
+        retired: "core.tls",
+        canonical: "core.net.tls",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-ws",
+        retired: "core.ws",
+        canonical: "core.net.ws",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-url",
+        retired: "core.url",
+        canonical: "core.net.url",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-mime",
+        retired: "core.mime",
+        canonical: "core.net.mime",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-uuid",
+        retired: "core.uuid",
+        canonical: "core.crypto.uuid",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-vault",
+        retired: "core.vault",
+        canonical: "core.crypto.vault",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-raylib",
+        retired: "core.raylib",
+        canonical: "core.game.raylib",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-browser",
+        retired: "core.browser",
+        canonical: "core.web.browser",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-solve",
+        retired: "core.solve",
+        canonical: "core.compute.solve",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-sketch",
+        retired: "core.sketch",
+        canonical: "core.data.sketch.*",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-sketch-hll",
+        retired: "core.sketch.hll",
+        canonical: "core.data.sketch.hll",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-sketch-tdigest",
+        retired: "core.sketch.tdigest",
+        canonical: "core.data.sketch.tdigest",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-sketch-reservoir",
+        retired: "core.sketch.reservoir",
+        canonical: "core.data.sketch.reservoir",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-sketch-cms",
+        retired: "core.sketch.cms",
+        canonical: "core.data.sketch.cms",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-compress",
+        retired: "core.compress",
+        canonical: "core.archive.gzip or core.archive.zstd",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-compress-gzip",
+        retired: "core.compress.gzip",
+        canonical: "core.archive.gzip",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-compress-zstd",
+        retired: "core.compress.zstd",
+        canonical: "core.archive.zstd",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-measurement",
+        retired: "core.science.measurement",
+        canonical: "core.units",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-mem-alloc",
+        retired: "core.mem.alloc",
+        canonical: "core.mem",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-scope",
+        retired: "core.scope",
+        canonical: "core.mem.scope",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-lang",
+        retired: "core.lang",
+        canonical: "core.compiler.lang",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
+        id: "core-namespace-binary",
+        retired: "core.binary",
+        canonical: "core.encoding and core.term.Reader",
+        kind: RetirementKind::Semantic,
+        decision: "D-CORE-TREE1=A",
+        since: "2026-08-06",
+        code: Some("E1001"),
+    },
+    Retirement {
         id: "target-plugin",
         retired: RETIRED_TARGET_PLUGIN,
         canonical: TARGET_SANDBOX,
@@ -296,6 +576,38 @@ pub const REF_PROVIDERS: &[&str] = super::REF_SOURCE_PROVIDERS;
 /// The row with this id, if there is one.
 pub fn retirement(id: &str) -> Option<&'static Retirement> {
     RETIREMENTS.iter().find(|row| row.id == id)
+}
+
+/// Return the semantic retirement row for a removed Core namespace.
+pub fn retired_core_module(name: &str) -> Option<&'static Retirement> {
+    RETIREMENTS
+        .iter()
+        .filter(|row| {
+            row.kind == RetirementKind::Semantic
+                && row.code == Some("E1001")
+                && (row.retired == name
+                    || name
+                        .strip_prefix(row.retired)
+                        .is_some_and(|rest| rest.starts_with('.')))
+        })
+        .max_by_key(|row| row.retired.len())
+}
+
+/// Build the one E1001 resolution error for a removed Core namespace. Loader
+/// and Sema both call this so a retired path cannot fall through to the generic
+/// module list and lose its canonical home.
+pub fn retired_core_module_diagnostic(name: &str, span: Span) -> Option<Diagnostic> {
+    let row = retired_core_module(name)?;
+    Some(Diagnostic::error(
+        "E1001",
+        format!("core module `{name}` was retired"),
+        format!(
+            "{} removed this free namespace; the canonical home is {}",
+            row.decision, row.canonical
+        ),
+        format!("use one of: {}", row.canonical),
+        Some(span),
+    ))
 }
 
 /// What `jet fmt` and `jet fix` rewrite a retired spelling to, when the

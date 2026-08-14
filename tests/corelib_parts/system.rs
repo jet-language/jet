@@ -1075,6 +1075,62 @@ fn core_reference_lists_every_built_core_module() {
 }
 
 #[test]
+fn retired_core_namespaces_name_their_canonical_homes() {
+    assert_eq!(jet::AST::core_list_prefix("core"), Some("core".to_string()));
+    assert_eq!(
+        jet::AST::core_list_prefix("core.game"),
+        Some("core.game".to_string())
+    );
+    assert_eq!(jet::AST::core_list_prefix("jet"), None);
+    assert_eq!(jet::AST::core_list_prefix("jet.game"), None);
+
+    let retired = [
+        ("core.io", "core.term"),
+        ("core.path", "core.files"),
+        ("core.time.date", "core.time"),
+        ("core.time.datetime", "core.time"),
+        ("core.text.unicode", "core.text"),
+        ("core.fmt", "core.text.fmt"),
+        ("core.random", "core.math.random"),
+        ("core.env", "core.sys"),
+        ("core.os", "core.sys"),
+        ("core.tls", "core.net.tls"),
+        ("core.ws", "core.net.ws"),
+        ("core.url", "core.net.url"),
+        ("core.mime", "core.net.mime"),
+        ("core.uuid", "core.crypto.uuid"),
+        ("core.vault", "core.crypto.vault"),
+        ("core.raylib", "core.game.raylib"),
+        ("core.browser", "core.web.browser"),
+        ("core.solve", "core.compute.solve"),
+        ("core.sketch.hll", "core.data.sketch.hll"),
+        ("core.sketch.tdigest", "core.data.sketch.tdigest"),
+        ("core.sketch.reservoir", "core.data.sketch.reservoir"),
+        ("core.sketch.cms", "core.data.sketch.cms"),
+        ("core.compress.gzip", "core.archive.gzip"),
+        ("core.compress.zstd", "core.archive.zstd"),
+        ("core.science.measurement", "core.units"),
+        ("core.mem.alloc", "core.mem"),
+        ("core.scope", "core.mem.scope"),
+        ("core.lang", "core.compiler.lang"),
+        ("core.binary", "core.encoding"),
+    ];
+    for (retired, canonical) in retired {
+        let source = format!("use {retired} as old\nfn run() {{}}\n");
+        let diagnostics = jet::compile(&source).expect_err(retired);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E1001")
+            .unwrap_or_else(|| panic!("{retired} did not produce E1001: {diagnostics:?}"));
+        assert!(
+            diagnostic.fix.contains(canonical),
+            "{retired} did not name {canonical}: {}",
+            diagnostic.fix
+        );
+    }
+}
+
+#[test]
 fn jet_raylib_namespace_is_not_a_core_module_alias() {
     assert!(jet::Syntax::is_known_core_module("core.game.raylib"));
     assert!(!jet::Syntax::is_known_core_module("jet.raylib"));
@@ -1091,6 +1147,10 @@ fn run() {
         diags.iter().any(|d| d.code == "E0341"),
         "expected E0341 for retired namespace, got: {:?}",
         diags.iter().map(|d| d.code.to_string()).collect::<Vec<_>>()
+    );
+    assert!(
+        diags.iter().any(|d| d.fix.contains("core.game.raylib")),
+        "raylib retirement must name its canonical home: {diags:?}"
     );
 }
 

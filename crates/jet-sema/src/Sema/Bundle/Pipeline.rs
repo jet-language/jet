@@ -1546,7 +1546,10 @@ fn check_bundle_opts_for_output_inner(
                             format!("`use jet.{ring}` is the old first-party library spelling"),
                             "first-party libraries moved to the `core.*` namespace (D-CORENS1)"
                                 .to_string(),
-                            format!("write `use core.{ring}` instead"),
+                            format!(
+                                "write `use {}` instead",
+                                crate::Syntax::canonical_ring_module(ring)
+                            ),
                             Some(imp.span),
                         ));
                         continue;
@@ -1555,13 +1558,9 @@ fn check_bundle_opts_for_output_inner(
             }
             if let Some(module) = imp.core_module_path() {
                 if !crate::Syntax::is_known_core_module(&module) {
-                    diags.push(Diagnostic::error(
-                        "E1001",
-                        format!("there is no core module `{}`", module),
-                        "`core` is compiler-known in M10, and only the frozen core modules exist"
-                            .to_string(),
-                        format!("import one of: {}", crate::Syntax::core_modules_list()),
-                        Some(imp.span),
+                    diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
+                        &module,
+                        imp.span,
                     ));
                     continue;
                 }
@@ -1751,12 +1750,9 @@ fn check_bundle_opts_for_output_inner(
                                 *module_alias_span,
                             ));
                         } else {
-                            diags.push(Diagnostic::error(
-                                "E1001",
-                                format!("there is no core module `{}`", full),
-                                "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
-                                format!("import one of: {}", crate::Syntax::core_modules_list()),
-                                Some(*module_alias_span),
+                            diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
+                                &full,
+                                *module_alias_span,
                             ));
                         }
                         continue;
@@ -1931,13 +1927,9 @@ fn check_bundle_opts_for_output_inner(
                 // module body.
                 if let Some(module) = imp.core_module_path() {
                     if !crate::Syntax::is_known_core_module(&module) {
-                        diags.push(Diagnostic::error(
-                            "E1001",
-                            format!("there is no core module `{module}`"),
-                            "`core` is compiler-known, and only the frozen core modules exist"
-                                .to_string(),
-                            format!("import one of: {}", crate::Syntax::core_modules_list()),
-                            Some(imp.span),
+                        diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
+                            &module,
+                            imp.span,
                         ));
                         continue;
                     }
@@ -2140,12 +2132,9 @@ fn check_bundle_opts_for_output_inner(
                                             module_alias_span,
                                         ));
                                     } else {
-                                        diags.push(Diagnostic::error(
-                                            "E1001",
-                                            format!("there is no core module {full}"),
-                                            "core is compiler-known, and only the frozen core modules exist".to_string(),
-                                            format!("import one of: {}", crate::Syntax::core_modules_list()),
-                                            Some(module_alias_span),
+                                        diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
+                                            &full,
+                                            module_alias_span,
                                         ));
                                     }
                                     None

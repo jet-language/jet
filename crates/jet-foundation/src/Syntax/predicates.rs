@@ -157,6 +157,14 @@ pub fn core_modules_list() -> String {
     KNOWN_CORE_MODULES.join(", ")
 }
 
+/// The canonical Core home for an old first-party ring spelling.
+pub fn canonical_ring_module(name: &str) -> String {
+    match name {
+        "raylib" => "core.game.raylib".to_string(),
+        _ => format!("core.{name}"),
+    }
+}
+
 /// E2-M9: ring module names that resolve as compiler-known modules.
 pub fn is_ring_module(name: &str) -> bool {
     matches!(

@@ -1565,7 +1565,7 @@ Most unit scales are exact ratios. Degree uses the exact symbolic definition
 pinned BIPM/CODATA central value, standard uncertainty, and source. A measured
 crossing requires an explicit rounded conversion and is never labeled exact.
 
-### `core.science.measurement` — measured numeric values (D-TYPE2-UNCERT1)
+### `core.units` — measured numeric values (D-TYPE2-UNCERT1)
 
 `measurement.from(value, uncertainty)` is the canonical measured-value
 constructor. An exact value enters the measured grade with uncertainty `0.0`.
@@ -1574,7 +1574,7 @@ Correlated errors are out of scope. Ordinary numeric code keeps its existing
 meaning until a measured value enters it.
 
 ```jet
-use core.science.measurement as measurement
+use core.units as measurement
 
 fn run() {
     gravity :: measurement.from(9.8, 0.1)

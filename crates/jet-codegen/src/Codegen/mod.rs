@@ -1321,11 +1321,11 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
             "core.web",
             "core.db",
             "core.sync",
-            "core.ws",
+            "core.net.ws",
             "core.http",
             "core.http.client",
             "core.http.server",
-            "core.browser",
+            "core.web.browser",
         ],
     );
     if needs_app_runtime {

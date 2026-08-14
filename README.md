@@ -108,7 +108,7 @@ The language, compiler, and core library are post-v1.0. Pin your toolchain with
 Not yet ready: registry upload (`jet registry publish` validates but does not upload —
 use git-based dependencies), `jet store gc` (stub until M12.2 registry lands), and
 `jet self doctor --online` (registry not wired). HTTPS clients use rustls with
-system roots by default; `core.tls` provides advanced client TLS configuration.
+system roots by default; `core.net.tls` provides advanced client TLS configuration.
 
 ## Repo map
 
