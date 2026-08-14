@@ -338,6 +338,8 @@ fn panic_context_uses_only_lexically_live_locals() {
             &["context_only"],
         ),
         (
+            // Card #1939: the dotted fixture stem must not reach rustc as a
+            // crate name while TaskGroup lowering is exercised.
             "task.group",
             "task.group g { task_group_only :: 7; print(task_group_only) }",
             &["task_group_only"],

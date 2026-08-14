@@ -3428,7 +3428,14 @@ pub(crate) fn write_web_artifacts(
         "wasm32-unknown-unknown",
         "--crate-type",
         "cdylib",
+        "--crate-name",
     ]);
+    rustc.arg(jet::Syntax::sanitize_crate_name(
+        wasm_rs_path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("out"),
+    ));
     if emit_maps {
         // Exact Jet statement lines need rustc's Wasm line table.
         rustc.args(["-C", "opt-level=0", "-C", "debuginfo=2"]);
@@ -3591,6 +3598,15 @@ pub(crate) fn write_plugin_artifacts(
             "--crate-type",
             "cdylib",
             "-O",
+            "--crate-name",
+        ])
+        .arg(jet::Syntax::sanitize_crate_name(
+            guest_rust_path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("out"),
+        ))
+        .args([
             guest_rust_path.to_str().unwrap(),
             "-o",
             core_wasm_path.to_str().unwrap(),
@@ -3708,6 +3724,13 @@ fn library_rustc(
         .arg("2021")
         .arg("--crate-type")
         .arg(crate_type)
+        .arg("--crate-name")
+        .arg(jet::Syntax::sanitize_crate_name(
+            source
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("out"),
+        ))
         .arg(source)
         .arg("-o")
         .arg(output);
