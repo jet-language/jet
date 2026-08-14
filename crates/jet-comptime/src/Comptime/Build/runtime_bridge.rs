@@ -286,7 +286,7 @@ fn eval_session_method(
             if args.len() >= 10 {
                 for pool in string_list_arg(&args, 9, span)? {
                     let pool = match pool.to_ascii_lowercase().as_str() {
-                        "cpu" => BuildResourcePool::Cpu,
+                        "cpu" => BuildResourcePool::CPU,
                         "memory" => BuildResourcePool::Memory,
                         "linker" => BuildResourcePool::Linker,
                         "console" => BuildResourcePool::Console,
@@ -410,7 +410,7 @@ fn eval_session_method(
             if args.len() >= 11 {
                 for pool in string_list_arg(&args, 10, span)? {
                     let pool = match pool.to_ascii_lowercase().as_str() {
-                        "cpu" => BuildResourcePool::Cpu,
+                        "cpu" => BuildResourcePool::CPU,
                         "memory" => BuildResourcePool::Memory,
                         "linker" => BuildResourcePool::Linker,
                         "console" => BuildResourcePool::Console,

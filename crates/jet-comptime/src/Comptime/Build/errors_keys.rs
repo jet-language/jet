@@ -332,7 +332,7 @@ fn encode_capability(w: &mut KeyWriter, cap: &BuildCapability) {
 
 fn encode_resource_pool(w: &mut KeyWriter, pool: &BuildResourcePool) {
     match pool {
-        BuildResourcePool::Cpu => w.str("cpu"),
+        BuildResourcePool::CPU => w.str("cpu"),
         BuildResourcePool::Memory => w.str("memory"),
         BuildResourcePool::Linker => w.str("linker"),
         BuildResourcePool::Console => w.str("console"),

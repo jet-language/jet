@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
     vec![
-        BuildResourcePoolSpec::new(BuildResourcePool::Cpu, 0),
+        BuildResourcePoolSpec::new(BuildResourcePool::CPU, 0),
         BuildResourcePoolSpec::new(BuildResourcePool::Memory, 0),
         BuildResourcePoolSpec::new(BuildResourcePool::Linker, 1),
         BuildResourcePoolSpec::new(BuildResourcePool::Console, 1),
@@ -17,7 +17,7 @@ pub(super) fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
 
 pub(super) fn action_pools(action: &BuildAction) -> Vec<BuildResourcePool> {
     if action.resource_pools.is_empty() {
-        vec![BuildResourcePool::Cpu]
+        vec![BuildResourcePool::CPU]
     } else {
         action.resource_pools.iter().cloned().collect()
     }

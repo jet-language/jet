@@ -14,7 +14,7 @@ const MAX_LEGACY_PROJECT_INPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildResourcePool {
-    Cpu,
+    CPU,
     Memory,
     Linker,
     Console,
@@ -25,7 +25,7 @@ pub enum BuildResourcePool {
 impl BuildResourcePool {
     pub fn as_str(&self) -> &str {
         match self {
-            BuildResourcePool::Cpu => "cpu",
+            BuildResourcePool::CPU => "cpu",
             BuildResourcePool::Memory => "memory",
             BuildResourcePool::Linker => "linker",
             BuildResourcePool::Console => "console",
@@ -146,7 +146,7 @@ fn parse_import_array(value: &str) -> Vec<String> {
 
 fn import_resource_pool(value: &str) -> BuildResourcePool {
     match value.to_ascii_lowercase().as_str() {
-        "cpu" => BuildResourcePool::Cpu,
+        "cpu" => BuildResourcePool::CPU,
         "memory" => BuildResourcePool::Memory,
         "linker" => BuildResourcePool::Linker,
         "console" => BuildResourcePool::Console,

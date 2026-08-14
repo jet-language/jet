@@ -1145,7 +1145,7 @@ fn parse_packaged_action_kind(value: &str) -> Result<ActionKind, BuildError> {
 
 fn parse_packaged_resource_pool(value: &str) -> BuildResourcePool {
     match value {
-        "cpu" => BuildResourcePool::Cpu,
+        "cpu" => BuildResourcePool::CPU,
         "memory" => BuildResourcePool::Memory,
         "linker" => BuildResourcePool::Linker,
         "console" => BuildResourcePool::Console,

@@ -1840,7 +1840,7 @@ fn scheduler_records_parallel_ready_graph_pools_cancellation_and_metrics() {
             "compile-core",
             ActionSpec::cached(["jetc", "src/core.jet"])
                 .with_outputs(["build/core.o"])
-                .with_pool(BuildResourcePool::Cpu),
+                .with_pool(BuildResourcePool::CPU),
         )
         .unwrap();
     let ui = b
@@ -1848,7 +1848,7 @@ fn scheduler_records_parallel_ready_graph_pools_cancellation_and_metrics() {
             "compile-ui",
             ActionSpec::cached(["jetc", "src/ui.jet"])
                 .with_outputs(["build/ui.o"])
-                .with_pool(BuildResourcePool::Cpu),
+                .with_pool(BuildResourcePool::CPU),
         )
         .unwrap();
     let link = b
@@ -1924,7 +1924,7 @@ fn scheduler_orders_file_producer_before_consumer_without_target_dep() {
             "generate",
             ActionSpec::cached(["gen"])
                 .with_outputs([".jet/generated/schema.jet"])
-                .with_pool(BuildResourcePool::Cpu),
+                .with_pool(BuildResourcePool::CPU),
         )
         .unwrap();
     let compile = b
@@ -1933,7 +1933,7 @@ fn scheduler_orders_file_producer_before_consumer_without_target_dep() {
             ActionSpec::cached(["jetc", ".jet/generated/schema.jet"])
                 .with_inputs([".jet/generated/schema.jet"])
                 .with_outputs(["build/schema.o"])
-                .with_pool(BuildResourcePool::Cpu),
+                .with_pool(BuildResourcePool::CPU),
         )
         .unwrap();
     b.add_library("gen", TargetSpec::new().with_action(gen))

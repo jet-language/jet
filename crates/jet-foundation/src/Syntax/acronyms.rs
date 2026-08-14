@@ -47,6 +47,7 @@ pub const ACRONYM_RESPILLS: &[(&str, &str)] = &[
     ("Sql", "SQL"),
     ("Cli", "CLI"),
     ("Abi", "ABI"),
+    ("Cpu", "CPU"),
     ("Gpu", "GPU"),
     ("Fs", "FS"),
     ("Db", "DB"),

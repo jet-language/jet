@@ -55,6 +55,48 @@ fn generated_symbol_ladder_has_one_canonical_prefix() {
     assert_eq!(generated_suffix("__jet_lambda_7"), "lambda_7");
 }
 
+#[test]
+fn compiler_user_visible_enums_obey_acronym_lexicon() {
+    use jet::Comptime::Build::{BuildCapability, BuildResourcePool};
+    use jet::Syntax::respell_acronym_name;
+
+    fn assert_variants(enum_name: &str, variants: &[(&str, &str, &str, &str)]) {
+        for (retired, canonical, rendered, expected) in variants {
+            assert_eq!(
+                respell_acronym_name(retired),
+                *canonical,
+                "{enum_name} variant `{retired}` has no canonical acronym respell"
+            );
+            assert_eq!(
+                respell_acronym_name(canonical),
+                *canonical,
+                "{enum_name} canonical variant `{canonical}` is still retired"
+            );
+            assert_eq!(
+                *rendered, *expected,
+                "{enum_name} variant `{canonical}` renders the wrong user-visible word"
+            );
+        }
+    }
+
+    assert_variants(
+        "BuildCapability",
+        &[
+            ("Fs", "FS", BuildCapability::FS.name(), "FS"),
+            ("Io", "IO", BuildCapability::IO.name(), "IO"),
+            ("Db", "DB", BuildCapability::DB.name(), "DB"),
+            ("Gpu", "GPU", BuildCapability::GPU.name(), "GPU"),
+        ],
+    );
+    assert_variants(
+        "BuildResourcePool",
+        &[
+            ("Cpu", "CPU", BuildResourcePool::CPU.as_str(), "cpu"),
+            ("Gpu", "GPU", BuildResourcePool::GPU.as_str(), "gpu"),
+        ],
+    );
+}
+
 const ROOTS: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
