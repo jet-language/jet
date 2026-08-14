@@ -894,9 +894,9 @@ pub(super) fn eval_handle_with_type_and_sink(
                     .unwrap_or(0),
                 _ => 0,
             };
-            Ok(CtValue::Float(
+            Ok(CtValue::Float(crate::AST::CtFloat::f64(
                 duration_kernel::jet_duration_kernel_seconds_value(ns),
-            ))
+            )))
         }
         THandleOp::FileReaderReadLine => Err(unsupported("handle `FileReaderReadLine`", span)),
         THandleOp::FileWriterWriteLine => Err(unsupported("handle `FileWriterWriteLine`", span)),
