@@ -3327,6 +3327,7 @@ fn emit_test_main_cov_mode(
             "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
         ));
         out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+        out.push_str("    jet_test_trace_tier();\n");
         out.push_str("    jet_test_suite_install(jet_test_command_run);\n");
         out.push_str("    run();\n");
         out.push_str("    let output = jet_test_take_output();\n");
