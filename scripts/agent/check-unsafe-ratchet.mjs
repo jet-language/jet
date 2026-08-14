@@ -167,26 +167,120 @@ function skipComment(text, start) {
   return text.length;
 }
 
+function isIdentifierChar(char) {
+  return Boolean(char) && /[A-Za-z0-9_]/.test(char);
+}
+
+function skipSpace(text, start) {
+  let index = start;
+  while (/\s/.test(text[index] ?? "")) index += 1;
+  return index;
+}
+
+function decodeJetString(text) {
+  let value = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\\") {
+      const escaped = text[++index];
+      if (escaped === "n") value += "\n";
+      else if (escaped === "t") value += "\t";
+      else if (escaped === '"') value += '"';
+      else if (escaped === "\\") value += "\\";
+      else return null;
+    } else if (char === "{" && text[index + 1] === "{") {
+      value += "{";
+      index += 1;
+    } else if (char === "}" && text[index + 1] === "}") {
+      value += "}";
+      index += 1;
+    } else if (char === "{" || char === "}") {
+      return null;
+    } else {
+      value += char;
+    }
+  }
+  return value;
+}
+
+function quotedStringAt(text, start) {
+  if (text[start] !== '"' || text.startsWith('"""', start)) return null;
+  const end = skipQuoted(text, start, '"');
+  if (end <= start || text[end - 1] !== '"') return null;
+  const reason = decodeJetString(text.slice(start + 1, end - 1));
+  return reason === null ? null : { end, reason };
+}
+
 function unsafeAt(text, start) {
-  const word = "#Unsafe";
-  const after = text[start + word.length];
-  if (after && /[A-Za-z0-9_]/.test(after)) return null;
-  let index = start + word.length;
-  while (/\s/.test(text[index] ?? "")) index += 1;
+  if (text[start] !== "#") return null;
+  let index = skipSpace(text, start + 1);
+  if (!text.startsWith("Unsafe", index) || isIdentifierChar(text[index + "Unsafe".length])) return null;
+  index = skipSpace(text, index + "Unsafe".length);
   if (text[index] !== "(") return null;
-  index += 1;
-  while (/\s/.test(text[index] ?? "")) index += 1;
-  if (text[index] !== '"') return null;
-  const end = skipQuoted(text, index, '"');
-  if (end <= index || text[end - 1] !== '"') return null;
-  const rawReason = text.slice(index, end);
-  let reason;
-  try {
-    reason = JSON.parse(rawReason);
-  } catch {
+  const literal = quotedStringAt(text, skipSpace(text, index + 1));
+  return literal ? { end: literal.end, reason: literal.reason } : null;
+}
+
+function skipBalanced(text, start, open, close) {
+  let depth = 0;
+  for (let index = start; index < text.length; index += 1) {
+    if (text.startsWith("//", index) || text.startsWith("/*", index)) {
+      index = skipComment(text, index) - 1;
+      continue;
+    }
+    if (text.startsWith("\"\"\"", index)) {
+      index = skipQuoted(text, index, "\"\"\"") - 1;
+      continue;
+    }
+    if (text[index] === '"' || text[index] === "`" || text[index] === "'") {
+      index = skipQuoted(text, index, text[index]) - 1;
+      continue;
+    }
+    if (text[index] === open) depth += 1;
+    else if (text[index] === close) {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return text.length;
+}
+
+function markerGroupAt(text, start) {
+  if (!text.startsWith("#[", start)) return null;
+  const markers = [];
+  let index = start + 2;
+  while (index < text.length) {
+    index = skipSpace(text, index);
+    if (text[index] === "]") return { end: index + 1, markers };
+    let negated = false;
+    if (text[index] === "!") {
+      negated = true;
+      index = skipSpace(text, index + 1);
+    }
+    if (!/[A-Za-z_]/.test(text[index] ?? "")) return null;
+    const nameStart = index;
+    index += 1;
+    while (isIdentifierChar(text[index])) index += 1;
+    const name = text.slice(nameStart, index);
+    index = skipSpace(text, index);
+    let reason = null;
+    if (text[index] === "(") {
+      if (name === "Unsafe") {
+        const literal = quotedStringAt(text, skipSpace(text, index + 1));
+        reason = literal?.reason ?? null;
+      }
+      index = skipBalanced(text, index, "(", ")");
+    }
+    markers.push({ name, negated, reason });
+    index = skipSpace(text, index);
+    if (text[index] === ",") {
+      index += 1;
+      continue;
+    }
+    if (text[index] === "]") return { end: index + 1, markers };
     return null;
   }
-  return typeof reason === "string" ? { end, reason } : null;
+  return null;
 }
 
 function scanSource(text, relativePath, owner) {
@@ -213,7 +307,19 @@ function scanSource(text, relativePath, owner) {
       index = skipQuoted(text, index, "'");
       continue;
     }
-    if (text.startsWith("#Unsafe", index)) {
+    if (text.startsWith("#[", index)) {
+      const group = markerGroupAt(text, index);
+      if (group) {
+        for (const marker of group.markers) {
+          if (marker.name !== "Unsafe" || marker.negated || marker.reason === null) continue;
+          const position = location(starts, index);
+          regions.push({ package: owner, file: relativePath, line: position.line, column: position.column, reason: marker.reason });
+        }
+        index = group.end;
+        continue;
+      }
+    }
+    if (text[index] === "#") {
       const found = unsafeAt(text, index);
       if (found) {
         const position = location(starts, index);

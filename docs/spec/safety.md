@@ -10,7 +10,8 @@ The repository records every user-written unsafe region in one baseline. The
 baseline splits regions by crate or package and names each file, position, and
 reason. `scripts/agent/check-unsafe-ratchet.mjs` checks the baseline.
 
-The check scans `.jet` source files. It ignores generated FFI files under
+The check scans `.jet` source files, including both bare and grouped
+`#Unsafe("reason")` markers. It ignores generated FFI files under
 `.jet/bindings/`. A higher count fails with each new region. Use `--update` in
 the same change when the new region is approved. A lower count updates the
 baseline automatically.
@@ -19,11 +20,11 @@ baseline automatically.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 54,
+  "total": 62,
   "counts": {
     "docs": 2,
-    "examples": 15,
-    "tests": 37
+    "examples": 17,
+    "tests": 43
   },
   "regions": [
     {
@@ -85,9 +86,23 @@ baseline automatically.
     {
       "package": "examples",
       "file": "examples/features/lowlevel/inline_asm.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "the operands are scalar registers and add does not access memory"
+    },
+    {
+      "package": "examples",
+      "file": "examples/features/lowlevel/inline_asm.jet",
       "line": 8,
       "column": 5,
       "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "examples",
+      "file": "examples/features/lowlevel/inline_c.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "the scalar ABI contract matches the C definition"
     },
     {
       "package": "examples",
@@ -186,6 +201,48 @@ baseline automatically.
       "line": 13,
       "column": 1,
       "reason": "the local slot remains live for the complete C call"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ffi_asm_float_signature.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "register-only increment"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ffi_asm_missing_return_anchor.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "cycle counter"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ffi_asm_no_mem.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "register-only increment"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ffi_body_not_string.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "demo"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ffi_inline_c_mismatch.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "deliberate mismatch fixture"
+    },
+    {
+      "package": "tests",
+      "file": "tests/ui/ffi_unknown_language.jet",
+      "line": 1,
+      "column": 1,
+      "reason": "demo"
     },
     {
       "package": "tests",
@@ -413,9 +470,9 @@ baseline automatically.
 | crate/package | regions |
 | --- | ---: |
 | docs | 2 |
-| examples | 15 |
-| tests | 37 |
-| **total** | **54** |
+| examples | 17 |
+| tests | 43 |
+| **total** | **62** |
 
 ### Regions
 
@@ -429,7 +486,9 @@ baseline automatically.
 | examples | examples/features/effects/single_use_discard.jet | 39:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
 | examples | examples/features/io/os_process_control.jet | 25:5 | "POSIX process and pipe control for the core.os surface" |
 | examples | examples/features/io/process_exit_cleanup.jet | 15:5 | "the exit callback has no captured state" |
+| examples | examples/features/lowlevel/inline_asm.jet | 3:1 | "the operands are scalar registers and add does not access memory" |
 | examples | examples/features/lowlevel/inline_asm.jet | 8:5 | "call the audited register-only assembly contract" |
+| examples | examples/features/lowlevel/inline_c.jet | 1:1 | "the scalar ABI contract matches the C definition" |
 | examples | examples/features/lowlevel/inline_c.jet | 6:5 | "call the audited inline C contract" |
 | examples | examples/features/lowlevel/lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | examples | examples/features/lowlevel/mmio_board_write.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
@@ -444,6 +503,12 @@ baseline automatically.
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | tests | tests/ui/audited_gate_ladder_forbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
 | tests | tests/ui/cffi_out_pointer_requires_unsafe.jet | 13:1 | "the local slot remains live for the complete C call" |
+| tests | tests/ui/ffi_asm_float_signature.jet | 3:1 | "register-only increment" |
+| tests | tests/ui/ffi_asm_missing_return_anchor.jet | 3:1 | "cycle counter" |
+| tests | tests/ui/ffi_asm_no_mem.jet | 1:1 | "register-only increment" |
+| tests | tests/ui/ffi_body_not_string.jet | 1:1 | "demo" |
+| tests | tests/ui/ffi_inline_c_mismatch.jet | 1:1 | "deliberate mismatch fixture" |
+| tests | tests/ui/ffi_unknown_language.jet | 1:1 | "demo" |
 | tests | tests/ui/crypto_argon2id_literal_policy_type_precedence.jet | 7:5 | "fixed password-hash vector" |
 | tests | tests/ui/crypto_argon2id_literal_policy_valid.jet | 7:5 | "protocol-selected password policy" |
 | tests | tests/ui/crypto_argon2id_literal_policy_valid.jet | 15:5 | "fixed password-hash vectors" |

@@ -56,14 +56,21 @@ fn seed(fixture: &Fixture) {
 
 pub fn ratchet_trips_on_seeded_growth() {
     let fixture = Fixture::new("growth");
-    fixture.write("main.jet", "#Unsafe(\"seed region\") {}\n");
+    fixture.write(
+        "main.jet",
+        r##"// #Unsafe("comment only")
+text :: "#Unsafe(\"string only\")"
+#Unsafe("seed region") {}
+#[Unsafe("function region"), FFI(c)] fn foreign() {}
+"##,
+    );
     seed(&fixture);
     fixture.write("new.jet", "#Unsafe(\"new region reason\") {}\n");
 
     let output = ratchet(&fixture, false);
     assert!(!output.status.success(), "growth must fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("fixture: 1 -> 2"), "{stderr}");
+    assert!(stderr.contains("fixture: 2 -> 3"), "{stderr}");
     assert!(stderr.contains("new.jet"), "{stderr}");
     assert!(stderr.contains("new region reason"), "{stderr}");
 }
