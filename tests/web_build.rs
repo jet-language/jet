@@ -1654,8 +1654,7 @@ fn web_contracts_execute_with_canonical_e3005_on_js_and_wasm() {
     let cases = [
         (
             "contract_js",
-            r#"#Target(JS)
-#[Pre(value > 0, "positive"), Post(result > value, "grows")]
+            r#"#[Target(JS), Pre(value > 0, "positive"), Post(result > value, "grows")]
 fn checked(value: Int) => Int {
     return value
 }
@@ -1670,8 +1669,7 @@ fn run() {
         ),
         (
             "contract_wasm",
-            r#"#Target(Wasm)
-#[Pre(value > 0, "positive"), Post(result > value, "grows")]
+            r#"#[Target(Wasm), Pre(value > 0, "positive"), Post(result > value, "grows")]
 fn checked(value: Int) => Int {
     return value
 }
