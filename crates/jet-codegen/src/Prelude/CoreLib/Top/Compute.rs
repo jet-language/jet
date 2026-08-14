@@ -7,7 +7,7 @@
 // Engines only marshal into these Prelude symbols (I9).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum JetComputeDevice {
+pub enum JetComputeDevice {
     Auto,
     Cpu,
 }
@@ -180,13 +180,13 @@ struct JetComputeTapeNode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct JetComputeTape {
+pub struct JetComputeTape {
     nodes: Vec<JetComputeTapeNode>,
     inputs: Vec<JetTensor>,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct JetComputeVjpState {
+pub struct JetComputeVjpState {
     value: JetTensor,
     tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
     output_node: Option<usize>,
@@ -2336,7 +2336,7 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
 // ── #1138: stream + transfer receipts (CPU oracle) ──────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct JetComputeStream {
+pub struct JetComputeStream {
     id: i64,
     device: JetComputeDevice,
 }
@@ -3836,7 +3836,7 @@ fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeErro
 // ── #1137 sparse CSR + #1143 CPU SIMD tile + #1147 profile ──────────────────
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct JetSparseCsr {
+pub struct JetSparseCsr {
     rows: i64,
     cols: i64,
     row_ptr: Vec<i64>,
