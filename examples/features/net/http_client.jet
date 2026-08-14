@@ -18,13 +18,13 @@ fn run() ? {
         _req_two :: stream_two.read_text(8192) ?? return
         net.tcp_reply(^stream_two, "200 OK", "hello from core.http") ?? return
     }
-    addr :: ch.receive().or_err("no addr")?
-    simple :: http.get("http://{addr}/")?
+    addr :: ch.receive() ?? return Err("no addr")
+    simple :: http.get("http://{addr}/") ?? return Err("simple get failed")
     configured :: http_client.request("GET", "http://{addr}/")
         .connect_timeout(1000)
-        .send()?
-    simple_body :: simple.body().text(8 * 1024 * 1024)?
-    configured_body :: configured.body().text(8 * 1024 * 1024)?
+        .send() ?? return Err("configured get failed")
+    simple_body :: simple.body().text(8 * 1024 * 1024) ?? return Err("simple body failed")
+    configured_body :: configured.body().text(8 * 1024 * 1024) ?? return Err("configured body failed")
     print("http rungs agree: {simple.status() == configured.status() && simple_body == configured_body}")
-    t.join()?
+    t.join() ?? return Err("server failed")
 }
