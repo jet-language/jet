@@ -111,7 +111,7 @@ The corpus already contains the correct pattern, four times, in the same directo
 
 ```text
 Prelude/TaskGroup.rs      "This exact Prelude source is compiled for JIT hosts and embedded in AOT programs."
-Prelude/Stream.rs         one 149-line substrate "so suspension, cancellation, cleanup cannot drift by tier"
+Prelude/Stream.rs         one shared substrate "so suspension, cancellation, cleanup cannot drift by tier"
 Prelude/SharedProtocol.rs one lock/condition protocol for native values and evaluator adapters
 Prelude/CoreLib/Top/IoLineStream.rs  "so the JIT host can include! this exact source instead of re-encoding the logic a second time"
 ```
@@ -119,14 +119,11 @@ Prelude/CoreLib/Top/IoLineStream.rs  "so the JIT host can include! this exact so
 And the violation, in the highest-stakes file of the domain:
 
 ```text
-BEFORE:  crates/jet-codegen/src/scheduler.rs         2,216 lines, compiled for JIT hosts
-         crates/jet-codegen/src/Prelude/Scheduler.rs 2,726 lines, embedded in AOT programs
-         — the two disagree across most of their length; E3003 text typed separately in each; "one mechanism" is a comment
-
-AFTER:   crates/jet-codegen/src/Prelude/Scheduler.rs  the only scheduler
-         jet-jit:  include!-s it, supplies representation adapters only
-         AOT:      include_str!-s the same bytes
-         guard:    a test that fails if a second file defines jet_scheduler_*
+RESOLVED: crates/jet-codegen/src/Prelude/Scheduler.rs  the only scheduler
+          crates/jet-codegen/src/Prelude/Stream.rs     the only Stream lifecycle substrate
+          jet-jit:  includes the same scheduler/Stream source and supplies representation adapters only
+          AOT:      embeds the same scheduler/Stream source
+          guard:    tests fail if a second scheduler or Stream source appears
 ```
 
 Same treatment for the other four engine coats: the `core.data` kernels (delete `DataLite`, comptime and the interpreter call the one Prelude function — and the differential test gains adversarial fixtures: empty input, catastrophic-cancellation arrays), the derive generators and the two purity walkers (both already named as shadow systems by the metaprogramming and authority slates — this element adds only their guards), and the JS `DomRuntime` port (which the audit verified is a faithful line-by-line port — so it gains a guard that diffs the two sources structurally, the cheapest possible parity proof).

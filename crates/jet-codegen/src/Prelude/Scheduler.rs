@@ -120,6 +120,13 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
 struct JetCancelUnwind;
 
+/// Identify the one internal unwind used by D-CANCELMODEL1=C. Shared
+/// lifecycle helpers use this predicate to keep cancellation out of the
+/// ordinary producer-failure rail.
+pub fn jet_scheduler_is_cancel_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
+    payload.is::<JetCancelUnwind>()
+}
+
 struct JetDeadlineUnwind {
     rendered: String,
 }

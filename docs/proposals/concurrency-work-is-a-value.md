@@ -103,7 +103,7 @@ line references prove each claim.
 | 7 | The runtime knows a task ends four ways. Jet code gets a `String`. | `scheduler.rs:1223` vs `StructuralDebug.rs:31` |
 | 8 | Four handle types exist only in error messages: `TaskGroup`, `SelectBuilder`, `Transaction`, `Capability` | `effects_surface.rs:128/147/263/121` |
 | 9 | `Receiver<T>` cannot be written in a signature; a dead `Channel` entry can | `type_assign.rs:284` |
-| 10 | Streams run on the task scheduler with a separately written shutdown law — and the copies drifted | D-STREAMYIELD1 vs `field-audit-2026-08-03.md:194` |
+| 10 | Streams once carried a separately written shutdown law; D-CONC-STREAM1 now delegates lifecycle to the task law | D-CONC-STREAM1=A and D-CANCELMODEL1=C |
 | 11 | `select` does not work on the interpreter tier; the `.read` arm is dropped on every tier | `TIR/eval/exprs.rs:5139`, `emit/helpers.rs:225` |
 | 12 | The earlier STM text differed from the shipped ordered-lock commit | `docs/spec/syntax-decisions.md:1903-1907` and `crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:115-140` |
 

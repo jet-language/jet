@@ -6955,6 +6955,10 @@ impl<'a> EvalCtx<'a> {
                     Ok(result)
                 }
                 crate::Codegen::TIR::THostCall::YieldSend { value } => {
+                    if self.stream_wait_check("stream yield")? {
+                        self.pending_return = Some(CtValue::Unit);
+                        return Ok(CtValue::Unit);
+                    }
                     let yielded = self.eval_expr_child(value, scope)?;
                     if let Some(items) = self.collecting_items.last_mut() {
                         items.push(yielded);
@@ -6974,6 +6978,9 @@ impl<'a> EvalCtx<'a> {
                     match result? {
                         Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
                         Flow::Break => {
+                            if let Some(cancel) = &self.stream_cancel {
+                                cancel.cancel();
+                            }
                             self.pending_return = Some(CtValue::Unit);
                             Ok(CtValue::Unit)
                         }

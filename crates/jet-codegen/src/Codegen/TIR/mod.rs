@@ -2966,9 +2966,9 @@ pub enum TStmt {
         /// `({coll}).iter_aos()` (yields owned gathered `S`) instead of
         /// `({coll}).iter().cloned()`. Always `false` for the map/method forms.
         columnar: bool,
-        /// D-STREAMYIELD1: the collection is a `Stream<T>` (`Receiver<T>`) —
-        /// iterate it directly BY VALUE (`for x in (coll) { }`; `Receiver<T>`
-        /// already implements `IntoIterator<Item = T>`), not `.iter().cloned()`.
+        /// D-ONCE-WORD1 / D-CONC-STREAM1: the collection is a `Stream<T>` —
+        /// iterate it directly BY VALUE; the shared Stream Prelude owns the
+        /// producer task and cancellation at the consumer's wait boundary.
         by_value: bool,
         body: Vec<TStmt>,
     },

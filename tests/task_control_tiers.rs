@@ -45,6 +45,9 @@ const EXPECTED: &str = "\
 5
 ";
 
+const STREAM_SOURCE: &str = include_str!("../examples/features/streams/generators.jet");
+const STREAM_EXPECTED: &str = include_str!("../examples/features/expected/streams/generators.out");
+
 const NESTED_SOURCE: &str = r#"
 use core.time as time
 
@@ -162,6 +165,32 @@ fn checked_task_bundle_for(
 
 fn checked_task_bundle(name: &str) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
     checked_task_bundle_for(name, SOURCE)
+}
+
+#[test]
+fn stream_drop_uses_task_cancel_cleanup_path() {
+    let (bundle, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
+    jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("stream cancellation fixture must lower through TIR");
+    let _ = fs::remove_dir_all(dir);
+
+    let interpreted = run_forced_interpreter("stream", STREAM_SOURCE);
+    assert_eq!(interpreted, STREAM_EXPECTED);
+
+    let (code, stdout, stderr) =
+        run_default_multi("stream_cancel", "main.jet", &[("main.jet", STREAM_SOURCE)]);
+    assert_eq!(code, 0, "default JIT: {stderr}");
+    assert_eq!(strip_tier_trace(&stdout), STREAM_EXPECTED, "JIT drifted: {stderr}");
+    assert!(
+        stderr.lines().any(|line| line.contains("tier1 native")),
+        "stream fixture did not execute in resident JIT: {stderr}"
+    );
+
+    if have_rustc() {
+        let (code, stdout) = build_and_run("stream_cancel", STREAM_SOURCE);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, STREAM_EXPECTED);
+    }
 }
 
 fn run_forced_interpreter(name: &str, source: &str) -> String {

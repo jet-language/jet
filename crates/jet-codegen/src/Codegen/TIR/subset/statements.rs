@@ -147,7 +147,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         },
         Stmt::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         Stmt::Return(None, _) => true,
-        // D-STREAMYIELD1: `yield e` inside a generator.
+        // D-ONCE-WORD1 / D-CONC-STREAM1: `yield e` inside a generator.
         Stmt::Yield(e, _) => expr_in_subset(e, cx, locals),
         // D-IGNORERET2=A: `.drop("reason")` lowers to an ExprStmt of the receiver;
         // the method call itself is erased. Covered iff the receiver is in-subset.

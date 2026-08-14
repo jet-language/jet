@@ -80,10 +80,22 @@ struct FuncWeb {
     span: Span,
     params: Vec<(String, Type)>,
     return_type: Option<Type>,
+    /// D-CONC-STREAM1: a `Stream<T>` producer is emitted as a JS generator;
+    /// its `yield` points remain resumable until the consumer closes it.
+    is_generator: bool,
     tir: TIR::TFunc,
     /// D-FIELDMEMO1=A: checked storage facts used when the web backend emits
     /// a user record literal.
     memo_fields: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+struct CloseWeb {
+    key: String,
+    source_path: String,
+    source_name: String,
+    source_marker: String,
+    file_prefix: Option<String>,
+    tir: TIR::TFunc,
 }
 
 struct JSSource {
@@ -113,9 +125,15 @@ pub fn emit_web(
     let source_marker = js_source_marker(bundle);
     let sources = js_sources(bundle);
     let funcs = collect_web_funcs(bundle, &source_marker, &sources);
+    let close_funcs = collect_web_close_funcs(bundle, &source_marker, &sources);
     let wasm_rust = emit_wasm_rust(bundle, &funcs)?;
-    let (js_app, js_source_map, handlers) =
-        emit_js_app(bundle, &funcs, &sources, &source_marker)?;
+    let (js_app, js_source_map, handlers) = emit_js_app(
+        bundle,
+        &funcs,
+        &close_funcs,
+        &sources,
+        &source_marker,
+    )?;
     let manifest_json = emit_manifest(bundle, &funcs, &handlers, &js_source_map);
     Ok(WebArtifacts {
         manifest_json,
@@ -459,6 +477,12 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
 }
 
 fn web_func_guarantees_return(f: &Func, tir: &TIR::TFunc) -> bool {
+    // A generator's normal completion is falling off the body. JavaScript's
+    // generator protocol represents that as `{ done: true }`, so it needs no
+    // explicit `return Stream<T>` value.
+    if tir.ret.as_ref().is_some_and(is_stream_type) {
+        return true;
+    }
     tir.ret.is_none()
         || web_stmts_guarantee_return(&tir.body)
         // D-FAIL-EXIT1: the default fallible `fn run()` may complete with the
@@ -521,6 +545,23 @@ fn web_wasm_if_cond_supported(
 
 fn is_list_int(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }))
+}
+
+fn is_stream_type(ty: &Type) -> bool {
+    matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1)
+}
+
+fn web_close_key(ty: &Type) -> Option<String> {
+    let name = match ty {
+        Type::Named(name) => name,
+        Type::Apply { name, .. } => name,
+        _ => return None,
+    };
+    Some(web_close_key_for_name(name))
+}
+
+fn web_close_key_for_name(type_name: &str) -> String {
+    mangle_generated(&format!("web_close_{type_name}"))
 }
 
 fn is_string_like(ty: &Type) -> bool {
@@ -711,6 +752,9 @@ fn web_wasm_expr_supported(
     file_prefix: Option<&str>,
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> bool {
+    if is_stream_type(&expr.ty) {
+        return false;
+    }
     match &expr.kind {
         TIR::TExprKind::IntLit(..)
         | TIR::TExprKind::FloatLit(_)
@@ -1026,6 +1070,7 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         | TIR::TStmt::Impure(body) => {
             web_stmts_supported(body)
         }
+        TIR::TStmt::DeferClose { close, .. } => web_expr_supported(close),
         _ => false,
     })
 }
@@ -1150,6 +1195,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         | E::MaterializeView(operand)
         | E::DistinctRaw(operand)
         | E::Print(operand) => web_expr_supported(operand),
+        E::Close(operand) => web_expr_supported(operand),
         E::Borrow { place, .. } => web_expr_supported(place),
         E::DistinctCtor { arg, .. } => web_expr_supported(arg),
         E::DistinctConvert {
@@ -1175,6 +1221,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             TIR::THostCall::FixedListIndex { base, index, .. } => {
                 web_expr_supported(base) && web_expr_supported(index)
             }
+            TIR::THostCall::YieldSend { value } => web_expr_supported(value),
             _ => false,
         },
         E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
@@ -1423,6 +1470,144 @@ fn collect_web_funcs(
     out
 }
 
+fn collect_web_close_funcs(
+    bundle: &ProgramBundle,
+    source_marker: &str,
+    sources: &[JSSource],
+) -> Vec<CloseWeb> {
+    let mut out = Vec::new();
+    let extern_funcs = bundle_extern_funcs(bundle);
+    for (i, module) in bundle.modules.iter().enumerate() {
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            None,
+            &extern_funcs,
+        );
+        populate_cx_from_bundle(&mut cx, bundle, i);
+        register_foreign_enum_variants(&mut cx, bundle, i);
+        update_cloneability_with_foreign_types(&mut cx, &module.items);
+        let source_name = sources
+            .iter()
+            .find(|source| source.display == module.display)
+            .map(|source| source.name.clone())
+            .unwrap_or_else(|| "source.jet".to_string());
+        collect_close_module_funcs(
+            &module.items,
+            &module.display,
+            &source_name,
+            source_marker,
+            None,
+            &cx,
+            &mut out,
+        );
+    }
+    out.sort_by(|a, b| a.key.cmp(&b.key));
+    out.dedup_by(|a, b| a.key == b.key);
+    out
+}
+
+fn collect_close_module_funcs(
+    items: &[Item],
+    source_path: &str,
+    source_name: &str,
+    source_marker: &str,
+    file_prefix: Option<&str>,
+    cx: &Cx,
+    out: &mut Vec<CloseWeb>,
+) {
+    for item in items {
+        match item {
+            Item::Impl(implementation) => collect_close_impl(
+                &implementation.type_name,
+                implementation.trait_name.as_deref(),
+                &implementation.methods,
+                source_path,
+                source_name,
+                source_marker,
+                file_prefix,
+                cx,
+                out,
+            ),
+            Item::Struct(definition) => {
+                for implementation in &definition.trait_impls {
+                    collect_close_impl(
+                        &definition.name,
+                        Some(implementation.trait_name.as_str()),
+                        &implementation.methods,
+                        source_path,
+                        source_name,
+                        source_marker,
+                        file_prefix,
+                        cx,
+                        out,
+                    );
+                }
+            }
+            Item::Enum(definition) => {
+                for implementation in &definition.trait_impls {
+                    collect_close_impl(
+                        &definition.name,
+                        Some(implementation.trait_name.as_str()),
+                        &implementation.methods,
+                        source_path,
+                        source_name,
+                        source_marker,
+                        file_prefix,
+                        cx,
+                        out,
+                    );
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_close_module_funcs(
+                        body,
+                        source_path,
+                        source_name,
+                        source_marker,
+                        Some(module.name.as_str()),
+                        cx,
+                        out,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_close_impl(
+    type_name: &str,
+    trait_name: Option<&str>,
+    methods: &[Func],
+    source_path: &str,
+    source_name: &str,
+    source_marker: &str,
+    file_prefix: Option<&str>,
+    cx: &Cx,
+    out: &mut Vec<CloseWeb>,
+) {
+    if trait_name != Some(Syntax::TRAIT_CLOSE) {
+        return;
+    }
+    let Some(method) = methods.iter().find(|method| method.name == "close") else {
+        return;
+    };
+    if !TIR::tir_covers_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE) {
+        return;
+    }
+    out.push(CloseWeb {
+        key: web_close_key_for_name(type_name),
+        source_path: source_path.to_string(),
+        source_name: source_name.to_string(),
+        source_marker: source_marker.to_string(),
+        file_prefix: file_prefix.map(str::to_string),
+        tir: TIR::lower_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE),
+    });
+}
+
 fn collect_module_funcs(
     items: &[Item],
     source_path: &str,
@@ -1448,6 +1633,8 @@ fn collect_module_funcs(
                     .get(&key)
                     .copied()
                     .unwrap_or(WebBucket::Wasm);
+                let tir = TIR::lower_web_func(f, cx);
+                let is_generator = tir.ret.as_ref().is_some_and(is_stream_type);
                 out.push(FuncWeb {
                     name: f.name.clone(),
                     key,
@@ -1467,7 +1654,8 @@ fn collect_module_funcs(
                         .return_type
                         .as_ref()
                         .map(|ty| cx.expand_type_aliases(ty)),
-                    tir: TIR::lower_web_func(f, cx),
+                    is_generator,
+                    tir,
                     memo_fields: memo_fields.clone(),
                 });
             }
@@ -4268,6 +4456,7 @@ fn web_emit_error(f: &FuncWeb) -> WebTirUnsupported {
 fn emit_js_app(
     bundle: &ProgramBundle,
     funcs: &[FuncWeb],
+    close_funcs: &[CloseWeb],
     sources: &[JSSource],
     source_marker: &str,
 ) -> WebEmitResult<(String, String, Vec<(String, String)>)> {
@@ -4345,6 +4534,13 @@ fn emit_js_app(
             ));
             out.push_str("}\n\n");
         }
+    }
+
+    // D-SHAPE-RESOURCE2 / D-CONC-STREAM1: `defer close(^value)` keeps the
+    // nominal Close implementation. The JS tier only marshals that method
+    // into a small helper; it does not invent a second cleanup protocol.
+    for close in close_funcs {
+        emit_js_close_fn(close, funcs, sources, &mut out)?;
     }
 
     let js_funcs: Vec<&FuncWeb> = funcs
@@ -4425,6 +4621,38 @@ fn emit_js_app(
     Ok((js_app, js_source_map, handlers))
 }
 
+fn emit_js_close_fn(
+    close: &CloseWeb,
+    funcs: &[FuncWeb],
+    sources: &[JSSource],
+    out: &mut String,
+) -> WebEmitResult<()> {
+    out.push_str(&format!(
+        "function {}(self) {{\n  const {} = {};\n",
+        close.key,
+        mangle_generated("source_file"),
+        json_quote(&close.source_name),
+    ));
+    out.push_str(&format!(
+        "  {} file {}\n",
+        close.source_marker,
+        js_source_index(sources, &close.source_path),
+    ));
+    emit_tir_js_body(
+        &close.tir.body,
+        out,
+        funcs,
+        close.file_prefix.as_deref(),
+        1,
+    )
+    .map_err(|()| WebTirUnsupported {
+        func_name: format!("{}::close", close.key),
+        span: close.tir.source_span,
+    })?;
+    out.push_str("}\n\n");
+    Ok(())
+}
+
 fn emit_js_fn(
     f: &FuncWeb,
     out: &mut String,
@@ -4459,13 +4687,14 @@ fn emit_js_fn(
     ));
     emit_tir_js_body(&f.tir.body, &mut body, all, f.file_prefix.as_deref(), 2)
         .map_err(|()| web_emit_error(f))?;
-    let async_kw = if body.contains("await bridge_") {
+    let async_kw = if !f.is_generator && body.contains("await bridge_") {
         "async "
     } else {
         ""
     };
+    let generator_mark = if f.is_generator { "*" } else { "" };
     out.push_str(&format!(
-        "export {async_kw}function {}({}) {{\n",
+        "export {async_kw}function{generator_mark} {}({}) {{\n",
         f.key,
         param_names(&f.params)
     ));
@@ -4985,6 +5214,39 @@ fn emit_tir_js_body(
     file_prefix: Option<&str>,
     indent: usize,
 ) -> Result<(), ()> {
+    let has_defer = body
+        .iter()
+        .any(|stmt| matches!(stmt, TIR::TStmt::DeferClose { .. }));
+    if !has_defer {
+        return emit_tir_js_body_inner(body, out, funcs, file_prefix, indent, &mut Vec::new());
+    }
+    let pad = "  ".repeat(indent);
+    out.push_str(&format!("{pad}try {{\n"));
+    let mut deferred = Vec::new();
+    emit_tir_js_body_inner(
+        body,
+        out,
+        funcs,
+        file_prefix,
+        indent + 1,
+        &mut deferred,
+    )?;
+    out.push_str(&format!("{pad}}} finally {{\n"));
+    for close in deferred.into_iter().rev() {
+        out.push_str(&format!("{}{};\n", "  ".repeat(indent + 1), close));
+    }
+    out.push_str(&format!("{pad}}}\n"));
+    Ok(())
+}
+
+fn emit_tir_js_body_inner(
+    body: &[TIR::TStmt],
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+    deferred: &mut Vec<String>,
+) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
     let source_file = mangle_generated("source_file");
     for stmt in body {
@@ -5030,6 +5292,9 @@ fn emit_tir_js_body(
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", tir_js_expr(expr, funcs, file_prefix)?)),
+            TIR::TStmt::DeferClose { close, .. } => {
+                deferred.push(tir_js_expr(close, funcs, file_prefix)?);
+            }
             TIR::TStmt::If {
                 cond,
                 then_body,
@@ -5579,6 +5844,9 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 tir_js_expr(base, funcs, file_prefix)?,
                 tir_js_expr(index, funcs, file_prefix)?,
             ),
+            TIR::THostCall::YieldSend { value } => {
+                format!("yield {}", tir_js_expr(value, funcs, file_prefix)?)
+            }
             _ => return Err(()),
         },
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
@@ -5640,6 +5908,10 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         | E::ExplicitCopy(inner)
         | E::MaterializeView(inner)
         | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::Close(inner) => {
+            let key = web_close_key(&inner.ty).ok_or(())?;
+            format!("{}({})", key, tir_js_expr(inner, funcs, file_prefix)?)
+        }
         E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
         E::DistinctConvert {

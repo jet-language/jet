@@ -1604,7 +1604,10 @@ fn lower_generator_wrapper(
             _ => return Err("jit generator capture count unsupported".to_string()),
         };
         let spawn = module.declare_func_in_func(spawn_id, b.func);
-        b.ins().call(spawn, &spawn_args);
+        let call = b.ins().call(spawn, &spawn_args);
+        let task = b.inst_results(call)[0];
+        let attach = module.declare_func_in_func(host.conc.generator_stream_attach, b.func);
+        b.ins().call(attach, &[channel, task]);
         b.ins().return_(&[channel]);
         b.finalize();
     }

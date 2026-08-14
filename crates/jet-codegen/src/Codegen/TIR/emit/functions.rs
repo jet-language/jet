@@ -311,7 +311,7 @@ fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize)
     }
     if tir.is_reactive {
         emit_reactive_wrapped_body(&tir.body, cx, out, indent);
-    } else if matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == "Stream") {
+    } else if matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM) {
         emit_generator_wrapped_body(&tir.body, cx, out, indent);
     } else {
         emit_tir_stmts(&tir.body, cx, out, indent);
@@ -349,31 +349,18 @@ fn is_fallible_void_return(ret: &Option<Type>) -> bool {
     )
 }
 
-/// D-STREAMYIELD1: a generator (`=> Stream<T>`) spawns its body on its own
-/// thread and hands the caller the Prelude receiver immediately. `yield`
-/// blocks on the rendezvous channel until the consumer pulls the next value;
-/// a closed consumer returns from the producer after lexical cleanup. No
-/// coroutine/async machinery: a real OS thread is the suspended generator.
+/// D-CONC-STREAM1=A / D-CANCELMODEL1=C: a generator (`=> Stream<T>`) is a
+/// scheduler child. The shared Stream Prelude owns its pull protocol and the
+/// task cancellation handle; `yield` is the producer's wait point.
 fn emit_generator_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);
     let inner = indent + 1;
     out.push_str(&jet_format!(
-        "{}let (mut {jet_prefix}yield_tx, {jet_prefix}yield_rx) = jet_std::stream();\n",
+        "{}jet_std::jet_stream_task(move |{jet_prefix}yield_tx| {{\n",
         pad
     ));
-    out.push_str(&format!("{}std::thread::spawn(move || {{\n", pad));
-    out.push_str(&jet_format!(
-        "{}let {jet_prefix}stream_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n",
-        "    ".repeat(inner)
-    ));
-    emit_tir_stmts(body, cx, out, inner + 1);
-    out.push_str(&jet_format!(
-        "{}}}));\n{}if {jet_prefix}stream_result.is_err() {{ {jet_prefix}yield_tx.fail(); }}\n",
-        "    ".repeat(inner),
-        "    ".repeat(inner),
-    ));
-    out.push_str(&format!("{}}});\n", pad));
-    out.push_str(&jet_format!("{}{jet_prefix}yield_rx\n", pad));
+    emit_tir_stmts(body, cx, out, inner);
+    out.push_str(&format!("{}}})\n", pad));
 }
 
 fn emit_reactive_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {

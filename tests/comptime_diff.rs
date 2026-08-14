@@ -324,6 +324,39 @@ fn yielding_loop_matches_comptime_and_runtime() {
 }
 
 #[test]
+fn stream_generator_break_matches_comptime_and_runtime() {
+    if !have_rustc() {
+        return;
+    }
+    check_comptime_src(
+        35_000,
+        "Stream generator early break",
+        r#"
+fn stop_after_two() => Stream<Int> {
+    yield 1
+    yield 2
+    yield 3
+}
+
+fn first() => [Int] {
+    return loop value, stop_after_two() -> {
+        if value == 2 { break }
+        value
+    }
+}
+
+@expected :: first()
+
+fn run() {
+    actual :: first()
+    print("{@expected}")
+    print("{actual}")
+}
+"#,
+    );
+}
+
+#[test]
 fn comptime_f32_width_survives_value_flow_and_matches_aot() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping F32 differential battery");

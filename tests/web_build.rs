@@ -138,6 +138,31 @@ fn run_web_app(dir: &PathBuf) -> String {
     String::from_utf8_lossy(&node.stdout).into_owned()
 }
 
+#[test]
+fn web_stream_generator_break_closes_deferred_resource() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web stream test (need rustc + node)");
+        return;
+    }
+    let shown = "examples/features/streams/generators.jet";
+    let src = fs::read_to_string(shown).unwrap();
+    let dir = build_web_fixture("streams_generators", &src, shown);
+    assert_eq!(
+        run_web_app(&dir),
+        include_str!("../examples/features/expected/streams/generators.out")
+    );
+    let app = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        app.contains("function*"),
+        "web generator missing JavaScript generator protocol"
+    );
+    assert!(
+        app.contains("web_close_CleanupMarker"),
+        "web deferred-close helper missing"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
 /// D-CORE-EAGER1=A / D-LOOPMAP1=B: the web tier keeps concrete collection
 /// adapters eager and returns plain arrays, with the same observable result as
 /// native tiers.

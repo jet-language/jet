@@ -2266,11 +2266,11 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            // D-STREAMYIELD1: a generator's `Stream<T>` is the Prelude's
+            // D-CONC-STREAM1=A: a generator's `Stream<T>` is the Prelude's
             // rendezvous receiver. Its owned iterator closes the receiver when
             // a consumer breaks or drops it, so a blocked producer observes the
             // same cancellation rule on every emitted program.
-            Type::Apply { name, args } if name == "Stream" && !args.is_empty() => {
+            Type::Apply { name, args } if name == Syntax::TYPE_STREAM && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetStream<{}>",
                     self.root_prefix,

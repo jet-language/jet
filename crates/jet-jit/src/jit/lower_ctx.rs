@@ -124,8 +124,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) switch_subject: Option<(Value, Type)>,
     /// Sender handle for a native generator body.
     pub(crate) yield_sender: Option<Value>,
-    /// Open Stream consumers. A non-local return must close them because the
-    /// JIT ABI carries a raw channel handle rather than an owning Rust drop.
+    /// Open Stream consumers. The raw JIT handle is only a marshalling adapter;
+    /// `JetStream::Drop` owns cancellation and join/drain cleanup on exit.
     pub(crate) stream_consumers: Vec<Value>,
     pub(crate) in_shared_transaction: bool,
     pub(crate) shared_transaction_depth: u32,
@@ -2951,7 +2951,9 @@ impl LowerCtx<'_, '_> {
             let close = self
                 .module
                 .declare_func_in_func(self.host.conc.sender_close, self.b.func);
-            self.b.ins().call(close, &[sender, status]);
+            // Only a real runtime trap is a producer failure. A task cancel or
+            // deadline is carried by the shared task control plane.
+            self.b.ins().call(close, &[sender, trapped]);
         }
         self.emit_deadline_pops_to(0);
 
@@ -7765,17 +7767,10 @@ impl LowerCtx<'_, '_> {
                     return Err("jit generator item type unsupported".to_string());
                 }
                 let sent_status = self.call_host(self.host.conc.sender_send, &[sender, value]);
-                let sent = self.finish_wait_call(sent_status);
-                let zero = self.b.ins().iconst(types::I64, 0);
-                let closed = self.b.ins().icmp(IntCC::Equal, sent, zero);
-                let stop = self.b.create_block();
-                let resume = self.b.create_block();
-                self.b.ins().brif(closed, stop, &[], resume, &[]);
-                self.b.switch_to_block(stop);
-                self.b.seal_block(stop);
-                self.emit_lexical_exit(None, false, self.shield_depth)?;
-                self.b.switch_to_block(resume);
-                self.b.seal_block(resume);
+                // D-CONC-STREAM1=A / D-CANCELMODEL1=C: sender_send is the
+                // shared task wait point. Cancellation unwinds through the
+                // normal lexical cleanup path; no Stream-specific return edge.
+                let _ = self.finish_wait_call(sent_status);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             THostCall::GcRead { root } => {

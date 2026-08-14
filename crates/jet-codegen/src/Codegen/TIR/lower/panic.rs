@@ -9,10 +9,6 @@ use crate::Codegen::TIR::TRequireKind;
 use crate::Diagnostics::Span;
 
 pub(crate) const RESOURCE_CLEANUP_MARKER: &str = "__JET_RESOURCE_CLEANUP__";
-/// A stream send that observes a closed consumer returns from the generator
-/// after the active lexical cleanups have run. The emitter replaces this
-/// marker with those cleanups before the return.
-pub(crate) const STREAM_CANCEL_MARKER: &str = "__JET_STREAM_CANCEL_RETURN__";
 
 pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {

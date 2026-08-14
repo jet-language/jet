@@ -11,7 +11,7 @@ use jet_codegen::scheduler::{
     jet_scheduler_task_group_wait, jet_scheduler_yield_now, jet_task_delay_ms_defaulted,
     jet_task_interval_ms_defaulted,
     jet_task_join_deadline_check, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
-    JetSchedulerWait, JetShieldExit, JetTaskControl, ParkSlot,
+    JetSchedulerWait, JetShieldExit, JetStream, JetTaskControl, ParkSlot,
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
@@ -408,6 +408,38 @@ extern "C" fn jet_jit_generator_channel_new() -> i64 {
             .insert(channel, Arc::new(producer));
         channel
     })
+}
+
+/// Attach the generic scheduler child created by the generator wrapper to its
+/// shared Stream consumer. The handle tables only marshal Cranelift words;
+/// `JetStream` owns cancellation and join/drain semantics.
+extern "C" fn jet_jit_generator_stream_attach(ch: i64, task: i64) {
+    let attached: Option<(JetStream<i64>, JetSchedulerJoin<i64>, Arc<JetTaskControl>)> =
+        with_runtime_mut(|rt| {
+            let consumer = rt
+                .stream_consumers
+                .remove(&ch)
+                .expect("jit generator attach without consumer");
+            let index = task as usize;
+            let join = rt
+                .tasks
+                .get_mut(index)
+                .and_then(Option::take)
+                .expect("jit generator attach without task join");
+            let control = rt
+                .task_controls
+                .get(index)
+                .cloned()
+                .expect("jit generator attach without task control");
+            Some((consumer, join, control))
+        });
+    let Some((mut consumer, join, control)) = attached else {
+        panic!("jit generator attach without active runtime");
+    };
+    consumer.attach_task(control, join);
+    with_runtime_mut(|rt| {
+        rt.stream_consumers.insert(ch, consumer);
+    });
 }
 
 /// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
@@ -1133,6 +1165,7 @@ host_fns! {
     channel_new: "jet_jit_channel_new" => jet_jit_channel_new: sig_channel_new;
     channel_bounded: "jet_jit_channel_bounded" => jet_jit_channel_bounded: sig_i64;
     generator_channel_new: "jet_jit_generator_channel_new" => jet_jit_generator_channel_new: sig_channel_new;
+    generator_stream_attach: "jet_jit_generator_stream_attach" => jet_jit_generator_stream_attach: sig_void_i64_i64;
     channel_close: "jet_jit_channel_close" => jet_jit_channel_close: sig_void_i64;
     channel_sender: "jet_jit_channel_sender" => jet_jit_channel_sender: sig_i64;
     sender_clone: "jet_jit_sender_clone" => jet_jit_sender_clone: sig_i64;

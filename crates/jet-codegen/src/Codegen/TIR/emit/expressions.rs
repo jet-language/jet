@@ -407,9 +407,8 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::SwitchSubjectValue => jet_format!("(*{jet_prefix}switch_subject)"),
         THostCall::YieldSend { value } => {
             jet_format!(
-                "if !{jet_prefix}yield_tx.send_stream({}) {{ {} return; }}",
+                "let _ = {jet_prefix}yield_tx.send_stream({});",
                 emit_tir_expr(value, cx),
-                crate::Codegen::TIR::STREAM_CANCEL_MARKER,
             )
         }
         THostCall::TypedTextInterp { kind, literals, holes } => {

@@ -412,9 +412,10 @@ fn fixed_size_list() {
     [t0, t1, t2] :: tripled
 }
 
-// Generators (D-STREAMYIELD1): one `yield` hands one value to one ordinary
-// consumer pull. The producer resumes after that value is accepted. A
-// consumer `break` drops the owned pull iterator and closes the producer.
+// Generators (D-ONCE-WORD1 / D-CONC-STREAM1): one `yield` hands one value to
+// one ordinary consumer pull. The producer resumes after that value is
+// accepted. A consumer `break` drops the iterator; task cancellation and
+// deferred cleanup follow D-CANCELMODEL1=C at the next wait point.
 fn numbers(n: Int) => Stream<Int> {
     i := 0
     loop i < n {

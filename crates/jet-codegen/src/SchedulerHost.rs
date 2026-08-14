@@ -154,6 +154,14 @@ mod scheduler_host_tests {
             lib.contains("include!(\"Prelude/Scheduler.rs\")"),
             "the scheduler module must include the one Prelude scheduler source"
         );
+        assert!(
+            lib.contains("include!(\"Prelude/Stream.rs\")"),
+            "the scheduler module must include the one Prelude Stream source"
+        );
+        assert!(
+            !root.join("src/stream.rs").exists(),
+            "src/stream.rs is a second Stream runtime; use Prelude/Stream.rs"
+        );
     }
 
     #[test]
@@ -197,6 +205,34 @@ mod scheduler_host_tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("closed Stream did not release its producer");
         producer.join().unwrap();
+    }
+
+    #[test]
+    fn stream_drop_uses_the_shared_task_cancel_cleanup_path() {
+        struct CleanupMark(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+        impl Drop for CleanupMark {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        let cleaned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let continued = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let producer_cleaned = std::sync::Arc::clone(&cleaned);
+        let producer_continued = std::sync::Arc::clone(&continued);
+        let stream = jet_stream_task(move |sender| {
+            let _cleanup = CleanupMark(producer_cleaned);
+            assert!(sender.send_stream(1));
+            producer_continued.store(true, Ordering::Release);
+        });
+
+        let mut iterator = stream.into_iter();
+        assert_eq!(iterator.next(), Some(1));
+        drop(iterator);
+
+        assert!(cleaned.load(Ordering::Acquire));
+        assert!(!continued.load(Ordering::Acquire));
     }
 
     #[test]

@@ -1230,6 +1230,19 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
                 if let Some(stream_index) = super::EvalCtx::stream_index(&coll) {
+                    let stream_control = {
+                        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                        runtime
+                            .streams
+                            .get(stream_index)
+                            .map(|stream| stream.control.clone())
+                            .ok_or_else(|| unsupported("stream handle", self.span()))?
+                    };
+                    self.task_wait_check("stream pull")?;
+                    if stream_control.cancelled() {
+                        return Ok(Flow::Normal);
+                    }
+                    let previous_stream_cancel = self.stream_cancel.replace(stream_control);
                     let (func, args) = {
                         let runtime =
                             self.runtime.lock().expect("evaluator runtime poisoned");
@@ -1249,6 +1262,7 @@ impl<'a> EvalCtx<'a> {
                     *scope = self.yield_scope.take().unwrap_or_default();
                     self.yield_scope = previous_scope;
                     self.yield_consumer = previous_consumer;
+                    self.stream_cancel = previous_stream_cancel;
                     result?;
                     return Ok(Flow::Normal);
                 }

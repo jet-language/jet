@@ -1,12 +1,14 @@
-// D-STREAMYIELD1: one pull-gated Stream protocol for emitted programs and the
-// resident JIT adapter. This file is included by both scheduler substrates so
-// suspension, cancellation, cleanup, and completion cannot drift by tier.
+// D-CONC-STREAM1=A / D-CANCELMODEL1=C: one pull-gated Stream protocol for
+// emitted programs and the resident JIT adapter. This file is included by
+// both scheduler substrates so suspension, cancellation, cleanup, and
+// completion cannot drift by tier.
 
 pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
     let values = JetSchedulerChannel::new();
     let acknowledgements = JetSchedulerChannel::new();
     let completion = JetSchedulerChannel::<JetStreamCompletion>::new();
     let failure_report = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let stream_control = JetStreamControl::new();
     let value_tx = values.sender();
     let acknowledgement_tx = acknowledgements.sender();
     let completion_tx = completion.sender();
@@ -25,14 +27,74 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
             pending: false,
             failed: false,
             failure_report,
+            producer_task: None,
+            stream_control,
         },
     )
+}
+
+/// Start a generator as a child task of its stream. The stream owns the task
+/// handle; dropping the consumer therefore uses the same cancellation and
+/// wait-point unwind as every other task.
+pub fn jet_stream_task<T, F>(producer: F) -> JetStream<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&JetStreamSender<T>) + Send + 'static,
+{
+    let (sender, mut stream) = jet_stream();
+    let control = JetTaskControl::new();
+    let join = jet_scheduler_spawn_with_control(
+        move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                producer(&sender);
+            }));
+            if let Err(payload) = result {
+                if !jet_scheduler_is_cancel_unwind(payload.as_ref()) {
+                    sender.fail();
+                }
+                std::panic::resume_unwind(payload);
+            }
+        },
+        control.clone(),
+    );
+    stream.attach_task(control, join);
+    stream
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JetStreamCompletion {
     Completed,
     Failed(Option<String>),
+}
+
+/// Shared task cancellation state for every execution adapter. The native
+/// producer and the evaluator both use the same task control; the evaluator
+/// drives its producer directly but still observes the task wait-point fact.
+#[derive(Clone)]
+pub struct JetStreamControl {
+    task: std::sync::Arc<JetTaskControl>,
+}
+
+impl JetStreamControl {
+    pub fn new() -> Self {
+        Self {
+            task: JetTaskControl::new(),
+        }
+    }
+
+    fn from_task(task: std::sync::Arc<JetTaskControl>) -> Self {
+        Self { task }
+    }
+
+    pub fn cancel(&self) {
+        self.task.cancel();
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.task
+            .cancelled
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 pub struct JetStream<T> {
@@ -42,9 +104,51 @@ pub struct JetStream<T> {
     pending: bool,
     failed: bool,
     failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    producer_task: Option<JetStreamTask>,
+    stream_control: JetStreamControl,
+}
+
+struct JetStreamTask {
+    control: std::sync::Arc<JetTaskControl>,
+    drain: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl JetStreamTask {
+    fn new<T: Send + 'static>(
+        control: std::sync::Arc<JetTaskControl>,
+        join: JetSchedulerJoin<T>,
+    ) -> Self {
+        Self {
+            control,
+            drain: Some(Box::new(move || join.drain())),
+        }
+    }
+
+    fn cancel_and_drain(mut self) {
+        self.control.cancel();
+        if let Some(drain) = self.drain.take() {
+            drain();
+        }
+    }
 }
 
 impl<T: Send> JetStream<T> {
+    /// Return the shared stream cancellation fact for an execution adapter.
+    pub fn control(&self) -> JetStreamControl {
+        self.stream_control.clone()
+    }
+
+    /// Attach the scheduler child that produces this stream. Runtime adapters
+    /// use this after their ABI handle has been created.
+    pub fn attach_task<J: Send + 'static>(
+        &mut self,
+        control: std::sync::Arc<JetTaskControl>,
+        join: JetSchedulerJoin<J>,
+    ) {
+        self.stream_control = JetStreamControl::from_task(control.clone());
+        self.producer_task = Some(JetStreamTask::new(control, join));
+    }
+
     /// Pull one value. The acknowledgement for the preceding value is sent
     /// first, which is the exact suspension boundary after `yield`.
     pub fn pull(&mut self) -> Option<T> {
@@ -127,8 +231,14 @@ impl<T: Send> IntoIterator for JetStream<T> {
 
 impl<T> Drop for JetStream<T> {
     fn drop(&mut self) {
-        // Drop consumer handles first. This closes the acknowledgement channel
-        // and wakes a producer blocked after its last accepted pull.
+        // D-CONC-STREAM1=A: dropping the iterator cancels its producer. The
+        // shared task wait point performs the unwind, so all producer defers
+        // run before the consumer endpoints disappear.
+        if let Some(task) = self.producer_task.take() {
+            task.cancel_and_drain();
+        } else {
+            self.stream_control.cancel();
+        }
         let _ = self.acknowledgements.take();
         let _ = self.values.take();
         if let Some(completion) = self.completion.take() {

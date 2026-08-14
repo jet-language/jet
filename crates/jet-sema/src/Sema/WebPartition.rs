@@ -140,6 +140,7 @@ fn assign_bucket(
     marker: Option<WebPartitionMarker>,
     ceiling: Option<WebBucket>,
     effects: &EffectSet,
+    return_type: Option<&Type>,
 ) -> WebBucket {
     if let Some(m) = marker {
         return m.bucket();
@@ -150,7 +151,18 @@ fn assign_bucket(
     if let Some(c) = ceiling {
         return c;
     }
+    // D-CONC-STREAM1=A / D-STREAMYIELD1: a `Stream<T>` is a resumable
+    // producer. The browser adapter is JavaScript's generator protocol; keep
+    // the default web bucket honest so an unmarked stream does not fall into
+    // the synchronous Wasm ABI and silently lose yield/close behavior.
+    if return_type.is_some_and(is_stream_type) {
+        return WebBucket::JS;
+    }
     WebBucket::Wasm
+}
+
+fn is_stream_type(ty: &Type) -> bool {
+    matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1)
 }
 
 fn items_have_web_markers(items: &[Item]) -> bool {
@@ -277,6 +289,9 @@ fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
     if let Some(c) = f.ceiling {
         return format!("#{}({})", Syntax::MARKER_TARGET, c.name());
     }
+    if f.return_type.as_ref().is_some_and(is_stream_type) {
+        return "inferred: Stream producer".to_string();
+    }
     if f.name == "run" {
         return "entry".to_string();
     }
@@ -377,8 +392,55 @@ pub fn check_web_partition(
     let mut partitions: HashMap<String, WebBucket> = HashMap::new();
     for f in &metas {
         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
-        let bucket = assign_bucket(f.marker, f.ceiling, &effects);
+        let bucket = assign_bucket(f.marker, f.ceiling, &effects, f.return_type.as_ref());
         partitions.insert(f.key.clone(), bucket);
+    }
+
+    // D-WEBTIR1 / D-CONC-STREAM1: a JS generator can only be consumed by JS,
+    // and a JS caller cannot invoke an ordinary Wasm function without the
+    // explicit WasmExport bridge. Promote unmarked functions along those call
+    // edges until the partition graph is closed. Explicit #Target choices stay
+    // authoritative and are reported by the existing crossing diagnostic.
+    loop {
+        let mut changed = false;
+        for (caller_key, summary) in summaries {
+            let Some(caller_meta) = metas
+                .iter()
+                .find(|meta| meta.effect_key.as_str() == caller_key.as_str())
+            else {
+                continue;
+            };
+            let caller_bucket = partitions.get(&caller_meta.key).copied().unwrap_or(WebBucket::Wasm);
+            for callee_key in &summary.edges {
+                let Some(callee_meta) = metas
+                    .iter()
+                    .find(|meta| meta.effect_key.as_str() == callee_key.as_str())
+                else {
+                    continue;
+                };
+                let callee_bucket = partitions.get(&callee_meta.key).copied().unwrap_or(WebBucket::Wasm);
+                if caller_bucket == WebBucket::Wasm
+                    && callee_bucket == WebBucket::JS
+                    && caller_meta.marker.is_none()
+                    && caller_meta.ceiling.is_none()
+                {
+                    if partitions.insert(caller_meta.key.clone(), WebBucket::JS) != Some(WebBucket::JS) {
+                        changed = true;
+                    }
+                } else if caller_bucket == WebBucket::JS
+                    && callee_bucket == WebBucket::Wasm
+                    && callee_meta.marker.is_none()
+                    && callee_meta.ceiling.is_none()
+                {
+                    if partitions.insert(callee_meta.key.clone(), WebBucket::JS) != Some(WebBucket::JS) {
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
     }
 
     bundle.web_partitions = partitions.clone();

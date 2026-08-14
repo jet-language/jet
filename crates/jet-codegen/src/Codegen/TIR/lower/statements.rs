@@ -2584,11 +2584,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             TStmt::Return(Some(value))
         }
         Stmt::Return(None, _) => TStmt::Return(None),
-        // D-STREAMYIELD1: `yield e` inside a generator's spawned thread — send on
-        // the channel the wrapping `Stream<T>` body opened (see `emit_generator_body`),
-        // blocking (rendezvous, bound 0) until the consumer pulls. A closed receiver
-        // (consumer stopped early) makes `send` fail; ignored — the thread just runs
-        // to completion doing nothing further useful, rather than panicking.
+        // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the shared Stream Prelude owns
+        // the producer task and makes this send a cancellation wait point.
         Stmt::Yield(e, _) => {
             let v = lower_expr(e, cx, env);
             TStmt::ExprStmt(TExpr {
@@ -2803,8 +2800,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         ("key".to_string(), Box::new((**key).clone())),
                         ("value".to_string(), Box::new((**value).clone())),
                     ])),
-                    // D-STREAMYIELD1: a generator's `Stream<T>`.
-                    Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
+                    // D-ONCE-WORD1 / D-CONC-STREAM1: a generator's `Stream<T>`.
+                    Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1 => {
                         Some(args[0].clone())
                     }
                     // D-ITERTOOLS1=A: lazy `Iter<T>` view — element is T.
@@ -2850,7 +2847,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     .as_ref()
                     .is_some_and(crate::Sema::type_requires_owned_iteration);
                 let by_value = matches!(&lowered_coll.ty,
-                    Type::Apply { name, .. } if name == "Stream" || name == crate::Syntax::TYPE_ITER
+                    Type::Apply { name, .. }
+                        if name == Syntax::TYPE_STREAM || name == crate::Syntax::TYPE_ITER
                 ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks")
                     || (method_kind.is_none()
                         && !elem_is_cloneable

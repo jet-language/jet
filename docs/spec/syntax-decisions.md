@@ -2366,11 +2366,9 @@ malformed block E1221.
 `fn f() => Stream<T>` uses `yield expr` to hand a value to the consumer and
 suspend until the next pull; falling off the end (or a bare `return;`) ends the
 stream; `return value;` is E0806. Consumers are ordinary `loop x; f() { }`
-loops — one keyword, one type, no async/await coloring. The producer is a task:
-`yield` is a wait point, dropping the iterator is cancellation, and the
-producer unwinds at its next wait point with normal cleanup. This is the task
-cancellation law on AOT, JIT, and the interpreter; it does not require
-coroutine syntax.
+loops — one keyword, one type, no async/await coloring. Lifecycle,
+cancellation, and cleanup are the task law in D-CANCELMODEL1=C as applied by
+D-CONC-STREAM1=A; this decision adds no independent generator shutdown law.
 
 ### Comptime & metaprogramming
 

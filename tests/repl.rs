@@ -463,6 +463,42 @@ fn repl_print_output() {
 }
 
 #[test]
+fn repl_stream_break_runs_deferred_close() {
+    let declarations = r#"
+struct Marker {
+    name: String
+}
+
+impl Marker.Close {
+    fn close(^self) {
+        print("closed: {self.name}")
+    }
+}
+
+fn values() => Stream<Int> {
+    marker := Marker.{name: "stream"}
+    defer close(^marker)
+    print("before")
+    yield 1
+    print("after")
+    yield 2
+}
+
+fn run() {
+    loop value, values() {
+        print("value: {value}")
+        break
+    }
+}
+"#;
+    let out = run_transcript(&[declarations, ":run"], None);
+    assert!(out.contains("before"), "got: {out:?}");
+    assert!(out.contains("value: 1"), "got: {out:?}");
+    assert!(out.contains("closed: stream"), "got: {out:?}");
+    assert!(!out.contains("after"), "producer resumed after break: {out:?}");
+}
+
+#[test]
 fn repl_string_echo() {
     let out = run_transcript(&["\"abc\""], None);
     assert!(out.contains("\"abc\" : String"), "got: {:?}", out);

@@ -1,8 +1,8 @@
-// D-STREAMYIELD1: a generator returns `Stream<T>` and uses `yield` to hand a
-// value to the consumer, suspending until the next pull. One keyword
-// (`yield`), one type (`Stream<T>`); consumers are ordinary loops — no
-// async/await coloring anywhere. Breaking the loop closes the stream, so the
-// producer does not run the statements after the last accepted pull.
+// D-ONCE-WORD1 / D-CONC-STREAM1: a generator returns `Stream<T>` and uses
+// `yield` to hand a value to the consumer, suspending until the next pull. One
+// keyword, one type; consumers are ordinary loops — no async/await coloring.
+// Breaking the loop cancels the producer task at the D-CANCELMODEL1=C wait
+// point and runs deferred cleanup.
 struct CleanupMarker {
     name: String
 }
