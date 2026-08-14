@@ -113,7 +113,13 @@ marker Pattern on [.Text] {
     hole re.escape(@value)
 }
 
+marker Identity on [.Text] {
+    check @body
+    hole @value
+}
+
 fn accept_pattern(pattern: Pattern) {}
+fn accept_identity(identity: Identity) {}
 
 fn run() {
     value :: "a.b"
@@ -121,6 +127,8 @@ fn run() {
     accept_pattern(pattern)
     trusted :: Pattern.raw("already checked")
     accept_pattern(trusted)
+    identity :: Identity.{"a-{value}"}
+    accept_identity(identity)
 }
 "#;
     jet::compile(source).expect("a declared text head should own its checked construction path");
