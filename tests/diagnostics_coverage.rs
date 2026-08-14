@@ -228,30 +228,111 @@ fn allowlist_reason_errors(entries: &[(&str, &str)]) -> Vec<String> {
         .collect()
 }
 
-fn now_emitted_codes<'a>(
+/// Compare the one expected-unimplemented baseline with the current registry
+/// projection. A stale row must be deleted; missing or unexpected rows must
+/// update the registry and baseline together.
+fn coverage_baseline_failure<'a>(
     entries: impl IntoIterator<Item = &'a str>,
-    emitted: &BTreeSet<String>,
-) -> Vec<String> {
-    let mut now_emitted: Vec<String> = entries
-        .into_iter()
-        .filter(|code| emitted.contains(*code))
-        .map(str::to_string)
-        .collect();
-    now_emitted.sort();
-    now_emitted
-}
-
-fn stale_allowlist_failure<'a>(
-    entries: impl IntoIterator<Item = &'a str>,
+    unimplemented: &BTreeSet<String>,
     emitted: &BTreeSet<String>,
 ) -> Option<String> {
-    let now_emitted = now_emitted_codes(entries, emitted);
-    (!now_emitted.is_empty()).then(|| {
-        format!(
+    let expected: BTreeSet<String> = entries.into_iter().map(str::to_string).collect();
+
+    let mut now_emitted: Vec<String> = expected.intersection(emitted).cloned().collect();
+    now_emitted.sort();
+
+    let mut missing: Vec<String> = expected
+        .difference(unimplemented)
+        .filter(|code| !emitted.contains(*code))
+        .cloned()
+        .collect();
+    missing.sort();
+
+    let mut unexpected: Vec<String> = unimplemented.difference(&expected).cloned().collect();
+    unexpected.sort();
+
+    let mut failures = Vec::new();
+    if !now_emitted.is_empty() {
+        failures.push(format!(
             "EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  {}",
             now_emitted.join("\n  ")
+        ));
+    }
+    if !missing.is_empty() {
+        failures.push(format!(
+            "EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  {}",
+            missing.join("\n  ")
+        ));
+    }
+    if !unexpected.is_empty() {
+        failures.push(format!(
+            "Unexpected codes registered in typed rows but not emitted in Source/.\n\
+         If this is intentional (staged feature), add the code to \
+         EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
+         Unexpected:\n  {}",
+            unexpected.join("\n  ")
+        ));
+    }
+
+    (!failures.is_empty()).then(|| failures.join("\n"))
+}
+
+fn code_set(codes: &[&str]) -> BTreeSet<String> {
+    codes.iter().map(|code| (*code).to_string()).collect()
+}
+
+#[test]
+fn coverage_baseline_rejects_removal_addition_and_substitution() {
+    let baseline = ["E2101", "E3001"];
+    let emitted = BTreeSet::new();
+
+    assert_eq!(
+        coverage_baseline_failure(
+            baseline.iter().copied(),
+            &code_set(&["E2101"]),
+            &emitted,
+        ),
+        Some(
+            "EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001"
+                .to_string()
         )
-    })
+    );
+    assert_eq!(
+        coverage_baseline_failure(
+            ["E2101"].iter().copied(),
+            &code_set(&["E2101", "E3001"]),
+            &emitted,
+        ),
+        Some(
+            "Unexpected codes registered in typed rows but not emitted in Source/.\n\
+         If this is intentional (staged feature), add the code to \
+         EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
+         Unexpected:\n  E3001"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        coverage_baseline_failure(
+            baseline.iter().copied(),
+            &code_set(&["E2101", "E4000"]),
+            &emitted,
+        ),
+        Some(
+            "EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001\nUnexpected codes registered in typed rows but not emitted in Source/.\n\
+         If this is intentional (staged feature), add the code to \
+         EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
+         Unexpected:\n  E4000"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        coverage_baseline_failure(
+            baseline.iter().copied(),
+            &code_set(&baseline),
+            &emitted,
+        ),
+        None
+    );
 }
 
 /// All [EL]NNNN codes that appear in snapshot files or legacy test assertions.
@@ -1031,11 +1112,6 @@ fn registered_unimplemented_codes_are_expected() {
         ("E3626", "staged #521"),
     ];
 
-    let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL
-        .iter()
-        .map(|(code, _)| (*code).to_string())
-        .collect();
-
     let emitted = emitted_codes();
     let registered = registered_codes();
     let exclusions = all_exclusions();
@@ -1048,8 +1124,9 @@ fn registered_unimplemented_codes_are_expected() {
     );
 
     const STALE_ALLOWLIST_FIXTURE: &[&str] = &["E2101", "E3001"];
-    let stale_fixture_failure = stale_allowlist_failure(
+    let stale_fixture_failure = coverage_baseline_failure(
         STALE_ALLOWLIST_FIXTURE.iter().copied(),
+        &BTreeSet::new(),
         &emitted,
     )
     .expect("embedded stale allowlist fixture must fail");
@@ -1084,24 +1161,12 @@ fn registered_unimplemented_codes_are_expected() {
         .cloned()
         .collect();
 
-    // Anything in spec_ahead_of_impl but NOT in expected is a surprise.
-    let mut unexpected: Vec<String> = spec_ahead_of_impl.difference(&expected).cloned().collect();
-    unexpected.sort();
-
-    assert!(
-        unexpected.is_empty(),
-        "Unexpected codes registered in typed rows but not emitted in Source/.\n\
-         If this is intentional (staged feature), add the code to \
-         EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
-         Unexpected:\n  {}",
-        unexpected.join("\n  ")
-    );
-
-    let now_emitted = stale_allowlist_failure(
+    let baseline_failure = coverage_baseline_failure(
         EXPECTED_SPEC_AHEAD_OF_IMPL.iter().map(|(code, _)| *code),
+        &spec_ahead_of_impl,
         &emitted,
     );
-    if let Some(failure) = now_emitted {
+    if let Some(failure) = baseline_failure {
         panic!("{failure}");
     }
 }
