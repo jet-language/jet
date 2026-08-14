@@ -1666,6 +1666,7 @@ fn run() {
             "tests/fixtures/web_contract_js.jet",
             "Pre",
             "positive",
+            7,
         ),
         (
             "contract_wasm",
@@ -1681,6 +1682,7 @@ fn run() {
             "tests/fixtures/web_contract_wasm.jet",
             "Post",
             "grows",
+            1,
         ),
     ];
     let harness = r#"
@@ -1697,7 +1699,7 @@ try {
   console.log(error.frame);
 }
 "#;
-    for (stem, source, shown, clause, message) in cases {
+    for (stem, source, shown, clause, message, expected_line) in cases {
         let dir = build_web_fixture(stem, source, shown);
         let stdout = run_node_harness(&dir, "contract_harness.mjs", harness);
         assert!(stdout.contains("code=E3005"), "{stem}:\n{stdout}");
@@ -1708,7 +1710,7 @@ try {
             "{stem} lost the contract frame:\n{stdout}"
         );
         assert!(
-            stdout.contains(&format!("--> {shown}:2")),
+            stdout.contains(&format!("--> {shown}:{expected_line}")),
             "{stem} lost the contract source location:\n{stdout}"
         );
         assert!(
