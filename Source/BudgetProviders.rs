@@ -323,6 +323,9 @@ fn compiler_latency_provider(request: &ProviderRequest, _: &ProviderCancellation
     if warmups != COMPILE_WARMUPS || sample_count != COMPILE_SAMPLES as u128 {
         return Err(ProviderFailure::operation(FailureClass::Incompatible, "CompilerProbe workload does not use the pinned warmup/sample policy"));
     }
+    if target != "cli" {
+        return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("compile workload target `{target}` is unsupported by the resident fixture compiler")));
+    }
     for spec in &request.specs {
         if !matches!(spec.metric.as_str(), "CompileTime(P50)" | "CompileTime(P90)" | "CompileTime(P95)" | "CompileTime(P99)" | "CompileTime(P999)") {
             return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("CompilerProbe does not support metric `{}`", spec.metric)));
@@ -363,24 +366,14 @@ fn compile_latency_samples(
     specs: &[ProviderSpec],
     request_id: &str,
 ) -> Result<Vec<ProviderEvent>, ProviderFailure> {
-    copy_compile_project(root, scratch).map_err(ProviderFailure::malformed)?;
-    let copied_source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
-    if copied_source_tree_sha256.as_str() != expected_source_tree_sha256 {
-        return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source changed while it was copied"));
-    }
     let relative_entry = entry.strip_prefix(root).map_err(|_| ProviderFailure::malformed("compile workload entry is outside its project root"))?;
-    let scratch_entry = scratch.join(relative_entry);
-    if let Some(patch) = patch {
-        apply_unified_patch(scratch, patch).map_err(ProviderFailure::malformed)?;
-    }
-    let source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
-    let edit_bytes_data = patch.map(|path| std::fs::read(scratch.join(path))).transpose().map_err(|error| ProviderFailure::malformed(format!("cannot read edit bytes: {error}")))?;
+    let workload_bytes = source_tree_bytes(root).map_err(ProviderFailure::malformed)?;
+    let edit_bytes_data = patch.map(|path| std::fs::read(root.join(path))).transpose().map_err(|error| ProviderFailure::malformed(format!("cannot read edit bytes: {error}")))?;
     let edit_bytes = edit_bytes_data.as_ref().map(|bytes| bytes.len() as u128).unwrap_or(0);
     let edit_sha256 = edit_bytes_data.as_deref().map(sha256_hex).unwrap_or_else(|| sha256_hex(&[]));
     if edit_sha256.as_str() != expected_patch_sha256 {
         return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload patch changed while it was copied"));
     }
-    let workload_bytes = source_tree_bytes(scratch).map_err(ProviderFailure::malformed)?;
     let compiler_digest = env!("JET_COMPILER_BUILD_ID").to_string();
     let core_digest = env!("JET_STDLIB_BUILD_ID").to_string();
     let host = format!("{}:{}", std::env::consts::OS, env!("JET_BUILD_TARGET"));
@@ -388,16 +381,43 @@ fn compile_latency_samples(
     let linker = std::env::var("RUSTC_LINKER").or_else(|_| std::env::var("CC")).unwrap_or_else(|_| "native".into());
     let mut sample_values = Vec::with_capacity(sample_count);
     let mut sample_records = Vec::with_capacity(sample_count);
-    for _ in 0..warmups {
-        if mode == "Clean" { reset_compile_cache(scratch)?; }
-        run_compile_child(&scratch_entry, scratch, target, profile)?;
+    let edit_patch = if mode == "Edit" {
+        Some(patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?)
+    } else {
+        None
+    };
+    if mode == "Edit" {
+        std::fs::create_dir_all(scratch).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot create edit workload scratch directory: {error}")))?;
+    } else {
+        copy_compile_project(root, scratch).map_err(ProviderFailure::malformed)?;
+        let copied_source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
+        if copied_source_tree_sha256.as_str() != expected_source_tree_sha256 {
+            return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source changed while it was copied"));
+        }
     }
-    for _ in 0..sample_count {
-        if mode == "Clean" { reset_compile_cache(scratch)?; }
-        let started = Instant::now();
-        run_compile_child(&scratch_entry, scratch, target, profile)?;
-        let elapsed_ns = started.elapsed().as_nanos();
-        let phase_totals = read_compile_phases(scratch)?;
+    for _ in 0..warmups {
+        if mode == "Edit" {
+            let trial = scratch.join("warmup");
+            let _ = compile_edit_trial(root, relative_entry, &trial, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?;
+        } else {
+            let scratch_entry = scratch.join(relative_entry);
+            if mode == "Clean" { reset_compile_cache(scratch)?; }
+            clear_compile_timing(scratch)?;
+            run_compile_child(&scratch_entry, scratch, target, profile)?;
+        }
+    }
+    for sample_index in 0..sample_count {
+        let (elapsed_ns, phase_totals) = if mode == "Edit" {
+            let trial = scratch.join(format!("sample-{sample_index}"));
+            compile_edit_trial(root, relative_entry, &trial, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?
+        } else {
+            let scratch_entry = scratch.join(relative_entry);
+            if mode == "Clean" { reset_compile_cache(scratch)?; }
+            clear_compile_timing(scratch)?;
+            let started = Instant::now();
+            run_compile_child(&scratch_entry, scratch, target, profile)?;
+            (started.elapsed().as_nanos(), read_compile_phases(scratch)?)
+        };
         sample_values.push(Rational::parse(&elapsed_ns.to_string(), "1").map_err(ProviderFailure::malformed)?);
         sample_records.push(CanonicalJson::object([
             ("backend".into(), CanonicalJson::String(backend.into())),
@@ -410,7 +430,7 @@ fn compile_latency_samples(
             ("linker".into(), CanonicalJson::String(linker.clone())),
             ("phase_totals".into(), phase_totals_json(&phase_totals)?),
             ("profile".into(), CanonicalJson::String(profile.into())),
-            ("source_tree_sha256".into(), CanonicalJson::String(source_tree_sha256.clone())),
+            ("source_tree_sha256".into(), CanonicalJson::String(expected_source_tree_sha256.into())),
             ("target".into(), CanonicalJson::String(target.into())),
             ("workload_bytes".into(), CanonicalJson::Integer(workload_bytes.to_string())),
         ]).map_err(ProviderFailure::malformed)?);
@@ -434,7 +454,7 @@ fn compile_latency_samples(
         ("profile".into(), CanonicalJson::String(profile.into())),
         ("sample_records".into(), CanonicalJson::Array(sample_records)),
         ("samples".into(), CanonicalJson::Integer(sample_count.to_string())),
-        ("source_tree_sha256".into(), CanonicalJson::String(source_tree_sha256)),
+        ("source_tree_sha256".into(), CanonicalJson::String(expected_source_tree_sha256.into())),
         ("target".into(), CanonicalJson::String(target.into())),
         ("variance".into(), variance.to_json()),
         ("warmups".into(), CanonicalJson::Integer(warmups.to_string())),
@@ -450,6 +470,39 @@ fn compile_latency_samples(
     }
     events.push(ProviderEvent::Complete { request_id: request_id.into(), samples: (sample_count * specs.len()) as u64 });
     Ok(events)
+}
+
+fn compile_edit_trial(
+    root: &Path,
+    relative_entry: &Path,
+    trial: &Path,
+    patch: &str,
+    expected_source_tree_sha256: &str,
+    expected_patch_sha256: &str,
+    target: &str,
+    profile: &str,
+) -> Result<(u128, Vec<(String, u128)>), ProviderFailure> {
+    let result = (|| {
+        copy_compile_project(root, trial).map_err(ProviderFailure::malformed)?;
+        let copied_source_tree_sha256 = source_tree_digest(trial).map_err(ProviderFailure::malformed)?;
+        if copied_source_tree_sha256.as_str() != expected_source_tree_sha256 {
+            return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source changed while it was copied"));
+        }
+        let patch_bytes = std::fs::read(trial.join(patch)).map_err(|error| ProviderFailure::operation(FailureClass::Incompatible, format!("compile workload patch changed while it was copied: {error}")))?;
+        if sha256_hex(&patch_bytes).as_str() != expected_patch_sha256 {
+            return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload patch changed while it was copied"));
+        }
+        reset_compile_cache(trial)?;
+        let entry = trial.join(relative_entry);
+        run_compile_child(&entry, trial, target, profile)?;
+        apply_unified_patch(trial, patch).map_err(ProviderFailure::malformed)?;
+        clear_compile_timing(trial)?;
+        let started = Instant::now();
+        run_compile_child(&entry, trial, target, profile)?;
+        Ok((started.elapsed().as_nanos(), read_compile_phases(trial)?))
+    })();
+    let _ = std::fs::remove_dir_all(trial);
+    result
 }
 
 fn workload_text(fields: &BTreeMap<String, CanonicalJson>, key: &str) -> Result<String, ProviderFailure> {
@@ -563,6 +616,17 @@ fn reset_compile_cache(root: &Path) -> Result<(), ProviderFailure> {
     Ok(())
 }
 
+fn clear_compile_timing(root: &Path) -> Result<(), ProviderFailure> {
+    for path in [root.join("jet-timing.json"), root.join("build/jet-timing-backend.json")] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot clear compile timing artifact: {error}"))),
+        }
+    }
+    Ok(())
+}
+
 fn apply_unified_patch(root: &Path, patch: &str) -> Result<(), String> {
     if !safe_relative_path(patch) { return Err("compile workload patch path is not project-relative".into()); }
     let patch_bytes = std::fs::read(root.join(patch)).map_err(|error| format!("cannot read compile workload patch: {error}"))?;
@@ -636,11 +700,19 @@ fn patch_header_path(header: &str) -> Result<String, String> {
     Ok(value.into())
 }
 
-fn run_compile_child(entry: &Path, root: &Path, _target: &str, profile: &str) -> Result<(), ProviderFailure> {
+fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> Result<(), ProviderFailure> {
+    if target != "cli" {
+        return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("compile workload target `{target}` is unsupported by the resident fixture compiler")));
+    }
     let executable = std::env::current_exe().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot identify resident Jet compiler: {error}")))?;
     let mut command = Command::new(executable);
     command.arg("build").arg(entry).current_dir(root).env("JET_TIMING", "1").env("JET_CACHE_DIR", root.join(".jet-compile-cache")).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    if profile == "release" { command.arg("--release"); }
+    match profile {
+        "dev" => {}
+        "release" => { command.arg("--release"); }
+        "small" => { command.arg("--small"); }
+        name => { command.arg(format!("--profile={name}")); }
+    }
     #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
     let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot start compile workload build: {error}")))?;
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -787,6 +859,16 @@ mod tests {
     fn panic_provider(_: &ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{panic!("hostile provider panic")}
     fn unavailable_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{Ok(vec![ProviderEvent::Unavailable{spec:0,reason:"probe could not observe ready event".into(),details:vec![]},ProviderEvent::Complete{request_id:request.request_id.clone(),samples:0}])}
     fn temporary(name:&str)->PathBuf{static NEXT:AtomicU64=AtomicU64::new(0);std::env::temp_dir().join(format!("jet-budget-provider-{}-{name}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)))}
+    #[test]
+    fn compiler_probe_rejects_forged_workload_identity_before_execution(){
+        let root=temporary("compile-identity");std::fs::create_dir_all(root.join("src")).unwrap();std::fs::create_dir_all(root.join("edits")).unwrap();
+        std::fs::write(root.join("package.jet"),"name: \"identity\"\nversion: \"0.1.0\"\n").unwrap();std::fs::write(root.join("src/run.jet"),"fn run() {}\n").unwrap();std::fs::write(root.join("edits/change.patch"),"patch\n").unwrap();
+        let workload=compiler_probe_workload(&root,&root.join("src/run.jet"),"Edit","cli","dev",Some("edits/change.patch")).unwrap();
+        let CanonicalJson::Object(mut fields)=workload else{panic!("workload object")};fields.insert("source_tree_sha256".into(),CanonicalJson::String("0".repeat(64)));
+        let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:"1".repeat(64),provider_hash:"2".repeat(64),context_hash:"3".repeat(64),specs:vec![ProviderSpec{budget_hash:"4".repeat(64),metric:"CompileTime(P95)".into()}],workload:CanonicalJson::Object(fields),policy:CanonicalJson::Null};
+        let cancellation=ProviderCancellation{cancelled:Arc::new(AtomicBool::new(false))};let failure=compiler_latency_provider(&request,&cancellation).unwrap_err();assert_eq!(failure.class,FailureClass::Incompatible);
+        let _=std::fs::remove_dir_all(root);
+    }
     #[cfg(target_os="linux")]fn assert_last_group_gone(){extern "C"{fn kill(pid:i32,signal:i32)->i32;}let group=LAST_ISOLATED_GROUP.load(Ordering::SeqCst)as i32;let deadline=Instant::now()+Duration::from_millis(100);while unsafe{kill(-group,0)}==0&&Instant::now()<deadline{std::thread::yield_now()}assert_ne!(unsafe{kill(-group,0)},0,"isolated provider process group survived timeout");}
     #[cfg(target_os="linux")]const SYS_PIDFD_SEND_SIGNAL:isize=424;
     #[cfg(target_os="linux")]const SYS_PIDFD_OPEN:isize=434;

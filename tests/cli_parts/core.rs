@@ -570,7 +570,7 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
 }
 
 #[test]
-fn budget_check_measures_typed_compile_edit_and_records_provenance() {
+fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = compile_latency_budget_project("budget_compile_latency");
     let bootstrap = Command::new(jet()).args(["budget", "update", "--baseline", "ci/linux-x64", "--bootstrap", "--reason", "initial compile latency", "--yes", "--json"]).current_dir(&dir).output().unwrap();
@@ -581,18 +581,27 @@ fn budget_check_measures_typed_compile_edit_and_records_provenance() {
     let CanonicalJson::Object(report) = &command["report"] else { panic!("report") };
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
-    let CanonicalJson::Object(measurement) = &measurements[0] else { panic!("measurement") };
-    let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
-    assert_eq!(provider["kind"], CanonicalJson::String("CompilerProbe".into()));
-    assert_eq!(measurement["unit"], CanonicalJson::String("Duration".into()));
-    let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
-    assert_eq!(samples.len(), 20);
-    let CanonicalJson::Object(statistics) = &measurement["statistics"] else { panic!("statistics") };
-    assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
-    let CanonicalJson::Object(compile) = &measurement["compile"] else { panic!("compile metadata") };
-    for key in ["source_tree_sha256", "compiler_digest", "core_digest", "target", "profile", "backend", "linker", "host", "cache_state", "warmups", "samples", "variance", "phase_totals", "sample_records", "edit_bytes", "edit_sha256", "workload_bytes"] {
-        assert!(compile.contains_key(key), "missing compile metadata field {key}");
+    assert_eq!(measurements.len(), 3);
+    let mut cache_states = std::collections::BTreeSet::new();
+    for measurement in measurements {
+        let CanonicalJson::Object(measurement) = measurement else { panic!("measurement") };
+        let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+        assert_eq!(provider["kind"], CanonicalJson::String("CompilerProbe".into()));
+        assert_eq!(measurement["unit"], CanonicalJson::String("Duration".into()));
+        let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+        assert_eq!(samples.len(), 20);
+        let CanonicalJson::Object(statistics) = &measurement["statistics"] else { panic!("statistics") };
+        assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
+        let CanonicalJson::Object(compile) = &measurement["compile"] else { panic!("compile metadata") };
+        let CanonicalJson::String(cache_state) = &compile["cache_state"] else { panic!("cache state") };
+        cache_states.insert(cache_state.clone());
+        let CanonicalJson::Integer(edit_bytes) = &compile["edit_bytes"] else { panic!("edit byte count") };
+        assert_eq!(cache_state == "Edit", edit_bytes != "0");
+        for key in ["source_tree_sha256", "compiler_digest", "core_digest", "target", "profile", "backend", "linker", "host", "cache_state", "warmups", "samples", "variance", "phase_totals", "sample_records", "edit_bytes", "edit_sha256", "workload_bytes"] {
+            assert!(compile.contains_key(key), "missing compile metadata field {key}");
+        }
     }
+    assert_eq!(cache_states, ["Clean", "NoChange", "Edit"].into_iter().map(String::from).collect());
     let report_path = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
     jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap()).unwrap();
 }
