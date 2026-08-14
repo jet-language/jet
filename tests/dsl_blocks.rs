@@ -113,14 +113,14 @@ marker Pattern on [.Text] {
     hole re.escape(@value)
 }
 
-fn take(pattern: Pattern) {}
+fn accept_pattern(pattern: Pattern) {}
 
 fn run() {
     value :: "a.b"
     pattern :: Pattern.{"a-{value}"}
-    take(pattern)
+    accept_pattern(pattern)
     trusted :: Pattern.raw("already checked")
-    take(trusted)
+    accept_pattern(trusted)
 }
 "#;
     jet::compile(source).expect("a declared text head should own its checked construction path");
@@ -134,11 +134,11 @@ marker Pattern on [.Text] {
     hole @value
 }
 
-fn take(pattern: Pattern) {}
+fn accept_pattern(pattern: Pattern) {}
 
 fn run() {
     raw :: "untrusted"
-    take(raw)
+    accept_pattern(raw)
 }
 "#;
     let diagnostics = jet::compile(invalid).expect_err("a bare String must not reach a text sink");
