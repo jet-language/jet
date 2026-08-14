@@ -499,12 +499,18 @@ impl CellExecResult {
 }
 
 fn bundle_for_eval(eval: &EvalResult) -> MimeBundle {
-    let text = eval
-        .value
-        .as_ref()
-        .filter(|value| !matches!(value, crate::Comptime::CtValue::Unit))
-        .map(crate::display_value)
-        .unwrap_or_else(|| eval.text.trim_end().to_string());
+    // `EvalResult.text` is the canonical turn/event stream: it contains sink
+    // output plus any echoed value or diagnostic. Keep it intact so a client
+    // cannot lose a print event when the turn also carries a value.
+    let text = match eval.text.trim_end() {
+        "" => eval
+            .value
+            .as_ref()
+            .filter(|value| !matches!(value, crate::Comptime::CtValue::Unit))
+            .map(crate::display_value)
+            .unwrap_or_default(),
+        text => text.to_string(),
+    };
     let mut mime = vec![("text/plain".to_string(), text.clone())];
     if text.trim_start().starts_with("<svg") {
         mime.push(("image/svg+xml".to_string(), text.clone()));
