@@ -7,6 +7,10 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
+fn jet_runtime_stop(code: &'static str, _file: &str, line: u32, message: &str) -> ! {
+    crate::runtime_host::runtime_stop_unwind(code, line, message)
+}
+
 #[allow(dead_code, unused_imports)]
 pub(crate) mod web_rt {
     pub(crate) use crate::net_http_rt::{
@@ -283,4 +287,3 @@ host_fns! {
     devserver_port: "jet_jit_devserver_port" => jet_jit_devserver_port: binary;
     devserver_serve: "jet_jit_devserver_serve" => jet_jit_devserver_serve: unary_void;
 }
-

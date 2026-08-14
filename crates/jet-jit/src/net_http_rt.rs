@@ -32,6 +32,10 @@ use jet_codegen::scheduler::{
 };
 use std::sync::Arc;
 
+fn jet_runtime_stop(code: &'static str, _file: &str, line: u32, message: &str) -> ! {
+    crate::runtime_host::runtime_stop_unwind(code, line, message)
+}
+
 type JetDataTree = crate::Encoding::json_rt::DataTree;
 
 trait __jet_Encode {
