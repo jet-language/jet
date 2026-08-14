@@ -1228,7 +1228,7 @@ fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
     assert!(errors.is_empty(), "job_runner front end: {errors:?}");
     for (job, expected_name) in [
         ("greet", "job_runner.greet"),
-        ("seed", "job_runner.seed"),
+        ("seed_data", "job_runner.seed_data"),
     ] {
         let expected = fs::read_to_string(
             root.join(format!("examples/features/expected/devloop/{expected_name}.out")),

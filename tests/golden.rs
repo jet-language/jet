@@ -268,7 +268,7 @@ fn golden_uses_release_run(stem: &str) -> bool {
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
-    // paths — leaf `greet` stays callable while sibling `seed` calls it.
+    // paths — leaf `greet` stays callable while sibling `seed_data` calls it.
     if entry.stem == "devloop/job_runner" {
         check_job_runner_jobs(entry, env);
         return;
@@ -766,7 +766,7 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
         "I2 violated: rustc rejected job_runner:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    for (job, expected_name) in [("greet", "job_runner.greet"), ("seed", "job_runner.seed")] {
+    for (job, expected_name) in [("greet", "job_runner.greet"), ("seed_data", "job_runner.seed_data")] {
         let run = Command::new(&bin).arg(job).output().unwrap();
         assert!(
             run.status.success(),

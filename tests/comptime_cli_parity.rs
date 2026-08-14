@@ -336,7 +336,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
 
     for (job, golden_name) in [
         ("greet", "job_runner.greet.out"),
-        ("seed", "job_runner.seed.out"),
+        ("seed_data", "job_runner.seed_data.out"),
     ] {
         let expected = fs::read(
             root.join("examples/features/expected/devloop").join(golden_name),

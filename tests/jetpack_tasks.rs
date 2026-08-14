@@ -63,7 +63,7 @@ fn greet() {
     print("from-jetpack")
 }
 #Job
-fn seed() {
+fn seed_data() {
     print("seeded")
 }
 fn run() {}
@@ -99,7 +99,7 @@ fn run() {}
     assert!(stderr.contains("E1294"), "stderr: {stderr}");
     assert!(stderr.contains("no job named `deploy`"), "stderr: {stderr}");
     assert!(
-        stderr.contains("declared jobs:") && stderr.contains("greet") && stderr.contains("seed"),
+        stderr.contains("declared jobs:") && stderr.contains("greet") && stderr.contains("seed_data"),
         "stderr: {stderr}"
     );
 }
@@ -118,7 +118,7 @@ fn greet() {
     print("leaf-ok")
 }
 #Job
-fn seed() {
+fn seed_data() {
     greet()
     print("dep-ok")
 }
@@ -149,7 +149,7 @@ fn run() { print("run-entry") }
     );
 
     let seed = jet()
-        .args(["run", path, "--", "seed"])
+        .args(["run", path, "--", "seed_data"])
         .output()
         .unwrap();
     assert!(
