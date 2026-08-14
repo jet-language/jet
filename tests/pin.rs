@@ -117,7 +117,11 @@ fn interpret_on_thread(src: String) -> String {
     );
     let mut sink = jet::Comptime::DevSink::new();
     jet::Codegen::TIR::install_comptime_bridge();
-    jet::Comptime::TirBridge::run_bundle(&bundle, &mut sink, true)
+    jet::Comptime::TirBridge::run_bundle(
+        &bundle,
+        &mut sink,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+    )
         .expect("interpreter runs the fixture");
     sink.stdout
 }
