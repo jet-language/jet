@@ -538,10 +538,8 @@ impl LowerCtx<'_, '_> {
                 } if self.meta.result_option_target(name)
             ),
             TExprKind::BuiltinMethod { op, recv, .. } => match op {
-                // Map hosts return result-arena Option handles for both get and add.
-                TBuiltinOp::GetMap | TBuiltinOp::InsertMap => {
-                    matches!(&recv.ty, Type::Map { .. })
-                }
+                // Map.get returns a result-arena Option handle.
+                TBuiltinOp::GetMap => matches!(&recv.ty, Type::Map { .. }),
                 TBuiltinOp::First | TBuiltinOp::Last => {
                     Self::receiver_is(&recv.ty, jet_foundation::Syntax::TYPE_RANK)
                 }
@@ -18585,11 +18583,19 @@ impl LowerCtx<'_, '_> {
                     _ => val,
                 };
                 let prev = self.call_host(self.host.coll.map_get_opt, &[recv_val, key]);
+                // map_get_opt returns a result-arena handle. Normalize it to
+                // the resident packed Option before it leaves this adapter.
+                let present = self.call_host(self.host.result_is_ok, &[prev]);
+                let zero_i8 = self.b.ins().iconst(types::I8, 0);
+                let present = self.b.ins().icmp(IntCC::NotEqual, present, zero_i8);
+                let payload = self.result_payload(prev, &args[1].ty)?;
+                let some = self.pack_option_payload(payload, &args[1].ty)?;
+                let none = self.b.ins().iconst(types::I64, 0);
                 let insert_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.map_insert, self.b.func);
                 self.b.ins().call(insert_ref, &[recv_val, key, val]);
-                Ok(prev)
+                Ok(self.b.ins().select(present, some, none))
             }
             TBuiltinOp::TryInsertMap => {
                 let key = self.lower_expr(&args[0])?;
