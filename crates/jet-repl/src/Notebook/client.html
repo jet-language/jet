@@ -15,7 +15,7 @@
     #status { color:var(--muted); margin-left:auto; min-width:12rem; text-align:right; }
     main { width:min(1100px,100%); margin:0 auto; padding:1rem; }
     .cell { background:var(--panel); border:1px solid var(--line); border-radius:.5rem; margin:0 0 1rem; overflow:hidden; }
-    .cell.stale { border-color:var(--warn); } .cell-head { display:flex; gap:.4rem; align-items:center; padding:.45rem .6rem; border-bottom:1px solid var(--line); color:var(--muted); }
+    .cell.stale, .cell.conflict { border-color:var(--warn); } .cell-head { display:flex; gap:.4rem; align-items:center; padding:.45rem .6rem; border-bottom:1px solid var(--line); color:var(--muted); }
     .cell-head strong { color:var(--ink); font-size:.8rem; } .cell-head .grow { flex:1; }
     textarea { display:block; width:100%; min-height:5rem; resize:vertical; border:0; border-bottom:1px solid var(--line); border-radius:0; padding:.75rem; background:#0d1117; color:var(--ink); font:14px/1.5 ui-monospace,SFMono-Regular,monospace; }
     .output { padding:.7rem .75rem; white-space:pre-wrap; overflow:auto; font:14px/1.45 ui-monospace,SFMono-Regular,monospace; }
@@ -63,8 +63,15 @@
   function outputNode(output) {
     const box = document.createElement('div'); box.className = 'output';
     if (!output) { box.textContent = 'No output yet.'; return box; }
-    if (!output.live) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = 'Stale output hidden. Run this cell again.'; box.append(n); return box; }
-    if (output.quarantined) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = 'Imported output is quarantined; run it locally before trusting it.'; box.append(n); }
+    if (!output.live && !output.quarantined) { const n = document.createElement('div'); n.className = 'notice'; n.textContent = 'Stale output hidden. Run this cell again.'; box.append(n); return box; }
+    if (output.quarantined) {
+      const n = document.createElement('div'); n.className = 'notice'; n.textContent = 'Rich output is quarantined; grant its requested trust or run it locally again.'; box.append(n);
+      if ((output.origins || []).length || (output.messages || []).length) {
+        const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Trust request';
+        const request = []; if ((output.origins || []).length) request.push(`origins: ${output.origins.join(', ')}`); if ((output.messages || []).length) request.push(`messages: ${output.messages.join(', ')}`);
+        const pre = document.createElement('pre'); pre.textContent = request.join('\n'); details.append(summary, pre); box.append(details);
+      }
+    }
     const text = document.createElement('pre'); text.textContent = output.text || '(no text/plain)'; box.append(text);
     (output.mime || []).forEach(part => {
       if (part.type === 'image/svg+xml') { const img = document.createElement('img'); img.alt = 'Jet plot'; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(part.data); box.append(img); }
@@ -75,7 +82,7 @@
   function render() {
     const list = (state && state.cells) || []; cells.replaceChildren(); empty.hidden = list.length > 0;
     list.forEach((cell, index) => {
-      const wrap = document.createElement('article'); wrap.className = 'cell' + (cell.output && !cell.output.live ? ' stale' : ''); wrap.dataset.id = cell.id;
+      const wrap = document.createElement('article'); wrap.className = 'cell' + (cell.output && !cell.output.live ? ' stale' : '') + (cell.conflict ? ' conflict' : ''); wrap.dataset.id = cell.id;
       const head = document.createElement('div'); head.className = 'cell-head';
       wrap.id = `cell-${cell.id}`;
       const label = document.createElement('strong'); label.textContent = `${index + 1} · ${cell.kind}`; head.append(label);
@@ -83,30 +90,34 @@
       const sourceLink = document.createElement('a'); sourceLink.href = `#cell-${cell.id}`; sourceLink.textContent = 'source'; sourceLink.title = 'Stable source link'; head.append(sourceLink);
       const grow = document.createElement('span'); grow.className = 'grow'; head.append(grow);
       if (cell.kind === 'jet') {
-        [['Run','run'],['Inspect','inspect'],['Debug','debug'],['Profile','profile']].forEach(([labelText, action]) => { const button = document.createElement('button'); button.textContent = labelText; button.onclick = () => act(action, cell.id); head.append(button); });
+        const actions = [['Run','run'],['Inspect','inspect'],['Debug','debug'],['Profile','profile']];
+        if (cell.output && cell.output.quarantined && ((cell.output.origins || []).length || (cell.output.messages || []).length)) actions.push(['Trust','grant']);
+        actions.forEach(([labelText, action]) => { const button = document.createElement('button'); button.textContent = labelText; button.onclick = () => act(action, cell.id); head.append(button); });
       }
-      const area = document.createElement('textarea'); area.value = drafts[cell.id] ?? cell.source; area.setAttribute('aria-label', `${cell.kind} cell source`); area.oninput = () => saveDraft(cell.id, area.value); area.onblur = () => sync(cell.id, area.value); wrap.append(head, area, outputNode(cell.output)); cells.append(wrap);
+      const area = document.createElement('textarea'); area.value = drafts[cell.id] ?? cell.source; area.setAttribute('aria-label', `${cell.kind} cell source`); area.oninput = () => saveDraft(cell.id, area.value); area.onblur = () => sync(cell.id, area.value); wrap.append(head, area);
+      if (cell.conflict) { const notice = document.createElement('div'); notice.className = 'output notice'; notice.textContent = 'Merge conflict: edit this source to resolve it before running.'; wrap.append(notice); }
+      wrap.append(outputNode(cell.output)); cells.append(wrap);
     });
   }
   async function sync(id, source) { try { await request('/api/edit', {cell_id:id, source}); delete drafts[id]; localStorage.setItem(draftsKey, JSON.stringify(drafts)); return true; } catch (error) { saveDraft(id, source); setStatus(error.message, true); return false; } }
-  async function refresh() { try { const body = await request('/api/state'); state = body.state || body; render(); setStatus(`${state.cells.length} cells · ${state.turns.length} turns`); } catch (error) { setStatus(`${error.message} · drafts saved locally`, true); } }
+  async function refresh() { try { const body = await request('/api/state', {client:document.querySelector('#client').value}); state = body.state || body; render(); setStatus(`${state.notice ? state.notice + ' · ' : ''}${state.cells.length} cells · ${state.turns.length} turns`); } catch (error) { setStatus(`${error.message} · drafts saved locally`, true); } }
   async function act(action, id) {
     const area = document.querySelector(`[data-id="${CSS.escape(id)}"] textarea`); if (area && !(await sync(id, area.value))) return;
-    try { const body = await request(`/api/${action}`, {cell_id:id, client:document.querySelector('#client').value, renderer:'jet-notebook'}); if (body.filename) download(body.filename, body.content); else { state = body.state || state; render(); setStatus(body.message || action); } } catch (error) { setStatus(error.message, true); }
+    try { const body = await request(`/api/${action}`, {cell_id:id, client:document.querySelector('#client').value}); if (body.filename) download(body.filename, body.content); else { state = body.state || state; render(); setStatus(body.message || action); } } catch (error) { setStatus(error.message, true); }
   }
   async function add(kind) { try { const body = await request('/api/add', {kind, source:''}); state = body.state; render(); setStatus('cell added'); const last = cells.lastElementChild; last?.querySelector('textarea')?.focus(); } catch (error) { setStatus(error.message, true); } }
   function download(name, content) { const blob = new Blob([content], {type:'application/octet-stream'}); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); URL.revokeObjectURL(link.href); }
   document.querySelector('#new-jet').onclick = () => add('jet'); document.querySelector('#new-md').onclick = () => add('markdown');
-  document.querySelector('#reopen').onclick = async () => { try { const body = await request('/api/reopen'); state = body.state; render(); setStatus('reopened'); } catch (error) { setStatus(error.message, true); } };
-  document.querySelector('#save').onclick = async () => { try { const synced = await Promise.all(Array.from(document.querySelectorAll('.cell textarea')).map(area => sync(area.closest('.cell').dataset.id, area.value))); if (synced.some(ok => !ok)) throw new Error('save skipped; edits remain in offline drafts'); const body = await request('/api/save', {path:document.querySelector('#path').value}); state = body.state; render(); setStatus(body.message || 'saved'); } catch (error) { setStatus(error.message, true); } };
-  document.querySelector('#open').onclick = async () => { try { const body = await request('/api/open', {path:document.querySelector('#path').value}); state = body.state; render(); setStatus('opened'); } catch (error) { setStatus(error.message, true); } };
-  document.querySelector('#merge').onclick = async () => { try { const body = await request('/api/merge', {path:document.querySelector('#path').value}); state = body.state; render(); setStatus('merged by stable cell ID'); } catch (error) { setStatus(error.message, true); } };
+  document.querySelector('#reopen').onclick = async () => { try { const body = await request('/api/reopen', {client:document.querySelector('#client').value}); state = body.state; render(); setStatus('reopened'); } catch (error) { setStatus(error.message, true); } };
+  document.querySelector('#save').onclick = async () => { try { const synced = await Promise.all(Array.from(document.querySelectorAll('.cell textarea')).map(area => sync(area.closest('.cell').dataset.id, area.value))); if (synced.some(ok => !ok)) throw new Error('save skipped; edits remain in offline drafts'); const body = await request('/api/save', {path:document.querySelector('#path').value, client:document.querySelector('#client').value}); state = body.state; render(); setStatus(body.message || 'saved'); } catch (error) { setStatus(error.message, true); } };
+  document.querySelector('#open').onclick = async () => { try { const body = await request('/api/open', {path:document.querySelector('#path').value, client:document.querySelector('#client').value}); state = body.state; render(); setStatus('opened'); } catch (error) { setStatus(error.message, true); } };
+  document.querySelector('#merge').onclick = async () => { try { const body = await request('/api/merge', {path:document.querySelector('#path').value, client:document.querySelector('#client').value}); state = body.state; render(); setStatus(body.message || 'merged by stable cell ID'); } catch (error) { setStatus(error.message, true); } };
   document.querySelector('#interrupt').onclick = async () => { try { await request('/api/interrupt'); setStatus('interrupt requested'); } catch (error) { setStatus(error.message, true); } };
   document.querySelector('#export-ipynb').onclick = async () => { try { const body = await request('/api/export/ipynb'); download(body.filename, body.content); setStatus(body.loss); } catch (error) { setStatus(error.message, true); } };
   document.querySelector('#export-jet').onclick = async () => { try { const body = await request('/api/export/jet'); download(body.filename, body.content); setStatus(body.loss); } catch (error) { setStatus(error.message, true); } };
   document.querySelector('#send-stdin').onclick = async () => { try { await request('/api/stdin', {line:document.querySelector('#stdin').value}); document.querySelector('#stdin').value = ''; setStatus('input queued'); } catch (error) { setStatus(error.message, true); } };
   document.querySelector('#complete-button').onclick = async () => { try { const body = await request('/api/complete', {prefix:document.querySelector('#complete').value}); document.querySelector('#completion').textContent = body.message || ''; } catch (error) { setStatus(error.message, true); } };
-  document.querySelector('#import-file').onchange = async event => { const file = event.target.files[0]; if (!file) return; try { const body = await request('/api/import', {text:await file.text()}); state = body.state; render(); setStatus(body.message || 'imported; review loss report'); } catch (error) { setStatus(error.message, true); } event.target.value = ''; };
+  document.querySelector('#import-file').onchange = async event => { const file = event.target.files[0]; if (!file) return; try { const body = await request('/api/import', {text:await file.text(), client:document.querySelector('#client').value}); state = body.state; render(); setStatus(body.message || 'imported; review loss report'); } catch (error) { setStatus(error.message, true); } event.target.value = ''; };
   window.addEventListener('online', refresh); window.addEventListener('offline', () => setStatus('offline · drafts saved locally', true)); refresh();
 })();
 </script>

@@ -9,7 +9,8 @@ mod trust;
 
 pub use document::{
     export_jet, export_ipynb, import_ipynb, load_jetnb, merge_by_id, save_jetnb, CellKind,
-    CellOutput, JetNotebook, LossReport, NotebookCell, OutputCacheEntry, OUTPUT_CACHE_POLICY,
+    CellOutput, JetNotebook, LossReport, MergeConflict, NotebookCell, OutputCacheEntry,
+    OUTPUT_CACHE_POLICY,
 };
 pub use kernel::{CellExecResult, ClientKind, Kernel, KernelView, RerunDecision};
 pub use protocol::{handle_message, run_headless_script, ProtocolMessage, ProtocolReply};

@@ -2740,6 +2740,31 @@ pub(crate) fn apply_replay_plan_with_stale(
     color: bool,
     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
 ) {
+    apply_replay_plan_with_stale_mode(session, plan, stale_from, base_dir, color, authorizer, true);
+}
+
+/// Notebook/headless callers need the same replay state transition without
+/// human progress lines contaminating their JSONL output.
+pub(crate) fn apply_replay_plan_with_stale_quiet(
+    session: &mut Session,
+    plan: &RerunPlan::ReplayPlan,
+    stale_from: Option<usize>,
+    base_dir: &Path,
+    color: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+) {
+    apply_replay_plan_with_stale_mode(session, plan, stale_from, base_dir, color, authorizer, false);
+}
+
+fn apply_replay_plan_with_stale_mode(
+    session: &mut Session,
+    plan: &RerunPlan::ReplayPlan,
+    stale_from: Option<usize>,
+    base_dir: &Path,
+    color: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+    announce: bool,
+) {
     let prior: Vec<String> = session
         .turns
         .iter()
@@ -2766,13 +2791,17 @@ pub(crate) fn apply_replay_plan_with_stale(
                 bound_name: None,
                 pending_unfold: None,
             });
-            println!("{}", dim(&format!("turn {} stale: not replayed", step.turn_id), color));
+            if announce {
+                println!("{}", dim(&format!("turn {} stale: not replayed", step.turn_id), color));
+            }
             continue;
         }
-        println!(
-            "{}",
-            dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)
-        );
+        if announce {
+            println!(
+                "{}",
+                dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)
+            );
+        }
         execute_line(&step.input, session, base_dir, color, false, false, authorizer);
     }
 }

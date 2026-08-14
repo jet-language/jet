@@ -16,12 +16,7 @@ const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
 
 /// Dispatch `jet notebook [PATH] [--protocol] [--bind ADDR] [--token TOKEN]`.
 pub(crate) fn run_notebook(raw: &[String]) {
-    let path = raw
-        .iter()
-        .skip_while(|arg| arg.as_str() != "notebook")
-        .nth(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .map(PathBuf::from);
+    let path = notebook_path(raw);
     let protocol = raw.iter().any(|arg| arg == "--protocol" || arg == "--headless");
     let bind = flag_value(raw, "--bind");
     let explicit_token = flag_value(raw, "--token").map(str::to_string);
@@ -80,7 +75,8 @@ pub(crate) fn run_notebook(raw: &[String]) {
 
 fn run_headless(kernel: &mut Kernel) {
     let stdin = io::stdin();
-    let mut out = String::new();
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
         let line = line.trim().to_string();
@@ -90,10 +86,14 @@ fn run_headless(kernel: &mut Kernel) {
         if line == "quit" || line == ":quit" {
             break;
         }
-        out.push_str(&Notebook::run_headless_script(kernel, &[&line]));
+        let response = Notebook::run_headless_script(kernel, &[&line]);
+        if stdout.write_all(response.as_bytes()).is_err() {
+            break;
+        }
+        if stdout.flush().is_err() {
+            break;
+        }
     }
-    print!("{out}");
-    let _ = io::stdout().flush();
 }
 
 fn flag_value<'a>(raw: &'a [String], name: &str) -> Option<&'a str> {
@@ -106,6 +106,26 @@ fn flag_value<'a>(raw: &'a [String], name: &str) -> Option<&'a str> {
         })
 }
 
+fn notebook_path(raw: &[String]) -> Option<PathBuf> {
+    let start = raw.iter().position(|arg| arg == "notebook")? + 1;
+    let mut consumes_value = false;
+    for arg in raw.iter().skip(start) {
+        if consumes_value {
+            consumes_value = false;
+            continue;
+        }
+        if arg == "--bind" || arg == "--token" {
+            consumes_value = true;
+            continue;
+        }
+        if arg.starts_with('-') {
+            continue;
+        }
+        return Some(PathBuf::from(arg));
+    }
+    None
+}
+
 fn mint_token() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     let mut source = std::fs::File::open("/dev/urandom").map_err(|error| error.to_string())?;
@@ -116,7 +136,13 @@ fn mint_token() -> Result<String, String> {
 }
 
 fn is_loopback(addr: &str) -> bool {
-    addr.starts_with("127.") || addr.starts_with("localhost:") || addr == "localhost"
+    addr.starts_with("127.")
+        || addr.starts_with("localhost:")
+        || addr == "localhost"
+        || addr.starts_with("[::1]:")
+        || addr == "[::1]"
+        || addr.starts_with("::1:")
+        || addr == "::1"
 }
 
 fn serve_loopback(
@@ -216,15 +242,16 @@ enum ApiResponse {
 fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_active: bool) -> ApiResponse {
     let value = |name: &str| form_value(body, name).unwrap_or_default();
     let client = || parse_client(&value("client"));
+    let selected_client = client().unwrap_or(ClientKind::FirstParty);
     let message = match route {
-        "/api/state" => return ApiResponse::Ok(kernel.state_json()),
+        "/api/state" => return ApiResponse::Ok(kernel.state_json_for(selected_client)),
         "/api/add" => {
             let kind = match value("kind").as_str() {
                 "markdown" => Notebook::CellKind::Markdown,
                 _ => Notebook::CellKind::Jet,
             };
             let cell_id = kernel.notebook.add_cell(kind, value("source")).id.clone();
-            return state_message(kernel, format!("added={cell_id}"));
+            return state_message_for(kernel, format!("added={cell_id}"), selected_client);
         }
         "/api/edit" => kernel.edit_cell(&value("cell_id"), value("source")).map(|()| "edited".into()),
         "/api/run" => {
@@ -248,9 +275,11 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
         }
         "/api/debug" => {
             kernel.attach_debug();
-            inspect_message(kernel, &value("cell_id"))
+            inspect_message(kernel, &value("cell_id"), client().unwrap_or(ClientKind::FirstParty))
         }
-        "/api/inspect" => inspect_message(kernel, &value("cell_id")),
+        "/api/inspect" => {
+            inspect_message(kernel, &value("cell_id"), client().unwrap_or(ClientKind::FirstParty))
+        }
         "/api/complete" => {
             let prefix = value("prefix");
             let mut names: Vec<_> = kernel
@@ -295,30 +324,36 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
             return ApiResponse::Ok(export_message("notebook.jet", content, loss.render()));
         }
         "/api/grant" => kernel
-            .grant_capability(&value("cell_id"), &value("renderer"))
+            .grant_capability(&value("cell_id"), selected_client.renderer())
             .map(|()| "granted".into()),
         other => Err(format!("unknown notebook route `{other}`")),
     };
     match message {
-        Ok(message) => state_message(kernel, message),
+        Ok(message) => state_message_for(kernel, message, selected_client),
         Err(error) => ApiResponse::Error(error),
     }
 }
 
-fn state_message(kernel: &Kernel, message: String) -> ApiResponse {
-    ApiResponse::Ok(format!("{{\"ok\":true,\"message\":{},\"state\":{}}}", json_str(&message), kernel.state_json()))
+fn state_message_for(kernel: &Kernel, message: String, client: ClientKind) -> ApiResponse {
+    ApiResponse::Ok(format!("{{\"ok\":true,\"message\":{},\"state\":{}}}", json_str(&message), kernel.state_json_for(client)))
 }
 
-fn inspect_message(kernel: &Kernel, cell_id: &str) -> Result<String, String> {
+fn inspect_message(
+    kernel: &Kernel,
+    cell_id: &str,
+    client: ClientKind,
+) -> Result<String, String> {
     let cell = kernel
         .notebook
         .cells
         .iter()
         .find(|cell| cell.id == cell_id)
         .ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
-    let output = kernel
-        .notebook
-        .visible_output(cell_id)
+    let output = (match client {
+        ClientKind::FirstParty => kernel.first_party_visible_output(cell_id),
+        ClientKind::CanvasLens => kernel.canvas_visible_output(cell_id),
+        ClientKind::JupyterAdapter => kernel.jupyter_visible_output(cell_id),
+    })
         .map(|out| out.bundle.text_plain.clone())
         .unwrap_or_else(|| "(no live output)".into());
     Ok(format!("inspected={};source_len={};output={}", cell.id, cell.source.len(), output))
@@ -350,7 +385,14 @@ fn parse_client(name: &str) -> Result<ClientKind, String> {
 fn merge_path(kernel: &mut Kernel, path: &Path) -> Result<String, String> {
     let notebook = Notebook::load_jetnb(path)?;
     kernel.merge_notebook(notebook);
-    Ok(format!("merged={}", path.display()))
+    if kernel.notebook.merge_conflicts.is_empty() {
+        Ok("merged by stable cell ID;conflicts=0".into())
+    } else {
+        Ok(format!(
+            "merged by stable cell ID;conflicts={}",
+            kernel.notebook.merge_conflicts.len()
+        ))
+    }
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<Request, String> {

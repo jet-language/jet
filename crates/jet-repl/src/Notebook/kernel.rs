@@ -45,6 +45,7 @@ pub struct Kernel {
     pub document_path: Option<PathBuf>,
     pub execution_count: u32,
     pub stdin_queue: Vec<String>,
+    document_notice: Option<String>,
     interrupt_requested: bool,
     debug_attached: bool,
     perf_attached: bool,
@@ -68,7 +69,15 @@ impl Kernel {
         let mut kernel = Self::blank(path, environment_hash);
         if let Some(path) = path {
             if path.exists() {
-                kernel.notebook = super::document::load_jetnb(path)?;
+                let mut notebook = super::document::load_jetnb(path)?;
+                if notebook.environment_hash != kernel.notebook.environment_hash {
+                    kernel.document_notice = Some(
+                        "notebook environment changed; cached output is stale until local re-run"
+                            .into(),
+                    );
+                    notebook.environment_hash = kernel.notebook.environment_hash.clone();
+                }
+                kernel.notebook = notebook;
             }
         }
         kernel.trust = TrustStore::load(&super::trust::trust_store_path());
@@ -89,6 +98,7 @@ impl Kernel {
             document_path: path.map(Path::to_path_buf),
             execution_count: 0,
             stdin_queue: Vec::new(),
+            document_notice: None,
             interrupt_requested: false,
             debug_attached: false,
             perf_attached: false,
@@ -100,18 +110,35 @@ impl Kernel {
         self.policy = ReplPolicy::for_notebook(notebook_flags(), &self.base_dir);
         self.execution_count = 0;
         self.stdin_queue.clear();
+        for cell in &mut self.notebook.cells {
+            if let Some(output) = &mut cell.output {
+                // Turn ids belong to one in-memory session. They must not be
+                // compared with newly numbered turns after reopen/edit/merge.
+                output.turn_id = None;
+            }
+        }
+        self.debug_attached = false;
+        self.perf_attached = false;
         self.interrupt_requested = false;
     }
 
     pub fn open_document(&mut self, path: &Path) -> Result<(), String> {
         let notebook = super::document::load_jetnb(path)?;
-        self.notebook = notebook;
-        self.document_path = Some(path.to_path_buf());
-        self.base_dir = path
+        let base_dir = path
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        let environment_hash = Self::environment_hash(&base_dir);
+        self.document_notice = (notebook.environment_hash != environment_hash).then(|| {
+            "notebook environment changed; cached output is stale until local re-run".into()
+        });
+        self.notebook = JetNotebook {
+            environment_hash,
+            ..notebook
+        };
+        self.document_path = Some(path.to_path_buf());
+        self.base_dir = base_dir;
         self.reset_runtime();
         Ok(())
     }
@@ -129,31 +156,47 @@ impl Kernel {
             .map(Path::to_path_buf)
             .or_else(|| self.document_path.clone())
             .ok_or_else(|| "save needs a `.jetnb` path".to_string())?;
-        super::document::save_jetnb(&self.notebook, &target)?;
-        self.document_path = Some(target.clone());
-        self.base_dir = target
+        let target_base_dir = target
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        self.notebook.environment_hash = Self::environment_hash(&target_base_dir);
+        super::document::save_jetnb(&self.notebook, &target)?;
+        self.document_notice = None;
+        self.document_path = Some(target.clone());
+        self.base_dir = target_base_dir;
         self.policy = ReplPolicy::for_notebook(notebook_flags(), &self.base_dir);
         Ok(target)
     }
 
     pub fn replace_notebook(&mut self, notebook: JetNotebook) {
-        self.notebook = notebook;
+        self.notebook = JetNotebook {
+            environment_hash: Self::environment_hash(&self.base_dir),
+            ..notebook
+        };
         self.document_path = None;
+        self.document_notice = Some(
+            "imported notebook output is quarantined; run cells locally to create trusted cache"
+                .into(),
+        );
         self.reset_runtime();
     }
 
     pub fn merge_notebook(&mut self, theirs: JetNotebook) {
         self.notebook = super::document::merge_by_id(&self.notebook, &theirs);
+        self.document_notice = (!self.notebook.merge_conflicts.is_empty()).then(|| {
+            "merge conflicts are present; edit the marked cells before execution".into()
+        });
         self.reset_runtime();
     }
 
     pub fn edit_cell(&mut self, cell_id: &str, source: impl Into<String>) -> Result<(), String> {
         self.notebook.edit_cell(cell_id, source)?;
-        self.session.reset();
+        self.reset_runtime();
+        if self.notebook.merge_conflicts.is_empty() {
+            self.document_notice = None;
+        }
         Ok(())
     }
 
@@ -231,6 +274,17 @@ impl Kernel {
             if cell.kind != CellKind::Jet {
                 return Err("markdown cells are not executed".into());
             }
+            if let Some(conflict) = self
+                .notebook
+                .merge_conflicts
+                .iter()
+                .find(|conflict| conflict.cell_id == cell_id)
+            {
+                return Err(format!(
+                    "cell `{cell_id}` has an unresolved merge conflict; edit it before execution (ours: {:?}, theirs: {:?})",
+                    conflict.ours_source, conflict.theirs_source
+                ));
+            }
             cell.source.clone()
         };
 
@@ -290,6 +344,12 @@ impl Kernel {
         decisions: &[RerunDecision],
     ) -> Result<Vec<usize>, String> {
         let _ = client;
+        // Replay rebuilds the shared session, but it does not know which
+        // notebook cell produced each historical turn. Clear cached cell
+        // outputs before rebuilding so an old turn can never be relabeled as
+        // live by a newly numbered session turn.
+        self.notebook.invalidate_all_outputs();
+        self.execution_count = 0;
         let mut decision_iter = decisions.iter().copied();
         let mut stale_from = None;
         for step in &plan.steps {
@@ -305,7 +365,7 @@ impl Kernel {
         }
         {
             let mut auth = self.policy.authorizer(None);
-            crate::apply_replay_plan_with_stale(
+            crate::apply_replay_plan_with_stale_quiet(
                 &mut self.session,
                 plan,
                 stale_from,
@@ -330,10 +390,10 @@ impl Kernel {
             .iter()
             .find(|c| c.id == cell_id)
             .ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
-        let out = cell
-            .output
-            .as_ref()
-            .ok_or_else(|| "cell has no output to grant".to_string())?;
+        let out = self
+            .notebook
+            .visible_output(cell_id)
+            .ok_or_else(|| "cell has no live output to grant".to_string())?;
         let payload_hash = SHA256::sha256_hex(
             format!("{:?}\0{:?}", out.bundle.mime, out.bundle.widget_id).as_bytes(),
         );
@@ -380,53 +440,100 @@ impl Kernel {
             {
                 return None;
             }
-        } else if let Some(turn) = self
-            .session
-            .turns
-            .iter()
-            .rev()
-            .find(|t| t.input.trim() == cell.source.trim())
-        {
-            if turn.stale {
-                return None;
-            }
         }
         let out = self.notebook.visible_output(cell_id)?;
+        let render = self.render_for(cell, out, client);
+        Some(display_bundle(&render, &out.bundle))
+    }
+
+    fn render_for(
+        &self,
+        cell: &super::document::NotebookCell,
+        out: &super::document::CellOutput,
+        client: ClientKind,
+    ) -> RenderDecision {
         let src_hash = SHA256::sha256_hex(cell.source.as_bytes());
-        let render = decide_render(
+        let first_party = decide_render(
+            &self.trust,
+            &src_hash,
+            &self.notebook.environment_hash,
+            ClientKind::FirstParty.renderer(),
+            &out.bundle,
+        );
+        if client == ClientKind::FirstParty {
+            return first_party;
+        }
+        if let RenderDecision::FallbackPlain { .. } = &first_party {
+            // Client projections are never trust bypasses: they may further
+            // restrict first-party output, but cannot reveal MIME the first-
+            // party client would quarantine.
+            return first_party;
+        }
+        decide_render(
             &self.trust,
             &src_hash,
             &self.notebook.environment_hash,
             client.renderer(),
             &out.bundle,
-        );
-        Some(display_bundle(&render, &out.bundle))
+        )
     }
 
     pub fn state_json(&self) -> String {
+        self.state_json_for(ClientKind::FirstParty)
+    }
+
+    pub fn state_json_for(&self, client: ClientKind) -> String {
         let cells = self
             .notebook
             .cells
             .iter()
             .map(|cell| {
+                let conflict = self
+                    .notebook
+                    .merge_conflicts
+                    .iter()
+                    .any(|entry| entry.cell_id == cell.id);
                 let output = cell.output.as_ref().map(|out| {
                     let live = self.cell_output_live(cell);
+                    let projected = if live {
+                        let render = self.render_for(cell, out, client);
+                        display_bundle(&render, &out.bundle)
+                    } else {
+                        // Imported output remains available as safe text for
+                        // recovery, but stale cache content never crosses the
+                        // state boundary as renderable MIME.
+                        MimeBundle {
+                            text_plain: out.bundle.text_plain.clone(),
+                            mime: Vec::new(),
+                            quarantined: out.bundle.quarantined,
+                            widget_id: None,
+                            requested_origins: Vec::new(),
+                            requested_messages: Vec::new(),
+                        }
+                    };
                     format!(
-                        "{{\"text\":{},\"quarantined\":{},\"live\":{},\"mime\":{}}}",
-                        json_str(&bounded_text(&out.bundle.text_plain)),
-                        out.bundle.quarantined,
+                        "{{\"text\":{},\"quarantined\":{},\"live\":{},\"cache_key\":{},\"origins\":{},\"messages\":{},\"mime\":{}}}",
+                        json_str(&bounded_text(&projected.text_plain)),
+                        projected.quarantined,
                         live,
-                        json_mime(&out.bundle.mime)
+                        out.cache_key
+                            .as_ref()
+                            .map(|key| json_str(key))
+                            .unwrap_or_else(|| "null".into()),
+                        json_strings(&out.bundle.requested_origins),
+                        json_strings(&out.bundle.requested_messages),
+                        json_mime(&projected.mime)
                     )
                 });
                 format!(
-                    "{{\"id\":{},\"kind\":{},\"source\":{},\"output\":{}}}",
+                    "{{\"id\":{},\"kind\":{},\"source\":{},\"conflict\":{},\"output\":{}}}",
                     json_str(&cell.id),
                     json_str(match cell.kind {
                         CellKind::Jet => "jet",
                         CellKind::Markdown => "markdown",
                     }),
                     json_str(&cell.source),
+                    conflict,
                     output.unwrap_or_else(|| "null".into())
                 )
             })
@@ -454,12 +561,18 @@ impl Kernel {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"environment_hash\":{},\"path\":{},\"execution_count\":{},\"debug\":{},\"perf\":{},\"pending_stdin\":{},\"cells\":[{}],\"turns\":[{}]}}",
+            "{{\"environment_hash\":{},\"path\":{},\"notice\":{},\"cache_entries\":{},\"merge_conflicts\":{},\"execution_count\":{},\"debug\":{},\"perf\":{},\"pending_stdin\":{},\"cells\":[{}],\"turns\":[{}]}}",
             json_str(&self.notebook.environment_hash),
             self.document_path
                 .as_ref()
                 .map(|path| json_str(&path.display().to_string()))
                 .unwrap_or_else(|| "null".into()),
+            self.document_notice
+                .as_ref()
+                .map(|notice| json_str(notice))
+                .unwrap_or_else(|| "null".into()),
+            self.notebook.output_cache.len(),
+            self.notebook.merge_conflicts.len(),
             self.execution_count,
             self.debug_attached,
             self.perf_attached,
@@ -619,6 +732,15 @@ fn json_mime(mime: &[(String, String)]) -> String {
                 json_str(&bounded_text(data))
             )
         })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{items}]")
+}
+
+fn json_strings(values: &[String]) -> String {
+    let items = values
+        .iter()
+        .map(|value| json_str(value))
         .collect::<Vec<_>>()
         .join(",");
     format!("[{items}]")

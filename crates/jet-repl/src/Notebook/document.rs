@@ -33,6 +33,13 @@ pub struct NotebookCell {
     pub depends_on: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MergeConflict {
+    pub cell_id: String,
+    pub ours_source: String,
+    pub theirs_source: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct OutputCacheEntry {
     pub key: String,
@@ -46,6 +53,7 @@ pub struct JetNotebook {
     pub environment_hash: String,
     pub cells: Vec<NotebookCell>,
     pub output_cache: BTreeMap<String, OutputCacheEntry>,
+    pub merge_conflicts: Vec<MergeConflict>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -83,6 +91,7 @@ impl JetNotebook {
             environment_hash: environment_hash.into(),
             cells: Vec::new(),
             output_cache: BTreeMap::new(),
+            merge_conflicts: Vec::new(),
         }
     }
 
@@ -123,35 +132,46 @@ impl JetNotebook {
             .cell_index(cell_id)
             .ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
         let source = source.into();
-        if self.cells[idx].source != source {
+        let changed = self.cells[idx].source != source;
+        if changed {
             self.cells[idx].source = source;
             self.invalidate_from(cell_id);
+            self.merge_conflicts.retain(|conflict| conflict.cell_id != cell_id);
         }
         Ok(())
     }
 
     pub fn invalidate_from(&mut self, cell_id: &str) {
-        let Some(start) = self.cell_index(cell_id) else {
+        let Some(_start) = self.cell_index(cell_id) else {
             return;
         };
         let mut doomed: BTreeSet<String> = BTreeSet::new();
         doomed.insert(cell_id.to_string());
-        for cell in self.cells.iter().skip(start) {
-            if cell.depends_on.iter().any(|d| doomed.contains(d)) {
-                doomed.insert(cell.id.clone());
-            }
-            if doomed.contains(&cell.id) {
-                if let Some(out) = &cell.output {
-                    if let Some(key) = &out.cache_key {
-                        self.output_cache.remove(key);
-                    }
+        // Dependency order is a document fact, not a layout fact. A user may
+        // reorder cells or merge a document whose dependent appears first, so
+        // walk to a fixpoint over every cell instead of relying on Vec order.
+        loop {
+            let mut changed = false;
+            for cell in &self.cells {
+                if !doomed.contains(&cell.id)
+                    && cell.depends_on.iter().any(|dep| doomed.contains(dep))
+                    && doomed.insert(cell.id.clone())
+                {
+                    changed = true;
                 }
             }
-        }
-        for cell in &mut self.cells {
-            if doomed.contains(&cell.id) {
-                cell.output = None;
+            if !changed {
+                break;
             }
+        }
+        let doomed_keys: Vec<String> = self
+            .cells
+            .iter()
+            .filter(|cell| doomed.contains(&cell.id))
+            .filter_map(|cell| cell.output.as_ref()?.cache_key.clone())
+            .collect();
+        for key in doomed_keys {
+            self.output_cache.remove(&key);
         }
     }
 
@@ -228,15 +248,28 @@ impl JetNotebook {
         Ok(())
     }
 
+    pub fn invalidate_all_outputs(&mut self) {
+        // Keep the old bundles as stale evidence for the UI and loss report;
+        // removing cache authority makes every one non-live.
+        self.output_cache.clear();
+    }
+
     pub fn visible_output(&self, cell_id: &str) -> Option<&CellOutput> {
         let cell = self.cells.iter().find(|c| c.id == cell_id)?;
         let out = cell.output.as_ref()?;
         let live = self.closure_cache_key(cell_id)?;
-        if out.cache_key.as_deref() == Some(live.as_str()) {
-            Some(out)
-        } else {
-            None
+        let key = out.cache_key.as_deref()?;
+        if key != live {
+            return None;
         }
+        let cached = self.output_cache.get(key)?;
+        if cached.key != key
+            || cached.bundle != out.bundle
+            || out.execution_count != Some(cached.execution_count)
+        {
+            return None;
+        }
+        Some(out)
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
@@ -329,6 +362,23 @@ fn notebook_to_json(nb: &JetNotebook) -> Result<CanonicalJson, String> {
             ])?,
         );
     }
+    let conflicts = nb
+        .merge_conflicts
+        .iter()
+        .map(|conflict| {
+            CanonicalJson::object([
+                ("cell_id".into(), CanonicalJson::String(conflict.cell_id.clone())),
+                (
+                    "ours_source".into(),
+                    CanonicalJson::String(conflict.ours_source.clone()),
+                ),
+                (
+                    "theirs_source".into(),
+                    CanonicalJson::String(conflict.theirs_source.clone()),
+                ),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     CanonicalJson::object([
         ("schema".into(), CanonicalJson::integer(nb.schema.to_string())?),
         ("format".into(), CanonicalJson::String("jetnb".into())),
@@ -342,6 +392,7 @@ fn notebook_to_json(nb: &JetNotebook) -> Result<CanonicalJson, String> {
         ),
         ("cells".into(), CanonicalJson::Array(cells)),
         ("output_cache".into(), CanonicalJson::Object(cache)),
+        ("merge_conflicts".into(), CanonicalJson::Array(conflicts)),
     ])
 }
 
@@ -396,6 +447,28 @@ fn bundle_to_json(bundle: &MimeBundle) -> Result<CanonicalJson, String> {
                 None => CanonicalJson::Null,
             },
         ),
+        (
+            "requested_origins".into(),
+            CanonicalJson::Array(
+                bundle
+                    .requested_origins
+                    .iter()
+                    .cloned()
+                    .map(CanonicalJson::String)
+                    .collect(),
+            ),
+        ),
+        (
+            "requested_messages".into(),
+            CanonicalJson::Array(
+                bundle
+                    .requested_messages
+                    .iter()
+                    .cloned()
+                    .map(CanonicalJson::String)
+                    .collect(),
+            ),
+        ),
     ])
 }
 
@@ -403,35 +476,77 @@ fn notebook_from_json(json: &CanonicalJson) -> Result<JetNotebook, String> {
     let CanonicalJson::Object(root) = json else {
         return Err("jetnb root must be an object".into());
     };
-    let environment_hash = text_field(root, "environment_hash")?;
+    let format = text_field(root, "format")?;
+    if format != "jetnb" {
+        return Err(format!("unsupported notebook format `{format}`"));
+    }
     let schema = match root.get("schema") {
-        Some(CanonicalJson::Integer(n)) => n.parse::<u32>().unwrap_or(1),
-        _ => 1,
+        Some(CanonicalJson::Integer(n)) => n
+            .parse::<u32>()
+            .map_err(|_| "jetnb schema is not an integer".to_string())?,
+        _ => return Err("jetnb is missing integer `schema`".into()),
     };
+    if schema != 1 {
+        return Err(format!("unsupported jetnb schema {schema}"));
+    }
+    if let Some(policy) = root.get("cache_policy") {
+        if !matches!(policy, CanonicalJson::String(value) if value == OUTPUT_CACHE_POLICY) {
+            return Err("jetnb uses an unsupported output cache policy".into());
+        }
+    }
+    let environment_hash = text_field(root, "environment_hash")?;
     let mut nb = JetNotebook {
         schema,
         environment_hash,
         cells: Vec::new(),
         output_cache: BTreeMap::new(),
+        merge_conflicts: Vec::new(),
     };
-    if let Some(CanonicalJson::Array(cells)) = root.get("cells") {
-        for cell in cells {
-            nb.cells.push(cell_from_json(cell)?);
+    let CanonicalJson::Array(cells) = root
+        .get("cells")
+        .ok_or_else(|| "jetnb is missing `cells`".to_string())?
+    else {
+        return Err("jetnb `cells` must be an array".into());
+    };
+    let mut ids = BTreeSet::new();
+    for cell in cells {
+        let cell = cell_from_json(cell)?;
+        if cell.id.is_empty() || !ids.insert(cell.id.clone()) {
+            return Err(format!("jetnb has duplicate or empty cell id `{}`", cell.id));
+        }
+        nb.cells.push(cell);
+    }
+    for cell in &nb.cells {
+        for dependency in &cell.depends_on {
+            if !ids.contains(dependency) {
+                return Err(format!(
+                    "cell `{}` depends on unknown cell `{dependency}`",
+                    cell.id
+                ));
+            }
         }
     }
-    if let Some(CanonicalJson::Object(cache)) = root.get("output_cache") {
+    if let Some(cache_value) = root.get("output_cache") {
+        let CanonicalJson::Object(cache) = cache_value else {
+            return Err("jetnb `output_cache` must be an object".into());
+        };
         for (k, v) in cache {
             let CanonicalJson::Object(entry) = v else {
-                continue;
+                return Err(format!("output cache entry `{k}` must be an object"));
             };
-            let key = text_field(entry, "key").unwrap_or_else(|_| k.clone());
+            let key = text_field(entry, "key")?;
+            if key.as_str() != k.as_str() {
+                return Err(format!("output cache key `{k}` does not match its entry"));
+            }
             let execution_count = match entry.get("execution_count") {
-                Some(CanonicalJson::Integer(n)) => n.parse().unwrap_or(0),
-                _ => 0,
+                Some(CanonicalJson::Integer(n)) => n
+                    .parse()
+                    .map_err(|_| format!("output cache entry `{k}` has an invalid execution count"))?,
+                _ => return Err(format!("output cache entry `{k}` is missing execution count")),
             };
             let bundle = match entry.get("bundle") {
                 Some(b) => bundle_from_json(b)?,
-                None => plain_bundle(""),
+                None => return Err(format!("output cache entry `{k}` is missing bundle")),
             };
             nb.output_cache.insert(
                 k.clone(),
@@ -441,6 +556,29 @@ fn notebook_from_json(json: &CanonicalJson) -> Result<JetNotebook, String> {
                     execution_count,
                 },
             );
+        }
+    }
+    if let Some(conflicts) = root.get("merge_conflicts") {
+        let CanonicalJson::Array(conflicts) = conflicts else {
+            return Err("jetnb `merge_conflicts` must be an array".into());
+        };
+        let mut conflict_ids = BTreeSet::new();
+        for conflict in conflicts {
+            let CanonicalJson::Object(fields) = conflict else {
+                return Err("jetnb merge conflict must be an object".into());
+            };
+            let cell_id = text_field(fields, "cell_id")?;
+            if !ids.contains(&cell_id) {
+                return Err(format!("merge conflict names unknown cell `{cell_id}`"));
+            }
+            if !conflict_ids.insert(cell_id.clone()) {
+                return Err(format!("jetnb repeats merge conflict for `{cell_id}`"));
+            }
+            nb.merge_conflicts.push(MergeConflict {
+                cell_id,
+                ours_source: text_field(fields, "ours_source")?,
+                theirs_source: text_field(fields, "theirs_source")?,
+            });
         }
     }
     Ok(nb)
@@ -453,17 +591,19 @@ fn cell_from_json(json: &CanonicalJson) -> Result<NotebookCell, String> {
     let id = text_field(obj, "id")?;
     let kind = match text_field(obj, "kind")?.as_str() {
         "markdown" => CellKind::Markdown,
-        _ => CellKind::Jet,
+        "jet" => CellKind::Jet,
+        other => return Err(format!("unknown jetnb cell kind `{other}`")),
     };
-    let source = text_field(obj, "source").unwrap_or_default();
+    let source = text_field(obj, "source")?;
     let depends_on = match obj.get("depends_on") {
         Some(CanonicalJson::Array(arr)) => arr
             .iter()
-            .filter_map(|v| match v {
-                CanonicalJson::String(s) => Some(s.clone()),
-                _ => None,
+            .map(|v| match v {
+                CanonicalJson::String(s) => Ok(s.clone()),
+                _ => Err("cell dependency must be a string".to_string()),
             })
-            .collect(),
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(_) => return Err("cell `depends_on` must be an array".into()),
         _ => Vec::new(),
     };
     let output = match obj.get("output") {
@@ -485,22 +625,32 @@ fn output_from_json(json: &CanonicalJson) -> Result<CellOutput, String> {
     };
     let mut bundle = match obj.get("bundle") {
         Some(b) => bundle_from_json(b)?,
-        None => plain_bundle(""),
+        None => return Err("output is missing bundle".into()),
     };
     if matches!(obj.get("quarantined"), Some(CanonicalJson::Bool(true))) {
         quarantine_outputs(&mut bundle);
     }
     let execution_count = match obj.get("execution_count") {
-        Some(CanonicalJson::Integer(n)) => Some(n.parse().unwrap_or(0)),
-        _ => None,
+        Some(CanonicalJson::Integer(n)) => Some(
+            n.parse()
+                .map_err(|_| "output execution count is not an integer".to_string())?,
+        ),
+        Some(CanonicalJson::Null) | None => None,
+        _ => return Err("output execution count must be an integer or null".into()),
     };
     let cache_key = match obj.get("cache_key") {
         Some(CanonicalJson::String(s)) => Some(s.clone()),
-        _ => None,
+        Some(CanonicalJson::Null) | None => None,
+        _ => return Err("output cache key must be a string or null".into()),
     };
     let turn_id = match obj.get("turn_id") {
-        Some(CanonicalJson::Integer(value)) => value.parse().ok(),
-        _ => None,
+        Some(CanonicalJson::Integer(value)) => Some(
+            value
+                .parse()
+                .map_err(|_| "output turn id is not an integer".to_string())?,
+        ),
+        Some(CanonicalJson::Null) | None => None,
+        _ => return Err("output turn id must be an integer or null".into()),
     };
     Ok(CellOutput {
         bundle,
@@ -514,31 +664,60 @@ fn bundle_from_json(json: &CanonicalJson) -> Result<MimeBundle, String> {
     let CanonicalJson::Object(obj) = json else {
         return Err("bundle must be an object".into());
     };
-    let text_plain = text_field(obj, "text_plain").unwrap_or_default();
+    let text_plain = text_field(obj, "text_plain")?;
     let mut mime = Vec::new();
-    if let Some(CanonicalJson::Array(arr)) = obj.get("mime") {
+    if let Some(mime_value) = obj.get("mime") {
+        let CanonicalJson::Array(arr) = mime_value else {
+            return Err("bundle `mime` must be an array".into());
+        };
         for part in arr {
             let CanonicalJson::Object(p) = part else {
-                continue;
+                return Err("bundle MIME entry must be an object".into());
             };
             let m = text_field(p, "mime")?;
-            let d = text_field(p, "data").unwrap_or_default();
+            let d = text_field(p, "data")?;
             mime.push((m, d));
         }
     }
     let widget_id = match obj.get("widget_id") {
         Some(CanonicalJson::String(s)) => Some(s.clone()),
-        _ => None,
+        Some(CanonicalJson::Null) | None => None,
+        Some(_) => return Err("bundle `widget_id` must be a string or null".into()),
     };
-    let quarantined = matches!(obj.get("quarantined"), Some(CanonicalJson::Bool(true)));
+    let quarantined = match obj.get("quarantined") {
+        Some(CanonicalJson::Bool(value)) => *value,
+        Some(_) => return Err("bundle `quarantined` must be boolean".into()),
+        None => false,
+    };
+    let requested_origins = string_array_field(obj, "requested_origins")?;
+    let requested_messages = string_array_field(obj, "requested_messages")?;
     Ok(MimeBundle {
         text_plain,
         mime,
         quarantined,
         widget_id,
-        requested_origins: Vec::new(),
-        requested_messages: Vec::new(),
+        requested_origins,
+        requested_messages,
     })
+}
+
+fn string_array_field(
+    obj: &BTreeMap<String, CanonicalJson>,
+    key: &str,
+) -> Result<Vec<String>, String> {
+    let Some(value) = obj.get(key) else {
+        return Ok(Vec::new());
+    };
+    let CanonicalJson::Array(values) = value else {
+        return Err(format!("`{key}` must be an array"));
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CanonicalJson::String(value) => Ok(value.clone()),
+            _ => Err(format!("`{key}` entries must be strings")),
+        })
+        .collect()
 }
 
 fn text_field(obj: &BTreeMap<String, CanonicalJson>, key: &str) -> Result<String, String> {
@@ -551,17 +730,55 @@ fn text_field(obj: &BTreeMap<String, CanonicalJson>, key: &str) -> Result<String
 pub fn merge_by_id(base: &JetNotebook, theirs: &JetNotebook) -> JetNotebook {
     let mut out = JetNotebook::new(base.environment_hash.clone());
     out.schema = base.schema.max(theirs.schema);
+    out.merge_conflicts = base.merge_conflicts.clone();
+    for conflict in &theirs.merge_conflicts {
+        if !out
+            .merge_conflicts
+            .iter()
+            .any(|existing| existing.cell_id == conflict.cell_id)
+        {
+            out.merge_conflicts.push(conflict.clone());
+        }
+    }
     let their_map: BTreeMap<&str, &NotebookCell> =
         theirs.cells.iter().map(|c| (c.id.as_str(), c)).collect();
     let mut seen = BTreeSet::new();
     for cell in &base.cells {
         seen.insert(cell.id.clone());
         if let Some(t) = their_map.get(cell.id.as_str()) {
-            let mut merged = (*t).clone();
-            let base_key = cell.output.as_ref().and_then(|o| o.cache_key.clone());
-            let their_key = t.output.as_ref().and_then(|o| o.cache_key.clone());
-            if base_key != their_key {
+            let t = *t;
+            let same_source = cell.kind == t.kind
+                && cell.source == t.source
+                && cell.depends_on == t.depends_on;
+            let mut merged = cell.clone();
+            if same_source {
+                // Source identity is the merge fact. Prefer an output whose
+                // closure key agrees with ours; otherwise take the other
+                // side's cache only when it describes the same source.
+                if merged.output.is_none() {
+                    merged.output = t.output.clone();
+                }
+                let base_key = cell.output.as_ref().and_then(|o| o.cache_key.as_deref());
+                let their_key = t.output.as_ref().and_then(|o| o.cache_key.as_deref());
+                if base_key.is_some() && their_key.is_some() && base_key != their_key {
+                    merged.output = None;
+                }
+            } else {
+                // A same-ID divergent edit is not a last-writer-wins fact.
+                // Keep the local source visible for editing, but make the
+                // conflict durable and refuse execution until it is resolved.
                 merged.output = None;
+                if !out
+                    .merge_conflicts
+                    .iter()
+                    .any(|conflict| conflict.cell_id == cell.id)
+                {
+                    out.merge_conflicts.push(MergeConflict {
+                        cell_id: cell.id.clone(),
+                        ours_source: cell.source.clone(),
+                        theirs_source: t.source.clone(),
+                    });
+                }
             }
             out.cells.push(merged);
         } else {
@@ -575,7 +792,7 @@ pub fn merge_by_id(base: &JetNotebook, theirs: &JetNotebook) -> JetNotebook {
     }
     out.output_cache = base.output_cache.clone();
     for (k, v) in &theirs.output_cache {
-        out.output_cache.insert(k.clone(), v.clone());
+        out.output_cache.entry(k.clone()).or_insert_with(|| v.clone());
     }
     out
 }
@@ -602,16 +819,24 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
         Some(CanonicalJson::Array(c)) => c,
         _ => return Err("ipynb missing cells array".into()),
     };
+    let mut imported_ids = BTreeSet::new();
     for cell in cells {
         let CanonicalJson::Object(obj) = cell else {
             loss.push("skipped non-object cell");
             continue;
         };
         let cell_type = text_field(obj, "cell_type").unwrap_or_else(|_| "code".into());
-        let kind = if cell_type == "markdown" {
-            CellKind::Markdown
-        } else {
-            CellKind::Jet
+        let kind = match cell_type.as_str() {
+            "markdown" => CellKind::Markdown,
+            "code" => CellKind::Jet,
+            "raw" => {
+                loss.push("raw cell imported as Markdown");
+                CellKind::Markdown
+            }
+            other => {
+                loss.push(format!("unsupported cell type `{other}` imported as Markdown"));
+                CellKind::Markdown
+            }
         };
         let source = match obj.get("source") {
             Some(CanonicalJson::String(s)) => s.clone(),
@@ -632,14 +857,18 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
                 JetNotebook::mint_cell_id()
             }
         };
+        if !imported_ids.insert(id.clone()) {
+            return Err(format!("ipynb has duplicate cell id `{id}`"));
+        }
         let mut out = None;
         if let Some(CanonicalJson::Array(outputs)) = obj.get("outputs") {
             if !outputs.is_empty() {
                 loss.push(format!(
                     "cell `{id}`: imported outputs quarantined (no ambient execution)"
                 ));
-                let text = flatten_ipynb_outputs(outputs);
+                let (text, mime) = flatten_ipynb_outputs(outputs);
                 let mut bundle = plain_bundle(text);
+                bundle.mime = mime;
                 quarantine_outputs(&mut bundle);
                 out = Some(CellOutput {
                     bundle,
@@ -682,36 +911,58 @@ fn json_value_to_canonical(value: JSONValue) -> CanonicalJson {
     }
 }
 
-fn flatten_ipynb_outputs(outputs: &[CanonicalJson]) -> String {
+fn flatten_ipynb_outputs(outputs: &[CanonicalJson]) -> (String, Vec<(String, String)>) {
     let mut text = String::new();
+    let mut mime = Vec::new();
     for out in outputs {
         let CanonicalJson::Object(obj) = out else {
             continue;
         };
         if let Some(CanonicalJson::Object(data)) = obj.get("data") {
-            if let Some(CanonicalJson::String(s)) = data.get("text/plain") {
-                text.push_str(s);
-                continue;
-            }
-            if let Some(CanonicalJson::Array(lines)) = data.get("text/plain") {
-                for line in lines {
-                    if let CanonicalJson::String(s) = line {
-                        text.push_str(s);
+            for (kind, value) in data {
+                if let Some(value) = ipynb_text(value) {
+                    if kind == "text/plain" {
+                        text.push_str(&value);
                     }
+                    mime.push((kind.clone(), value));
                 }
-                continue;
             }
         }
-        if let Some(CanonicalJson::String(s)) = obj.get("text") {
-            text.push_str(s);
+        if let Some(value) = obj.get("text") {
+            if let Some(s) = ipynb_text(value) {
+                text.push_str(&s);
+                mime.push(("text/plain".into(), s));
+            }
         }
     }
-    text
+    (text, mime)
+}
+
+fn ipynb_text(value: &CanonicalJson) -> Option<String> {
+    match value {
+        CanonicalJson::String(value) => Some(value.clone()),
+        CanonicalJson::Array(values) => Some(
+            values
+                .iter()
+                .filter_map(|value| match value {
+                    CanonicalJson::String(value) => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        _ => Some(
+            String::from_utf8(value.bytes())
+                .ok()?
+                .trim_end_matches('\n')
+                .to_string(),
+        ),
+    }
 }
 
 pub fn export_ipynb(nb: &JetNotebook) -> Result<(String, LossReport), String> {
     let mut loss = LossReport::default();
     loss.push("Jet-specific depends_on / closure cache omitted from ipynb");
+    loss.push("Jet cell execution events are projected to ipynb results; stream/error distinctions are not retained");
     let mut cells = Vec::new();
     for cell in &nb.cells {
         let cell_type = match cell.kind {
@@ -731,10 +982,26 @@ pub fn export_ipynb(nb: &JetNotebook) -> Result<(String, LossReport), String> {
             let mut outputs = Vec::new();
             match nb.visible_output(&cell.id) {
                 Some(out) => {
-                    let data = CanonicalJson::object([(
+                    let mut data_fields = vec![(
                         "text/plain".into(),
                         CanonicalJson::String(out.bundle.text_plain.clone()),
-                    )])?;
+                    )];
+                    if !out.bundle.quarantined {
+                        for (mime, value) in &out.bundle.mime {
+                            if mime != "text/plain" {
+                                data_fields.push((
+                                    mime.clone(),
+                                    CanonicalJson::String(value.clone()),
+                                ));
+                            }
+                        }
+                    } else {
+                        loss.push(format!(
+                            "cell `{}`: quarantined rich output exported as text/plain",
+                            cell.id
+                        ));
+                    }
+                    let data = CanonicalJson::object(data_fields)?;
                     outputs.push(CanonicalJson::object([
                         (
                             "output_type".into(),
@@ -758,11 +1025,30 @@ pub fn export_ipynb(nb: &JetNotebook) -> Result<(String, LossReport), String> {
                     }
                 }
                 None => {
-                    if cell.output.is_some() {
-                        loss.push(format!(
-                            "cell `{}`: stale output omitted (closure key mismatch)",
-                            cell.id
-                        ));
+                    if let Some(out) = &cell.output {
+                        if out.bundle.quarantined {
+                            let data = CanonicalJson::object([(
+                                "text/plain".into(),
+                                CanonicalJson::String(out.bundle.text_plain.clone()),
+                            )])?;
+                            outputs.push(CanonicalJson::object([
+                                (
+                                    "output_type".into(),
+                                    CanonicalJson::String("display_data".into()),
+                                ),
+                                ("data".into(), data),
+                                ("metadata".into(), CanonicalJson::object([])?),
+                            ])?);
+                            loss.push(format!(
+                                "cell `{}`: quarantined output exported as text/plain",
+                                cell.id
+                            ));
+                        } else {
+                            loss.push(format!(
+                                "cell `{}`: stale output omitted (closure key mismatch)",
+                                cell.id
+                            ));
+                        }
                     }
                 }
             }
@@ -798,6 +1084,12 @@ pub fn export_jet(nb: &JetNotebook) -> (String, LossReport) {
     loss.push("markdown cells omitted");
     loss.push("outputs / trust / cell ids omitted");
     loss.push("notebook environment identity omitted");
+    if !nb.merge_conflicts.is_empty() {
+        loss.push(format!(
+            "{} unresolved merge conflict(s) retained; execution is blocked",
+            nb.merge_conflicts.len()
+        ));
+    }
     let mut body =
         String::from("// generated from .jetnb — stated-loss projection (D-NOTEBOOK-DOC1=D)\n");
     for cell in &nb.cells {

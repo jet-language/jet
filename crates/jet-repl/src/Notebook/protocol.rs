@@ -181,8 +181,7 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
                 return ProtocolReply::err(format!("unknown cell `{cell_id}`"));
             };
             let out = kernel
-                .notebook
-                .visible_output(&cell_id)
+                .first_party_visible_output(&cell_id)
                 .map(|o| o.bundle.text_plain.clone())
                 .unwrap_or_else(|| "(no live output)".into());
             ProtocolReply::ok(format!(
@@ -288,7 +287,7 @@ pub fn run_headless_script(kernel: &mut Kernel, lines: &[&str]) -> String {
 }
 
 fn parse_script_line(kernel: &Kernel, line: &str) -> Result<ProtocolMessage, String> {
-    let mut parts = line.splitn(2, ' ');
+    let mut parts = line.splitn(2, |character: char| character.is_ascii_whitespace());
     let cmd = parts.next().unwrap_or("");
     let rest = parts.next().unwrap_or("").trim();
     match cmd {
@@ -321,10 +320,10 @@ fn parse_script_line(kernel: &Kernel, line: &str) -> Result<ProtocolMessage, Str
         }),
         "reopen" => Ok(ProtocolMessage::Reopen),
         "edit" => {
-            let mut bits = rest.splitn(2, ' ');
+            let mut bits = rest.splitn(2, |character: char| character.is_ascii_whitespace());
             Ok(ProtocolMessage::Edit {
                 cell_id: bits.next().ok_or("edit needs cell id")?.to_string(),
-                source: bits.next().unwrap_or("").to_string(),
+                source: bits.next().unwrap_or("").trim_start().to_string(),
             })
         }
         "save" => Ok(ProtocolMessage::Save {

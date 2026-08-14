@@ -136,6 +136,21 @@ The first-party browser, Canvas lens, Jupyter adapter, and headless protocol
 all call this one REPL session. They share stale-output rules, rich output,
 source links, and trust decisions.
 
+For a terminal-only or CI journey, use the same session as JSONL. Each input
+line produces one JSON reply, so a consumer can stop after any observable
+claim without waiting for end-of-file:
+
+```bash
+printf '%s\n' 'add-jet answer :: 42' 'exec first' 'state' |
+  jet notebook --protocol first-hour.jetnb
+```
+
+If the browser or server stops, local drafts remain in the browser until the
+server is reachable again. A stale cached result is shown as stale and must be
+run again. An imported result remains plain text and quarantined. A merge with
+the same cell ID edited on both sides is marked as a conflict; edit that cell
+before running it.
+
 ## 5. Build something you can ship
 
 Save the following program as `ship.jet`:
