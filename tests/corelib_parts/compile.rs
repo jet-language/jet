@@ -834,15 +834,9 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert_eq!(stream.matches("process::exit(70)").count(), 0);
     assert_eq!(ffi.matches("process::exit(70)").count(), 0);
     assert_eq!(codegen.matches("std::process::exit(70)").count(), 0);
-    let bench_dir = std::env::temp_dir().join(format!(
-        "jet_corelib_boundary_bench_{}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&bench_dir).unwrap();
-    let bench_path = bench_dir.join("boundary.jet");
-    fs::write(&bench_path, "fn run() {}\n#Bench(\"boundary\") {}\n").unwrap();
+    let bench_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/bench.jet");
     let (bench_rust, _) = jet::Driver::compile_benches(bench_path.to_str().unwrap()).unwrap();
-    let _ = fs::remove_dir_all(&bench_dir);
     assert!(bench_rust.contains(
         r#"jet_runtime_boundary(|| jet_runtime_stop("E3001", "", 0, &message))"#
     ));
