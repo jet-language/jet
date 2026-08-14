@@ -43,28 +43,41 @@ coverage checks accept both.
 
 1. Prove the rejection belongs in the Jet front end, not rustc or codegen, and
    reuse an existing code when it is the same rule. New semantics or syntax must
-   already be ratified.
+   already be ratified. A rendering problem does not mint a second diagnostic.
 2. Add one typed row to `crates/jet-codegen/src/Prelude/Diagnostics.jet`. The
-   row owns the unique code, severity, moment, What/Why/Fix templates, named
-   holes, and any structured fix. The registry and this reference are generated
-   projections; never ship a generic fallback for a known case.
-   A hole is written as `{name}` and is supplied by the emitter through the
-   row renderer; an emitter does not replace prose by hand. A structured fix
-   is a source marker such as `replace:;=>,`, `remove:->`, or
-   `generated:missing_arms`, projected into typed fix metadata before a report
-   is built. Fix prose is never parsed to recover an edit.
-3. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
+   row is the only home for the unique code, severity, moment, What/Why/Fix
+   templates, named holes, and structured fix. The registry, this reference,
+   `jet explain`, and error pages are generated projections. Do not copy the
+   row's code or words into Rust, Markdown, tests, CLI, LSP, web, or engine
+   code. Never ship a generic fallback for a known case.
+3. At the raise site, supply only values for the row's named holes and attach
+   any structured fix that the checker already knows. A hole is written as
+   `{name}` and is rendered by the row. An emitter does not replace prose by
+   hand. A structured fix can use a source marker such as `replace:;=>,`,
+   `remove:->`, or `generated:missing_arms`; the marker becomes typed fix
+   metadata before the report is built. Fix prose is never parsed to recover
+   an edit.
+4. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
-   recoverable errors, and includes no raw rustc text.
-4. Emit it from lexer, parser, or sema—the layer that knows the violated rule.
-   Codegen must receive only approved facts (I3).
-5. Run the focused snapshot test without update mode, review the diff, then use
+   recoverable errors, and includes no raw rustc text. Every report row has a
+   UI snapshot, including test, tool, web, and editor reports when applicable.
+5. Emit it from lexer, parser, or sema—the layer that knows the violated rule.
+   Codegen, AOT, JIT/dev, interpreter, and web hosts receive approved facts and
+   marshal the same row or Prelude report (I3, I9). They do not re-encode the
+   rule, defaults, policy, error meaning, or report words.
+6. Run the focused snapshot test without update mode, review the diff, then use
    the blessing procedure in `.claude/skills/verify/SKILL.md`. Re-run without
-   update mode.
-6. Add `jet explain` coverage and regenerate `docs/reference/errors/` from the
-   typed rows when the code is part of that generated representative set. Update relevant spec/docs,
-   then run `scripts/agent/jet-env cargo test --test diagnostics_coverage` and
-   the feature's focused test. `tests/diagnostic_snapshots.rs` and
+   update mode. Add `jet explain` coverage and regenerate
+   `docs/reference/errors/` from the typed rows when the code is part of that
+   generated representative set. Run both coverage directions: every emitted
+   code has one row and snapshot; every row is emitted or marked retired or
+   reserved. The guard must reject duplicate homes, unregistered codes, missing
+   What/Why/Fix fields, false locations, and fixes that do not apply to the
+   named span. A report must keep one code and one meaning from AOT through
+   `jet run` and the interpreter; do not park a missing tier in
+   `tests/jit_gaps.txt`. Update relevant spec/docs, then run
+   `scripts/agent/jet-env cargo test --test diagnostics_coverage` and the
+   feature's focused test. `tests/diagnostic_snapshots.rs` and
    `tests/diagnostics_coverage.rs` are the executable proof.
 
 ## Exact render format (pinned by snapshots)

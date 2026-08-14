@@ -6987,3 +6987,26 @@ reads hits, misses, current size, and the written bound. A function's argument
 tuple must pass the existing hashability rule, and a lazy `Iter<T>` parameter or
 result is refused. The marker registry owns the spelling and all execution
 tiers call one Prelude cache implementation.
+
+## The one-report slate (D-REPORT-*, ratified 2026-08-07, card #1626)
+
+All six D-REPORT decisions are ratified as option A. This slate extends
+D-FAIL-BREACH1's one runtime report family and one renderer to every report
+moment and surface. D-REPORT-HOME1 amends the I4 `Adding a diagnostic` process;
+D-REPORT-MACHINE1 amends D-DX1. The card numbers below record the current
+implementation handoff. They do not claim that any card is complete.
+
+- **D-REPORT-LAW1=A — one law for every report (implementation #1712).** Every error, warning, stop, test failure, and tool failure across compile, run, test, tool, web, and editor is a registered report with one code, What, Why, and Fix, rendered by one renderer per surface. Status, progress, success, ledger, and usage lines stay plain. Amendment: D-FAIL-BREACH1's one-renderer rule now covers every report moment. Required guards: one UI snapshot for each owned report surface, and I9 proof that one condition has one report with the same meaning and text under AOT, `jet run`, and the interpreter; the registry or Prelude owns the text, and engines only marshal it.
+- **D-REPORT-HOME1=A — typed rows are the one text home (implementation #1806).** A typed row owns code, severity, moment, What/Why/Fix templates, named holes, and structured fixes. The registry generates the spec, error pages, and `jet explain`; no renderer or emitter keeps a second copy. I4 `Adding a diagnostic` now requires the row, its snapshot, and both-direction coverage. Required guards: the card's UI snapshot proves the complete row-backed report, and I9 proves the same row-backed meaning under AOT, `jet run`, and the interpreter.
+- **D-REPORT-SEV1=A — two severities and the ratified words (implementation #1678).** Blocking and advisory are the only levels. `Error`, `Stop`, and `Warning` remain the frame words; a contained failed assertion is `Stop` in the E3001 family, not a new `Fail` word or code block. Moment is row metadata, not a new severity. The duplicate severity enum is deleted; E and L prefixes stay, and W0410 stays the frozen exception. Required guards: UI snapshots cover each changed severity form, and I9 proves identical severity meaning and frame text under AOT, `jet run`, and the interpreter.
+- **D-REPORT-TEST1=A — a failed test shows the full report (implementation #1684).** A failed assertion or golden check prints the full report frame under the test ledger, through the same renderer used by the stop path, with registered code, location, and caret. A golden failure states whether the file is missing or the output changed and includes its diff. Passing output stays unchanged. `JETTEST2` proof records stay separate from JSON reports. Required guards: one UI snapshot covers the failed-test frame, and I9 proves the E3001 report is the same under AOT, `jet run`, and the interpreter.
+- **D-REPORT-MACHINE1=A — one JSON line for every report (implementation #1713).** Each report is one complete `jet.report/v1` JSON object per line, with schema, moment, severity, code, What, Why, Fix, detail, location, span, `fix_edits`, cause, and clears fields when applicable. Command status envelopes remain status data; every report inside them uses this object. Amendment: D-DX1 changes `message` to `what`, `suggestions` to `fix_edits`, and `schema_version` to `schema`. The failed-test example uses registered code **E3001**, never provisional E3020. Required guards: UI/machine snapshots cover the exact emitted object, and I9 proves one condition emits the same report meaning under AOT, `jet run`, and the interpreter; no engine invents a second JSON shape or report field meaning.
+- **D-REPORT-EDITOR1=A — the editor gets the whole report (implementation #1807).** LSP uses What as `message` and carries Why, Fix, `fix_edits`, cause, the `jet://explain/<CODE>` link, and related locations in structured fields. Code actions reuse the row-owned edit used by `jet fix`; no editor path parses prose or keeps editor-only text. Required guards: LSP/UI snapshots cover the full payload and action, and I9 proves the same report meaning and recovery data under AOT, `jet run`, and the interpreter.
+
+These six cards share exact truthfulness guards. Every report code is registered;
+every row has What, Why, Fix, and a snapshot; every emitted code has one row;
+every row is emitted, retired, or reserved; locations name the source that the
+consumer can open; and `fix_edits` apply to the named span. No status line is
+promoted to a report, no report falls back to a bare string, and no engine,
+editor, JSON writer, or web host re-creates registry meaning. A missing tier
+proof is an open criterion, not a `tests/jit_gaps.txt` entry.
