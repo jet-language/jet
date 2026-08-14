@@ -167,7 +167,8 @@ fn range_knowledge_gate_has_three_tier_example_parity() {
     let release = stdout(&run(root, &["run", "--release", example]));
     let default = stdout(&run(root, &["run", example]));
     let interpret = stdout(&run(root, &["run", "--interpret", example]));
-    let expected = "7\n3\n10\ntrue\n7\n15\n";
+    let expected = fs::read_to_string(root.join("examples/features/expected/types/range_types.out"))
+        .expect("range_types golden output");
     assert_eq!(release, expected);
     assert_eq!(default, expected);
     assert_eq!(interpret, expected);
