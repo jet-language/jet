@@ -41,6 +41,11 @@ coverage checks accept both.
 
 ## Adding a diagnostic
 
+D-REPORT-HOME1=A makes one typed row the only home for each diagnostic's code,
+severity, moment, What/Why/Fix templates, named holes, and structured fix.
+The registry, this chapter, `jet explain`, and error pages are projections of
+that row. They are not alternate homes.
+
 1. Prove the rejection belongs in the Jet front end, not rustc or codegen, and
    reuse an existing code when it is the same rule. New semantics or syntax must
    already be ratified. A rendering problem does not mint a second diagnostic.
