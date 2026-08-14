@@ -139,6 +139,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/retired_bare_sanitizer.jet",
     "tests/ui/retired_cli_marker.jet",
     "tests/ui/retired_error_type.jet",
+    "tests/ui/retired_function_value_call.jet",
     "tests/ui/retired_void_result.jet",
     "tests/ui/return_arrow_split.jet",
     "tests/ui/root_param_shape.jet",

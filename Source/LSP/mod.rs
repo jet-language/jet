@@ -590,6 +590,19 @@ fn run() {
     }
 
     #[test]
+    fn completion_exposes_call_for_function_value_param() {
+        let src = "fn run(callback: fn(Int) => Int) {\n    callback.call(1)\n}\n";
+        let (project, _, bundle, facts) = check_test_document(src);
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let offset = src.find("callback.call").unwrap() + "callback.ca".len();
+        let item = compute_completions(&db, src, offset, project.entry(), None, None)
+            .into_iter()
+            .find(|item| item.label == "call")
+            .expect("call completion");
+        assert_eq!(item.detail.as_deref(), Some("call(...)"));
+    }
+
+    #[test]
     fn completion_catalogs_numeric_destination_methods() {
         let src = "fn run() {\n    value :: F32.from_float(1.0) ?? F32.from_int(0)\n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
