@@ -3048,6 +3048,22 @@ extern "C" fn jet_jit_testing_snap(name: i64, actual: i64) -> i8 {
     })
 }
 
+extern "C" fn jet_jit_testing_golden(path: i64, actual: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let path = rt.heap.clone_string(path).unwrap_or_default();
+        let actual = rt.heap.clone_string(actual).unwrap_or_default();
+        i8::from(crate::testing_shared::jet_testing_golden(&path, &actual))
+    })
+}
+
+extern "C" fn jet_jit_testing_fixture(path: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let path = rt.heap.clone_string(path).unwrap_or_default();
+        rt.heap
+            .alloc_string(crate::testing_shared::jet_testing_fixture(&path))
+    })
+}
+
 /// D-CMD-OVERRIDE1=C: resident handles marshal the same Prelude-owned suite
 /// snapshot as AOT. Discovery and filtering stay in the command callback.
 extern "C" fn jet_jit_testing_test_suite_new() -> i64 {
@@ -3581,6 +3597,8 @@ host_fns! {
     reflect_field_value: "jet_jit_reflect_field_value" => jet_jit_reflect_field_value: sig_str_unary_i64;
     testing_temp_dir: "jet_jit_testing_temp_dir" => jet_jit_testing_temp_dir: sig_str_unary_i64;
     testing_snap: "jet_jit_testing_snap" => jet_jit_testing_snap: sig_str_eq;
+    testing_golden: "jet_jit_testing_golden" => jet_jit_testing_golden: sig_str_eq;
+    testing_fixture: "jet_jit_testing_fixture" => jet_jit_testing_fixture: sig_str_unary_i64;
     testing_test_suite_new: "jet_jit_testing_test_suite_new" => jet_jit_testing_test_suite_new: sig_str_begin;
     testing_test_suite_run: "jet_jit_testing_test_suite_run" => jet_jit_testing_test_suite_run: sig_str_unary_i64;
     testing_bench_suite_new: "jet_jit_testing_bench_suite_new" => jet_jit_testing_bench_suite_new: sig_str_begin;

@@ -415,6 +415,10 @@ fn criterion_1_2_3_4_6_testing_file_failures_are_typed_and_path_bearing() {
     assert!(removal < addition, "diff order must be deterministic: {stderr}");
     assert_eq!(stderr.matches("Stop [E3001]").count(), 4, "stderr: {stderr}");
     assert_eq!(stderr.matches("-->").count(), 4, "stderr: {stderr}");
+    let snapshot = fs::read_to_string(root.join("tests/fixtures/testing_failure_reports.stderr"))
+        .expect("testing_failure_reports.stderr");
+    let normalized_stderr = stderr.replace(root.to_str().expect("manifest path"), "<repo>");
+    assert_eq!(normalized_stderr, snapshot, "typed testing report snapshot drifted");
 
     let good = Command::new(&jet).arg("test").arg(&fixed).output().unwrap();
     assert!(

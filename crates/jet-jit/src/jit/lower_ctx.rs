@@ -6652,6 +6652,15 @@ impl LowerCtx<'_, '_> {
                 let b = self.lower_expr(&args[1])?;
                 Ok(self.call_host(self.host.testing_snap, &[a, b]))
             }
+            "golden" if args.len() == 2 => {
+                let path = self.lower_expr(&args[0])?;
+                let actual = self.lower_expr(&args[1])?;
+                Ok(self.call_host(self.host.testing_golden, &[path, actual]))
+            }
+            "fixture" if args.len() == 1 => {
+                let path = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.testing_fixture, &[path]))
+            }
             "fake_clock" if args.len() == 1 => {
                 let ms = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.clock_new, &[ms]))

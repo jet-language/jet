@@ -1068,43 +1068,6 @@ fn jet_testing_snap(name: &String, actual: &String) -> bool {
     std::fs::read_to_string(path).map(|s| s == *actual).unwrap_or(false)
 }
 
-fn jet_testing_golden(path: &String, actual: &String) -> bool {
-    match std::fs::read_to_string(path) {
-        Ok(expected) if expected == *actual => true,
-        Ok(expected) => {
-            jet_testing_record_failure(JetTestingFailure::GoldenMismatch {
-                path: path.clone(),
-                diff: jet_testing_unified_diff(path, &expected, actual),
-            });
-            false
-        }
-        Err(error) => {
-            let failure = if error.kind() == std::io::ErrorKind::NotFound {
-                JetTestingFailure::GoldenMissing { path: path.clone() }
-            } else {
-                JetTestingFailure::GoldenUnreadable { path: path.clone() }
-            };
-            jet_testing_record_failure(failure);
-            false
-        }
-    }
-}
-
-fn jet_testing_fixture(path: &String) -> String {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) => {
-            let failure = if error.kind() == std::io::ErrorKind::NotFound {
-                JetTestingFailure::FixtureMissing { path: path.clone() }
-            } else {
-                JetTestingFailure::FixtureUnreadable { path: path.clone() }
-            };
-            jet_testing_record_failure(failure);
-            String::new()
-        }
-    }
-}
-
 fn jet_testing_temp_dir(prefix: &String) -> String {
     jet_testing_temp_dir_path(prefix)
 }

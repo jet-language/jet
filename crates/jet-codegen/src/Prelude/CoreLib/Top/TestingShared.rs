@@ -174,6 +174,43 @@ fn jet_testing_unified_diff(path: &str, expected: &str, actual: &str) -> String 
     output
 }
 
+pub(crate) fn jet_testing_golden(path: &String, actual: &String) -> bool {
+    match std::fs::read_to_string(path) {
+        Ok(expected) if expected == *actual => true,
+        Ok(expected) => {
+            jet_testing_record_failure(JetTestingFailure::GoldenMismatch {
+                path: path.clone(),
+                diff: jet_testing_unified_diff(path, &expected, actual),
+            });
+            false
+        }
+        Err(error) => {
+            let failure = if error.kind() == std::io::ErrorKind::NotFound {
+                JetTestingFailure::GoldenMissing { path: path.clone() }
+            } else {
+                JetTestingFailure::GoldenUnreadable { path: path.clone() }
+            };
+            jet_testing_record_failure(failure);
+            false
+        }
+    }
+}
+
+pub(crate) fn jet_testing_fixture(path: &String) -> String {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            let failure = if error.kind() == std::io::ErrorKind::NotFound {
+                JetTestingFailure::FixtureMissing { path: path.clone() }
+            } else {
+                JetTestingFailure::FixtureUnreadable { path: path.clone() }
+            };
+            jet_testing_record_failure(failure);
+            String::new()
+        }
+    }
+}
+
 pub(crate) fn jet_testing_temp_dir_path(prefix: &str) -> String {
     let safe: String = prefix
         .chars()

@@ -2823,6 +2823,24 @@ pub fn ambient_core_call(
                 crate::testing_shared::jet_testing_temp_dir_path(prefix),
             )))
         }
+        ("core.testing", "golden") => {
+            let (Some(CtValue::Str(path)), Some(CtValue::Str(actual))) =
+                (args.first(), args.get(1))
+            else {
+                return Some(Err(unsupported("core.testing.golden arguments", span)));
+            };
+            Some(Ok(CtValue::Bool(
+                crate::testing_shared::jet_testing_golden(path, actual),
+            )))
+        }
+        ("core.testing", "fixture") => {
+            let Some(CtValue::Str(path)) = args.first() else {
+                return Some(Err(unsupported("core.testing.fixture arguments", span)));
+            };
+            Some(Ok(CtValue::Str(
+                crate::testing_shared::jet_testing_fixture(path),
+            )))
+        }
         ("core.testing", "test_suite") => {
             let suite = jet_codegen::command_suite::jet_test_suite_new();
             Some(Ok(CtValue::Struct {

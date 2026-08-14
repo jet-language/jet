@@ -1364,9 +1364,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     "temp_dir" | "fake_clock" | "fake_rng" if args.len() == 1 => {
                         resident_safe_expr(&args[0], callees)
                     }
-                    "snap" if args.len() == 2 => {
+                    "snap" | "golden" if args.len() == 2 => {
                         args.iter().all(|a| resident_safe_expr(a, callees))
                     }
+                    "fixture" if args.len() == 1 => resident_safe_expr(&args[0], callees),
                     _ => false,
                 };
             }
