@@ -228,7 +228,7 @@ fn run() {
         &mut sink,
         std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
     )
     .expect("standard force conversion must run in the evaluator");
     assert_eq!(sink.stdout, "44482216152605.0\n");
@@ -309,7 +309,7 @@ fn run() {
         &mut sink,
         std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
     )
     .expect("open dimensions must run in the evaluator");
     assert_eq!(sink.stdout, "3.0\n");
@@ -1313,7 +1313,7 @@ fn run() {
         &mut sink,
         std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
     )
     .expect("custom unit Display must run in the evaluator");
     assert_eq!(sink.stdout, "custom length\ncustom length\n12\n");
@@ -1489,7 +1489,7 @@ fn run() {
         &mut sink,
         std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
-        true,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
     )
     .expect("imported unit display must run in the evaluator");
     assert_eq!(sink.stdout, expected);
