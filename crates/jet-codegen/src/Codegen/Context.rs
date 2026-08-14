@@ -3534,10 +3534,10 @@ pub(crate) fn memo_facts_for_struct(
         let mut expression = expression.clone();
         let mut dependencies = HashSet::new();
         expression.for_each_expr_mut(|node| {
-            if let Expr::Field(receiver, name, _) = node
-                && matches!(receiver.as_ref(), Expr::Ident(value, _) if value == Syntax::KW_SELF)
-            {
-                dependencies.insert(name.clone());
+            if let Expr::Field(receiver, name, _) = node {
+                if matches!(receiver.as_ref(), Expr::Ident(value, _) if value == Syntax::KW_SELF) {
+                    dependencies.insert(name.clone());
+                }
             }
         });
         direct.insert(field.name.clone(), dependencies);
