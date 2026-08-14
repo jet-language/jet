@@ -4,9 +4,9 @@ fn quote(s: String) => String :: "\"{s}\""
 
 fn run() {
     commands :: [String: fn(String) => String].{ "lower": lower, "quote": quote }
-    f :: commands.get("quote") ?? return
+    f :: commands.get("quote") ?? panic("missing quote handler")
     q :: f("hi")
-    g :: commands.get("lower") ?? return
+    g :: commands.get("lower") ?? panic("missing lower handler")
     l :: g("HI")
     print("{q} {l}")
 }
