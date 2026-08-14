@@ -1856,7 +1856,7 @@ fn jet_services_fail_worker(
             }
         })
         .collect::<Vec<_>>();
-    let mut authority_updated = Vec::new();
+    let mut authority_updated: Vec<usize> = Vec::new();
     for (index, worker) in tree.workers.iter().enumerate() {
         if let Err(error) = jet_services_authority_update(&worker.endpoint, desired_running[index]) {
             let mut rollback_error = None;
@@ -3765,7 +3765,7 @@ fn jet_services_promote_worker_generation(
     };
     if tree.delivery == JetServiceDelivery::DurableAtLeastOnce
         && tree.state_authority.is_some()
-        && service_authority_has_uncommitted(&old_endpoint)?
+        && jet_services_authority_has_uncommitted(&old_endpoint)?
     {
         return Ok(false);
     }
@@ -3900,7 +3900,7 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
     for worker in &tree.workers {
         let has_uncommitted = tree.delivery == JetServiceDelivery::DurableAtLeastOnce
             && tree.state_authority.is_some()
-            && service_authority_has_uncommitted(&worker.endpoint)?;
+            && jet_services_authority_has_uncommitted(&worker.endpoint)?;
         if tree.partitioned.iter().any(|name| name == &worker.name)
             || (tree.draining.iter().any(|name| name == &worker.name)
                 && worker.mailbox.channel.depth() > 0)

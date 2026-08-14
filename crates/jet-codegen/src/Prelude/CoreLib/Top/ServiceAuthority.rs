@@ -505,7 +505,9 @@ fn service_authority_current_endpoint(
                 } else if state.generation > entry.generation && state.started {
                     if newer_exact
                         .as_ref()
-                        .is_none_or(|current| current.3 < state.generation)
+                        .is_none_or(|current: &(String, String, String, i64, Option<String>)| {
+                            current.3 < state.generation
+                        })
                     {
                         newer_exact = Some(candidate);
                     }

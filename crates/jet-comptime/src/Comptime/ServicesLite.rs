@@ -846,7 +846,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         }
         _ => return Err(unsupported("service idempotency state", span)),
     };
-    let tree = JetServiceTree {
+    let mut tree = JetServiceTree {
         name: ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "tree name", span)?,
         authority: ct_to_service_string(
             field("authority")?,
