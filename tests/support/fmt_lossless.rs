@@ -69,6 +69,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/fixed_interpolation_missing_precision.jet",
     "tests/ui/flow_pipe_unassigned.jet",
     "tests/ui/fn_type_zone_misplaced.jet",
+    "tests/ui/foreign_do.jet",
     "tests/ui/foreign_for.jet",
     "tests/ui/foreign_loop_parenthesized.jet",
     "tests/ui/generated_cffi_e3206.jet",
