@@ -366,8 +366,8 @@ fn run() {{
             "{name}: expected Jet panic, not a rustc ICE: {stderr}"
         );
         assert!(
-            stderr.contains("panic: missing value"),
-            "{name}: missing Jet panic: {stderr}"
+            stderr.contains("Stop [E3001]: panic: missing value"),
+            "{name}: missing exact Jet panic report: {stderr}"
         );
         assert!(
             stderr.contains("live = 3"),
@@ -380,8 +380,8 @@ fn run() {{
             );
         }
         assert!(
-            !stderr.contains("internal compiler error"),
-            "{name}: rustc failure escaped I2 handling: {stderr}"
+            !stderr.contains("rustc") && !stderr.contains("internal compiler error"),
+            "{name}: backend diagnostic escaped I2 handling: {stderr}"
         );
     }
 }
