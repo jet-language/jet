@@ -456,6 +456,11 @@ pub struct EffectSummary {
     /// Core compute consumers seen in each body; the autodiff post-pass uses
     /// this to reject operations that cannot preserve a Tensor trace.
     pub compute_calls: Vec<ComputeCallFact>,
+    /// D-AUTODIFF1/D-NOPANIC1: provenance for Panic sites. The safe form is
+    /// only the explicit fallback of a Tensor-returning `core.compute` call;
+    /// arbitrary/direct Panic remains outside the pure Tensor contract.
+    pub autodiff_safe_panic: bool,
+    pub autodiff_unsafe_panic: bool,
     /// D-MEM-FACTS1 shares this already-complete call graph instead of growing
     /// a parallel reachability mechanism.
     pub memory: super::MemoryFacts::MemorySummary,
@@ -469,16 +474,91 @@ pub fn check_autodiff_purity(
     solved: &HashMap<String, EffectSet>,
     diags: &mut Vec<Diagnostic>,
 ) {
+    fn panic_sites_are_compute_failures(
+        name: &str,
+        summaries: &HashMap<String, EffectSummary>,
+        solved: &HashMap<String, EffectSet>,
+        visiting: &mut BTreeSet<String>,
+        memo: &mut HashMap<String, bool>,
+    ) -> bool {
+        if name == "__jet_panic__" {
+            return false;
+        }
+        if let Some(result) = memo.get(name) {
+            return *result;
+        }
+        if !visiting.insert(name.to_string()) {
+            return false;
+        }
+        let Some(summary) = summaries.get(name) else {
+            visiting.remove(name);
+            memo.insert(name.to_string(), false);
+            return false;
+        };
+        let local_panic = summary
+            .direct
+            .iter()
+            .any(|effect| effect_root(effect) == Effect::Panic.name());
+        let mut safe = !local_panic
+            || (summary.autodiff_safe_panic && !summary.autodiff_unsafe_panic);
+        if summary.edges.contains("__jet_panic__") && !local_panic {
+            safe = false;
+        }
+        if safe {
+            for edge in &summary.edges {
+                if edge == "__jet_panic__" {
+                    continue;
+                }
+                let reaches_panic = solved.get(edge).is_some_and(|effects| {
+                    effects
+                        .iter()
+                        .any(|effect| effect_root(effect) == Effect::Panic.name())
+                });
+                if reaches_panic
+                    && !panic_sites_are_compute_failures(edge, summaries, solved, visiting, memo)
+                {
+                    safe = false;
+                    break;
+                }
+            }
+        }
+        visiting.remove(name);
+        memo.insert(name.to_string(), safe);
+        safe
+    }
+
+    let mut panic_memo = HashMap::new();
     for summary in summaries.values() {
         for obligation in &summary.autodiff_obligations {
             let Some(effects) = solved.get(&obligation.target) else {
                 continue;
             };
-            let forbidden = effects
+            let mut forbidden = effects
                 .iter()
                 .filter(|effect| effect_root(effect) != Effect::GPU.name())
                 .cloned()
                 .collect::<EffectSet>();
+            // D-NOPANIC1 remains in the solved effect row. A differentiated
+            // Tensor function may preserve the same partial domain only when
+            // every reachable stop is the explicit fallback of a checked
+            // Tensor-returning Core compute operation. Direct or unrelated
+            // Panic never becomes admissible merely because the function also
+            // uses compute.
+            let panic_only = !forbidden.is_empty()
+                && forbidden
+                    .iter()
+                    .all(|effect| effect_root(effect) == Effect::Panic.name());
+            if panic_only
+                && panic_sites_are_compute_failures(
+                    &obligation.target,
+                    summaries,
+                    solved,
+                    &mut BTreeSet::new(),
+                    &mut panic_memo,
+                )
+            {
+                forbidden.retain(|effect| effect_root(effect) != Effect::Panic.name());
+            }
             if forbidden.is_empty() {
                 if let Some(target_summary) = summaries.get(&obligation.target) {
                     for call in &target_summary.compute_calls {

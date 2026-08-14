@@ -333,6 +333,8 @@ impl<'a> Checker<'a> {
             Some(&value_ty),
             "supply an owned exhaustion-route payload",
         );
+        let compute_failure_fallback = value_ty.is_compute_tensor_family()
+            && self.is_core_compute_call(value.as_ref());
         let Some(label) = value_loop_route_label(&mut value) else {
             *expr = *value;
             return Some(value_ty);
@@ -437,7 +439,10 @@ impl<'a> Checker<'a> {
                     range_checked: false,
                     widen_approx: false,
                 };
+                let saved_safe_panic_context = self.autodiff_safe_panic_context;
+                self.autodiff_safe_panic_context = compute_failure_fallback;
                 self.check_panic_call(&mut call);
+                self.autodiff_safe_panic_context = saved_safe_panic_context;
                 attach_value_loop_route(&mut value, Stmt::Expr(Expr::Call(call)));
             }
             route @ (OrFallback::Break(_) | OrFallback::Continue(_)) => {
@@ -501,6 +506,16 @@ impl<'a> Checker<'a> {
         Some(value_ty)
     }
 
+    fn is_core_compute_call(&self, expr: &Expr) -> bool {
+        let Expr::MethodCall { receiver, .. } = expr.without_parens() else {
+            return false;
+        };
+        matches!(
+            receiver.as_ref().without_parens(),
+            Expr::Ident(alias, _) if self.core_imports.get(alias).map(String::as_str) == Some("core.compute")
+        )
+    }
+
     pub(crate) fn infer_or_fallback(
         &mut self,
         value: &mut Box<Expr>,
@@ -539,6 +554,8 @@ impl<'a> Checker<'a> {
             Some(&val_ty),
             "supply an owned fallback payload",
         );
+        let compute_failure_fallback = payload.is_compute_tensor_family()
+            && self.is_core_compute_call(value.as_ref());
         // D-FAIL-BIND1=A: make the report a normal typed local in a fresh
         // scope while checking every fallback form. Optional fallbacks keep
         // the context marker without declaring a local, so `err` receives the
@@ -691,7 +708,10 @@ impl<'a> Checker<'a> {
                     range_checked: false,
                     widen_approx: false,
                 };
+                let saved_safe_panic_context = self.autodiff_safe_panic_context;
+                self.autodiff_safe_panic_context = compute_failure_fallback;
                 self.check_panic_call(&mut call);
+                self.autodiff_safe_panic_context = saved_safe_panic_context;
                 *args = call.args;
                 Some(payload)
             }

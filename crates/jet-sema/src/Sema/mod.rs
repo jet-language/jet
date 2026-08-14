@@ -1400,6 +1400,13 @@ pub(crate) struct Checker<'a> {
     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
     /// D-AUTODIFF1: compute consumers used by this function body.
     fx_compute_calls: Vec<Effects::ComputeCallFact>,
+    /// D-AUTODIFF1: a `?? panic` directly attached to a Tensor-returning
+    /// `core.compute` operation is a checked domain-failure boundary. Keep its
+    /// provenance separate from arbitrary/direct panic sites so autodiff can
+    /// admit only the former without erasing the D-NOPANIC effect fact.
+    fx_autodiff_safe_panic: bool,
+    fx_autodiff_unsafe_panic: bool,
+    autodiff_safe_panic_context: bool,
     /// D-CRYPTO-DIAG1: compiler-known crypto facts wait for the function's
     /// syntax/type/effect phases to finish before becoming diagnostics.
     fx_pending_diagnostics: Vec<Diagnostic>,

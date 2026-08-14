@@ -121,7 +121,7 @@ fn compute_tensor_type() -> Type {
 }
 
 fn is_compute_tensor(ty: &Type) -> bool {
-    matches!(ty, Type::Named(type_name) if type_name == "Tensor")
+    ty.is_compute_tensor_family()
 }
 
 fn compute_gradient_value_type(output: &Type) -> Option<Type> {
@@ -585,7 +585,7 @@ impl<'a> Checker<'a> {
             }
             if params
                 .iter()
-                .any(|param| !matches!(param, Type::Named(type_name) if type_name == "Tensor"))
+                .any(|param| !param.is_compute_tensor_family())
             {
                 self.diags.push(Diagnostic::error(
                     "E0112",
@@ -611,7 +611,10 @@ impl<'a> Checker<'a> {
             }
             for index in &value_indexes {
                 let value_ty = self.infer(&mut args[*index].expr);
-                if !matches!(value_ty, Some(Type::Named(type_name)) if type_name == "Tensor") {
+                if !value_ty
+                    .as_ref()
+                    .is_some_and(Type::is_compute_tensor_family)
+                {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!("argument {} to `compute.{name}` should be `Tensor`", index),
@@ -631,7 +634,6 @@ impl<'a> Checker<'a> {
                         Some(wrt.span()),
                     ));
                 }
-                self.infer(wrt);
             }
             if wrt_expr.is_some() && !matches!(name, "gradient" | "value_and_gradient") {
                 self.diags.push(Diagnostic::error(

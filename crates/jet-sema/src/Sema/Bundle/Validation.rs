@@ -1572,6 +1572,9 @@ fn check_func_body_bundle_scoped(
         fx_callback_obligations: Vec::new(),
         fx_autodiff_obligations: Vec::new(),
         fx_compute_calls: Vec::new(),
+        fx_autodiff_safe_panic: false,
+        fx_autodiff_unsafe_panic: false,
+        autodiff_safe_panic_context: false,
         fx_pending_diagnostics: Vec::new(),
         fx_memory_events: Vec::new(),
         fx_memory_open: Vec::new(),
@@ -1851,6 +1854,8 @@ fn check_func_body_bundle_scoped(
             callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
             autodiff_obligations: std::mem::take(&mut ck.fx_autodiff_obligations),
             compute_calls: std::mem::take(&mut ck.fx_compute_calls),
+            autodiff_safe_panic: ck.fx_autodiff_safe_panic,
+            autodiff_unsafe_panic: ck.fx_autodiff_unsafe_panic,
             memory: super::MemoryFacts::MemorySummary {
                 events: std::mem::take(&mut ck.fx_memory_events),
                 open_dispatches: std::mem::take(&mut ck.fx_memory_open),

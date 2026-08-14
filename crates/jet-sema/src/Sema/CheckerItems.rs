@@ -3386,6 +3386,15 @@ impl<'a> Checker<'a> {
         // both the legacy `reaches_panic` fact and the deniable Panic effect.
         self.fx_edges.insert("__jet_panic__".to_string());
         self.record_effect(Effect::Panic.name(), call.name_span);
+        let safe_panic_context = self.autodiff_safe_panic_context;
+        if safe_panic_context {
+            self.fx_autodiff_safe_panic = true;
+        } else {
+            self.fx_autodiff_unsafe_panic = true;
+        }
+        // A panic message is an ordinary expression. Do not let a nested
+        // direct panic inherit the outer compute-failure provenance.
+        self.autodiff_safe_panic_context = false;
         if call.args.len() != 1 {
             self.diags.push(Diagnostic::error(
                 "E0103",
@@ -3414,6 +3423,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        self.autodiff_safe_panic_context = safe_panic_context;
     }
 
     pub(crate) fn check_require_call(&mut self, call: &mut Call) {
