@@ -582,14 +582,14 @@ mod jet_runtime_atexit {
     {
         HANDLERS.with(|handlers| {
             let mut handlers = handlers.borrow_mut();
-            jet_runtime_register_atexit(&mut handlers, Box::new(handler));
+            super::jet_runtime_register_atexit(&mut handlers, Box::new(handler));
         });
     }
 
     pub(super) fn run() {
         HANDLERS.with(|handlers| {
             let mut handlers = handlers.borrow_mut();
-            jet_runtime_drain_atexit(&mut handlers, |handler| handler());
+            super::jet_runtime_drain_atexit(&mut handlers, |handler| handler());
         });
     }
 }
