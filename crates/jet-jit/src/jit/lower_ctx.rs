@@ -84,6 +84,10 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) meta: &'a JitMeta<'a>,
     pub(crate) vars: &'a mut HashMap<String, Variable>,
     pub(crate) var_tys: &'a mut HashMap<String, Type>,
+    /// Captures for a Prelude callback are stored in the opaque environment
+    /// handle. The callback writes its current locals back before every exit;
+    /// the enclosing collection adapter then synchronizes the surviving values.
+    pub(crate) capture_writeback: Option<(Value, Vec<(usize, String, Type)>)>,
     /// Locals whose Option carrier is the tagged result arena rather than the
     /// legacy value-plus-one representation.
     pub(crate) result_option_vars: HashSet<String>,
@@ -2906,6 +2910,48 @@ impl LowerCtx<'_, '_> {
         self.emit_lexical_exit_preserving(value, force_dummy, active_shield_depth, &[])
     }
 
+    fn emit_capture_writeback(&mut self) -> Result<(), String> {
+        let Some((env, captures)) = self.capture_writeback.clone() else {
+            return Ok(());
+        };
+        let line = self.b.ins().iconst(types::I32, 0);
+        for (index, place, capture_ty) in captures {
+            let Some(var) = self.vars.get(&place).copied() else {
+                continue;
+            };
+            let value = self.b.use_var(var);
+            let index_value = self.b.ins().iconst(types::I64, index as i64);
+            let value_ty = self.b.func.dfg.value_type(value);
+            match value_ty {
+                ty if ty == types::F64 => {
+                    let set = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_set_f64, self.b.func);
+                    self.b.ins().call(set, &[env, index_value, value, line]);
+                }
+                ty if ty == types::I8 || ty == types::I32 => {
+                    let value = self.b.ins().uextend(types::I64, value);
+                    let set = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_set, self.b.func);
+                    self.b.ins().call(set, &[env, index_value, value, line]);
+                }
+                ty if ty == types::I64 => {
+                    let set = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_set, self.b.func);
+                    self.b.ins().call(set, &[env, index_value, value, line]);
+                }
+                other => {
+                    return Err(format!(
+                        "jit closure capture writeback unsupported: {capture_ty:?} ({other:?})"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn emit_lexical_exit_preserving(
         &mut self,
         value: Option<Value>,
@@ -2939,6 +2985,7 @@ impl LowerCtx<'_, '_> {
         preserve_shared_guards: &[String],
     ) -> Result<(), String> {
         self.track_compute_locals()?;
+        self.emit_capture_writeback()?;
         self.emit_compute_resource_closes(0, values);
         self.emit_shared_transaction_aborts_to(0);
 
@@ -25042,7 +25089,8 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(host, &[source]);
     }
 
-    /// Native Iter/list closure adapters — lambda bodies inlined in Cranelift.
+    /// Native list closure adapters — collection traversal remains in Prelude;
+    /// Cranelift supplies only the callback and handle marshalling.
     fn closure_elem_type_for(recv: &TExpr) -> Option<Type> {
         jit_closure_elem_type_for(&recv.ty)
     }
@@ -25054,6 +25102,88 @@ impl LowerCtx<'_, '_> {
         } else {
             Ok(value)
         }
+    }
+
+    fn lower_collection_callback(
+        &mut self,
+        lambda_expr: &TExpr,
+    ) -> Result<(Value, Option<Value>), String> {
+        let TExprKind::Lambda(lambda) = &lambda_expr.kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        let id = super::functions_compile::lower_collection_callable_lambda(
+            self.module,
+            self.host,
+            self.meta,
+            lambda,
+            self.func_ids,
+            self.spawn_func_ids,
+            self.spawn_lambdas,
+            self.spawn_site,
+            self.runtime,
+        )?;
+        let func_ref = self.module.declare_func_in_func(id, self.b.func);
+        let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
+        let env = self.lower_lambda_capture_env(lambda)?;
+        let (env_value, has_env_flag) = match env {
+            Some(env) => (env, 1),
+            None => (self.b.ins().iconst(types::I64, 0), 0),
+        };
+        let has_env = self.b.ins().iconst(types::I8, has_env_flag);
+        let callback = self.call_host(
+            self.host.callable_bind,
+            &[fn_addr, env_value, has_env],
+        );
+        self.emit_trap_check()?;
+        Ok((callback, env))
+    }
+
+    fn sync_collection_captures(
+        &mut self,
+        lambda: &TLambda,
+        env: Option<Value>,
+    ) -> Result<(), String> {
+        let Some(env) = env else {
+            return Ok(());
+        };
+        let line = self.b.ins().iconst(types::I32, 0);
+        for (index, (outer, _place, ty)) in lambda.captures.iter().enumerate() {
+            if lambda
+                .materialized_captures
+                .iter()
+                .any(|capture| capture == outer)
+                || lambda
+                    .frozen_captures
+                    .iter()
+                    .any(|capture| capture == outer)
+            {
+                continue;
+            }
+            let outer_place = TIR::local_place(outer);
+            let Some(var) = self.vars.get(&outer_place).copied() else {
+                continue;
+            };
+            let index_value = self.b.ins().iconst(types::I64, index as i64);
+            let value = if self.meta.clif_ty(ty) == Some(types::F64) {
+                self.call_host(self.host.coll.list_get_f64, &[env, index_value, line])
+            } else {
+                self.call_host(self.host.coll.list_get, &[env, index_value, line])
+            };
+            let value = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                Some(clif) if clif == types::F64 => value,
+                Some(clif) if clif == types::I8 => self.b.ins().ireduce(types::I8, value),
+                Some(clif) if clif == types::I32 => self.b.ins().ireduce(types::I32, value),
+                Some(clif) if clif == types::I64 => value,
+                Some(clif) => {
+                    return Err(format!(
+                        "jit closure capture sync unsupported: {ty:?} ({clif:?})"
+                    ));
+                }
+                None => return Err(format!("jit closure capture sync unsupported: {ty:?}")),
+            };
+            self.b.def_var(var, value);
+        }
+        self.emit_trap_check()
     }
 
     fn lower_closure_method(
@@ -25068,7 +25198,12 @@ impl LowerCtx<'_, '_> {
                 if let Type::Option(inner) = &recv.ty {
                     return self.lower_option_map(recv, args, inner);
                 }
-                self.lower_iter_map_filter(recv, args, false)
+                self.lower_native_iter_map_filter(
+                    recv,
+                    args,
+                    false,
+                    matches!(op, TClosureOp::MapMut),
+                )
             }
             TClosureOp::Any => self.lower_iter_any_all(recv, args, false),
             TClosureOp::All => self.lower_iter_any_all(recv, args, true),
@@ -25082,14 +25217,14 @@ impl LowerCtx<'_, '_> {
             // D-PARCAPTURE1: order-preserving parallel adapters — serial Cranelift
             // inlining matches AOT results for the covered examples.
             // parity: guard tests/dev.rs::unified_loop_jit_tiers_are_explicit_and_match_aot
-            TClosureOp::ParaMap => self.lower_iter_map_filter(recv, args, false),
-            TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
-            TClosureOp::ParaFilter => self.lower_iter_map_filter(recv, args, true),
+            TClosureOp::ParaMap => self.lower_native_iter_map_filter(recv, args, false, false),
+            TClosureOp::Filter => self.lower_native_iter_map_filter(recv, args, true, true),
+            TClosureOp::ParaFilter => self.lower_native_iter_map_filter(recv, args, true, true),
             TClosureOp::ParaPartition { .. } => self.lower_para_partition(recv, args),
             TClosureOp::ParaFold => self.lower_para_fold(recv, args),
-            TClosureOp::Each | TClosureOp::EachMut | TClosureOp::EachRef => {
-                self.lower_iter_each(recv, args)
-            }
+            TClosureOp::Each => self.lower_iter_each(recv, args, false),
+            TClosureOp::EachMut => self.lower_iter_each(recv, args, true),
+            TClosureOp::EachRef => self.lower_iter_each(recv, args, false),
             TClosureOp::FilterMap => self.lower_iter_filter_map(recv, args),
             TClosureOp::SortBy => self.lower_iter_sort_by(recv, args),
             TClosureOp::SortByCompare => self.lower_iter_sort_by_compare(recv, args),
@@ -25356,71 +25491,30 @@ impl LowerCtx<'_, '_> {
         if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
             return Err("jit closure method unsupported".to_string());
         }
-        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        if self.meta.clif_ty(&elem_ty) != Some(types::I64) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (_, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(&body_expr.ty, Type::Bool) {
             return Err("jit closure method unsupported".to_string());
         }
+        let lambda_expr = args
+            .first()
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        let TExprKind::Lambda(lambda) = &lambda_expr.kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
         let recv_val = self.lower_closure_source(recv)?;
-        let coll_var = self.fresh_var(types::I64);
-        self.b.def_var(coll_var, recv_val);
-        let result_var = self.fresh_var(types::I8);
-        let initial = self.b.ins().iconst(types::I8, i64::from(want_all));
-        self.b.def_var(result_var, initial);
-        let idx_var = self.fresh_var(types::I64);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        self.b.def_var(idx_var, zero);
-
-        let header = self.b.create_block();
-        let body = self.b.create_block();
-        let step = self.b.create_block();
-        let selected = self.b.create_block();
-        let exit = self.b.create_block();
-        self.b.ins().jump(header, &[]);
-
-        self.b.switch_to_block(header);
-        let idx = self.b.use_var(idx_var);
-        let coll = self.b.use_var(coll_var);
-        let len = self.call_host(self.host.coll.list_len, &[coll]);
-        let done = self
-            .b
-            .ins()
-            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
-        self.b.ins().brif(done, exit, &[], body, &[]);
-
-        self.b.switch_to_block(body);
-        self.b.seal_block(body);
-        let line = self.b.ins().iconst(types::I32, 0);
-        let elem = self.call_host(self.host.coll.list_get, &[coll, idx, line]);
-        self.emit_trap_check()?;
-        let pred = self.with_bound_local(&param_place, elem_ty, elem, |this| {
-            this.lower_expr(body_expr)
-        })?;
-        let zero_bool = self.b.ins().iconst(types::I8, 0);
-        let matched = self.b.ins().icmp(IntCC::NotEqual, pred, zero_bool);
-        if want_all {
-            self.b.ins().brif(matched, step, &[], selected, &[]);
+        let (callback, env) = self.lower_collection_callback(lambda_expr)?;
+        let host = if want_all {
+            self.host.coll.list_closure_all
         } else {
-            self.b.ins().brif(matched, selected, &[], step, &[]);
-        }
-
-        self.b.switch_to_block(selected);
-        self.b.seal_block(selected);
-        let value = self.b.ins().iconst(types::I8, i64::from(!want_all));
-        self.b.def_var(result_var, value);
-        self.b.ins().jump(exit, &[]);
-
-        self.b.switch_to_block(step);
-        self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
-        self.b.ins().jump(header, &[]);
-
-        self.b.switch_to_block(exit);
-        self.b.seal_block(header);
-        self.b.seal_block(exit);
-        Ok(self.b.use_var(result_var))
+            self.host.coll.list_closure_any
+        };
+        let result = self.call_host(host, &[recv_val, callback]);
+        self.emit_trap_check()?;
+        self.sync_collection_captures(lambda, env)?;
+        Ok(result)
     }
 
     fn lower_map_closure(
@@ -26157,13 +26251,98 @@ impl LowerCtx<'_, '_> {
         Ok(output)
     }
 
-    fn lower_iter_each(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+    fn lower_native_iter_map_filter(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+        is_filter: bool,
+        map_mut: bool,
+    ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
             .ok_or_else(|| "jit closure method unsupported".to_string())?;
         if !matches!(
             &elem_ty,
             Type::Int | Type::String | Type::Named(_)
         ) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        if self.meta.clif_ty(&elem_ty) != Some(types::I64) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (_, body_expr) = self.closure_unary_lambda(args)?;
+        let lambda_expr = args
+            .first()
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        let TExprKind::Lambda(lambda) = &lambda_expr.kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        let recv_val = self.lower_closure_source(recv)?;
+        let host = if is_filter {
+            if !matches!(self.erase_distinct_ty(&body_expr.ty), Type::Bool) {
+                return Err("jit closure method unsupported".to_string());
+            }
+            self.host.coll.list_closure_filter
+        } else {
+            let mapped_ty = self.erase_distinct_ty(&body_expr.ty);
+            match self.meta.clif_ty(&body_expr.ty).or_else(|| clif_ty(&mapped_ty)) {
+                Some(clif) if clif == types::F64 => {
+                    if map_mut {
+                        self.host.coll.list_closure_map_f64_mut
+                    } else {
+                        self.host.coll.list_closure_map_f64
+                    }
+                }
+                Some(clif) if clif == types::I8 => {
+                    if map_mut {
+                        self.host.coll.list_closure_map_i8_mut
+                    } else {
+                        self.host.coll.list_closure_map_i8
+                    }
+                }
+                Some(clif) if clif == types::I32 => {
+                    if map_mut {
+                        self.host.coll.list_closure_map_i32_mut
+                    } else {
+                        self.host.coll.list_closure_map_i32
+                    }
+                }
+                Some(clif) if clif == types::I64 => {
+                    if map_mut {
+                        self.host.coll.list_closure_map_mut
+                    } else {
+                        self.host.coll.list_closure_map
+                    }
+                }
+                _ => return Err("jit closure method unsupported".to_string()),
+            }
+        };
+        let (callback, env) = self.lower_collection_callback(lambda_expr)?;
+        let output = self.call_host(host, &[recv_val, callback]);
+        self.emit_trap_check()?;
+        self.sync_collection_captures(lambda, env)?;
+        if is_filter {
+            self.transfer_progress_filter(recv_val, output);
+        } else {
+            self.transfer_progress(recv_val, output);
+        }
+        Ok(output)
+    }
+
+    fn lower_iter_each(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+        mutable: bool,
+    ) -> Result<Value, String> {
+        let elem_ty = Self::closure_elem_type_for(recv)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(
+            &elem_ty,
+            Type::Int | Type::String | Type::Named(_)
+        ) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        if self.meta.clif_ty(&elem_ty) != Some(types::I64) {
             return Err("jit closure method unsupported".to_string());
         }
         let lam_expr = args
@@ -26175,60 +26354,23 @@ impl LowerCtx<'_, '_> {
         if !lam.prep.is_empty() || lam.source_params.len() != 1 {
             return Err("jit closure method unsupported".to_string());
         }
-        let param_place = TIR::local_place(&lam.source_params[0]);
+        if lam.ret.is_some() {
+            return Err("jit closure method unsupported".to_string());
+        }
         let recv_val = self.lower_closure_source(recv)?;
         let recv_val = self.collect_progress(recv_val);
-        let coll_var = self.fresh_var(types::I64);
-        self.b.def_var(coll_var, recv_val);
-
-        let header = self.b.create_block();
-        let body = self.b.create_block();
-        let step = self.b.create_block();
-        let exit = self.b.create_block();
-        let idx_var = self.fresh_var(types::I64);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        self.b.def_var(idx_var, zero);
-        self.b.ins().jump(header, &[]);
-
-        self.b.switch_to_block(header);
-        let idx = self.b.use_var(idx_var);
-        let coll = self.b.use_var(coll_var);
-        let len = self.call_host(self.host.coll.list_len, &[coll]);
-        let done = self
-            .b
-            .ins()
-            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
-        self.b.ins().brif(done, exit, &[], body, &[]);
-
-        self.b.switch_to_block(body);
-        self.b.seal_block(body);
-        let get_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_get, self.b.func);
-        let line = self.b.ins().iconst(types::I32, 0);
-        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
-        let elem = self.b.inst_results(get_call)[0];
+        let (callback, env) = self.lower_collection_callback(lam_expr)?;
+        let host = if mutable {
+            self.host.coll.list_closure_each_mut
+        } else {
+            self.host.coll.list_closure_each
+        };
+        self.b.ins().call(
+            self.module.declare_func_in_func(host, self.b.func),
+            &[recv_val, callback],
+        );
         self.emit_trap_check()?;
-        self.with_bound_local(&param_place, elem_ty, elem, |this| {
-            match &lam.executable {
-                TLambdaBody::Expr(body) => this.lower_expr(body).map(|_| ()),
-                TLambdaBody::Block(stmts) => this.lower_stmts(stmts),
-                TLambdaBody::SharedBlock(stmts) => this.lower_stmts(&stmts[..]),
-            }
-        })?;
-        self.b.ins().jump(step, &[]);
-
-        self.b.switch_to_block(step);
-        self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
-        self.b.ins().jump(header, &[]);
-
-        self.b.switch_to_block(exit);
-        self.b.seal_block(header);
-        self.b.seal_block(exit);
+        self.sync_collection_captures(lam, env)?;
         Ok(self.b.ins().iconst(types::I8, 0))
     }
 

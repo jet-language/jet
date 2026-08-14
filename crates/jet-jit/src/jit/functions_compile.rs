@@ -481,6 +481,7 @@ fn lower_spawn_function(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            capture_writeback: None,
             result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             allocator_view_names: HashSet::new(),
@@ -673,6 +674,36 @@ pub(crate) fn lower_callable_lambda(
         spawn_site,
         runtime,
         false,
+        false,
+    )
+}
+
+/// Compile a List/Set closure callback. The collection operation remains in
+/// the shared Prelude; this function only supplies its native callback ABI and
+/// keeps the opaque capture environment current across callback invocations.
+pub(crate) fn lower_collection_callable_lambda(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    lam: &TLambda,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+) -> Result<FuncId, String> {
+    lower_callable_lambda_with_env(
+        module,
+        host,
+        meta,
+        lam,
+        func_ids,
+        spawn_func_ids,
+        spawn_lambdas,
+        spawn_site,
+        runtime,
+        false,
+        true,
     )
 }
 
@@ -701,6 +732,7 @@ pub(crate) fn lower_interrupt_callable_lambda(
         spawn_site,
         runtime,
         true,
+        false,
     )
 }
 
@@ -801,6 +833,7 @@ pub(crate) fn lower_shared_transaction_lambda(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            capture_writeback: None,
             result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             allocator_view_names: HashSet::new(),
@@ -995,6 +1028,7 @@ fn lower_callable_lambda_with_env(
     spawn_site: &mut usize,
     runtime: &mut JitRuntime,
     force_env: bool,
+    writeback_captures: bool,
 ) -> Result<FuncId, String> {
     let capturing = force_env || !lam.captures.is_empty();
     // Capturing callables are supported when every capture is an i64 handle/scalar
@@ -1060,6 +1094,7 @@ fn lower_callable_lambda_with_env(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            capture_writeback: None,
             result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             allocator_view_names: HashSet::new(),
@@ -1107,7 +1142,7 @@ fn lower_callable_lambda_with_env(
             for (idx, (_outer, place, ty)) in lam.captures.iter().enumerate() {
                 let idx_v = lctx.b.ins().iconst(types::I64, idx as i64);
                 let host = lctx.module.declare_func_in_func(
-                    if matches!(ty, Type::Float) {
+                    if meta.clif_ty(ty) == Some(types::F64) {
                         lctx.host.coll.list_get_f64
                     } else {
                         lctx.host.coll.list_get
@@ -1131,6 +1166,16 @@ fn lower_callable_lambda_with_env(
                 lctx.b.def_var(var, val);
                 lctx.vars.insert(place.clone(), var);
                 lctx.var_tys.insert(place.clone(), ty.clone());
+            }
+            if writeback_captures && !lam.captures.is_empty() {
+                lctx.capture_writeback = Some((
+                    env,
+                    lam.captures
+                        .iter()
+                        .enumerate()
+                        .map(|(index, (_, place, ty))| (index, place.clone(), ty.clone()))
+                        .collect(),
+                ));
             }
         }
         for (name, ty) in lam.source_params.iter().zip(&lam.param_types) {
@@ -1254,6 +1299,7 @@ pub(crate) fn lower_option_lift2_factory(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            capture_writeback: None,
             raw_slots: HashMap::new(),
             allocator_view_names: HashSet::new(),
             preserve_allocator_view: false,
@@ -1404,6 +1450,7 @@ fn lower_function(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            capture_writeback: None,
             result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             allocator_view_names: HashSet::new(),
@@ -1679,6 +1726,7 @@ fn lower_generator_body(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            capture_writeback: None,
             result_option_vars: HashSet::new(),
             raw_slots: HashMap::new(),
             allocator_view_names: HashSet::new(),

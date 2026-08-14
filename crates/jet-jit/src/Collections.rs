@@ -1,6 +1,7 @@
 //! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
 
 use super::Concurrency;
+use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 mod set_semantics {
@@ -119,6 +120,76 @@ mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
+
+    // Core.rs owns the public any/all/each spellings. These adapters compose
+    // the same eager Prelude kernels available in this shared collection seam;
+    // they do not inspect handles or define a second traversal policy.
+    pub(super) fn list_closure_any<F>(xs: Vec<i64>, mut f: F) -> bool
+    where
+        F: FnMut(&i64) -> bool,
+    {
+        jet_list_position(xs, |value| f(value)).is_ok()
+    }
+
+    pub(super) fn list_closure_all<F>(xs: Vec<i64>, f: F) -> bool
+    where
+        F: FnMut(&i64) -> bool,
+    {
+        jet_list_position(xs, |value| !f(value)).is_err()
+    }
+
+    pub(super) fn list_closure_map<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+    where
+        F: Fn(&i64) -> i64,
+    {
+        jet_list_map(xs, f)
+    }
+
+    pub(super) fn list_closure_map_mut<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+    where
+        F: FnMut(&i64) -> i64,
+    {
+        jet_list_map_mut(xs, f)
+    }
+
+    pub(super) fn list_closure_map_f64<F>(xs: Vec<i64>, f: F) -> Vec<f64>
+    where
+        F: Fn(&i64) -> f64,
+    {
+        jet_list_map(xs, f)
+    }
+
+    pub(super) fn list_closure_map_f64_mut<F>(xs: Vec<i64>, f: F) -> Vec<f64>
+    where
+        F: FnMut(&i64) -> f64,
+    {
+        jet_list_map_mut(xs, f)
+    }
+
+    pub(super) fn list_closure_filter<F>(xs: Vec<i64>, f: F) -> Vec<i64>
+    where
+        F: FnMut(&i64) -> bool,
+    {
+        jet_list_filter(xs, f)
+    }
+
+    pub(super) fn list_closure_each<F>(xs: Vec<i64>, f: F)
+    where
+        F: Fn(&i64),
+    {
+        let _ = jet_list_fold(xs, (), |_, value| {
+            f(value);
+        });
+    }
+
+    pub(super) fn list_closure_each_mut<F>(xs: Vec<i64>, f: F)
+    where
+        F: FnMut(&i64),
+    {
+        let _ = jet_list_fold(xs, (), |_, value| {
+            f(value);
+        });
+    }
 
     pub(super) fn zip_fill_at<T: Clone>(
         fill_mode: u8,
@@ -705,6 +776,330 @@ extern "C" fn jet_jit_list_push_range(
 
 extern "C" fn jet_jit_list_len(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
+}
+
+fn closure_callback_slot(handle: i64) -> Option<JitCallableSlot> {
+    Concurrency::with_runtime_mut(|rt| {
+        let slot = jit_callable_parts(rt, handle);
+        if slot.is_none() {
+            rt.set_trap("invalid resident collection callback");
+        }
+        slot
+    })
+}
+
+fn closure_trapped() -> bool {
+    Concurrency::with_runtime_mut(|rt| rt.trapped.is_some())
+}
+
+// The binder records the callback pointer, environment word, and env flag as
+// one slot. Each adapter selects the ABI declared by the callback's TIR type.
+unsafe fn invoke_closure_bool(slot: JitCallableSlot, value: i64) -> bool {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) -> i8 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value) != 0
+    } else {
+        let callback: unsafe extern "C" fn(i64) -> i8 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(value) != 0
+    }
+}
+
+unsafe fn invoke_closure_i64(slot: JitCallableSlot, value: i64) -> i64 {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value)
+    } else {
+        let callback: unsafe extern "C" fn(i64) -> i64 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(value)
+    }
+}
+
+unsafe fn invoke_closure_i8(slot: JitCallableSlot, value: i64) -> i8 {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) -> i8 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value)
+    } else {
+        let callback: unsafe extern "C" fn(i64) -> i8 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(value)
+    }
+}
+
+unsafe fn invoke_closure_i32(slot: JitCallableSlot, value: i64) -> i32 {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) -> i32 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value)
+    } else {
+        let callback: unsafe extern "C" fn(i64) -> i32 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(value)
+    }
+}
+
+unsafe fn invoke_closure_f64(slot: JitCallableSlot, value: i64) -> f64 {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) -> f64 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value)
+    } else {
+        let callback: unsafe extern "C" fn(i64) -> f64 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(value)
+    }
+}
+
+unsafe fn invoke_closure_unit(slot: JitCallableSlot, value: i64) {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value);
+    } else {
+        let callback: unsafe extern "C" fn(i64) =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(value);
+    }
+}
+
+fn alloc_closure_ints(values: Vec<i64>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list(values))
+}
+
+fn alloc_closure_floats(values: Vec<f64>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for value in values {
+            if rt.heap.list_push_float(list, value).is_none() {
+                rt.set_trap("JIT collection closure list allocation failed");
+                return 0;
+            }
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_list_closure_any(list: i64, callback: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    i8::from(collection_semantics::list_closure_any(values, |value| {
+        if closure_trapped() {
+            return true;
+        }
+        let matched = unsafe { invoke_closure_bool(slot, *value) };
+        closure_trapped() || matched
+    }))
+}
+
+extern "C" fn jet_jit_list_closure_all(list: i64, callback: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    i8::from(collection_semantics::list_closure_all(values, |value| {
+        if closure_trapped() {
+            return false;
+        }
+        let matched = unsafe { invoke_closure_bool(slot, *value) };
+        !closure_trapped() && matched
+    }))
+}
+
+fn list_closure_map_i64(list: i64, callback: i64, mutable: bool) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let mapped = if mutable {
+        collection_semantics::list_closure_map_mut(values, |value| {
+            if closure_trapped() {
+                0
+            } else {
+                unsafe { invoke_closure_i64(slot, *value) }
+            }
+        })
+    } else {
+        collection_semantics::list_closure_map(values, |value| {
+            if closure_trapped() {
+                0
+            } else {
+                unsafe { invoke_closure_i64(slot, *value) }
+            }
+        })
+    };
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_closure_ints(mapped)
+}
+
+extern "C" fn jet_jit_list_closure_map(list: i64, callback: i64) -> i64 {
+    list_closure_map_i64(list, callback, false)
+}
+
+extern "C" fn jet_jit_list_closure_map_mut(list: i64, callback: i64) -> i64 {
+    list_closure_map_i64(list, callback, true)
+}
+
+fn list_closure_map_i8(list: i64, callback: i64, mutable: bool) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let mapped = if mutable {
+        collection_semantics::list_closure_map_mut(values, |value| {
+            if closure_trapped() {
+                0
+            } else {
+                i64::from(unsafe { invoke_closure_i8(slot, *value) })
+            }
+        })
+    } else {
+        collection_semantics::list_closure_map(values, |value| {
+            if closure_trapped() {
+                0
+            } else {
+                i64::from(unsafe { invoke_closure_i8(slot, *value) })
+            }
+        })
+    };
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_closure_ints(mapped)
+}
+
+extern "C" fn jet_jit_list_closure_map_i8(list: i64, callback: i64) -> i64 {
+    list_closure_map_i8(list, callback, false)
+}
+
+extern "C" fn jet_jit_list_closure_map_i8_mut(list: i64, callback: i64) -> i64 {
+    list_closure_map_i8(list, callback, true)
+}
+
+fn list_closure_map_i32(list: i64, callback: i64, mutable: bool) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let mapped = if mutable {
+        collection_semantics::list_closure_map_mut(values, |value| {
+            if closure_trapped() {
+                0
+            } else {
+                i64::from(unsafe { invoke_closure_i32(slot, *value) })
+            }
+        })
+    } else {
+        collection_semantics::list_closure_map(values, |value| {
+            if closure_trapped() {
+                0
+            } else {
+                i64::from(unsafe { invoke_closure_i32(slot, *value) })
+            }
+        })
+    };
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_closure_ints(mapped)
+}
+
+extern "C" fn jet_jit_list_closure_map_i32(list: i64, callback: i64) -> i64 {
+    list_closure_map_i32(list, callback, false)
+}
+
+extern "C" fn jet_jit_list_closure_map_i32_mut(list: i64, callback: i64) -> i64 {
+    list_closure_map_i32(list, callback, true)
+}
+
+fn list_closure_map_f64(list: i64, callback: i64, mutable: bool) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let mapped = if mutable {
+        collection_semantics::list_closure_map_f64_mut(values, |value| {
+            if closure_trapped() {
+                0.0
+            } else {
+                unsafe { invoke_closure_f64(slot, *value) }
+            }
+        })
+    } else {
+        collection_semantics::list_closure_map_f64(values, |value| {
+            if closure_trapped() {
+                0.0
+            } else {
+                unsafe { invoke_closure_f64(slot, *value) }
+            }
+        })
+    };
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_closure_floats(mapped)
+}
+
+extern "C" fn jet_jit_list_closure_map_f64(list: i64, callback: i64) -> i64 {
+    list_closure_map_f64(list, callback, false)
+}
+
+extern "C" fn jet_jit_list_closure_map_f64_mut(list: i64, callback: i64) -> i64 {
+    list_closure_map_f64(list, callback, true)
+}
+
+extern "C" fn jet_jit_list_closure_filter(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let filtered = collection_semantics::list_closure_filter(values, |value| {
+        if closure_trapped() {
+            false
+        } else {
+            unsafe { invoke_closure_bool(slot, *value) } && !closure_trapped()
+        }
+    });
+    if closure_trapped() {
+        return 0;
+    }
+    alloc_closure_ints(filtered)
+}
+
+fn list_closure_each(list: i64, callback: i64, mutable: bool) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    if mutable {
+        collection_semantics::list_closure_each_mut(values, |value| {
+            if !closure_trapped() {
+                unsafe { invoke_closure_unit(slot, *value) };
+            }
+        });
+    } else {
+        collection_semantics::list_closure_each(values, |value| {
+            if !closure_trapped() {
+                unsafe { invoke_closure_unit(slot, *value) };
+            }
+        });
+    }
+    0
+}
+
+extern "C" fn jet_jit_list_closure_each(list: i64, callback: i64) -> i8 {
+    list_closure_each(list, callback, false)
+}
+
+extern "C" fn jet_jit_list_closure_each_mut(list: i64, callback: i64) -> i8 {
+    list_closure_each(list, callback, true)
 }
 
 extern "C" fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
@@ -4301,6 +4696,15 @@ host_fns! {
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::I64));
         sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_closure_predicate = Signature::new(cc);
+        sig_closure_predicate
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_closure_predicate.returns.push(AbiParam::new(types::I8));
+        let mut sig_closure_value = sig_closure_predicate.clone();
+        sig_closure_value.returns.clear();
+        sig_closure_value.returns.push(AbiParam::new(types::I64));
+        let sig_closure_each = sig_closure_predicate.clone();
         let mut sig_priority_queue_slot = Signature::new(cc);
         sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
         sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
@@ -4333,6 +4737,19 @@ host_fns! {
     list_set: "jet_jit_list_set" => jet_jit_list_set: sig_set;
     list_set_f64: "jet_jit_list_set_f64" => jet_jit_list_set_f64: sig_set_f64;
     list_len: "jet_jit_list_len" => jet_jit_list_len: sig_len;
+    list_closure_any: "jet_jit_list_closure_any" => jet_jit_list_closure_any: sig_closure_predicate;
+    list_closure_all: "jet_jit_list_closure_all" => jet_jit_list_closure_all: sig_closure_predicate;
+    list_closure_map: "jet_jit_list_closure_map" => jet_jit_list_closure_map: sig_closure_value;
+    list_closure_map_mut: "jet_jit_list_closure_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
+    list_closure_map_i8: "jet_jit_list_closure_map_i8" => jet_jit_list_closure_map_i8: sig_closure_value;
+    list_closure_map_i8_mut: "jet_jit_list_closure_map_i8_mut" => jet_jit_list_closure_map_i8_mut: sig_closure_value;
+    list_closure_map_i32: "jet_jit_list_closure_map_i32" => jet_jit_list_closure_map_i32: sig_closure_value;
+    list_closure_map_i32_mut: "jet_jit_list_closure_map_i32_mut" => jet_jit_list_closure_map_i32_mut: sig_closure_value;
+    list_closure_map_f64: "jet_jit_list_closure_map_f64" => jet_jit_list_closure_map_f64: sig_closure_value;
+    list_closure_map_f64_mut: "jet_jit_list_closure_map_f64_mut" => jet_jit_list_closure_map_f64_mut: sig_closure_value;
+    list_closure_filter: "jet_jit_list_closure_filter" => jet_jit_list_closure_filter: sig_closure_value;
+    list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_each;
+    list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_each;
     list_contains_str: "jet_jit_list_contains_str" => jet_jit_list_contains_str: sig_list_eq;
     list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
     list_eq_str: "jet_jit_list_eq_str" => jet_jit_list_eq_str: sig_list_eq;
