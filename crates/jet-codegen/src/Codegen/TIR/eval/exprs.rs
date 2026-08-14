@@ -8523,7 +8523,10 @@ impl<'a> EvalCtx<'a> {
         let Some(sink) = self.sink.as_ref() else {
             return Err(unsupported("print at comptime", self.span()));
         };
-        let tty = if to_stderr {
+        // REPL/notebook callers consume the sink as their stdout/stderr event
+        // stream and project it into the cell result. Do not bypass it just
+        // because the host process itself has a terminal.
+        let tty = !self.repl_mode && if to_stderr {
             super::term_semantics::jet_term_stderr_is_terminal()
         } else {
             super::term_semantics::jet_term_stdout_is_terminal()
