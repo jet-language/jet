@@ -5852,6 +5852,16 @@ fn assert_network_http_browser_three_way(file: &str, stem: &str) {
 }
 
 #[test]
+fn reflection_value_matches_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stem = "reflection/reflect-value";
+    assert_data_pipelines_parsing_three_way(&example_path(stem), stem);
+}
+
+#[test]
 fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
     const CHILD_STEM: &str = "JET_1223_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {
@@ -5879,7 +5889,6 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "parsing/binary_pattern",
         "parsing/parse_interpolation",
         "parsing/text-cursor",
-        "reflection/reflect-value",
         "tooling/debug_native",
         "tooling/fuzz_demo",
         "tooling/panic_report",
@@ -5976,6 +5985,14 @@ fn assert_data_pipelines_parsing_three_way(file: &str, stem: &str) {
             panic!("interpreter baseline must run `{stem}` or stop at known boundary, got: {diags:?}")
         }
     };
+
+    if stem == "reflection/reflect-value" {
+        assert_eq!(
+            interpreted.as_ref(),
+            Some(&expected),
+            "reflection example must match its golden output in the interpreter"
+        );
+    }
 
     jet_jit::reset_jit_trace_for_test();
     let mut backend = CraneliftBackend::new();
