@@ -1991,7 +1991,7 @@ fn string_field_compound_append_matches_interpreter_default_jit_and_aot() {
     let file = dir.join("string_field_compound.jet");
     fs::write(
         &file,
-        "struct Packet {\n    source: String\n}\nfn run() {\n    p := Packet.{ source: \"base\" }\n    p.source += \"AAA\"\n    print(p.source)\n}\n",
+        "struct Packet {\n    source: String\n    fn append(&self) {\n        self.source += \"AAA\"\n    }\n}\nfn run() {\n    p := Packet.{ source: \"base\" }\n    p.append()\n    print(p.source)\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().into_owned();
