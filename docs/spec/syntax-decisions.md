@@ -6948,7 +6948,7 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
 ## Memory audit slate (ratified 2026-08-12, card #1889 — directions ratified, implementation in progress)
 
-Owner-commissioned first-principles memory audit; proposal at `docs/proposals/memory-one-question.md`; evidence dossiers under `docs/audits/memory-*-2026-08-12.md`. Five decisions ratified =A with the owner's checkpoint quotes on the ballots, plus one owner-designed tooling element. The named implementation card owns the I7 Syntax.rs rows, I4 diagnostic registration and snapshots, and I9 tier proof before its entry may be read as shipped law. Fresh-context review findings are folded in below; the ballot texts remain the historical record and this section is the operative wording where they differ.
+Owner-commissioned first-principles memory audit on card #1889. Five decisions ratified =A with the owner's checkpoint quotes on the ballots, plus one owner-designed tooling element. The named implementation card owns the I7 Syntax.rs rows, I4 diagnostic registration and snapshots, and I9 tier proof before its entry may be read as shipped law. Fresh-context review findings are folded in below; the ballot texts remain the historical record and this section is the operative wording where they differ.
 
 Card #1894 supplies the package-only `contain`/`harden` facts and the `jet inspect guarantees` projection described below. Runtime fence activation remains owned by the shared sentry seam in card #1892; this slice does not claim that missing runtime behavior.
 

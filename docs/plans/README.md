@@ -6,8 +6,8 @@ Tower owns live status, claims, decisions, and blockers.
 
 ## Where plans live
 
-- [`docs-cleanup-sweep.md`](docs-cleanup-sweep.md) — **active** proposal to thin
-  Docs UI content (archive vs delete). No moves until the owner marks that table.
+- [`docs-cleanup-sweep.md`](docs-cleanup-sweep.md) — **accepted** cleanup policy
+  for Docs UI content (archive vs delete), executed through Tower card #1848.
 - [`compiler-speed.md`](compiler-speed.md) — two-lens law and self-hosted speed bets.
 - [`epoch-3/`](epoch-3/) — compiler and language program plans.
 - [`epoch-4/`](epoch-4/) — jetpack package-manager and environment substrate.

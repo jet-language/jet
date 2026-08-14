@@ -59,11 +59,10 @@ checked Jet's compiler seams, memory safety, runtime, layout, module, tooling,
 environment, onboarding, UI, UX, and DX. The mine kept small polish cuts as
 well as large design lessons.
 
-Resulting work: [reflection, layout, and generic-call surface research](../research/reflection-layout-and-generic-call-surface-research.md),
-Tower cards #1388 (`inspect expand --json`), #1389 (`inspect unsafe`
-diagnostics and locations), #1390 (`layout` facts), and #1391 (final S33
-reconciliation), with ratified decisions D-LAYOUT-FACTS1=B and
-D-GENERIC-CALL1=A.
+Resulting work: Tower cards #1388 (`inspect expand --json`), #1389 (`inspect
+unsafe` diagnostics and locations), #1390 (`layout` facts), and #1391 (final
+S33 reconciliation), with ratified decisions D-LAYOUT-FACTS1=B and
+D-GENERIC-CALL1=A recorded in `docs/spec/syntax-decisions.md`.
 
 - lolzdev — Making my own programming language: keep keyword tables simple;
   preserve sema and TIR; reject unsafe-by-default design.

@@ -12,4 +12,4 @@ ratified, archive or delete the proposal after durable law and tracking exist.
 Use `tower docs archive` when the write-up still has history value; delete when
 nothing cites it. Tower and governing specs remain authoritative.
 
-Pending pass: [`../plans/docs-cleanup-sweep.md`](../plans/docs-cleanup-sweep.md).
+Cleanup policy: [`../plans/docs-cleanup-sweep.md`](../plans/docs-cleanup-sweep.md).
