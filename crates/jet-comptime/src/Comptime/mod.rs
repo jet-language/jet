@@ -1542,6 +1542,14 @@ pub fn expand_derive_body(
     base_dir: &Path,
 ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
     let mut scope = HashMap::new();
+    // `@name` is the canonical item-name splice for a derive target. Keep it
+    // in the same typed scope as the reflected handle so a template does not
+    // need a helper binding merely to name the generated item.
+    if let CtValue::Struct { fields, .. } = &type_info {
+        if let Some((_, CtValue::Str(name))) = fields.iter().find(|(field, _)| field == "name") {
+            scope.insert("name".to_string(), CtValue::Str(name.clone()));
+        }
+    }
     scope.insert(type_param.to_string(), type_info);
     expand_template_body(body, &scope, funcs, base_dir)
 }
@@ -1696,6 +1704,10 @@ fn expand_template_item(
                 interp,
                 scope,
             )?;
+            let trait_span = implementation.trait_span.unwrap_or(implementation.type_span);
+            if let Some(trait_name) = &mut implementation.trait_name {
+                *trait_name = expand_template_name(trait_name, trait_span, interp, scope)?;
+            }
             for method in &mut implementation.methods {
                 expand_template_func(method, interp, scope)?;
             }
@@ -1712,13 +1724,25 @@ fn expand_template_item(
                 scope,
             )?;
             for field in &mut definition.fields {
+                field.name = expand_template_name(&field.name, field.name_span, interp, scope)?;
                 expand_template_type(&mut field.ty, interp, scope)?;
+                if let Some(value) = &mut field.computed {
+                    expand_template_expr(value, interp, scope)?;
+                }
                 if let Some(value) = &mut field.default {
                     expand_template_expr(value, interp, scope)?;
                 }
             }
+            expand_template_markers(&mut definition.serde_markers, interp, scope)?;
+            expand_template_markers(&mut definition.type_markers, interp, scope)?;
             for method in &mut definition.methods {
                 expand_template_func(method, interp, scope)?;
+            }
+            for implementation in &mut definition.trait_impls {
+                expand_template_trait_impl(implementation, interp, scope)?;
+            }
+            for stmt in &mut definition.validate_block {
+                expand_template_stmt(stmt, interp, scope)?;
             }
             Ok(())
         }
@@ -1737,18 +1761,66 @@ fn expand_template_item(
                     }
                     crate::AST::VariantPayload::Named(fields) => {
                         for field in fields {
+                            field.name = expand_template_name(
+                                &field.name,
+                                field.name_span,
+                                interp,
+                                scope,
+                            )?;
                             expand_template_type(&mut field.ty, interp, scope)?;
                         }
                     }
                 }
+                if let Some(discriminant) = &mut variant.discriminant_expr {
+                    expand_template_expr(discriminant, interp, scope)?;
+                }
+                expand_template_markers(&mut variant.serde_markers, interp, scope)?;
             }
+            expand_template_markers(&mut definition.serde_markers, interp, scope)?;
+            expand_template_markers(&mut definition.type_markers, interp, scope)?;
             for method in &mut definition.methods {
                 expand_template_func(method, interp, scope)?;
+            }
+            for implementation in &mut definition.trait_impls {
+                expand_template_trait_impl(implementation, interp, scope)?;
             }
             Ok(())
         }
         _ => Ok(()),
     }
+}
+
+fn expand_template_markers(
+    markers: &mut [crate::AST::Marker],
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    for marker in markers {
+        for arg in &mut marker.args {
+            expand_template_expr(arg, interp, scope)?;
+        }
+    }
+    Ok(())
+}
+
+fn expand_template_trait_impl(
+    implementation: &mut crate::AST::TraitImplBlock,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    implementation.trait_name = expand_template_name(
+        &implementation.trait_name,
+        implementation.trait_span,
+        interp,
+        scope,
+    )?;
+    for method in &mut implementation.methods {
+        expand_template_func(method, interp, scope)?;
+    }
+    for (_, _, ty) in &mut implementation.assoc_type_impls {
+        expand_template_type(ty, interp, scope)?;
+    }
+    Ok(())
 }
 
 fn expand_template_func(
@@ -1766,6 +1838,22 @@ fn expand_template_func(
     if let Some(ty) = &mut function.return_type {
         expand_template_type(ty, interp, scope)?;
     }
+    if let Some(pattern) = &mut function.head_pattern {
+        expand_template_pattern(pattern, interp, scope)?;
+    }
+    for marker in &mut function.markers {
+        for arg in &mut marker.args {
+            expand_template_expr(arg, interp, scope)?;
+        }
+    }
+    for clause in &mut function.pre {
+        expand_template_expr(&mut clause.cond, interp, scope)?;
+        expand_template_expr(&mut clause.message_expr, interp, scope)?;
+    }
+    for clause in &mut function.post {
+        expand_template_expr(&mut clause.cond, interp, scope)?;
+        expand_template_expr(&mut clause.message_expr, interp, scope)?;
+    }
     for stmt in &mut function.body {
         expand_template_stmt(stmt, interp, scope)?;
     }
@@ -1777,6 +1865,13 @@ fn expand_template_stmt(
     interp: &mut Interpreter::Interp<'_>,
     scope: &mut HashMap<String, CtValue>,
 ) -> Result<(), Diagnostic> {
+    match stmt {
+        crate::AST::Stmt::Val(binding) => expand_template_binding(binding, interp, scope)?,
+        crate::AST::Stmt::CountedLoop { init, .. } => {
+            expand_template_binding(init, interp, scope)?;
+        }
+        _ => {}
+    }
     let mut error = None;
     stmt.for_each_expr_mut(|expr| {
         if error.is_none() {
@@ -1790,6 +1885,67 @@ fn expand_template_stmt(
     } else {
         Ok(())
     }
+}
+
+fn expand_template_binding(
+    binding: &mut crate::AST::Binding,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    if let Some(ty) = &mut binding.ty {
+        expand_template_type(ty, interp, scope)?;
+    }
+    if let Some(pattern) = &mut binding.pattern {
+        expand_template_bind_pattern(pattern, interp, scope)?;
+    }
+    Ok(())
+}
+
+fn expand_template_bind_pattern(
+    pattern: &mut crate::AST::BindPattern,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    match pattern {
+        crate::AST::BindPattern::Struct { type_name, type_span, .. } => {
+            *type_name = expand_template_name(type_name, *type_span, interp, scope)?;
+        }
+        crate::AST::BindPattern::Refutable { pattern, .. } => {
+            expand_template_pattern(pattern, interp, scope)?;
+        }
+        crate::AST::BindPattern::List { .. } | crate::AST::BindPattern::Tuple { .. } => {}
+    }
+    Ok(())
+}
+
+fn expand_template_pattern(
+    pattern: &mut crate::AST::Pattern,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<(), Diagnostic> {
+    match pattern {
+        crate::AST::Pattern::Or(patterns, _) => {
+            for pattern in patterns {
+                expand_template_pattern(pattern, interp, scope)?;
+            }
+        }
+        crate::AST::Pattern::StrMatch { parts, .. } => {
+            for part in parts {
+                if let crate::AST::StrMatchPart::Hole { ty: Some(ty), .. } = part {
+                    expand_template_type(ty, interp, scope)?;
+                }
+            }
+        }
+        crate::AST::Pattern::Variant { .. }
+        | crate::AST::Pattern::Present { .. }
+        | crate::AST::Pattern::Absent(..)
+        | crate::AST::Pattern::Ok { .. }
+        | crate::AST::Pattern::Err { .. }
+        | crate::AST::Pattern::Range { .. }
+        | crate::AST::Pattern::Struct { .. }
+        | crate::AST::Pattern::BinMatch { .. } => {}
+    }
+    Ok(())
 }
 
 fn expand_template_name(
@@ -1889,6 +2045,44 @@ fn expand_template_expr_node(
                 }
             }
         }
+        crate::AST::Expr::StrMatchLit(parts, _) => {
+            for part in parts {
+                if let crate::AST::StrMatchPart::Hole { ty: Some(ty), .. } = part {
+                    expand_template_type(ty, interp, scope)?;
+                }
+            }
+        }
+        crate::AST::Expr::Call(call) => {
+            call.name = expand_template_name(&call.name, call.name_span, interp, scope)?;
+            for ty in &mut call.type_args {
+                expand_template_type(ty, interp, scope)?;
+            }
+        }
+        crate::AST::Expr::MethodCall {
+            method,
+            method_span,
+            owner_type_args,
+            type_args,
+            ..
+        } => {
+            *method = expand_template_name(method, *method_span, interp, scope)?;
+            for ty in owner_type_args {
+                expand_template_type(ty, interp, scope)?;
+            }
+            for ty in type_args {
+                expand_template_type(ty, interp, scope)?;
+            }
+        }
+        crate::AST::Expr::Lambda(lambda) => {
+            for param in &mut lambda.params {
+                if let Some(ty) = &mut param.ty {
+                    expand_template_type(ty, interp, scope)?;
+                }
+            }
+        }
+        crate::AST::Expr::PtrFromAddr { elem, .. } => {
+            expand_template_type(elem, interp, scope)?;
+        }
         crate::AST::Expr::StructLit { type_name, type_args, .. } => {
             *type_name = expand_template_name(
                 type_name,
@@ -1900,8 +2094,14 @@ fn expand_template_expr_node(
                 expand_template_type(ty, interp, scope)?;
             }
         }
+        crate::AST::Expr::TypedLit { head: Some(head), .. } => {
+            expand_template_type(head, interp, scope)?;
+        }
         crate::AST::Expr::EnumLit { type_name, .. } => {
             *type_name = expand_template_name(type_name, span, interp, scope)?;
+        }
+        crate::AST::Expr::PatternTest { pattern, .. } => {
+            expand_template_pattern(pattern, interp, scope)?;
         }
         _ => {}
     }
