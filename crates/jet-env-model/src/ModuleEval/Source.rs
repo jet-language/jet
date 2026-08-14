@@ -53,7 +53,7 @@ pub fn is_module_surface(src: &str) -> bool {
 /// Evaluate a typed `env.jet` (the `module name { sources:/imports:/env.X: }`
 /// surface, U3/U6/U8) into an `EnvPlan`. Sources merge across modules by key
 /// (U5); package sugar resolves to `package@source` refs; the `prompt`
-/// scalar becomes the label. `imports: find(…)` is walked before evaluation;
+/// fact becomes the label. `imports: find(…)` is walked before evaluation;
 /// typed integration calls lower into the same source and environment graph.
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     evaluate_env_with_preset(src, base_dir, None)
@@ -234,7 +234,8 @@ pub fn evaluate_env_with_selections(
     // Evaluate every unit's modules (each against its own source + base dir),
     // then merge all contributions through the §6 engine as one pass — so a
     // discovered module's `env.dev` packages combine with the root's, and a
-    // cross-file source/scalar conflict still surfaces as E0967.
+    // cross-file source conflict still surfaces as E0967; fact conflicts use
+    // the canonical contribution diagnostic.
     let mut modules = Vec::new();
     for unit in &units {
         modules.extend(evaluate_modules(&unit.items, &unit.src, &unit.base_dir)?);

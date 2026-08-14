@@ -14,7 +14,10 @@ use crate::AST::{
     Namespace,
 };
 
-use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
+use super::super::Merge::{
+    self, ContributionLayer, EntryContribution, FactContribution, FactValue, MergeError,
+    MergedEntry, SourceScope,
+};
 use super::DevService::evaluate_dev_service;
 use super::Environment::{
     files_from_value, lifecycle_from_field, languages_from_value, presets_from_value,
@@ -153,7 +156,15 @@ fn evaluate_module<'a>(
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
-                let capture = evaluate_env_contribution(c, src, base_dir, funcs, globals)?;
+                let source = format!("{}.{}", m.name, c.path);
+                let capture = evaluate_env_contribution(
+                    c,
+                    src,
+                    base_dir,
+                    funcs,
+                    globals,
+                    &source,
+                )?;
                 let EnvCapture {
                     entry,
                     secrets: names,
@@ -172,8 +183,15 @@ fn evaluate_module<'a>(
                 adapters.extend(found_adapters);
             }
             (Namespace::Env, ContribValue::Env(lit)) => {
-                let (capture, services) =
-                    evaluate_env_role(lit, src, base_dir, funcs, globals)?;
+                let source = format!("{}.{}", m.name, c.path);
+                let (capture, services) = evaluate_env_role(
+                    lit,
+                    src,
+                    base_dir,
+                    funcs,
+                    globals,
+                    &source,
+                )?;
                 let EnvCapture {
                     entry,
                     secrets: names,
@@ -857,6 +875,7 @@ fn evaluate_env_contribution(
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
+    source: &str,
 ) -> Result<EnvCapture, Diagnostic> {
     let expected = namespace_type(c.namespace);
     let ContribValue::Expr(value) = &c.value else {
@@ -875,19 +894,22 @@ fn evaluate_env_contribution(
         return Err(wrong_namespace_type(expected, type_name, value.span()));
     }
 
-    Ok(evaluate_env_fields(fields, src, base_dir, funcs, globals)?)
+    Ok(evaluate_env_fields(
+        fields, src, base_dir, funcs, globals, source,
+    )?)
 }
 
 /// Shared field-loop for both `env.<name>:` producer shapes (the legacy
 /// `Expr::StructLit`'s fields and the canonical role-module's `EnvLit::fields`):
 /// `packages:` reuses the Pkg-sugar text slice; everything else is a pure
-/// comptime scalar setting.
+/// comptime fact setting.
 fn evaluate_env_fields(
     fields: &[(String, crate::Diagnostics::Span, Expr)],
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
+    source: &str,
 ) -> Result<EnvCapture, Diagnostic> {
     let mut entry = EntryContribution::default();
     let mut secrets = Vec::new();
@@ -938,11 +960,12 @@ fn evaluate_env_fields(
                 base_dir,
                 funcs,
                 &resolved,
+                source,
             )?;
         } else if name == Syntax::ENV_FIELD_SECRETS {
             // U13: `secrets: ["name", …]` — a plain list of strings, no Pkg
             // sugar. Evaluated as an ordinary comptime expression; anything
-            // that isn't a `[String]` is captured as a scalar setting instead
+            // that isn't a `[String]` is captured as a fact setting instead
             // (E1242-style "wrong shape" surfaces at env-entry validation,
             // not here — this stays a pure capture step, no field-check).
             let v = resolved
@@ -952,11 +975,7 @@ fn evaluate_env_fields(
             match names_from(&v) {
                 Some(names) => secrets.extend(names),
                 None => {
-                    entry
-                        .settings
-                        .entry(name.clone())
-                        .or_default()
-                        .push(Scalar::normal(v.jet_show()));
+                    record_setting(&mut entry, name, v.jet_show(), *span, source);
                 }
             }
         } else if name == Syntax::ENV_FIELD_PRESETS {
@@ -1011,11 +1030,7 @@ fn evaluate_env_fields(
                 .get(name)
                 .cloned()
                 .ok_or_else(|| field_missing_value(name, value.span()))?;
-            entry
-                .settings
-                .entry(name.clone())
-                .or_default()
-                .push(Scalar::normal(v.jet_show()));
+            record_setting(&mut entry, name, v.jet_show(), *span, source);
         }
     }
     Ok(EnvCapture {
@@ -1115,6 +1130,7 @@ fn capture_prompt_setting(
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
+    source: &str,
 ) -> Result<(), Diagnostic> {
     if let Expr::StructLit {
         type_name, fields, ..
@@ -1130,11 +1146,13 @@ fn capture_prompt_setting(
                         let Some(label) = string_value(&v) else {
                             return Err(prompt_bad_value(field, "a quoted label", *span));
                         };
-                        entry
-                            .settings
-                            .entry(Syntax::ENV_FIELD_PROMPT.to_string())
-                            .or_default()
-                            .push(Scalar::normal(label));
+                        record_setting(
+                            entry,
+                            Syntax::ENV_FIELD_PROMPT,
+                            label,
+                            *span,
+                            source,
+                        );
                     }
                     Syntax::PROMPT_FIELD_PATH => {
                         let Some(word) = prompt_word(&v) else {
@@ -1143,11 +1161,13 @@ fn capture_prompt_setting(
                         if word != Syntax::PROMPT_PATH_SHORT && word != Syntax::PROMPT_PATH_FULL {
                             return Err(prompt_bad_value(field, ".Short or .Full", *span));
                         }
-                        entry
-                            .settings
-                            .entry(Syntax::PROMPT_SETTING_PATH.to_string())
-                            .or_default()
-                            .push(Scalar::normal(word));
+                        record_setting(
+                            entry,
+                            Syntax::PROMPT_SETTING_PATH,
+                            word,
+                            *span,
+                            source,
+                        );
                     }
                     Syntax::PROMPT_FIELD_STRIP => {
                         let Some(word) = prompt_word(&v) else {
@@ -1156,11 +1176,13 @@ fn capture_prompt_setting(
                         if word != Syntax::PROMPT_STRIP_ON && word != Syntax::PROMPT_STRIP_OFF {
                             return Err(prompt_bad_value(field, ".On or .Off", *span));
                         }
-                        entry
-                            .settings
-                            .entry(Syntax::PROMPT_SETTING_STRIP.to_string())
-                            .or_default()
-                            .push(Scalar::normal(word));
+                        record_setting(
+                            entry,
+                            Syntax::PROMPT_SETTING_STRIP,
+                            word,
+                            *span,
+                            source,
+                        );
                     }
                     _ => return Err(prompt_bad_field(field, *span)),
                 }
@@ -1172,12 +1194,37 @@ fn capture_prompt_setting(
     check_build_io(value)?;
     let extern_names = HashSet::new();
     let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, globals)?;
+    record_setting(
+        entry,
+        Syntax::ENV_FIELD_PROMPT,
+        v.jet_show(),
+        value.span(),
+        source,
+    );
+    Ok(())
+}
+
+fn record_setting(
+    entry: &mut EntryContribution,
+    key: &str,
+    value: String,
+    span: crate::Diagnostics::Span,
+    source: &str,
+) {
     entry
         .settings
-        .entry(Syntax::ENV_FIELD_PROMPT.to_string())
+        .entry(key.to_string())
         .or_default()
-        .push(Scalar::normal(v.jet_show()));
-    Ok(())
+        .push(
+            FactContribution::new(
+                key,
+                FactValue::Text(value),
+                SourceScope::Item,
+                ContributionLayer::Environment,
+                format!("{source}.{key}"),
+            )
+            .at(span),
+        );
 }
 
 fn string_value(v: &crate::Comptime::CtValue) -> Option<String> {
@@ -1198,7 +1245,7 @@ fn prompt_word(v: &crate::Comptime::CtValue) -> Option<String> {
 }
 
 /// U13: `[String]` → `Vec<String>`, or `None` if `v` isn't a list of strings
-/// (caller falls back to capturing it as an opaque scalar setting).
+/// (caller falls back to capturing it as an opaque fact setting).
 fn names_from(v: &crate::Comptime::CtValue) -> Option<Vec<String>> {
     let crate::Comptime::CtValue::List(xs) = v else {
         return None;
@@ -1221,6 +1268,7 @@ fn evaluate_env_role(
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
+    source: &str,
 ) -> Result<
     (
         EnvCapture,
@@ -1228,7 +1276,7 @@ fn evaluate_env_role(
     ),
     Diagnostic,
 > {
-    let capture = evaluate_env_fields(&lit.fields, src, base_dir, funcs, globals)?;
+    let capture = evaluate_env_fields(&lit.fields, src, base_dir, funcs, globals, source)?;
     let mut services = Vec::new();
     for s in &lit.services {
         services.push(evaluate_dev_service(s, base_dir, funcs, globals)?);

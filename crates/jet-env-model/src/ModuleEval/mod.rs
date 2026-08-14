@@ -51,7 +51,7 @@ pub use Environment::{
 use std::path::Path;
 
 #[cfg(test)]
-use super::Merge::{self, Scalar};
+use super::Merge::{self, FactValue};
 #[cfg(test)]
 use super::RefSpec::ProviderKind;
 #[cfg(test)]
@@ -64,6 +64,14 @@ mod tests {
 
     fn base_dir() -> PathBuf {
         std::env::temp_dir()
+    }
+
+    fn setting_value(entry: &Merge::EntryContribution, key: &str) -> Option<FactValue> {
+        entry
+            .settings
+            .get(key)
+            .and_then(|writers| writers.first())
+            .map(|writer| writer.value.clone())
     }
 
     fn check_diagnostic_snapshot(code: &str, rendered: &str) {
@@ -110,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluates_plain_scalar_and_packages() {
+    fn evaluates_plain_fact_and_packages() {
         let src = r#"
 module dev {
     env.dev: Env.{
@@ -134,8 +142,8 @@ module dev {
             ]
         );
         assert_eq!(
-            entry.settings.get("prompt"),
-            Some(&vec![Scalar::normal("wordstats")])
+            setting_value(entry, "prompt"),
+            Some(FactValue::Text("wordstats".to_string()))
         );
     }
 
@@ -250,7 +258,7 @@ module second {
     }
 
     #[test]
-    fn evaluates_computed_scalar_via_if_else() {
+    fn evaluates_computed_fact_via_if_else() {
         let src = r#"
 module dev {
     env.dev: Env.{
@@ -261,8 +269,8 @@ module dev {
         let modules = evaluate_source(src, &base_dir()).unwrap();
         let (_, entry) = &modules[0].entries[0];
         assert_eq!(
-            entry.settings.get("prompt"),
-            Some(&vec![Scalar::normal("yes")])
+            setting_value(entry, "prompt"),
+            Some(FactValue::Text("yes".to_string()))
         );
     }
 
@@ -280,12 +288,12 @@ module dev {
         let modules = evaluate_source(src, &base_dir()).unwrap();
         let (_, entry) = &modules[0].entries[0];
         assert_eq!(
-            entry.settings.get("port"),
-            Some(&vec![Scalar::normal("8001")])
+            setting_value(entry, "port"),
+            Some(FactValue::Text("8001".to_string()))
         );
         assert_eq!(
-            entry.settings.get("prompt"),
-            Some(&vec![Scalar::normal("ready")])
+            setting_value(entry, "prompt"),
+            Some(FactValue::Text("ready".to_string()))
         );
     }
 
@@ -302,8 +310,8 @@ module dev {
         let modules = evaluate_source(src, &base_dir()).unwrap();
         let (_, entry) = &modules[0].entries[0];
         assert_eq!(
-            entry.settings.get("port"),
-            Some(&vec![Scalar::normal("8001")])
+            setting_value(entry, "port"),
+            Some(FactValue::Text("8001".to_string()))
         );
     }
 
@@ -649,9 +657,11 @@ module b {
     sources: { default: NixOS/nixpkgs/nixos-23.11@github }
     env.dev: Env.{ packages: [default.fd] }
 }
-"#;
+    "#;
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0967");
+        let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
+        check_diagnostic_snapshot("E0967", &rendered);
     }
 
     #[test]
@@ -681,7 +691,7 @@ module b {
     }
 
     #[test]
-    fn conflicting_scalar_contributions_are_a_merge_error() {
+    fn conflicting_fact_contributions_are_a_merge_error() {
         let src = r#"
 module a {
     env.dev: Env.{
@@ -697,13 +707,13 @@ module b {
         let modules = evaluate_source(src, &base_dir()).unwrap();
         let err = merge_all(&modules).unwrap_err();
         let diag = merge_error_to_diagnostic(&err);
-        assert_eq!(diag.code, "E0967");
+        assert_eq!(diag.code, "E3521");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&diag));
-        assert_eq!(
-            rendered,
-            "Error [E0967]: `prompt` got conflicting values: one, two\n Why: scalar settings merge to one value; without a priority marker, modules contributing different values can't be reconciled\n Fix: make every module agree on this value, or remove the conflicting contribution\n"
-        );
-        check_diagnostic_snapshot("E0967", &rendered);
+        assert!(rendered.contains("Error [E3521]: fact `prompt` has conflicting values"));
+        assert!(rendered.contains("a.dev.prompt"), "{rendered}");
+        assert!(rendered.contains("b.dev.prompt"), "{rendered}");
+        assert!(rendered.contains("\"one\""), "{rendered}");
+        assert!(rendered.contains("\"two\""), "{rendered}");
     }
 
     #[test]

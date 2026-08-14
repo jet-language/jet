@@ -7,8 +7,8 @@
 //! |---|---|
 //! | `sources` | merge by key; duplicate names with **different** refs conflict |
 //! | `packages` | concatenate, de-duplicate, **preserve source identity** |
-//! | namespace entries | merge by key; package lists combine; scalars per below |
-//! | scalar settings | one value wins by the shared contribution law |
+//! | namespace entries | merge by key; package lists combine; facts per below |
+//! | fact settings | one value wins by the shared contribution law |
 //!
 //! This is the pure data-reconciliation core (std-only, I6). It operates on the
 //! typed contribution model the module parser/evaluator will populate (Chunk 3+)
@@ -16,6 +16,10 @@
 //! `MergeError`s here; they become I4 diagnostics when wired into evaluation.
 
 use std::collections::BTreeMap;
+
+pub use jet_foundation::Policy::{
+    ContributionLayer, FactContribution, FactError, FactKey, FactValue, SourceScope,
+};
 
 /// A package value (`Pkg`, §5) with its source identity preserved so the
 /// de-duplication in §6 keeps `default.ripgrep` distinct from `unstable.ripgrep`.
@@ -109,54 +113,18 @@ fn split_top_level(body: &str) -> Vec<&str> {
     out
 }
 
-/// The explicit priority a scalar setting may carry (§6). A bare value is
-/// `Normal`; `default` is the declaration fallback; `force` is a fleet pin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Priority {
-    Normal,
-    Default,
-    Force,
-}
-
-/// One contribution to a scalar setting: the value plus its priority.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Scalar {
-    pub value: String,
-    pub priority: Priority,
-}
-
-impl Scalar {
-    pub fn normal(value: impl Into<String>) -> Scalar {
-        Scalar {
-            value: value.into(),
-            priority: Priority::Normal,
-        }
-    }
-    pub fn default(value: impl Into<String>) -> Scalar {
-        Scalar {
-            value: value.into(),
-            priority: Priority::Default,
-        }
-    }
-    pub fn force(value: impl Into<String>) -> Scalar {
-        Scalar {
-            value: value.into(),
-            priority: Priority::Force,
-        }
-    }
-}
-
 /// One namespace entry's contributions (e.g. everything modules contribute to
-/// `env.dev`). Package lists combine; scalar settings reconcile by priority.
+/// `env.dev`). Package lists combine; fact settings reconcile through the
+/// canonical contribution law.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EntryContribution {
     pub packages: Vec<Pkg>,
-    /// Scalar settings (`services`/`options`/plain fields), keyed by setting
-    /// name. Each key may receive several contributions to reconcile.
-    pub settings: BTreeMap<String, Vec<Scalar>>,
+    /// Fact settings (`services`/`options`/plain fields), keyed by setting
+    /// name. Each writer already carries its layer, scope, span, and source.
+    pub settings: BTreeMap<String, Vec<FactContribution>>,
 }
 
-/// A fully merged namespace entry: deduped packages + resolved scalar values.
+/// A fully merged namespace entry: deduped packages + resolved fact values.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MergedEntry {
     pub packages: Vec<Pkg>,
@@ -168,8 +136,8 @@ pub struct MergedEntry {
 pub enum MergeError {
     /// Two `sources` declarations share a name but resolve to different refs.
     SourceConflict { name: String, a: String, b: String },
-    /// A scalar setting got conflicting values at one contribution layer.
-    ScalarConflict { key: String, values: Vec<String> },
+    /// A fact setting failed the canonical contribution law.
+    FactConflict(FactError),
 }
 
 /// Merge `sources` maps by key: identical refs de-duplicate; the same name with
@@ -211,72 +179,28 @@ pub fn merge_packages(lists: &[Vec<Pkg>]) -> Vec<Pkg> {
     out
 }
 
-/// Resolve one scalar setting's contributions through the canonical fact law.
-/// Scalar inputs carry no precedence algorithm; precedence and conflicts belong
-/// to `jet_foundation::Policy::resolve`.
-pub fn resolve_scalar(key: &str, contribs: &[Scalar]) -> Result<Option<String>, MergeError> {
-    let declarations = contribs
-        .iter()
-        .enumerate()
-        .map(|(index, scalar)| {
-            let (layer, force) = match scalar.priority {
-                Priority::Default => (jet_foundation::Policy::ContributionLayer::Declaration, false),
-                Priority::Normal => (jet_foundation::Policy::ContributionLayer::OptimizationBundle, false),
-                Priority::Force => (jet_foundation::Policy::ContributionLayer::Fleet, true),
-            };
-            let declaration = jet_foundation::Policy::FactContribution::new(
-                key,
-                jet_foundation::Policy::FactValue::Text(scalar.value.clone()),
-                jet_foundation::Policy::SourceScope::Package,
-                layer,
-                format!("scalar contribution {index}"),
-            );
-            if force { declaration.force() } else { declaration }
-        })
-        .collect::<Vec<_>>();
-    match jet_foundation::Policy::resolve(
-        jet_foundation::Policy::FactKey::new(key),
-        declarations,
-    ) {
-        Ok(Some(fact)) => match fact.value {
-            jet_foundation::Policy::FactValue::Text(value) => Ok(Some(value)),
-            _ => Ok(None),
-        },
-        Ok(None) => Ok(None),
-        Err(jet_foundation::Policy::FactError::Conflict { first, second, .. }) => {
-            let show = |value: jet_foundation::Policy::FactValue| match value {
-                jet_foundation::Policy::FactValue::Text(value) => value,
-                value => value.display(),
-            };
-            Err(MergeError::ScalarConflict {
-                key: key.to_string(),
-                values: vec![show(first.value), show(second.value)],
-            })
-        }
-        Err(error) => Err(MergeError::ScalarConflict {
-            key: key.to_string(),
-            values: vec![error.message()],
-        }),
-    }
-}
-
 /// Merge several contributions to one namespace entry: packages combine+dedup,
-/// scalar settings reconcile per `resolve_scalar` (§6).
+/// fact settings reconcile through the one resolver (§6).
 pub fn merge_entry(contribs: &[EntryContribution]) -> Result<MergedEntry, MergeError> {
     let lists: Vec<Vec<Pkg>> = contribs.iter().map(|c| c.packages.clone()).collect();
     let packages = merge_packages(&lists);
 
     // Gather every contribution per setting key.
-    let mut by_key: BTreeMap<String, Vec<Scalar>> = BTreeMap::new();
+    let mut by_key: BTreeMap<String, Vec<FactContribution>> = BTreeMap::new();
     for c in contribs {
-        for (k, scalars) in &c.settings {
-            by_key.entry(k.clone()).or_default().extend(scalars.clone());
+        for (k, writers) in &c.settings {
+            by_key.entry(k.clone()).or_default().extend(writers.clone());
         }
     }
     let mut settings = BTreeMap::new();
-    for (k, scalars) in by_key {
-        if let Some(v) = resolve_scalar(&k, &scalars)? {
-            settings.insert(k, v);
+    for (key, writers) in by_key {
+        let Some(fact) = jet_foundation::Policy::resolve(FactKey::new(key.clone()), writers)
+            .map_err(MergeError::FactConflict)?
+        else {
+            continue;
+        };
+        if let FactValue::Text(value) = fact.value {
+            settings.insert(key, value);
         }
     }
     Ok(MergedEntry { packages, settings })
@@ -396,66 +320,64 @@ mod tests {
         );
     }
 
-    // ── scalars ──
-
-    #[test]
-    fn scalar_single_value() {
-        assert_eq!(
-            resolve_scalar("k", &[Scalar::normal("on")]).unwrap(),
-            Some("on".to_string())
-        );
+    fn writer(
+        key: &str,
+        value: &str,
+        layer: ContributionLayer,
+        source: &str,
+    ) -> FactContribution {
+        FactContribution::new(
+            key,
+            FactValue::Text(value.to_string()),
+            SourceScope::Package,
+            layer,
+            source,
+        )
     }
 
     #[test]
-    fn scalar_same_value_twice_is_fine() {
-        let v = resolve_scalar("k", &[Scalar::normal("on"), Scalar::normal("on")]).unwrap();
-        assert_eq!(v, Some("on".to_string()));
-    }
-
-    #[test]
-    fn scalar_conflict_without_priority() {
-        assert!(matches!(
-            resolve_scalar("k", &[Scalar::normal("on"), Scalar::normal("off")]),
-            Err(MergeError::ScalarConflict { .. })
-        ));
-    }
-
-    #[test]
-    fn scalar_normal_overrides_default() {
-        let v = resolve_scalar("k", &[Scalar::default("off"), Scalar::normal("on")]).unwrap();
-        assert_eq!(v, Some("on".to_string()));
-    }
-
-    #[test]
-    fn scalar_force_overrides_normal() {
-        let v = resolve_scalar(
-            "k",
-            &[
-                Scalar::normal("on"),
-                Scalar::force("win"),
+    fn fact_law_resolves_layers_and_force_without_a_second_priority_table() {
+        let resolved = jet_foundation::Policy::resolve(
+            FactKey::new("k"),
+            [
+                writer("k", "default", ContributionLayer::Declaration, "package.jet"),
+                writer(
+                    "k",
+                    "bundle",
+                    ContributionLayer::OptimizationBundle,
+                    "release",
+                ),
+                writer("k", "cli", ContributionLayer::CommandLine, "command line"),
             ],
         )
+        .unwrap()
         .unwrap();
-        assert_eq!(v, Some("win".to_string()));
+        assert_eq!(resolved.value, FactValue::Text("cli".to_string()));
+
+        let pinned = jet_foundation::Policy::resolve(
+            FactKey::new("k"),
+            [
+                writer("k", "bundle", ContributionLayer::OptimizationBundle, "release"),
+                writer("k", "fleet", ContributionLayer::Fleet, "fleet.jet").force(),
+                writer("k", "cli", ContributionLayer::CommandLine, "command line"),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(pinned.value, FactValue::Text("fleet".to_string()));
     }
 
     #[test]
-    fn scalar_default_only() {
-        let v = resolve_scalar("k", &[Scalar::default("base")]).unwrap();
-        assert_eq!(v, Some("base".to_string()));
-    }
-
-    #[test]
-    fn scalar_two_forces_conflict() {
-        assert!(matches!(
-            resolve_scalar("k", &[Scalar::force("a"), Scalar::force("b")]),
-            Err(MergeError::ScalarConflict { .. })
-        ));
-    }
-
-    #[test]
-    fn scalar_none_when_no_contributions() {
-        assert_eq!(resolve_scalar("k", &[]).unwrap(), None);
+    fn fact_law_conflict_keeps_both_writers() {
+        let error = jet_foundation::Policy::resolve(
+            FactKey::new("k"),
+            [
+                writer("k", "a", ContributionLayer::Environment, "env-a"),
+                writer("k", "b", ContributionLayer::Environment, "env-b"),
+            ],
+        )
+        .unwrap_err();
+        assert!(matches!(error, FactError::Conflict { .. }));
     }
 
     // ── full entry ──
@@ -464,34 +386,66 @@ mod tests {
     fn entry_combines_packages_and_resolves_settings() {
         let c1 = EntryContribution {
             packages: vec![Pkg::new("default", "ripgrep")],
-            settings: BTreeMap::from([("prompt".to_string(), vec![Scalar::default("jetpack")])]),
+            settings: BTreeMap::from([(
+                "prompt".to_string(),
+                vec![writer(
+                    "prompt",
+                    "jetpack",
+                    ContributionLayer::Declaration,
+                    "package.jet",
+                )],
+            )]),
         };
         let c2 = EntryContribution {
             packages: vec![Pkg::new("default", "fd")],
-            settings: BTreeMap::from([("prompt".to_string(), vec![Scalar::normal("wordstats")])]),
+            settings: BTreeMap::from([(
+                "prompt".to_string(),
+                vec![writer(
+                    "prompt",
+                    "wordstats",
+                    ContributionLayer::OptimizationBundle,
+                    "profile",
+                )],
+            )]),
         };
         let merged = merge_entry(&[c1, c2]).unwrap();
         assert_eq!(
             merged.packages,
             vec![Pkg::new("default", "ripgrep"), Pkg::new("default", "fd")]
         );
-        // normal overrides the default fallback
+        // The optimization bundle overrides the declaration fallback.
         assert_eq!(merged.settings["prompt"], "wordstats");
     }
 
     #[test]
-    fn entry_propagates_scalar_conflict() {
+    fn entry_propagates_fact_conflict() {
         let c1 = EntryContribution {
             packages: vec![],
-            settings: BTreeMap::from([("host".to_string(), vec![Scalar::normal("a")])]),
+            settings: BTreeMap::from([(
+                "host".to_string(),
+                vec![writer(
+                    "host",
+                    "a",
+                    ContributionLayer::Environment,
+                    "env-a",
+                )],
+            )]),
         };
         let c2 = EntryContribution {
             packages: vec![],
-            settings: BTreeMap::from([("host".to_string(), vec![Scalar::normal("b")])]),
+            settings: BTreeMap::from([(
+                "host".to_string(),
+                vec![writer(
+                    "host",
+                    "b",
+                    ContributionLayer::Environment,
+                    "env-b",
+                )],
+            )]),
         };
         assert!(matches!(
             merge_entry(&[c1, c2]),
-            Err(MergeError::ScalarConflict { key, .. }) if key == "host"
+            Err(MergeError::FactConflict(FactError::Conflict { key, .. })) if key == "host"
         ));
     }
 }

@@ -337,12 +337,14 @@ pub fn merge_error_to_diagnostic(err: &MergeError) -> Diagnostic {
             "make every declaration of this source agree, or rename one of them".to_string(),
             None,
         ),
-        MergeError::ScalarConflict { key, values } => Diagnostic::error(
-            "E0967",
-            format!("`{key}` got conflicting values: {}", values.join(", ")),
-            "scalar settings merge to one value; without a priority marker, modules contributing different values can't be reconciled".to_string(),
-            "make every module agree on this value, or remove the conflicting contribution".to_string(),
-            None,
-        ),
+        MergeError::FactConflict(error) => error.diagnostic().unwrap_or_else(|| {
+            Diagnostic::error(
+                "E3521",
+                "fact contribution failed".to_string(),
+                error.message(),
+                "make the contribution valid, or move it to the supported contribution layer".to_string(),
+                None,
+            )
+        }),
     }
 }

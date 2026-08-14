@@ -677,7 +677,7 @@ renumbered, and no new `W` code may be allocated.
 | E1313 | sema  | trait-bounded variadic call-site argument doesn't implement the bound trait (D-ANY-JAI1) |
 | E1314 | sema  | trait-bounded variadic parameter used outside a `loop x, name { … }` loop (D-ANY-JAI1) |
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
-| E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
+| E0967 | jetpack | §6 merge conflict: a named source got irreconcilable refs |
 | E0968 | jetpack | a module `sources:` entry isn't a `target@provider` ref or bare path (D-JPK-REF1/U6/U8) |
 | E0969 | jetpack | an `imports:` discovery directive isn't `find("<dir>")` with a literal path (U4) |
 | E0970 | jetpack | `imports: find("<dir>")` points at a directory that doesn't exist (U4) |
@@ -1095,7 +1095,7 @@ CLI.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0966 | A module contribution's value isn't a struct literal of its namespace's type. | `env.dev: Env { … }` ties a namespace to its matching type so the merge engine knows what it's combining. | Wrap the value in the matching type, e.g. `Env { … }`. |
-| E0967 | Two modules contributed irreconcilable values to the same source name or scalar setting. | §6: sources merge by name (refs must agree) and scalar settings merge to one value; without a priority marker, differing contributions can't be reconciled automatically. | Make every contribution agree, or remove the conflicting one. |
+| E0967 | Two modules contributed different refs to the same source name. | §6 merges sources by name, so one source name must resolve to one ref. | Make every declaration of the source agree, or rename one of them. |
 | E0968 | A `sources:` entry's value isn't a `target@provider` ref or bare path. | D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare. | Write `default: owner/repo/rev@github`, `default: channel@nixpkgs`, or a bare local path. |
 | E0969 | An `imports:` discovery directive isn't `find("<dir>")` with a single literal path. | Imports auto-discover a directory of modules (U4); discovery uses one literal `find` path, while recognized first-party integrations use their typed calls. | Write `imports: find("./modules")`, or use a recognized typed integration call. |
 | E0970 | `imports: find("<dir>")` points at a directory that doesn't exist. | `find` walks that directory for `.jet` modules (U4); it must exist relative to the file that declares it, or there is nothing to discover. | Create the directory, or fix the path so it points at your modules folder. |
