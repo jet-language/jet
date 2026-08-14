@@ -617,6 +617,10 @@ pub(crate) fn render_generics(
 fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
     let expanded = cx.expand_type_aliases(ty);
     match &expanded {
+        // D-BOUND-SINK1=A: the checked-text carrier's argument is the nominal
+        // head identity, not a nested runtime type. Re-expanding that identity
+        // would recreate the same carrier and recurse forever.
+        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => {}
         Type::Apply { name, args } => {
             let carries_clone_bound = cx
                 .struct_type_params
