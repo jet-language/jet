@@ -182,7 +182,7 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
             };
             let out = kernel
                 .first_party_visible_output(&cell_id)
-                .map(|o| o.bundle.text_plain.clone())
+                .map(|o| o.text_plain.clone())
                 .unwrap_or_else(|| "(no live output)".into());
             ProtocolReply::ok(format!(
                 "id={}; kind={:?}; source_len={}; output={}",
