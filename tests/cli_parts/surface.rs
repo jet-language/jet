@@ -1031,6 +1031,32 @@ fn explain_build_fact_golden() {
 }
 
 #[test]
+fn explain_typed_build_setting_golden() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/typed_settings");
+    let out = Command::new(jet())
+        .args([
+            "explain",
+            "build.settings.tls",
+            "run.jet",
+            "--profile=release",
+            "--set",
+            "tls=true",
+        ])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "typed setting explain failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    check_snapshot("explain_build_setting.txt", &stdout);
+}
+
+#[test]
 fn explain_runtime_stop_golden() {
     for code in ["E3001", "E3010", "E3011", "E3012"] {
         let out = Command::new(jet()).arg("explain").arg(code).output().unwrap();

@@ -1777,11 +1777,9 @@ fn validate_build_contributions(
             .push(contribution.clone());
     }
     for (key, values) in by_key {
-        jet_foundation::Policy::resolve(
-            jet_foundation::Policy::FactKey::new(key),
-            values,
-        )
-        .map_err(|error| vec![fact_contribution_diagnostic(error)])?;
+        // Computed writers are checked before build actions execute, but they
+        // still enter the same resolver wrapper as the complete chain below.
+        resolve_build_fact(jet_foundation::Policy::FactKey::new(key), values)?;
     }
     Ok(())
 }

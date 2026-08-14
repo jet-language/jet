@@ -276,7 +276,7 @@ impl PackagePolicy {
 }
 
 /// D-CONF-MODULE1=A: one declared `settings:` entry — a name, a Tier-0 type,
-/// and an optional default.
+/// and a required default.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingDecl {
     pub ty: String,
