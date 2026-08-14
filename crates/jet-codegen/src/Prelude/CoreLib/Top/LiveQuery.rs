@@ -379,7 +379,7 @@ fn jet_app_invalidate(footprint: String) -> i64 {
 
     // A query body may itself touch the live registry. Never execute user
     // callbacks while holding the registry mutex.
-    for (id, generation, footprint, rerun, sink) in reruns {
+    for (id, generation, _footprint, rerun, sink) in reruns {
         match rerun() {
             Ok(value) => match jet_live_payload(value) {
                 Ok(value) => {

@@ -1,8 +1,6 @@
 //! JSON rendering and value conversion for the comptime/REPL interpreter.
 //! Parsing uses the same foundation-backed Prelude kernel as AOT and JIT.
 
-use std::collections::BTreeMap;
-
 use crate::AST::{CtFloat, CtKey, CtValue};
 
 fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
