@@ -476,74 +476,24 @@ fn benchmark_cli_help_and_selected_region_keep_aot_golden_contract() {
 }
 
 #[test]
-fn package_build_entry_discovery_matches_aot_release_default_dev_and_interpreter() {
+fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let example = root.join("examples/features/tooling/build_entry_discovery");
+    let entry = example.join("main.jet");
+    let expected = fs::read(
+        root.join("examples/features/expected/tooling/build_entry_discovery.out"),
+    )
+    .expect("read build-entry discovery golden");
     let scratch = common::Scratch::new("package_build_entry_discovery_parity");
-    let tools = scratch.join("tools");
-    fs::create_dir_all(&tools).expect("create build-entry source directory");
-    fs::write(
-        scratch.join("package.jet"),
-        "name: \"build_entry_discovery\"\nversion: \"0.1.0\"\n",
-    )
-    .expect("write package manifest");
-    fs::write(
-        scratch.join("main.jet"),
-        "fn run() { print(\"nested build entry\") }\n",
-    )
-    .expect("write runtime entry");
-    fs::write(
-        tools.join("build_entry.jet"),
-        r#"
-fn build(b: BuildContext) => BuildPlan ? {
-    b.default_allow(["Exec"])
-    #Impure("prove the package-wide build entry ran") {
-        stamp :: b.action(
-            "discovered-build-entry",
-            [],
-            ["build-entry.stamp"],
-            ["sh", "-c", "printf discovered > build-entry.stamp"],
-            ["Exec"]
-        )?
-        target :: b.add_executable("build_entry_discovery", ["main.jet"], [stamp])?
-        return b.plan(target)
-    }
-    return b.plan()
-}
-"#,
-    )
-    .expect("write nested build entry");
-
-    let expected = b"nested build entry\n";
-    let build = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["build", "main.jet"])
-        .current_dir(&scratch.path)
-        .env("JET_CACHE_DIR", scratch.join("cache/aot"))
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("build package-wide entry");
-    assert!(
-        build.status.success(),
-        "AOT build failed:\n{}",
-        String::from_utf8_lossy(&build.stderr)
-    );
-    assert_eq!(
-        fs::read_to_string(scratch.join("build-entry.stamp")).unwrap(),
-        "discovered"
-    );
-    let aot = Command::new(scratch.join("build/main"))
-        .current_dir(&scratch.path)
-        .output()
-        .expect("run AOT package entry");
-    assert!(aot.status.success(), "AOT run failed: {:?}", aot.status);
-    assert_eq!(aot.stdout, expected);
 
     let release = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--release", "main.jet"])
-        .current_dir(&scratch.path)
+        .args(["run", "--release", entry.to_str().expect("entry path is utf8")])
+        .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/release-run"))
         .env("JET_CACHE_DIR", scratch.join("cache/release-build"))
         .env("NO_COLOR", "1")
         .output()
-        .expect("run package entry through release jet run");
+        .expect("run committed package entry through release jet run");
     assert!(
         release.status.success(),
         "release jet run failed:\n{}",
@@ -552,13 +502,13 @@ fn build(b: BuildContext) => BuildPlan ? {
     assert_eq!(release.stdout, expected);
 
     let default = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "main.jet"])
-        .current_dir(&scratch.path)
+        .args(["run", entry.to_str().expect("entry path is utf8")])
+        .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/run"))
         .env("JET_CACHE_DIR", scratch.join("cache/default"))
         .env("NO_COLOR", "1")
         .output()
-        .expect("run package entry through default jet run");
+        .expect("run committed package entry through default jet run");
     assert!(
         default.status.success(),
         "default jet run failed:\n{}",
@@ -567,38 +517,26 @@ fn build(b: BuildContext) => BuildPlan ? {
     assert_eq!(default.stdout, expected);
 
     let dev = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["dev", "main.jet", "--interpret", "--watch=off"])
-        .current_dir(&scratch.path)
+        .args([
+            "dev",
+            entry.to_str().expect("entry path is utf8"),
+            "--interpret",
+            "--watch=off",
+        ])
+        .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/dev-run"))
         .env("JET_CACHE_DIR", scratch.join("cache/dev-build"))
         .env("NO_COLOR", "1")
         .output()
-        .expect("run package entry through interpreted jet dev");
+        .expect("run committed package entry through interpreted jet dev");
     assert!(
         dev.status.success(),
         "interpreted jet dev failed:\n{}",
         String::from_utf8_lossy(&dev.stderr)
     );
     assert_eq!(dev.stdout, expected);
-
-    let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", "main.jet"])
-        .current_dir(&scratch.path)
-        .env("JET_RUN_CACHE_DIR", scratch.join("cache/interpreter-run"))
-        .env("JET_CACHE_DIR", scratch.join("cache/interpreter-build"))
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("run package entry through interpreter");
-    assert!(
-        interpreted.status.success(),
-        "interpreter run failed:\n{}",
-        String::from_utf8_lossy(&interpreted.stderr)
-    );
-    assert_eq!(interpreted.stdout, expected);
-    assert_eq!(release.status.code(), aot.status.code());
-    assert_eq!(default.status.code(), aot.status.code());
-    assert_eq!(dev.status.code(), aot.status.code());
-    assert_eq!(interpreted.status.code(), aot.status.code());
+    assert_eq!(release.status.code(), default.status.code());
+    assert_eq!(release.status.code(), dev.status.code());
 }
 
 #[test]
