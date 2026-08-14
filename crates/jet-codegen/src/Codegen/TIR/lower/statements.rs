@@ -3097,9 +3097,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 vec![LowerBody::scoped(body, scoped)],
                 move |mut lowered| {
                     let body = lowered.pop().expect("policy body was deferred");
-                    sentry_mode.map_or(TStmt::Region(body), |enabled| {
-                        TStmt::SentryPolicy { enabled, body }
-                    })
+                    match sentry_mode {
+                        Some(enabled) => TStmt::SentryPolicy { enabled, body },
+                        None => TStmt::Region(body),
+                    }
                 },
             );
         }
