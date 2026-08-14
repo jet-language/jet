@@ -475,7 +475,7 @@ where
 }
 
 /// A fully-evaluated compile-time value.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum CtValue {
     Int(i64),
     Float(CtFloat),
@@ -513,6 +513,59 @@ pub enum CtValue {
     /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
     /// `Option.lift2`), stored, or returned. See `ClosureData` below.
     Closure(std::sync::Arc<ClosureData>),
+}
+
+impl PartialEq for CtValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(left), Self::Int(right)) => left == right,
+            (Self::Float(left), Self::Float(right)) => left == right,
+            (Self::Bool(left), Self::Bool(right)) => left == right,
+            (Self::Char(left), Self::Char(right)) => left == right,
+            (Self::Str(left), Self::Str(right)) => left == right,
+            (Self::BigInt(left), Self::BigInt(right)) => left == right,
+            (Self::Bytes(left), Self::Bytes(right)) => left == right,
+            (Self::List(left), Self::List(right)) => left == right,
+            (Self::Map(left), Self::Map(right)) => left == right,
+            (
+                Self::Struct {
+                    type_name: left_type,
+                    fields: left_fields,
+                },
+                Self::Struct {
+                    type_name: right_type,
+                    fields: right_fields,
+                },
+            ) => {
+                left_type == right_type
+                    && left_fields
+                        .iter()
+                        .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                        .eq(
+                            right_fields
+                                .iter()
+                                .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name)),
+                        )
+            }
+            (
+                Self::Enum {
+                    type_name: left_type,
+                    variant: left_variant,
+                    args: left_args,
+                },
+                Self::Enum {
+                    type_name: right_type,
+                    variant: right_variant,
+                    args: right_args,
+                },
+            ) => left_type == right_type && left_variant == right_variant && left_args == right_args,
+            (Self::Present(left), Self::Present(right)) => left == right,
+            (Self::Failed(left), Self::Failed(right)) => left == right,
+            (Self::Unit, Self::Unit) => true,
+            (Self::Closure(left), Self::Closure(right)) => left == right,
+            _ => false,
+        }
+    }
 }
 
 /// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
@@ -835,7 +888,8 @@ impl CtValue {
                 let filtered: Vec<(String, CtValue)> = fields
                     .iter()
                     .filter(|(n, _)| {
-                        !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
+                        !crate::Syntax::is_memo_storage_name(n)
+                            && !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
                             && n == "elem_type")
                             && !(type_name == "Tensor" && n == "__jet_tensor_handle")
                     })
@@ -919,6 +973,10 @@ impl CtValue {
             CtValue::Struct { type_name, fields } => {
                 let ty = crate::Syntax::generated_suffix(type_name);
                 let mangled = crate::Names::mangle_path(ty);
+                let fields = fields
+                    .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .collect::<Vec<_>>();
                 if fields.is_empty() {
                     mangled
                 } else {
@@ -1026,6 +1084,10 @@ impl CtValue {
                 }
             }
             CtValue::Struct { type_name, fields } => {
+                let fields = fields
+                    .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .collect::<Vec<_>>();
                 if fields.is_empty() {
                     out.push_str(type_name);
                     out.push_str(" {}");
@@ -1131,6 +1193,7 @@ impl CtValue {
             CtValue::Struct { fields, .. } => {
                 let parts: Vec<String> = fields
                     .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
                     .map(|(n, v)| format!("\"{}\":{}", n, v.to_json()))
                     .collect();
                 format!("{{{}}}", parts.join(","))
@@ -1216,6 +1279,7 @@ impl CtValue {
             CtValue::Struct { type_name, fields } => {
                 let parts: Vec<String> = fields
                     .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
                     .map(|(n, v)| {
                         let field = match type_name.as_str() {
                             "Range" | "DimensionInfo" | "DimensionAxis" | "StateRef"

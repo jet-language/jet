@@ -1555,16 +1555,17 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
 }
 
 /// D-FIELDPOL1: writing to a computed field (`s.field = v`, `s.field++`) — a
-/// computed field is never stored, so there's nothing to write.
+/// computed field is not a writable source field, whether or not its result is
+/// retained by `#Memo`.
 pub(crate) fn computed_field_not_settable(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0339",
         format!("`{}` is a computed field — it can't be assigned", field),
         format!(
-            "`{}` is declared `{} => …` — its value always comes from that formula, recomputed on every read",
+            "`{}` is declared `{} => …` — its value always comes from that formula; `#Memo` only retains the result between valid reads",
             field, field
         ),
-        format!("change the fields `{}`'s formula reads, not `{}` itself", field, field),
+        format!("change a stored field the `{}` formula reads, not `{}` itself", field, field),
         Some(span),
     )
 }

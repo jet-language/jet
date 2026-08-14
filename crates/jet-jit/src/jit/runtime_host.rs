@@ -143,6 +143,10 @@ pub(crate) struct JitRuntime {
     /// column representation and remains stable across heap resets.
     pub(crate) zip_plans: Vec<JitZipPlan>,
     pub(crate) invocations: u64,
+    /// D-FIELDMEMO1=A: cached computed-field words keyed by record and the
+    /// stable getter slot. The host only stores raw ABI words; the TIR/JIT
+    /// lowering owns type packing and the Prelude owns cache policy elsewhere.
+    pub(crate) memo_values: std::collections::HashMap<(i64, i64), i64>,
     pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
     pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
     /// Opaque Stream handles. The pull/close/completion law lives in the
@@ -1512,6 +1516,34 @@ extern "C" fn jet_jit_struct_set_char(h: i64, idx: i64, v: i32) {
 extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
     with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_string(h, idx, v);
+    });
+}
+
+extern "C" fn jet_jit_memo_probe(record: i64, slot: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(rt.memo_values.contains_key(&(record, slot))))
+}
+
+extern "C" fn jet_jit_memo_get(record: i64, slot: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.memo_values.get(&(record, slot)).copied().unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_memo_put(record: i64, slot: i64, value: i64) {
+    with_runtime_mut(|rt| {
+        rt.memo_values.insert((record, slot), value);
+    });
+}
+
+extern "C" fn jet_jit_memo_clear(record: i64) {
+    with_runtime_mut(|rt| {
+        rt.memo_values.retain(|(owner, _), _| *owner != record);
+    });
+}
+
+extern "C" fn jet_jit_memo_clear_slot(record: i64, slot: i64) {
+    with_runtime_mut(|rt| {
+        rt.memo_values.remove(&(record, slot));
     });
 }
 
@@ -3061,6 +3093,13 @@ host_fns! {
         sig_struct_set_i32.params.push(AbiParam::new(types::I64));
         sig_struct_set_i32.params.push(AbiParam::new(types::I64));
         sig_struct_set_i32.params.push(AbiParam::new(types::I32));
+        let mut sig_memo_probe = Signature::new(cc);
+        sig_memo_probe.params.push(AbiParam::new(types::I64));
+        sig_memo_probe.params.push(AbiParam::new(types::I64));
+        sig_memo_probe.returns.push(AbiParam::new(types::I8));
+        let mut sig_i64_i64 = Signature::new(cc);
+        sig_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64.params.push(AbiParam::new(types::I64));
         let mut sig_measurement_new = Signature::new(cc);
         sig_measurement_new.params.push(AbiParam::new(types::F64));
         sig_measurement_new.params.push(AbiParam::new(types::F64));
@@ -3290,6 +3329,11 @@ host_fns! {
     struct_set_bool: "jet_jit_struct_set_bool" => jet_jit_struct_set_bool: sig_struct_set_i8;
     struct_set_char: "jet_jit_struct_set_char" => jet_jit_struct_set_char: sig_struct_set_i32;
     struct_set_str: "jet_jit_struct_set_str" => jet_jit_struct_set_str: sig_struct_set_i64;
+    memo_probe: "jet_jit_memo_probe" => jet_jit_memo_probe: sig_memo_probe;
+    memo_get: "jet_jit_memo_get" => jet_jit_memo_get: sig_struct_get_i64;
+    memo_put: "jet_jit_memo_put" => jet_jit_memo_put: sig_struct_set_i64;
+    memo_clear: "jet_jit_memo_clear" => jet_jit_memo_clear: sig_i64;
+    memo_clear_slot: "jet_jit_memo_clear_slot" => jet_jit_memo_clear_slot: sig_i64_i64;
     err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
     err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
     err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;

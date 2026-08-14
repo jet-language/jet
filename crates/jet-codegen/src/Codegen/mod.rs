@@ -2791,10 +2791,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 411_342, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 420_583, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "003f251010136ce526a955118cf11ba823b65895eb0edd913ad65acfd90155f3",
+            "a8355ab0b15c426b997d2ceb9ed058d51e7409480bb4a6b1e224cb4f4d1fec00",
             "split changed prelude bytes, order, or boundary newline"
         );
     }

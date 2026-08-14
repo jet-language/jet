@@ -167,6 +167,16 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         let field_ty = cx.struct_field_rust_with_view_lifetime(s, &f.name, &f.ty);
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
+    if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
+        for (field, ty) in memo_fields {
+            let storage = crate::Syntax::memo_storage_name(field);
+            let field_ty = cx.struct_field_rust_with_view_lifetime(s, field, ty);
+            out.push_str(&format!(
+                "    pub {storage}: {}JetMemo<{field_ty}>,\n",
+                cx.root_prefix
+            ));
+        }
+    }
     if cx.published_schemas.contains(&s.name) {
         out.push_str(&format!(
             "    pub {}: {},\n",
@@ -361,6 +371,15 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     for f in &fields {
         let m = mangle(&f.name);
         out.push_str(&format!("            {m}: self.{m}[__i].clone(),\n"));
+    }
+    if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
+        for field in memo_fields.keys() {
+            let storage = crate::Syntax::memo_storage_name(field);
+            out.push_str(&format!(
+                "            {storage}: {}JetMemo::new(),\n",
+                cx.root_prefix
+            ));
+        }
     }
     out.push_str("        }\n    }\n");
     // gather_at(i) — bounds-checked index-read producing a logical S. Reuses the
@@ -587,12 +606,21 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
         spec_name = spec_name
     ));
 
-    let inits: Vec<String> = s
+    let mut inits: Vec<String> = s
         .fields
         .iter()
         .filter(|f| f.computed.is_none())
         .map(|f| mangle(&f.name))
         .collect();
+    if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
+        inits.extend(memo_fields.keys().map(|field| {
+            format!(
+                "{}: {}JetMemo::new()",
+                crate::Syntax::memo_storage_name(field),
+                cx.root_prefix,
+            )
+        }));
+    }
     out.push_str(&format!(
         "pub(crate) fn {decode_name}(__spec: &{root}JetArgsSpec, __parsed: &{root}JetParsedArgs) -> Result<{cn}, String> {{\n{decode_lines}    Ok({cn} {{ {inits} }})\n}}\n\n",
         decode_name = decode_name,
@@ -604,7 +632,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
 // D-PATCH1 (card #181): `#[Patchable]` — nested `T.Patch` + apply/diff/merge.
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
+fn emit_struct_patchable(cx: &Cx, s: &StructDef, out: &mut String) {
     if !s
         .derives
         .iter()
@@ -633,6 +661,15 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
         merge_fields.push(format!(
             "{m}: __other.{m}.clone().or_else(|_| self.{m}.clone())"
         ));
+    }
+    if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
+        for field in memo_fields.keys() {
+            let storage = crate::Syntax::memo_storage_name(field);
+            apply_fields.push(format!(
+                "{storage}: {}JetMemo::new()",
+                cx.root_prefix
+            ));
+        }
     }
 
     out.push_str(&format!("impl {base_rust} {{\n"));

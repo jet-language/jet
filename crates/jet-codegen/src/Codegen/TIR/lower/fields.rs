@@ -273,8 +273,7 @@ pub(crate) fn register_imported_struct_shapes(
             })
             .collect();
         let fields = definition
-            .fields
-            .iter()
+            .reflection_fields()
             .map(|field| {
                 (
                     field.name.clone(),
@@ -285,6 +284,24 @@ pub(crate) fn register_imported_struct_shapes(
         cx.type_names.insert(qualified.clone());
         cx.foreign_types.insert(qualified.clone(), rust_mod.clone());
         cx.struct_fields.insert(qualified.clone(), fields.clone());
+        let computed = definition
+            .fields
+            .iter()
+            .filter(|field| field.computed.is_some())
+            .map(|field| field.name.clone())
+            .collect::<HashSet<_>>();
+        if !computed.is_empty() {
+            cx.computed_fields.insert(qualified.clone(), computed);
+        }
+        let (memo_fields, memo_dependencies) =
+            crate::Codegen::Context::memo_facts_for_struct(definition);
+        if !memo_fields.is_empty() {
+            cx.memo_fields.insert(qualified.clone(), memo_fields);
+        }
+        if !memo_dependencies.is_empty() {
+            cx.memo_dependencies
+                .insert(qualified.clone(), memo_dependencies);
+        }
         if crate::Codegen::type_is_cloneable_struct(definition, &target_type_names) {
             cx.cloneable.insert(qualified.clone());
         }

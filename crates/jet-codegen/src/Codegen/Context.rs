@@ -5,7 +5,7 @@ use crate::Generics;
 use crate::Syntax;
 use crate::AST::FfiLink;
 use crate::AST::{
-    AccessConvention, ContractClause, CtValue, EnumDef, Func, Item, Program, ProgramBundle, StructDef, Type,
+    AccessConvention, ContractClause, CtValue, EnumDef, Expr, Func, Item, Program, ProgramBundle, StructDef, Type,
     VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
@@ -165,6 +165,12 @@ pub(crate) struct Cx {
     /// emits a call to that getter instead of a struct member access — the
     /// field simply isn't a Rust struct member (see `emit_struct`).
     pub(crate) computed_fields: HashMap<String, HashSet<String>>,
+    /// D-FIELDMEMO1=A: stored computed fields and their result types. The
+    /// hidden Rust member is emitted from this one semantic registry.
+    pub(crate) memo_fields: HashMap<String, HashMap<String, Type>>,
+    /// D-FIELDMEMO1=A: stored field -> memo getters that depend on it,
+    /// including transitive computed-field dependencies.
+    pub(crate) memo_dependencies: HashMap<String, HashMap<String, HashSet<String>>>,
     pub(crate) src: String,
     pub(crate) file: String,
     /// Rust module alias for this loaded source file, when it is emitted as a
@@ -3436,6 +3442,92 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
     cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string(), "Limits".to_string()]);
 }
 
+pub(crate) fn memo_facts_for_struct(
+    structure: &StructDef,
+) -> (
+    HashMap<String, Type>,
+    HashMap<String, HashSet<String>>,
+) {
+    let computed: HashSet<String> = structure
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_some())
+        .map(|field| field.name.clone())
+        .collect();
+    let mut direct = HashMap::<String, HashSet<String>>::new();
+    for field in &structure.fields {
+        let Some(expression) = field.computed.as_deref() else {
+            continue;
+        };
+        let mut expression = expression.clone();
+        let mut dependencies = HashSet::new();
+        expression.for_each_expr_mut(|node| {
+            if let Expr::Field(receiver, name, _) = node
+                && matches!(receiver.as_ref(), Expr::Ident(value, _) if value == Syntax::KW_SELF)
+            {
+                dependencies.insert(name.clone());
+            }
+        });
+        direct.insert(field.name.clone(), dependencies);
+    }
+    fn depends_on(
+        field: &str,
+        source: &str,
+        direct: &HashMap<String, HashSet<String>>,
+        computed: &HashSet<String>,
+        visiting: &mut HashSet<String>,
+    ) -> bool {
+        if !visiting.insert(field.to_string()) {
+            return false;
+        }
+        let result = direct.get(field).is_some_and(|dependencies| {
+            dependencies.iter().any(|dependency| {
+                dependency == source
+                    || computed.contains(dependency)
+                        && depends_on(dependency, source, direct, computed, visiting)
+            })
+        });
+        visiting.remove(field);
+        result
+    }
+
+    let memo_fields = structure
+        .fields
+        .iter()
+        .filter(|field| {
+            field.computed.is_some()
+                && field
+                    .serde_markers
+                    .iter()
+                    .any(|marker| marker.name == Syntax::MARKER_MEMO)
+        })
+        .map(|field| (field.name.clone(), field.ty.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut dependencies = HashMap::<String, HashSet<String>>::new();
+    for source in structure
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_none())
+        .map(|field| field.name.as_str())
+    {
+        for memo in memo_fields.keys() {
+            if depends_on(
+                memo,
+                source,
+                &direct,
+                &computed,
+                &mut HashSet::new(),
+            ) {
+                dependencies
+                    .entry(source.to_string())
+                    .or_default()
+                    .insert(memo.clone());
+            }
+        }
+    }
+    (memo_fields, dependencies)
+}
+
 pub(crate) fn build_cx_items(
     items: &[Item],
     src: &str,
@@ -3477,6 +3569,8 @@ pub(crate) fn build_cx_items(
         hashable: HashSet::new(),
         patchable: HashSet::new(),
         computed_fields: HashMap::new(),
+        memo_fields: HashMap::new(),
+        memo_dependencies: HashMap::new(),
         src: src.to_string(),
         file: file.to_string(),
         module_alias: String::new(),
@@ -3897,6 +3991,14 @@ pub(crate) fn build_cx_items(
                     .collect();
                 if !computed.is_empty() {
                     cx.computed_fields.insert(s.name.clone(), computed);
+                }
+                let (memo_fields, memo_dependencies) = memo_facts_for_struct(s);
+                if !memo_fields.is_empty() {
+                    cx.memo_fields.insert(s.name.clone(), memo_fields);
+                }
+                if !memo_dependencies.is_empty() {
+                    cx.memo_dependencies
+                        .insert(s.name.clone(), memo_dependencies);
                 }
                 // c148: record the declared type params so multi-char names are
                 // recognized everywhere (struct_is_generic, field_type_cloneable, …).

@@ -4,7 +4,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
-use crate::Codegen::TIR::emit_tir_stmts;
+use crate::Codegen::TIR::{emit_tir_expr, emit_tir_stmts};
 use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
@@ -237,7 +237,7 @@ fn emit_tir_memoized_toplevel(
     let body_unsafe = if tir.is_unsafe { "unsafe " } else { "" };
     let root = &cx.root_prefix;
     let store_init = format!(
-        "{store_name}.get_or_init(|| ::std::sync::Mutex::new({root}JetMemo::new({bound_expr})))"
+        "{store_name}.get_or_init(|| ::std::sync::Mutex::new({root}JetMemo::with_bound({bound_expr})))"
     );
 
     out.push_str(&format!(
@@ -514,6 +514,30 @@ pub(crate) fn emit_tir_method(
     }
     if tir.is_reactive {
         emit_reactive_wrapped_body(&tir.body, cx, out, indent + 1);
+    } else if let Some(field) = &tir.memo_field {
+        let memo_value = {
+            let mut value = None;
+            for stmt in &tir.body {
+                match stmt {
+                    TStmt::LineMarker(_) | TStmt::SourceSpan(_) => {}
+                    TStmt::Return(Some(expr)) if value.is_none() => value = Some(expr),
+                    _ => {
+                        value = None;
+                        break;
+                    }
+                }
+            }
+            value
+        };
+        if let Some(value) = memo_value {
+            let storage = crate::Syntax::memo_storage_name(field);
+            let value = emit_tir_expr(value, cx);
+            out.push_str(&format!(
+                "{pad}    (self).{storage}.get_or_insert_with(|| {{ {value} }})\n"
+            ));
+        } else {
+            emit_tir_stmts(&tir.body, cx, out, indent + 1);
+        }
     } else {
         emit_tir_stmts(&tir.body, cx, out, indent + 1);
     }

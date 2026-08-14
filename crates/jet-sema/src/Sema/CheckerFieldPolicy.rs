@@ -1,7 +1,7 @@
 //! D-FIELDPOL1 (card #181): computed fields — `name: T => expr` on a struct.
-//! Never stored; every read recomputes `expr` against the struct's current
-//! sibling fields (data fields or other computed fields — computed-from-
-//! computed is fine, a cycle is E0338).
+//! Never stored by default; every unmarked read recomputes `expr` against the
+//! struct's current sibling fields. `#Memo` is the one explicit stored form:
+//! it keeps the first answer and invalidates it when a dependency is written.
 //!
 //! This pass runs before registration (mirrors `inject_patchable_types`):
 //! for each struct, in order,
@@ -44,6 +44,18 @@ use std::collections::{HashMap, HashSet};
 pub(crate) fn process_computed_fields(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
     for item in items.iter_mut() {
         let Item::Struct(s) = item else { continue };
+        for field in &s.fields {
+            let Some(marker) = field
+                .serde_markers
+                .iter()
+                .find(|marker| marker.name == Syntax::MARKER_MEMO)
+            else {
+                continue;
+            };
+            if field.computed.is_none() || !marker.args.is_empty() {
+                diags.push(e0382_invalid_memo_field(&field.name, marker.span));
+            }
+        }
         if !s.fields.iter().any(|f| f.computed.is_some()) {
             continue;
         }
@@ -166,6 +178,10 @@ fn e0338_computed_field_cycle(struct_name: &str, field: &str, via: &str, span: S
         ),
         Some(span),
     )
+}
+
+fn e0382_invalid_memo_field(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row("E0382", &[("field", field)], Some(span))
 }
 
 /// Step 2: substitute every `Ident` in each computed field's expr that names
@@ -419,7 +435,12 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         post: Vec::new(),
         inline_foreign: None,
         undo: None,
-        markers: Vec::new(),
+        markers: f
+            .serde_markers
+            .iter()
+            .filter(|marker| marker.name == Syntax::MARKER_MEMO)
+            .cloned()
+            .collect(),
         body: vec![Stmt::Return(Some(body_expr), span)],
     }
 }

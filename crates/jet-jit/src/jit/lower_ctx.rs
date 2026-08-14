@@ -261,6 +261,28 @@ impl LowerCtx<'_, '_> {
         self.b.inst_results(call)[0]
     }
 
+    fn clear_memo_for_record(&mut self, record: Value) {
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.host.memo_clear, self.b.func);
+        self.b.ins().call(func_ref, &[record]);
+    }
+
+    fn clear_memo_for_field(&mut self, record: Value, owner: &str, source: &str) {
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.host.memo_clear_slot, self.b.func);
+        for memo in self.meta.memo_dependents(owner, source) {
+            let slot = self.b.ins().iconst(
+                types::I64,
+                jet_codegen::Codegen::TIR::stable_place_address(&format!(
+                    "memo::{owner}::{memo}"
+                )),
+            );
+            self.b.ins().call(func_ref, &[record, slot]);
+        }
+    }
+
     /// Materialize the environment expected by a captured callback. Ordinary
     /// function-value lowering performs the same packing; transaction hooks
     /// keep the handle directly because they call the compiled callback later
@@ -4073,6 +4095,7 @@ impl LowerCtx<'_, '_> {
                         let field_index = self.b.ins().iconst(types::I64, field_index as i64);
                         let setter = self.module.declare_func_in_func(setter_id, self.b.func);
                         self.b.ins().call(setter, &[record, field_index, assigned]);
+                        self.clear_memo_for_field(record, &type_name, field);
                         self.adopt_compute_resource(assigned, record);
                         return Ok(());
                     }
@@ -4130,6 +4153,7 @@ impl LowerCtx<'_, '_> {
                         let index = self.b.ins().iconst(types::I64, index as i64);
                         let setter = self.module.declare_func_in_func(host_id, self.b.func);
                         self.b.ins().call(setter, &[handle, index, assigned]);
+                        self.clear_memo_for_field(handle, &type_name, field);
                         self.adopt_compute_resource(assigned, handle);
                         return Ok(());
                     }
@@ -4176,6 +4200,7 @@ impl LowerCtx<'_, '_> {
                             let setter =
                                 self.module.declare_func_in_func(host_id, self.b.func);
                             self.b.ins().call(setter, &[handle, index, assigned]);
+                            self.clear_memo_for_field(handle, &type_name, field);
                             self.adopt_compute_resource(assigned, handle);
                             return Ok(());
                         }
@@ -4294,6 +4319,7 @@ impl LowerCtx<'_, '_> {
                                 .module
                                 .declare_func_in_func(self.host.struct_set_i64, self.b.func);
                             self.b.ins().call(set, &[structure, idx, src]);
+                            self.clear_memo_for_record(structure);
                             self.adopt_compute_resource(src, structure);
                             return Ok(());
                         }
@@ -4301,6 +4327,7 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.struct_assign, self.b.func);
                         self.b.ins().call(assign, &[dst, src]);
+                        self.clear_memo_for_record(dst);
                         self.adopt_compute_resource(src, dst);
                         return Ok(());
                     }
@@ -4417,6 +4444,7 @@ impl LowerCtx<'_, '_> {
                 let field_index = self.b.ins().iconst(types::I64, field_index as i64);
                 let setter = self.module.declare_func_in_func(setter, self.b.func);
                 self.b.ins().call(setter, &[handle, field_index, value]);
+                self.clear_memo_for_field(handle, &type_name, &assign.field);
                 self.adopt_compute_resource(value, handle);
             }
             TStmt::Return(Some(expr)) => {

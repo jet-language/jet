@@ -1,7 +1,7 @@
-Error [E0339]: `attack` is a computed field on `Stats` — it can't be set
-  --> tests/ui/computed_field_set.jet:7:31
+Error [E0339]: `attack` is a computed field — it can't be assigned
+  --> tests/ui/computed_field_set.jet:8:31
     |
-  7 |     s := Stats.{strength: 10, attack: 5}
+  8 |     s := Stats.{strength: 10, attack: 5}
     |                               ^^^^^^
- Why: `attack` is declared `attack => …` — its value always comes from that formula, never from a struct literal
- Fix: remove `attack` from this `.{ … }`
+ Why: `attack` is declared `attack => …` — its value always comes from that formula; `#Memo` only retains the result between valid reads
+ Fix: change a stored field the `attack` formula reads, not `attack` itself

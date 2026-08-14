@@ -149,6 +149,10 @@ pub struct JitProgram {
     pub struct_fields: std::collections::HashMap<String, Vec<String>>,
     /// M5: field types parallel to `struct_fields` order.
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
+    /// D-FIELDMEMO1=A: stored-field dependency edges consumed by the JIT
+    /// invalidation adapter. Values are memo getter names, not policy.
+    pub memo_dependencies:
+        std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>>,
     /// Canonical typeable paths used by interpreter reflection.
     pub reflect_paths: std::collections::HashMap<String, String>,
     /// Declared generic parameter names per struct, in source order.
@@ -1132,6 +1136,28 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
 
 /// c139 M3: lower every `tir_covers` top-level function in the entry module so the
 /// JIT can compile multi-function programs (calls between covered helpers).
+fn memo_dependency_facts(
+    cx: &Cx,
+) -> std::collections::HashMap<
+    String,
+    std::collections::HashMap<String, Vec<String>>,
+> {
+    cx.memo_dependencies
+        .iter()
+        .map(|(owner, sources)| {
+            let sources = sources
+                .iter()
+                .map(|(source, memo_fields)| {
+                    let mut memo_fields = memo_fields.iter().cloned().collect::<Vec<_>>();
+                    memo_fields.sort();
+                    (source.clone(), memo_fields)
+                })
+                .collect();
+            (owner.clone(), sources)
+        })
+        .collect()
+}
+
 pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
@@ -1431,6 +1457,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     }
     let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
     let mut reflect_paths = cx.reflect_paths.clone();
+    let mut memo_dependencies = memo_dependency_facts(&cx);
     // File-module calls carry their already-resolved Rust path in TIR. Give the
     // resident JIT the same qualified target instead of forcing the whole
     // program through the interpreter, which cannot execute foreign binders.
@@ -1450,6 +1477,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+        for (owner, sources) in memo_dependency_facts(&imported_cx) {
+            let target = memo_dependencies.entry(owner).or_default();
+            for (source, fields) in sources {
+                target.entry(source).or_insert(fields);
+            }
+        }
         for (name, path) in imported_cx.reflect_paths.iter() {
             reflect_paths
                 .entry(name.clone())
@@ -1578,8 +1611,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     s.name.clone(),
                     {
                         let mut fields = s
-                            .fields
-                            .iter()
+                            .reflection_fields()
                             .map(|f| mangle(&f.name))
                             .collect::<Vec<_>>();
                         add_published_schema_field(s, &mut fields);
@@ -1589,7 +1621,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 struct_field_types.insert(
                     s.name.clone(),
                     {
-                        let mut types = s.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
+                        let mut types = s
+                            .reflection_fields()
+                            .map(|f| f.ty.clone())
+                            .collect::<Vec<_>>();
                         add_published_schema_field_type(s, &mut types);
                         types
                     },
@@ -1661,8 +1696,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     name.clone(),
                                     {
                                         let mut fields = s
-                                            .fields
-                                            .iter()
+                                            .reflection_fields()
                                             .map(|f| mangle(&f.name))
                                             .collect::<Vec<_>>();
                                         add_published_schema_field(s, &mut fields);
@@ -1673,8 +1707,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     name,
                                     {
                                         let mut types = s
-                                            .fields
-                                            .iter()
+                                            .reflection_fields()
                                             .map(|f| f.ty.clone())
                                             .collect::<Vec<_>>();
                                         add_published_schema_field_type(s, &mut types);
@@ -1741,8 +1774,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             name.clone(),
                             {
                                 let mut fields = s
-                                    .fields
-                                    .iter()
+                                    .reflection_fields()
                                     .map(|field| mangle(&field.name))
                                     .collect::<Vec<_>>();
                                 add_published_schema_field(s, &mut fields);
@@ -1753,8 +1785,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             name,
                             {
                                 let mut types = s
-                                    .fields
-                                    .iter()
+                                    .reflection_fields()
                                     .map(|field| {
                                         crate::Codegen::TIR::qualify_imported_type(
                                             bundle,
@@ -1799,14 +1830,15 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             Item::Struct(s) if s.type_params.is_empty() => {
                                 struct_fields.insert(
                                     s.name.clone(),
-                                    s.fields
-                                        .iter()
+                                    s.reflection_fields()
                                         .map(|field| mangle(&field.name))
                                         .collect(),
                                 );
                                 struct_field_types.insert(
                                     s.name.clone(),
-                                    s.fields.iter().map(|field| field.ty.clone()).collect(),
+                                    s.reflection_fields()
+                                        .map(|field| field.ty.clone())
+                                        .collect(),
                                 );
                                 for field in &s.fields {
                                     register_union_type(
@@ -1920,6 +1952,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         spawn_lambdas,
         struct_fields,
         struct_field_types,
+        memo_dependencies,
         reflect_paths,
         struct_type_params,
         enum_variants,
@@ -2106,6 +2139,9 @@ pub struct TFunc {
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
+    /// D-FIELDMEMO1=A: the synthetic getter stores its result in this hidden
+    /// owner field. `None` keeps ordinary functions and methods unchanged.
+    pub memo_field: Option<String>,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn __jet_name(<self>, …)`

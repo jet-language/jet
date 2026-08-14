@@ -716,6 +716,8 @@ pub(crate) struct JitMeta<'a> {
         &'a HashMap<(String, String), Type>,
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
+    memo_dependencies:
+        &'a HashMap<String, HashMap<String, Vec<String>>>,
     struct_type_params: &'a HashMap<String, Vec<String>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
     enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
@@ -737,6 +739,7 @@ impl<'a> JitMeta<'a> {
             iterable_item_types: &program.iterable_item_types,
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
+            memo_dependencies: &program.memo_dependencies,
             struct_type_params: &program.struct_type_params,
             enum_variants: &program.enum_variants,
             enum_variant_payload_types: &program.enum_variant_payload_types,
@@ -758,6 +761,14 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn result_option_param(&self, function: &str, index: usize) -> bool {
         self.result_option_params
             .contains(&(function.to_string(), index))
+    }
+
+    pub(crate) fn memo_dependents(&self, owner: &str, source: &str) -> &[String] {
+        self.memo_dependencies
+            .get(owner)
+            .and_then(|sources| sources.get(source))
+            .map(|values| values.as_slice())
+            .unwrap_or(&[])
     }
 
     pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {

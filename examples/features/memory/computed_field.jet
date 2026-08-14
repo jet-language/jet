@@ -1,0 +1,20 @@
+// D-FIELDMEMO1=A: a marked computed field keeps its answer until a stored
+// sibling in its dependency graph changes. An unmarked computed field remains
+// a read-time formula.
+struct Stats {
+    strength: Int
+    gear_mod: Int
+    #Memo
+    attack: Int => strength * 2 + gear_mod
+    threat: Int => attack + gear_mod
+}
+
+fn run() {
+    stats := Stats.{strength: 10, gear_mod: 3}
+    print("attack 1: {stats.attack}")
+    print("attack 2: {stats.attack}")
+    stats.gear_mod = 8
+    print("attack after write: {stats.attack}")
+    print("attack after write again: {stats.attack}")
+    print("unmarked threat: {stats.threat}")
+}

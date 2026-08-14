@@ -762,6 +762,30 @@ fn emit_tir_stmt(
             clone_value,
             line,
         } => {
+            let memo_invalidations = match place {
+                TPlace::Expr(expr) => match &expr.kind {
+                    crate::Codegen::TIR::TExprKind::Field { recv, field, .. } => {
+                        let owner = match &recv.ty {
+                            Type::Named(name) | Type::Apply { name, .. } => Some(name),
+                            _ => None,
+                        };
+                        owner
+                            .and_then(|name| cx.memo_dependencies.get(name))
+                            .and_then(|dependencies| dependencies.get(field))
+                            .map(|fields| {
+                                (
+                                    emit_tir_expr(recv, cx),
+                                    fields.iter()
+                                        .map(|field| crate::Syntax::memo_storage_name(field))
+                                        .collect::<Vec<_>>(),
+                                )
+                            })
+                            .unwrap_or_default()
+                    }
+                    _ => (String::new(), Vec::new()),
+                },
+                TPlace::Local(_) => (String::new(), Vec::new()),
+            };
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             // c150: append `.clone()` when the value is a borrowed non-scalar (computed
             // at lowering). `({v}).clone()` matches how other clone sites in the AST
@@ -834,6 +858,15 @@ fn emit_tir_stmt(
                 }
                 Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.rust_spell().expect(PRELUDE_CARRIED), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
+            }
+            let (memo_receiver, memo_storages) = memo_invalidations;
+            if !memo_storages.is_empty() {
+                for storage in memo_storages {
+                    out.push_str(&format!(
+                        "{}({}).{}.invalidate();\n",
+                        pad, memo_receiver, storage
+                    ));
+                }
             }
         }
         // c109 Phase 23: tuple destructure. Mirrors `emit_stmt`'s `BindPattern::Tuple`

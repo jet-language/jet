@@ -68,6 +68,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         compile_strings: Vec::new(),
         zip_plans: Vec::new(),
         invocations: 0,
+        memo_values: std::collections::HashMap::new(),
         channels: Vec::new(),
         senders: Vec::new(),
         stream_consumers: std::collections::HashMap::new(),
@@ -162,6 +163,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.heap.clear();
     rt.heap.install_string_slots(&compile_strings);
     rt.compute.clear();
+    rt.memo_values.clear();
     crate::Data::clear_lazy_state();
     crate::Math::clear_math_values();
     let stream_consumers = std::mem::take(&mut rt.stream_consumers);

@@ -548,6 +548,22 @@ mod highlights;
 pub use highlights::*;
 mod predicates;
 pub use predicates::*;
+
+/// D-FIELDMEMO1=A: compiler-owned storage for one marked computed field.
+/// Keep this name in the syntax module so every engine addresses the same
+/// hidden member without inventing a second field naming rule.
+pub fn memo_storage_name(field: &str) -> String {
+    crate::Names::mangle_generated(&format!("memo_{field}"))
+}
+
+/// D-FIELDMEMO1=A: the interpreter carries the same hidden cache slot in its
+/// structural value as native records carry in their generated Rust shape.
+/// It is never a user-visible field, a wire field, or part of value equality.
+pub fn is_memo_storage_name(field: &str) -> bool {
+    field
+        .strip_prefix(GENERATED_NAME_PREFIX)
+        .is_some_and(|name| name.starts_with("__memo_"))
+}
 mod retirements;
 pub use retirements::*;
 mod sinks;

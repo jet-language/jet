@@ -212,6 +212,7 @@ fn tir_func(
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
+        memo_field: None,
         body,
         kind: jet::Codegen::TIR::TFuncKind::TopLevel,
     }
@@ -241,6 +242,7 @@ fn nested_tir_program(
 
     JitProgram {
         source_file: "nested-tir.jet".to_string(),
+        source_text: String::new(),
         entry: "run".to_string(),
         instance_provenance: Vec::new(),
         funcs: vec![tir_func(
@@ -251,6 +253,7 @@ fn nested_tir_program(
         spawn_lambdas: Vec::new(),
         struct_fields: std::collections::HashMap::new(),
         struct_field_types: std::collections::HashMap::new(),
+        memo_dependencies: std::collections::HashMap::new(),
         reflect_paths: std::collections::HashMap::new(),
         struct_type_params: std::collections::HashMap::new(),
         enum_variants: std::collections::HashMap::new(),

@@ -971,6 +971,9 @@ pub(super) struct EvalCtx<'a> {
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
+    /// D-FIELDMEMO1=A: sema-owned source-to-memo edges shared with the
+    /// interpreter invalidation adapter.
+    pub(super) memo_dependencies: HashMap<String, HashMap<String, Vec<String>>>,
     /// Canonical typeable paths for runtime reflection.
     pub(super) reflect_paths: HashMap<String, String>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
@@ -1298,6 +1301,7 @@ struct EvalTaskConfig<'a> {
     repl_mode: bool,
     repl_grants: Vec<String>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
+    memo_dependencies: HashMap<String, HashMap<String, Vec<String>>>,
     reflect_paths: HashMap<String, String>,
     struct_field_types: HashMap<String, Vec<(String, Type)>>,
     codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
@@ -1485,6 +1489,7 @@ impl<'a> EvalCtx<'a> {
             repl_mode: self.repl_mode,
             repl_grants: self.repl_grants.clone(),
             struct_fields: self.struct_fields.clone(),
+            memo_dependencies: self.memo_dependencies.clone(),
             reflect_paths: self.reflect_paths.clone(),
             struct_field_types: self.struct_field_types.clone(),
             codec_migrations: self.codec_migrations.clone(),
@@ -1565,6 +1570,7 @@ impl<'a> EvalCtx<'a> {
             current_fn: String::new(),
             embed_inputs: None,
             struct_fields: config.struct_fields,
+            memo_dependencies: config.memo_dependencies,
             reflect_paths: config.reflect_paths,
             struct_field_types: config.struct_field_types,
             codec_migrations: config.codec_migrations,
@@ -2433,7 +2439,7 @@ impl<'a> EvalCtx<'a> {
             let mut memos = runtime.memos.lock().expect("memo state poisoned");
             let memo = memos
                 .entry(func.name.clone())
-                .or_insert_with(|| crate::memo::JetMemo::new(bound));
+                .or_insert_with(|| crate::memo::JetMemo::with_bound(bound));
             if let Some(value) = memo.get(&args) {
                 return Ok(value);
             }
@@ -2508,7 +2514,7 @@ impl<'a> EvalCtx<'a> {
                 let mut memos = runtime.memos.lock().expect("memo state poisoned");
                 memos
                     .entry(func.name.clone())
-                    .or_insert_with(|| crate::memo::JetMemo::new(bound))
+                    .or_insert_with(|| crate::memo::JetMemo::with_bound(bound))
                     .put(args, value.clone());
             }
         }
@@ -2528,7 +2534,7 @@ impl<'a> EvalCtx<'a> {
         let mut memos = runtime.memos.lock().expect("memo state poisoned");
         let stats = memos
             .entry(name.to_string())
-            .or_insert_with(|| crate::memo::JetMemo::new(bound))
+            .or_insert_with(|| crate::memo::JetMemo::with_bound(bound))
             .stats();
         Ok(CtValue::Struct {
             type_name: crate::Syntax::TYPE_MEMO_STATS.to_string(),
@@ -2944,8 +2950,7 @@ fn seed_fragment_structs(
         cx.struct_fields.insert(
             name.clone(),
             definition
-                .fields
-                .iter()
+                .reflection_fields()
                 .map(|field| (field.name.clone(), field.ty.clone()))
                 .collect(),
         );
@@ -2967,6 +2972,14 @@ fn seed_fragment_structs(
             .collect::<std::collections::HashSet<_>>();
         if !computed.is_empty() {
             cx.computed_fields.insert(name.clone(), computed);
+        }
+        let (memo_fields, memo_dependencies) =
+            crate::Codegen::Context::memo_facts_for_struct(definition);
+        if !memo_fields.is_empty() {
+            cx.memo_fields.insert(name.clone(), memo_fields);
+        }
+        if !memo_dependencies.is_empty() {
+            cx.memo_dependencies.insert(name.clone(), memo_dependencies);
         }
     }
     // Keep fragment lowering on the same recursive-layout fact as AOT/JIT.
@@ -3515,6 +3528,7 @@ fn run_program_with_structs_on_stack(
         current_fn: entry.name.clone(),
         embed_inputs: None,
         struct_fields,
+        memo_dependencies: program.memo_dependencies.clone(),
         reflect_paths: program.reflect_paths.clone(),
         struct_field_types,
         codec_migrations: program.codec_migrations.clone(),
@@ -3617,6 +3631,7 @@ pub fn run_named_func_with_memos(
         current_fn: func.name.clone(),
         embed_inputs: None,
         struct_fields: HashMap::new(),
+        memo_dependencies: program.memo_dependencies.clone(),
         reflect_paths: program.reflect_paths.clone(),
         struct_field_types: program_struct_field_types(program),
         codec_migrations: program.codec_migrations.clone(),
@@ -3845,6 +3860,7 @@ fn eval_expr_hook(
         current_fn: String::new(),
         embed_inputs,
         struct_fields: HashMap::new(),
+        memo_dependencies: HashMap::new(),
         reflect_paths: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),
@@ -3970,6 +3986,7 @@ fn eval_block_hook(
         current_fn: String::new(),
         embed_inputs,
         struct_fields: HashMap::new(),
+        memo_dependencies: HashMap::new(),
         reflect_paths: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
         codec_migrations: HashMap::new(),

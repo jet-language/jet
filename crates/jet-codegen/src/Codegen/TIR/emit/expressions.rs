@@ -2485,6 +2485,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 parts.push("params: std::collections::BTreeMap::new()".to_string());
                 parts.push("route_template: None".to_string());
             }
+            if extra.is_none() {
+                let owner = match &literal_ty {
+                    Type::Named(name) | Type::Apply { name, .. } => Some(name),
+                    _ => None,
+                };
+                if let Some(memo_fields) = owner.and_then(|name| cx.memo_fields.get(name)) {
+                    for field in memo_fields.keys() {
+                        let storage = crate::Syntax::memo_storage_name(field);
+                        parts.push(format!(
+                            "{storage}: {}JetMemo::new()",
+                            cx.root_prefix
+                        ));
+                    }
+                }
+            }
             let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
                 Some((trait_name, _)) => {

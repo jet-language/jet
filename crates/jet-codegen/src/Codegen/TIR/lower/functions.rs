@@ -175,6 +175,7 @@ pub(crate) fn lower_error_conv(
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
+        memo_field: None,
         body: lower_stmts(&conversion.body, cx, &mut env),
         kind: TFuncKind::TopLevel,
     }
@@ -298,6 +299,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+        memo_field: None,
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -769,6 +771,10 @@ pub(crate) fn lower_method_for_owner(
         self_conv: if is_static { None } else { self_conv },
         owner_type: owner_ty,
     };
+    let memo_field = cx
+        .memo_fields
+        .get(type_name)
+        .and_then(|fields| fields.contains_key(&f.name).then(|| f.name.clone()));
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -796,6 +802,7 @@ pub(crate) fn lower_method_for_owner(
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+        memo_field,
         body,
         kind,
     }
@@ -966,6 +973,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+        memo_field: None,
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -1062,6 +1070,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
+        memo_field: None,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,

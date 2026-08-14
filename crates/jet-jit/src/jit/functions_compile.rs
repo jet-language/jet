@@ -71,6 +71,28 @@ fn pack_spawn_return(
     }
 }
 
+fn unpack_memo_return(
+    b: &mut FunctionBuilder<'_>,
+    raw: Value,
+    ret_ty: &Type,
+) -> Result<Value, String> {
+    match clif_ty(ret_ty) {
+        Some(ty) if ty == types::F64 => Ok(b.ins().bitcast(
+            types::F64,
+            MemFlags::new().with_endianness(Endianness::Little),
+            raw,
+        )),
+        Some(ty) if ty == types::I8 => Ok(b.ins().ireduce(types::I8, raw)),
+        Some(ty) if ty == types::I32 => Ok(b.ins().ireduce(types::I32, raw)),
+        Some(ty) if ty == types::I64 => Ok(raw),
+        other => Err(format!("jit memo return unsupported: {ret_ty:?} ({other:?})")),
+    }
+}
+
+fn memo_slot(tir: &TFunc, field: &str) -> i64 {
+    jet_codegen::Codegen::TIR::stable_place_address(&format!("memo::{}::{field}", tir.name))
+}
+
 /// Build the one ABI thunk used by the shared OptionLift2 Prelude operation.
 /// The thunk is deliberately policy-free: it turns the Prelude's two packed
 /// payload words back into the callable's real Cranelift argument types, calls
@@ -1304,7 +1326,72 @@ fn lower_function(
             }
         }
 
-        lctx.lower_stmts(&tir.body)?;
+        let memo_body = tir.memo_field.as_deref().and_then(|_| {
+            let mut value = None;
+            for statement in &tir.body {
+                match statement {
+                    TStmt::LineMarker(_) | TStmt::SourceSpan(_) => {}
+                    TStmt::Return(Some(expr)) if value.is_none() => value = Some(expr),
+                    _ => return None,
+                }
+            }
+            value
+        });
+        if let (Some(field), Some(expression), Some(ret_ty)) =
+            (tir.memo_field.as_deref(), memo_body, tir.ret.as_ref())
+        {
+            if !func_has_receiver(tir) || param_vals.is_empty() {
+                return Err("jit memo getter has no receiver".to_string());
+            }
+            let record = param_vals[0];
+            let slot = lctx.b.ins().iconst(
+                types::I64,
+                memo_slot(tir, field),
+            );
+            let probe_ref = lctx
+                .module
+                .declare_func_in_func(lctx.host.memo_probe, lctx.b.func);
+            let probe = lctx.b.ins().call(probe_ref, &[record, slot]);
+            let probe = lctx.b.inst_results(probe)[0];
+            let zero = lctx.b.ins().iconst(types::I8, 0);
+            let hit = lctx.b.ins().icmp(IntCC::NotEqual, probe, zero);
+            let hit_block = lctx.b.create_block();
+            let miss_block = lctx.b.create_block();
+            let merge_block = lctx.b.create_block();
+            let ret_clif = meta
+                .clif_ty(ret_ty)
+                .ok_or_else(|| format!("jit memo return unsupported: {ret_ty:?}"))?;
+            lctx.b.append_block_param(merge_block, ret_clif);
+            lctx.b.ins().brif(hit, hit_block, &[], miss_block, &[]);
+
+            lctx.b.switch_to_block(hit_block);
+            lctx.b.seal_block(hit_block);
+            let get_ref = lctx
+                .module
+                .declare_func_in_func(lctx.host.memo_get, lctx.b.func);
+            let cached = lctx.b.ins().call(get_ref, &[record, slot]);
+            let cached = lctx.b.inst_results(cached)[0];
+            let cached = unpack_memo_return(lctx.b, cached, ret_ty)?;
+            lctx.b.ins().jump(merge_block, &[cached]);
+
+            lctx.b.switch_to_block(miss_block);
+            lctx.b.seal_block(miss_block);
+            let value = lctx.lower_expr(expression)?;
+            let packed = pack_spawn_return(lctx.b, value, ret_ty)?;
+            let put_ref = lctx
+                .module
+                .declare_func_in_func(lctx.host.memo_put, lctx.b.func);
+            lctx.b.ins().call(put_ref, &[record, slot, packed]);
+            lctx.b.ins().jump(merge_block, &[value]);
+
+            lctx.b.switch_to_block(merge_block);
+            lctx.b.seal_block(merge_block);
+            let value = lctx.b.block_params(merge_block)[0];
+            lctx.emit_lexical_exit(Some(value), false, lctx.shield_depth)?;
+            lctx.dead = true;
+        } else {
+            lctx.lower_stmts(&tir.body)?;
+        }
         if !lctx.dead {
             let value = if let Some(ret) = &tir.ret {
                 if matches!(ret, Type::Result { ok, .. }

@@ -730,17 +730,20 @@ arithmetic widens to the base type. The constraint bounds are integer literals,
 not Range values; accepting a runtime value here would make the declaration
 value-dependent (D-RANGE-VALUE1=A).
 
-**D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181)*: a struct
-field `name: T => expr` is never stored — every read recomputes `expr` against
-the struct's current field values (siblings, data or computed, are readable by
-bare name inside `expr`). Unsettable: absent from a `Type.{ … }` literal's
-required/allowed field list (E0339 if provided), and direct assignment
-(`s.field = v`, `s.field++`) is also E0339. A cycle among computed-field
-formulas, including self-reference, is E0338. Codegen: not a Rust struct
-member — a synthesized inherent getter method instead; every read routes to a
-call of it. `#Patchable` (D-PATCH1) excludes a computed field from `T.Patch`
-and from `apply`/`diff`/`merge`. `#Codable` encode calls the getter (the
-field appears in the wire output); decode never reads into it.
+**D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181; amended by
+D-FIELDMEMO1=A)*: a struct field `name: T => expr` is an unmarked read-time
+formula over the struct's current field values (siblings, data or computed,
+are readable by bare name inside `expr`). `#Memo` is the explicit retained
+form: the first read keeps its answer, and a write to any stored sibling in
+its dependency graph drops that answer. Both forms are unsettable: the field
+is absent from a `Type.{ … }` literal's required/allowed field list (E0339 if
+provided), and direct assignment (`s.field = v`, `s.field++`) is also E0339. A
+cycle among computed-field formulas, including self-reference, is E0338.
+Codegen: not a Rust struct member — a synthesized inherent getter method
+instead; every read routes to a call of it. `#Patchable` (D-PATCH1) excludes a
+computed field from `T.Patch` and from `apply`/`diff`/`merge`. `#Codable` encode
+calls the getter (the field appears in the wire output); decode never reads
+into it.
 
 **D-QUAL3 — Unit families**: `#UnitFamily(Currency) { usd, eur, gbp }` mints
 one distinct type per member (usd → `Usd`, erases to the base numeric);
@@ -6992,13 +6995,17 @@ evaluator used for generic-module value arguments, and its normalized value is
 part of the existing instance fingerprint. Semantic instance facts retain the
 profile and declaration provenance; no execution tier reads settings.
 
-**2026-08-13 — D-MEMO1=A** *(card #1871)*: `#Memo` marks one pure function
-result cache. Bare `#Memo` uses the bounded 128-entry LRU default;
-`#Memo(bound: none)` is the one explicit unbounded opt-in. `name.cache()`
-reads hits, misses, current size, and the written bound. A function's argument
-tuple must pass the existing hashability rule, and a lazy `Iter<T>` parameter or
-result is refused. The marker registry owns the spelling and all execution
-tiers call one Prelude cache implementation.
+**2026-08-13 — D-MEMO1=A / D-FIELDMEMO1=A** *(cards #1871/#1872)*: `#Memo`
+is one marker family. A pure function uses its shared bounded store by default
+(`128` entries), with `#Memo(bound: none)` for an unbounded store; lazy
+`Iter<T>` parameters or results are refused. `name.cache()` reads hits,
+misses, current size, and the written bound. A computed field uses the same
+bare `#Memo` spelling before `name: T => expr`. Its first valid read is
+retained, and a write to any stored sibling in the formula's dependency graph
+drops that field's result. Without `#Memo`, D-FIELDPOL1 remains
+recompute-on-read. The field form has no cache arguments and is a compile-time
+error when attached to an ordinary field (E0382). The marker registry and one
+Prelude cache implementation own the spelling and execution-tier behavior.
 
 ## The one-report slate (D-REPORT-*, ratified 2026-08-07, card #1626)
 

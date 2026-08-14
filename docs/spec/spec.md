@@ -819,6 +819,13 @@ impl Circle {
   validation explicitly. The `Validate.over(s)` use-site escape for rules
   needing outside context remains a separate framework slice. The contract
   ruling is recorded as `D-VALIDATE-DECODE1=B`.
+- **Computed fields (D-FIELDPOL1 / D-FIELDMEMO1):** `name: T => expr` is an
+  unmarked read-time formula over sibling fields. Put `#Memo` immediately
+  before the field when the result should be retained after its first read;
+  writes to stored siblings in the formula dependency graph invalidate it.
+  A memoized field is still not a writable field and is not supplied in a
+  `Type.{ … }` literal. A bare `#Memo` is the field spelling; arguments are
+  rejected with E0382. See `examples/features/memory/computed_field.jet`.
 - **Tags (D-QUAL2, D-TAG-SURFACE1):** `tag Name { deny: [Net] }` declares an
   erased dataflow fact and its policy. `deny` is required and nonempty; `from`
   is optional. Direct `#Name` tags attach to values, fields, parameters, and

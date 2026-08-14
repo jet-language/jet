@@ -81,6 +81,9 @@ struct FuncWeb {
     params: Vec<(String, Type)>,
     return_type: Option<Type>,
     tir: TIR::TFunc,
+    /// D-FIELDMEMO1=A: checked storage facts used when the web backend emits
+    /// a user record literal.
+    memo_fields: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 struct JSSource {
@@ -844,14 +847,22 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
         } => {
-            method.name == "display"
+            let computed = method.mangled
+                && args.is_empty()
+                && matches!(
+                    &recv.ty,
+                    Type::Named(type_name)
+                        if bundle_has_computed_field(bundle, type_name, &method.name)
+                );
+            let display = method.name == "display"
                 && !method.mangled
                 && args.is_empty()
                 && matches!(
                     &recv.ty,
                     Type::Named(type_name)
                         if bundle_has_explicit_unit_display(bundle, type_name)
-                )
+                );
+            (computed || display)
                 && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::ModuleCall { form, args, .. } => {
@@ -1300,12 +1311,77 @@ fn emit_index_html() -> String {
         .to_string()
 }
 
+/// D-FIELDMEMO1=A: collect the hidden Prelude cache fields once for the web
+/// module. The map is carried with the web function set so nested expression
+/// emitters stay pure adapters: they read checked facts and never inspect Jet
+/// marker policy themselves.
+fn web_memo_fields(bundle: &ProgramBundle) -> std::collections::BTreeMap<String, Vec<String>> {
+    fn collect(
+        items: &[Item],
+        fields: &mut std::collections::BTreeMap<String, Vec<String>>,
+    ) {
+        for item in items {
+            match item {
+                Item::Struct(def) => {
+                    let memo = def
+                        .fields
+                        .iter()
+                        .filter(|field| {
+                            field.computed.is_some()
+                                && field.serde_markers.iter().any(|marker| {
+                                    marker.name == crate::Syntax::MARKER_MEMO
+                                })
+                        })
+                        .map(|field| crate::Syntax::memo_storage_name(&field.name))
+                        .collect::<Vec<_>>();
+                    if !memo.is_empty() {
+                        fields.insert(def.name.clone(), memo);
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        collect(body, fields);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut fields = std::collections::BTreeMap::new();
+    for module in &bundle.modules {
+        collect(&module.items, &mut fields);
+    }
+    fields
+}
+
+fn wasm_memo_field_names<'a>(
+    funcs: &'a [FuncWeb],
+    type_name: &str,
+) -> Option<&'a [String]> {
+    funcs
+        .iter()
+        .find_map(|func| func.memo_fields.get(type_name).map(|fields| fields.as_slice()))
+        .or_else(|| {
+            type_name
+                .rsplit_once('.')
+                .and_then(|(_, leaf)| {
+                    funcs
+                        .iter()
+                        .find_map(|func| {
+                            func.memo_fields.get(leaf).map(|fields| fields.as_slice())
+                        })
+                })
+        })
+}
+
 fn collect_web_funcs(
     bundle: &ProgramBundle,
     source_marker: &str,
     sources: &[JSSource],
 ) -> Vec<FuncWeb> {
     let mut out = Vec::new();
+    let memo_fields = web_memo_fields(bundle);
     let extern_funcs = bundle_extern_funcs(bundle);
     for (i, module) in bundle.modules.iter().enumerate() {
         let mut cx = build_cx_items(
@@ -1333,6 +1409,7 @@ fn collect_web_funcs(
             None,
             None,
             (i != bundle.entry).then_some(module.alias.as_str()),
+            &memo_fields,
             bundle,
             &cx,
             &mut out,
@@ -1350,6 +1427,7 @@ fn collect_module_funcs(
     module_ceiling: Option<WebBucket>,
     module_prefix: Option<&str>,
     file_prefix: Option<&str>,
+    memo_fields: &std::collections::BTreeMap<String, Vec<String>>,
     bundle: &ProgramBundle,
     cx: &Cx,
     out: &mut Vec<FuncWeb>,
@@ -1382,6 +1460,7 @@ fn collect_module_funcs(
                         .collect(),
                     return_type: f.return_type.clone(),
                     tir: TIR::lower_web_func(f, cx),
+                    memo_fields: memo_fields.clone(),
                 });
             }
             Item::CodeModule(cm) => {
@@ -1396,6 +1475,7 @@ fn collect_module_funcs(
                         mod_ceiling,
                         Some(&cm.name),
                         file_prefix,
+                        memo_fields,
                         bundle,
                         cx,
                         out,
@@ -1781,6 +1861,23 @@ fn items_have_explicit_unit_display(items: &[Item], type_name: &str) -> bool {
     unit && display
 }
 
+fn items_have_computed_field(items: &[Item], type_name: &str, field_name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Struct(def) => {
+            def.name == type_name
+                && def
+                    .fields
+                    .iter()
+                    .any(|field| field.name == field_name && field.computed.is_some())
+        }
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| items_have_computed_field(body, type_name, field_name)),
+        _ => false,
+    })
+}
+
 fn bundle_module_index_for_alias(bundle: &ProgramBundle, alias: &str) -> Option<usize> {
     let entry = &bundle.modules[bundle.entry];
     entry
@@ -1824,6 +1921,18 @@ fn bundle_has_explicit_unit_display(bundle: &ProgramBundle, type_name: &str) -> 
             .is_some_and(|module| items_have_explicit_unit_display(&module.items, leaf));
     }
     items_have_explicit_unit_display(&bundle.modules[bundle.entry].items, type_name)
+}
+
+fn bundle_has_computed_field(bundle: &ProgramBundle, type_name: &str, field_name: &str) -> bool {
+    if let Some((alias, leaf)) = type_name.split_once('.') {
+        return bundle_module_index_for_alias(bundle, alias)
+            .and_then(|index| bundle.modules.get(index))
+            .is_some_and(|module| items_have_computed_field(&module.items, leaf, field_name));
+    }
+    bundle
+        .modules
+        .iter()
+        .any(|module| items_have_computed_field(&module.items, type_name, field_name))
 }
 
 fn bundle_has_named_web_type(bundle: &ProgramBundle, name: &str) -> bool {
@@ -1942,6 +2051,7 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                 let fields = def
                     .fields
                     .iter()
+                    .filter(|field| field.computed.is_none())
                     .map(|field| {
                         Some(format!(
                             "    {}: {},\n",
@@ -1952,8 +2062,27 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                     .collect::<Option<Vec<_>>>()
                     .map(|parts| parts.concat());
                 if let Some(fields) = fields {
+                    let memo_fields = def
+                        .fields
+                        .iter()
+                        .filter(|field| {
+                            field.computed.is_some()
+                                && field.serde_markers.iter().any(|marker| {
+                                    marker.name == crate::Syntax::MARKER_MEMO
+                                })
+                        })
+                        .map(|field| {
+                            Some(format!(
+                                "    {}: JetMemo<{}>,\n",
+                                crate::Syntax::memo_storage_name(&field.name),
+                                wasm_internal_ty(&field.ty, bundle)?
+                            ))
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .map(|parts| parts.concat())
+                        .unwrap_or_default();
                     out.push_str(&format!(
-                        "#[derive(Clone)]\nstruct {} {{\n{fields}}}\n\n",
+                        "#[derive(Clone)]\nstruct {} {{\n{fields}{memo_fields}}}\n\n",
                         mangle_path(&def.name)
                     ));
                 }
@@ -2106,6 +2235,42 @@ fn emit_wasm_uninit_storage(out: &mut String) {
         "pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};\n",
     );
     out.push_str("}\n\n");
+}
+
+/// D-FIELDMEMO1=A: computed fields are synthesized inherent getters in sema.
+/// Emit those getters into the Wasm module as well, so a web read reaches the
+/// same Prelude-backed cache method as native code.
+fn emit_wasm_computed_methods(items: &[Item], cx: &Cx, out: &mut String) {
+    for item in items {
+        match item {
+            Item::Struct(def) if def.type_params.is_empty() => {
+                let methods = def
+                    .methods
+                    .iter()
+                    .filter(|method| {
+                        def.fields.iter().any(|field| {
+                            field.name == method.name && field.computed.is_some()
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if methods.is_empty() {
+                    continue;
+                }
+                out.push_str(&format!("impl {} {{\n", mangle_path(&def.name)));
+                for method in methods {
+                    let tir = TIR::lower_method(method, &def.name, cx);
+                    TIR::emit_tir_func(&tir, cx, out);
+                }
+                out.push_str("}\n\n");
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    emit_wasm_computed_methods(body, cx, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A Wasm `run` is the browser entry when no companion HTML owns startup.
@@ -2390,6 +2555,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut cx, bundle, module_index);
+        emit_wasm_computed_methods(&module.items, &cx, &mut out);
         // D-ERR-CONV: web conversion calls use the same TIR-owned conversion
         // bodies as native emission. The web expression emitter only marshals
         // the call at the `?` site; it does not recreate the conversion body.
@@ -3678,11 +3844,18 @@ fn wasm_emit_expr(
                 format!("({}).{}", recv_expr, mangle(field))
             }
         }
-        TIR::TExprKind::StructLit { fields, .. } => {
-            let Type::Named(name) = &expr.ty else {
-                return Err(());
-            };
-            if name == jet_foundation::Syntax::TYPE_ERR {
+        TIR::TExprKind::StructLit {
+            fields, as_trait, ..
+        } => {
+            let literal_name = as_trait
+                .as_ref()
+                .map(|(_, concrete)| concrete.as_str())
+                .or_else(|| match &expr.ty {
+                    Type::Named(name) => Some(name.as_str()),
+                    _ => None,
+                })
+                .ok_or(())?;
+            if literal_name == jet_foundation::Syntax::TYPE_ERR {
                 let value = |wanted: &str| {
                     fields
                         .iter()
@@ -3695,21 +3868,28 @@ fn wasm_emit_expr(
                 let cause = wasm_emit_expr(value("cause")?, funcs, file_prefix, reconstructions)?;
                 return Ok(format!("jet_err({message}, {code}, {cause})"));
             }
+            let mut rendered_fields = fields
+                .iter()
+                .map(|(field, value, boxed)| {
+                    let mut value =
+                        wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
+                    if *boxed {
+                        value = format!("Box::new({value})");
+                    }
+                    Ok(format!("{}: {value}", mangle(field)))
+                })
+                .collect::<Result<Vec<_>, ()>>()?;
+            if let Some(memo_fields) = wasm_memo_field_names(funcs, literal_name) {
+                rendered_fields.extend(
+                    memo_fields
+                        .iter()
+                        .map(|field| format!("{field}: JetMemo::new()")),
+                );
+            }
             format!(
                 "{} {{ {} }}",
-                mangle_path(name),
-                fields
-                    .iter()
-                    .map(|(field, value, boxed)| {
-                        let mut value =
-                            wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
-                        if *boxed {
-                            value = format!("Box::new({value})");
-                        }
-                        Ok(format!("{}: {value}", mangle(field)))
-                    })
-                    .collect::<Result<Vec<_>, ()>>()?
-                    .join(", ")
+                mangle_path(literal_name),
+                rendered_fields.join(", ")
             )
         }
         TIR::TExprKind::ListLit(elements) => {
@@ -6097,6 +6277,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Division.rs"),
     "\n",
     include_str!("../Prelude/Core/StringConcat.rs"),
+    "\n",
+    include_str!("../Prelude/Memo.rs"),
     "\n"
 );
 

@@ -20,6 +20,12 @@ pub const MARKER_PRE: &str = "Pre"; // D-PREPOST1
 /// "msg")`; `result` names the return value inside `cond`.
 pub const MARKER_POST: &str = "Post"; // D-PREPOST1
 
+/// D-MEMO1=A / D-FIELDMEMO1=A: stores a pure function result or a computed
+/// field result until its checked inputs change. Functions use the bounded
+/// default or `bound: none`; the field form is bare `#Memo` before
+/// `name: T => expr`.
+pub const MARKER_MEMO: &str = "Memo"; // D-MEMO1=A, D-FIELDMEMO1=A
+
 /// D-COMPUTE-KERNEL-SURFACE1=B: explicit safe kernel declaration —
 /// `#Kernel(.parallel) fn …`. The mode is intentionally a closed marker
 /// argument, so adding another execution mode needs a new owner ruling.
@@ -35,9 +41,6 @@ pub const MARKER_PERSIST: &str = "Persist"; // D-PERSIST1
 /// codegen). Never rejected by sema; the compiler is free to ignore it.
 /// Methods stay ordinary functions — no macro-rewrite hooks (D-METHODMACRO1).
 pub const MARKER_INLINE: &str = "Inline"; // D-METHODMACRO1
-/// D-MEMO1=A: `#Memo` marks a pure function result cache. The default is the
-/// bounded 128-entry store; `bound: none` is the one explicit unbounded form.
-pub const MARKER_MEMO: &str = "Memo"; // D-MEMO1
 pub const MARKER_STATIC: &str = "Static"; // D-META-STAGE1
 /// D-CAPBUNDLE1 / D-CONTRACTCASE1: capability bundles on a nominal distinct
 /// type — each re-exposes a curated slice of the base type's operations

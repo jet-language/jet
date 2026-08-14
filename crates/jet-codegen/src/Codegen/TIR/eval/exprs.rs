@@ -1333,6 +1333,39 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
     }
 }
 
+fn memo_storage_field(field: &str) -> String {
+    crate::Syntax::memo_storage_name(field)
+}
+
+fn memo_read(value: &CtValue, field: &str) -> Option<CtValue> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    let storage = memo_storage_field(field);
+    fields.iter().find_map(|(name, value)| {
+        if name != &storage {
+            return None;
+        }
+        match value {
+            CtValue::Present(value) => Some((**value).clone()),
+            _ => None,
+        }
+    })
+}
+
+fn memo_write(value: &mut CtValue, field: &str, result: CtValue) {
+    let CtValue::Struct { fields, .. } = value else {
+        return;
+    };
+    let storage = memo_storage_field(field);
+    let cached = CtValue::Present(Box::new(result));
+    if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == &storage) {
+        *value = cached;
+    } else {
+        fields.push((storage, cached));
+    }
+}
+
 #[derive(Clone, Copy)]
 struct EvalIfWork<'a> {
     original: &'a TExpr,
@@ -1737,6 +1770,36 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
+    fn invalidate_memo_fields(
+        &self,
+        owner: &str,
+        fields: &mut Vec<(String, CtValue)>,
+        source: &str,
+    ) {
+        if source.starts_with(crate::Syntax::GENERATED_NAME_PREFIX) {
+            return;
+        }
+        let dependents = self
+            .memo_dependencies
+            .get(owner)
+            .and_then(|sources| sources.get(source))
+            .or_else(|| {
+                owner.rsplit_once('.').and_then(|(_, leaf)| {
+                    self.memo_dependencies
+                        .get(leaf)
+                        .and_then(|sources| sources.get(source))
+                })
+            });
+        let Some(dependents) = dependents else {
+            return;
+        };
+        fields.retain(|(name, _)| {
+            !dependents
+                .iter()
+                .any(|memo| name == &memo_storage_field(memo))
+        });
+    }
+
     pub(super) fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
         fn visit(ctx: &EvalCtx<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
             if ty.is_compute_tensor_family() {
@@ -6185,6 +6248,21 @@ impl<'a> EvalCtx<'a> {
                             }
                                 | crate::Codegen::TIR::TFuncKind::TraitMethod { .. }
                         );
+                        if has_receiver {
+                            if let Some(memo_field) = &func.memo_field {
+                                if let Some(cached) = memo_read(&r, memo_field) {
+                                    return Ok(cached);
+                                }
+                                child.insert("self".to_string(), r.clone());
+                                let result = self.run_func(func, argv, &mut child)?;
+                                let mut updated = child
+                                    .remove("self")
+                                    .unwrap_or_else(|| r.clone());
+                                memo_write(&mut updated, memo_field, result.clone());
+                                self.write_back_place(recv, updated, scope)?;
+                                return Ok(result);
+                            }
+                        }
                         let argv_for_params = if has_receiver {
                             child.insert("self".to_string(), r.clone());
                             argv
@@ -8085,7 +8163,8 @@ impl<'a> EvalCtx<'a> {
                                     }
                                     let mut elem = items[i].clone();
                                     match &mut elem {
-                                        CtValue::Struct { fields, .. } => {
+                                        CtValue::Struct { type_name, fields } => {
+                                            self.invalidate_memo_fields(type_name, fields, field);
                                             let mangled = crate::Codegen::mangle(field);
                                             if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
                                                 n == field
@@ -8125,7 +8204,8 @@ impl<'a> EvalCtx<'a> {
                     } if type_name == "__JetViewMut" => {
                         return Err(unsupported("field write-back on view-mut", self.span()));
                     }
-                    CtValue::Struct { fields, .. } => {
+                    CtValue::Struct { type_name, fields } => {
+                        self.invalidate_memo_fields(type_name, fields, field);
                         let mangled = crate::Codegen::mangle(field);
                         if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
                             n == field
@@ -8178,9 +8258,10 @@ impl<'a> EvalCtx<'a> {
                     return Err(pool_stale_diagnostic());
                 };
                 if let Some(field) = field {
-                    let CtValue::Struct { fields, .. } = payload else {
+                    let CtValue::Struct { type_name, fields } = payload else {
                         return Err(unsupported("Pool field on a non-struct", self.span()));
                     };
+                    self.invalidate_memo_fields(type_name, fields, field);
                     let slot = fields
                         .iter_mut()
                         .find_map(|(name, value)| (name == field).then_some(value))

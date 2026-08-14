@@ -360,6 +360,7 @@ renumbered, and no new `W` code may be allocated.
 | E0337 | sema  | `#Patchable` struct has a function-typed field (D-PATCH1) |
 | E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
 | E0339 | sema  | a computed field given in a struct literal or assigned to directly (D-FIELDPOL1) |
+| E0382 | sema  | `#Memo` requires a bare computed field (D-FIELDMEMO1=A) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | E0342 | parse | `#Off` / `#DebugOnly` written on an item instead of a statement (D-CANVASSTATE1) |
