@@ -1044,6 +1044,7 @@ fn for_each_map(var: &str, var2: &str, collection: Expr, body: Vec<Stmt>, span: 
         kind: ForKind::In { collection, step: None },
         body,
         span,
+        arrow_body: false,
         label: None,
     }
 }
@@ -1056,6 +1057,7 @@ fn for_each(var: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
         kind: ForKind::In { collection, step: None },
         body,
         span,
+        arrow_body: false,
         label: None,
     }
 }
