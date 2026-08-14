@@ -4,9 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const TIER_PARITY_STEMS: [&str; 5] = [
+const TIER_PARITY_STEMS: [&str; 6] = [
     "comptime/embed",
     "comptime/embed_bytes",
+    "comptime/fact_plane",
     "comptime/find",
     "comptime/find_empty",
     "tooling/declared_text_head",
