@@ -1148,7 +1148,6 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "logs"
             | "clean"
             | "fetch"
-            | "shared-store"
             | "publish"
             | "yank"
             | "keygen"
