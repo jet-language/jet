@@ -166,6 +166,14 @@ mod collection_semantics {
     }
 }
 
+pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
+    collection_semantics::iter_first(values)
+}
+
+pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
+    collection_semantics::iter_skip(values, n)
+}
+
 pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
     collection_semantics::list_pop(values)
 }
