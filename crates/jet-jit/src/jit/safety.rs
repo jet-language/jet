@@ -1238,8 +1238,65 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return resident_safe_compute_call(method, args, callees);
             }
             if module == "core.services" {
-                // ServiceTree mutates through Prelude; deopt to ambient (I9).
-                return false;
+                let supported = match method.as_str() {
+                    "runtime" => args.len() == 2,
+                    "restart_one_for_one"
+                    | "restart_one_for_all"
+                    | "restart_rest_for_one"
+                    | "delivery_at_most_once"
+                    | "delivery_durable" => args.is_empty(),
+                    "tree" | "state_store" => args.len() == 1,
+                    "set_restart" | "set_delivery" => args.len() == 2,
+                    "worker" | "group" => args.len() == 3,
+                    "start" | "stop" => args.len() == 1,
+                    "send" => args.len() == 3,
+                    "receive" | "mailbox_depth" | "restarts" | "fail_worker" => {
+                        args.len() == 2
+                    }
+                    "endpoint_show"
+                    | "tree_show"
+                    | "dead_letter_count"
+                    | "drain_dead_letters"
+                    | "set_state_empty"
+                    | "restore_snapshot"
+                    | "event_count"
+                    | "replay_events"
+                    | "directory_generation"
+                    | "handoff_generation"
+                    | "rollback_generation"
+                    | "chaos_fail"
+                    | "upgrade_receipt"
+                    | "observe" => args.len() == 1,
+                    "send_durable" => args.len() == 4,
+                    "set_state_snapshot" | "set_state_event_log" => args.len() == 5,
+                    "commit_snapshot" | "append_event" => args.len() == 2,
+                    "workflow_start" | "workflow_step" => args.len() == 3,
+                    "workflow_history" | "directory_resolve" | "drain_worker" => {
+                        args.len() == 2
+                    }
+                    "directory_register" => args.len() == 3,
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if module == "core.sync" {
+                let supported = match method.as_str() {
+                    "text_new" | "text_merge" | "counter_new" | "counter_merge" => {
+                        args.len() == 2
+                    }
+                    "text_set" | "counter_inc" | "map_set" | "list_push" => args.len() == 3,
+                    "text_edit" => args.len() == 5,
+                    "text_show" | "text_metadata" | "counter_value" | "map_show"
+                    | "list_show" | "policy_show" => args.len() == 1,
+                    "map_new" | "list_new" => args.is_empty(),
+                    "map_get" => args.len() == 2,
+                    "map_merge" | "list_merge" => args.len() == 2,
+                    "policy_new" => args.len() == 2,
+                    "policy_allows" => args.len() == 3,
+                    "sync_over" | "sync" => args.len() == 2,
+                    _ => false,
+                };
+                return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
             if (module == "app" || module == "core.web")
                 && matches!(
@@ -5016,6 +5073,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             if args.is_empty() =>
         {
             true
+        }
+        THandleOp::ServiceRuntimeSend => {
+            args.len() == 3 && recv.ty == Type::Named("ServiceRuntime".into())
+        }
+        THandleOp::ServiceRuntimeRetry
+        | THandleOp::ServiceRuntimeDeadLetter
+        | THandleOp::ServiceRuntimeRetain
+        | THandleOp::ServiceRuntimeCommit => {
+            args.len() == 1 && recv.ty == Type::Named("ServiceRuntime".into())
         }
         THandleOp::DurationNew { .. } => args.is_empty(),
         THandleOp::DurationIn { .. } => args.len() <= 1,

@@ -27,6 +27,10 @@ pub(crate) mod contract_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 
+pub(crate) mod service_prelude {
+    include!("../../../jet-codegen/src/Prelude/Service.rs");
+}
+
 thread_local! {
     static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
 }
@@ -229,6 +233,9 @@ pub(crate) struct JitRuntime {
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
     /// `core.url` / `core.mime` / net handles (#1221).
     pub(crate) net_values: Vec<Option<Net::NetValue>>,
+    /// `core.services` / `core.sync` opaque Prelude values keyed by their
+    /// resident heap-record handle. Entries live for one invocation only.
+    pub(crate) service_values: Vec<Option<jet_foundation::AST::CtValue>>,
     /// `core.game` scene / frame / replay / backend handles (#1218).
     pub(crate) game_scenes: Vec<crate::Game::GameSceneState>,
     pub(crate) game_frames: Vec<crate::Game::GameFrameState>,
@@ -1649,6 +1656,598 @@ pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 
     rt.results.len() as i64
 }
 
+mod service_adapter {
+    use super::{alloc_jit_result, service_prelude, JitRuntime};
+    use jet_foundation::AST::{CtReport, CtValue};
+    use jet_foundation::Diagnostics::Span;
+
+    const SERVICES_MODULE: i64 = 0;
+    const SYNC_MODULE: i64 = 1;
+    const SERVICE_AUTHORITY_MODULE: i64 = 2;
+
+    #[derive(Clone, Copy)]
+    enum ArgKind {
+        String,
+        Int,
+        StringList,
+        Slot,
+        Restart,
+        Delivery,
+        DurationNs,
+    }
+
+    fn arg_kind(module: i64, method: &str, index: usize) -> Option<ArgKind> {
+        match module {
+            SERVICES_MODULE => match method {
+                "runtime" => match index {
+                    0 => Some(ArgKind::String),
+                    1 => Some(ArgKind::DurationNs),
+                    _ => None,
+                },
+                "tree" | "state_store" if index == 0 => Some(ArgKind::String),
+                "set_restart" if index == 0 => Some(ArgKind::Slot),
+                "set_restart" if index == 1 => Some(ArgKind::Restart),
+                "set_delivery" if index == 0 => Some(ArgKind::Slot),
+                "set_delivery" if index == 1 => Some(ArgKind::Delivery),
+                "worker" if index == 0 => Some(ArgKind::Slot),
+                "worker" if index == 1 => Some(ArgKind::String),
+                "worker" if index == 2 => Some(ArgKind::Int),
+                "group" if index == 0 => Some(ArgKind::Slot),
+                "group" if index == 1 => Some(ArgKind::String),
+                "group" if index == 2 => Some(ArgKind::StringList),
+                "start" | "stop" if index == 0 => Some(ArgKind::Slot),
+                "send" if index == 0 => Some(ArgKind::Slot),
+                "send" if index == 1 => Some(ArgKind::Slot),
+                "send" if index == 2 => Some(ArgKind::String),
+                "receive" | "mailbox_depth" | "restarts" | "fail_worker" if index < 2 => {
+                    Some(ArgKind::Slot)
+                }
+                "endpoint_show"
+                | "tree_show"
+                | "dead_letter_count"
+                | "drain_dead_letters"
+                | "set_state_empty"
+                | "restore_snapshot"
+                | "event_count"
+                | "replay_events"
+                | "directory_generation"
+                | "handoff_generation"
+                | "rollback_generation"
+                | "chaos_fail"
+                | "upgrade_receipt"
+                | "observe"
+                    if index == 0 =>
+                {
+                    Some(ArgKind::Slot)
+                }
+                "send_durable" if index < 2 => Some(ArgKind::Slot),
+                "send_durable" if index < 4 => Some(ArgKind::String),
+                "set_state_snapshot" | "set_state_event_log" if index == 0 => {
+                    Some(ArgKind::Slot)
+                }
+                "set_state_snapshot" | "set_state_event_log" if index == 1 => {
+                    Some(ArgKind::Slot)
+                }
+                "set_state_snapshot" | "set_state_event_log" if index == 2 => {
+                    Some(ArgKind::String)
+                }
+                "set_state_snapshot" | "set_state_event_log" if index == 3 => {
+                    Some(ArgKind::Int)
+                }
+                "set_state_snapshot" | "set_state_event_log" if index == 4 => {
+                    Some(ArgKind::String)
+                }
+                "commit_snapshot" if index == 0 => Some(ArgKind::Slot),
+                "commit_snapshot" if index == 1 => Some(ArgKind::String),
+                "append_event" if index == 0 => Some(ArgKind::Slot),
+                "append_event" if index == 1 => Some(ArgKind::String),
+                "workflow_start" if index == 0 => Some(ArgKind::Slot),
+                "workflow_start" if index == 1 => Some(ArgKind::String),
+                "workflow_start" if index == 2 => Some(ArgKind::Int),
+                "workflow_step" if index == 0 => Some(ArgKind::Slot),
+                "workflow_step" if index == 1 => Some(ArgKind::Int),
+                "workflow_step" if index == 2 => Some(ArgKind::String),
+                "workflow_history" if index == 0 => Some(ArgKind::Slot),
+                "workflow_history" if index == 1 => Some(ArgKind::Int),
+                "directory_register" if index == 0 => Some(ArgKind::Slot),
+                "directory_register" if index == 1 => Some(ArgKind::String),
+                "directory_register" if index == 2 => Some(ArgKind::Slot),
+                "directory_resolve" if index == 0 => Some(ArgKind::Slot),
+                "directory_resolve" if index == 1 => Some(ArgKind::String),
+                "drain_worker" if index < 2 => Some(ArgKind::Slot),
+                _ => None,
+            },
+            SERVICE_AUTHORITY_MODULE => match method {
+                "send" if index == 0 => Some(ArgKind::Slot),
+                "send" if index == 1 => Some(ArgKind::Slot),
+                "send" if index >= 2 => Some(ArgKind::String),
+                "retry" | "dead_letter" | "retain" if index < 2 => {
+                    if index == 0 {
+                        Some(ArgKind::Slot)
+                    } else {
+                        Some(ArgKind::String)
+                    }
+                }
+                "commit" if index == 0 => Some(ArgKind::Slot),
+                "commit" if index == 1 => Some(ArgKind::String),
+                _ => None,
+            },
+            SYNC_MODULE => match method {
+                "text_new" if index < 2 => Some(ArgKind::String),
+                "text_set" if index == 0 => Some(ArgKind::Slot),
+                "text_set" if index > 0 => Some(ArgKind::String),
+                "text_merge" if index < 2 => Some(ArgKind::Slot),
+                "text_show" | "text_metadata" if index == 0 => Some(ArgKind::Slot),
+                "text_edit" if index == 0 => Some(ArgKind::Slot),
+                "text_edit" if index == 1 || index == 4 => Some(ArgKind::String),
+                "text_edit" if index == 2 || index == 3 => Some(ArgKind::Int),
+                "counter_new" if index == 0 => Some(ArgKind::String),
+                "counter_new" if index == 1 => Some(ArgKind::Int),
+                "counter_inc" if index == 0 => Some(ArgKind::Slot),
+                "counter_inc" if index == 1 => Some(ArgKind::String),
+                "counter_inc" if index == 2 => Some(ArgKind::Int),
+                "counter_merge" if index < 2 => Some(ArgKind::Slot),
+                "counter_value" if index == 0 => Some(ArgKind::Slot),
+                "map_set" if index == 0 => Some(ArgKind::Slot),
+                "map_set" if index > 0 => Some(ArgKind::String),
+                "map_get" if index == 0 => Some(ArgKind::Slot),
+                "map_get" if index == 1 => Some(ArgKind::String),
+                "map_merge" if index < 2 => Some(ArgKind::Slot),
+                "map_show" if index == 0 => Some(ArgKind::Slot),
+                "list_push" if index == 0 => Some(ArgKind::Slot),
+                "list_push" if index > 0 => Some(ArgKind::String),
+                "list_merge" if index < 2 => Some(ArgKind::Slot),
+                "list_show" if index == 0 => Some(ArgKind::Slot),
+                "policy_new" if index < 2 => Some(ArgKind::String),
+                "policy_allows" if index == 0 => Some(ArgKind::Slot),
+                "policy_allows" if index > 0 => Some(ArgKind::String),
+                "policy_show" if index == 0 => Some(ArgKind::Slot),
+                "sync_over" | "sync" if index < 2 => Some(ArgKind::String),
+                "map_new" | "list_new" => None,
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn service_value(rt: &JitRuntime, handle: i64) -> Option<CtValue> {
+        let index = usize::try_from(handle).ok()?;
+        rt.service_values.get(index)?.as_ref().cloned()
+    }
+
+    fn remember_service_value(rt: &mut JitRuntime, handle: i64, value: CtValue) {
+        let Ok(index) = usize::try_from(handle) else {
+            return;
+        };
+        if rt.service_values.len() <= index {
+            rt.service_values.resize_with(index + 1, || None);
+        }
+        rt.service_values[index] = Some(value);
+    }
+
+    fn replace_service_value(rt: &mut JitRuntime, handle: i64, value: CtValue) {
+        let Ok(index) = usize::try_from(handle) else {
+            return;
+        };
+        if index < rt.service_values.len() {
+            rt.service_values[index] = Some(value.clone());
+            refresh_service_record(rt, handle, &value);
+        }
+    }
+
+    fn convert_arg(rt: &JitRuntime, kind: ArgKind, raw: i64) -> Option<CtValue> {
+        match kind {
+            ArgKind::String => rt.heap.clone_string(raw).map(CtValue::Str),
+            ArgKind::Int => Some(CtValue::Int(raw)),
+            ArgKind::StringList => {
+                let length = rt.heap.list_len(raw)?;
+                if length < 0 {
+                    return None;
+                }
+                let mut values = Vec::with_capacity(usize::try_from(length).ok()?);
+                for index in 0..length {
+                    let handle = rt.heap.list_get_int(raw, index)?;
+                    values.push(CtValue::Str(rt.heap.clone_string(handle)?));
+                }
+                Some(CtValue::List(values))
+            }
+            ArgKind::Slot => service_value(rt, raw),
+            ArgKind::Restart => Some(CtValue::Enum {
+                type_name: "ServiceRestart".to_string(),
+                variant: match raw {
+                    0 => "OneForOne",
+                    1 => "OneForAll",
+                    2 => "RestForOne",
+                    _ => return None,
+                }
+                .to_string(),
+                args: Vec::new(),
+            }),
+            ArgKind::Delivery => Some(CtValue::Enum {
+                type_name: "ServiceDelivery".to_string(),
+                variant: match raw {
+                    0 => "AtMostOnce",
+                    1 => "DurableAtLeastOnce",
+                    _ => return None,
+                }
+                .to_string(),
+                args: Vec::new(),
+            }),
+            ArgKind::DurationNs => Some(CtValue::Struct {
+                type_name: "Duration".to_string(),
+                fields: vec![("ns".to_string(), CtValue::Int(raw))],
+            }),
+        }
+    }
+
+    fn set_record_field(rt: &mut JitRuntime, record: i64, index: usize, value: &CtValue) {
+        let Ok(index) = i64::try_from(index) else {
+            return;
+        };
+        match value {
+            CtValue::Int(value) => {
+                let _ = rt.heap.record_set_int(record, index, *value);
+            }
+            CtValue::Float(value) => {
+                let _ = rt.heap.record_set_float(record, index, value.as_f64());
+            }
+            CtValue::Bool(value) => {
+                let _ = rt.heap.record_set_bool(record, index, *value);
+            }
+            CtValue::Char(value) => {
+                let _ = rt.heap.record_set_char(record, index, *value);
+            }
+            CtValue::Str(value) => {
+                let handle = rt.heap.alloc_string(value.clone());
+                let _ = rt.heap.record_set_string(record, index, handle);
+            }
+            CtValue::Present(value) => {
+                let bits = marshal_scalar(rt, value).wrapping_add(1);
+                let _ = rt.heap.record_set_int(record, index, bits);
+            }
+            CtValue::Failed(CtReport::Clean(_)) => {
+                let _ = rt.heap.record_set_int(record, index, 0);
+            }
+            CtValue::Failed(CtReport::Told(value)) => {
+                let bits = marshal_scalar(rt, value);
+                let _ = rt.heap.record_set_int(record, index, bits);
+            }
+            value => {
+                let bits = marshal_scalar(rt, value);
+                let _ = rt.heap.record_set_int(record, index, bits);
+            }
+        }
+    }
+
+    fn refresh_service_record(rt: &mut JitRuntime, record: i64, value: &CtValue) {
+        let CtValue::Struct { fields, .. } = value else {
+            return;
+        };
+        for (index, (_, value)) in fields.iter().enumerate() {
+            set_record_field(rt, record, index, value);
+        }
+    }
+
+    fn marshal_list(rt: &mut JitRuntime, values: &[CtValue]) -> i64 {
+        let list = rt.heap.alloc_empty_list();
+        for value in values {
+            let bits = marshal_scalar(rt, value);
+            let _ = rt.heap.list_push_int(list, bits);
+        }
+        list
+    }
+
+    fn marshal_struct(
+        rt: &mut JitRuntime,
+        type_name: &str,
+        fields: &[(String, CtValue)],
+    ) -> i64 {
+        let record = rt.heap.alloc_record(fields.len());
+        remember_service_value(
+            rt,
+            record,
+            CtValue::Struct {
+                type_name: type_name.to_string(),
+                fields: fields.to_vec(),
+            },
+        );
+        for (index, (_, value)) in fields.iter().enumerate() {
+            set_record_field(rt, record, index, value);
+        }
+        record
+    }
+
+    fn enum_discriminant(type_name: &str, variant: &str) -> Option<i64> {
+        let variants: &[&str] = match type_name {
+            "ServiceReceipt" => &[
+                "Accepted",
+                "Duplicate",
+                "Retained",
+                "DeadLettered",
+                "Rejected",
+                "Unavailable",
+            ],
+            "ServiceError" => &[
+                "Full",
+                "Ambiguous",
+                "Unknown",
+                "NotStarted",
+                "Policy",
+                "Unavailable",
+                "Partitioned",
+                "Revoked",
+                "Stale",
+                "Expired",
+            ],
+            "ServiceRestart" => &["OneForOne", "OneForAll", "RestForOne"],
+            "ServiceDelivery" => &["AtMostOnce", "DurableAtLeastOnce"],
+            "ServiceStateAdapter" => &["Empty", "Snapshot", "EventLog"],
+            _ => return None,
+        };
+        variants
+            .iter()
+            .position(|name| *name == variant)
+            .and_then(|index| i64::try_from(index).ok())
+    }
+
+    fn marshal_enum(
+        rt: &mut JitRuntime,
+        type_name: &str,
+        variant: &str,
+        args: &[(Option<String>, CtValue)],
+    ) -> i64 {
+        let Some(discriminant) = enum_discriminant(type_name, variant) else {
+            return 0;
+        };
+        if args.len() <= 1 {
+            let payload = args
+                .first()
+                .map(|(_, value)| marshal_scalar(rt, value))
+                .unwrap_or(0);
+            return payload.wrapping_shl(8) | discriminant;
+        }
+        let record = rt.heap.alloc_record(args.len() + 1);
+        let _ = rt.heap.record_set_int(record, 0, discriminant);
+        for (index, (_, value)) in args.iter().enumerate() {
+            let field = i64::try_from(index + 1).unwrap_or(i64::MAX);
+            match value {
+                CtValue::Int(value) => {
+                    let _ = rt.heap.record_set_int(record, field, *value);
+                }
+                CtValue::Float(value) => {
+                    let _ = rt.heap.record_set_float(record, field, value.as_f64());
+                }
+                CtValue::Bool(value) => {
+                    let _ = rt.heap.record_set_bool(record, field, *value);
+                }
+                CtValue::Char(value) => {
+                    let _ = rt.heap.record_set_char(record, field, *value);
+                }
+                CtValue::Str(value) => {
+                    let handle = rt.heap.alloc_string(value.clone());
+                    let _ = rt.heap.record_set_string(record, field, handle);
+                }
+                other => {
+                    let bits = marshal_scalar(rt, other);
+                    let _ = rt.heap.record_set_int(record, field, bits);
+                }
+            }
+        }
+        record
+    }
+
+    fn marshal_scalar(rt: &mut JitRuntime, value: &CtValue) -> i64 {
+        match value {
+            CtValue::Int(value) => *value,
+            CtValue::Float(value) => value.to_bits_i64(),
+            CtValue::Bool(value) => i64::from(*value),
+            CtValue::Char(value) => i64::from(*value as u32),
+            CtValue::Str(value) => rt.heap.alloc_string(value.clone()),
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => marshal_enum(rt, type_name, variant, args),
+            CtValue::Present(value) => marshal_scalar(rt, value),
+            CtValue::Failed(_) | CtValue::Unit => 0,
+            CtValue::Bytes(values) => marshal_list(
+                rt,
+                &values.iter().map(|value| CtValue::Int(i64::from(*value))).collect::<Vec<_>>(),
+            ),
+            CtValue::List(values) => marshal_list(rt, values),
+            CtValue::Struct { type_name, fields } => marshal_struct(rt, type_name, fields),
+            CtValue::BigInt(_) | CtValue::Map(_) | CtValue::Closure(_) => 0,
+        }
+    }
+
+    fn marshal_result(rt: &mut JitRuntime, value: CtValue) -> i64 {
+        match value {
+            CtValue::Present(value) => {
+                let bits = marshal_scalar(rt, &value);
+                alloc_jit_result(rt, true, bits as u64)
+            }
+            CtValue::Failed(CtReport::Told(value)) => {
+                let bits = marshal_scalar(rt, &value);
+                alloc_jit_result(rt, false, bits as u64)
+            }
+            CtValue::Failed(CtReport::Clean(_)) => alloc_jit_result(rt, false, 0),
+            value => marshal_scalar(rt, &value),
+        }
+    }
+
+    fn marshal_option(rt: &mut JitRuntime, value: CtValue) -> i64 {
+        match value {
+            CtValue::Present(value) => marshal_scalar(rt, &value).wrapping_add(1),
+            CtValue::Failed(CtReport::Clean(_)) => 0,
+            _ => 0,
+        }
+    }
+
+    fn diagnostic_value(diagnostic: jet_foundation::Diagnostics::Diagnostic) -> CtValue {
+        CtValue::failed(Box::new(CtValue::Str(format!(
+            "{}: {}",
+            diagnostic.code, diagnostic.what
+        ))))
+    }
+
+    fn apply_services_mutation(rt: &mut JitRuntime, raw_args: &[i64], value: CtValue) -> CtValue {
+        match service_prelude::services_take_mut(value) {
+            Ok((tree, value)) => {
+                if !matches!(tree, CtValue::Unit) {
+                    if let Some(handle) = raw_args.first() {
+                        replace_service_value(rt, *handle, tree);
+                    }
+                }
+                value
+            }
+            Err(value) => value,
+        }
+    }
+
+    fn call_ct(rt: &mut JitRuntime, module: i64, method: &str, raw_args: &[i64]) -> CtValue {
+        let span = Span::new(0, 0);
+        if module == SERVICES_MODULE && method == "runtime" {
+            let Some(store) = raw_args.first().and_then(|handle| rt.heap.clone_string(*handle))
+            else {
+                return CtValue::failed(Box::new(CtValue::Str(
+                    "core.services.runtime expects a store path".to_string(),
+                )));
+            };
+            let Some(retention_ns) = raw_args.get(1).copied() else {
+                return CtValue::failed(Box::new(CtValue::Str(
+                    "core.services.runtime expects a Duration".to_string(),
+                )));
+            };
+            return service_prelude::service_runtime(store, retention_ns / 1_000_000);
+        }
+
+        let mut args = Vec::with_capacity(raw_args.len());
+        for (index, raw) in raw_args.iter().copied().enumerate() {
+            let Some(kind) = arg_kind(module, method, index) else {
+                return CtValue::failed(Box::new(CtValue::Str(format!(
+                    "unsupported service adapter call: {module}.{method}"
+                ))));
+            };
+            let Some(value) = convert_arg(rt, kind, raw) else {
+                return CtValue::failed(Box::new(CtValue::Str(format!(
+                    "invalid service adapter argument: {module}.{method}[{index}]"
+                ))));
+            };
+            args.push(value);
+        }
+
+        let result = match module {
+            SERVICES_MODULE => service_prelude::services_apply(method, &args, span),
+            SYNC_MODULE => service_prelude::sync_apply(method, &args, span),
+            SERVICE_AUTHORITY_MODULE => {
+                let Some((receiver, args)) = args.split_first() else {
+                    return CtValue::failed(Box::new(CtValue::Str(
+                        "ServiceRuntime receiver is missing".to_string(),
+                    )));
+                };
+                service_prelude::services_runtime_apply(receiver, method, args, span)
+            }
+            _ => {
+                return CtValue::failed(Box::new(CtValue::Str(
+                    "unknown service adapter module".to_string(),
+                )))
+            }
+        };
+        let value = match result {
+            Ok(value) => value,
+            Err(diagnostic) => diagnostic_value(diagnostic),
+        };
+        if module == SERVICES_MODULE {
+            apply_services_mutation(rt, raw_args, value)
+        } else {
+            value
+        }
+    }
+
+    pub(super) fn call(
+        rt: &mut JitRuntime,
+        module: i64,
+        method_handle: i64,
+        argc: i64,
+        raw: [i64; 7],
+    ) -> i64 {
+        let Some(method) = rt.heap.clone_string(method_handle) else {
+            return 0;
+        };
+        let Some(count) = usize::try_from(argc).ok().filter(|count| *count <= raw.len()) else {
+            return 0;
+        };
+        let value = call_ct(rt, module, &method, &raw[..count]);
+        if module == SYNC_MODULE && method == "map_get" {
+            marshal_option(rt, value)
+        } else if module == SERVICES_MODULE && method == "runtime" {
+            marshal_scalar(rt, &value)
+        } else {
+            marshal_result(rt, value)
+        }
+    }
+
+    pub(super) fn call_bool(
+        rt: &mut JitRuntime,
+        module: i64,
+        method_handle: i64,
+        argc: i64,
+        raw: [i64; 7],
+    ) -> i8 {
+        call(rt, module, method_handle, argc, raw) as i8
+    }
+
+    pub(super) fn show(rt: &mut JitRuntime, handle: i64) -> i64 {
+        let Some(value) = service_value(rt, handle) else {
+            rt.set_trap("the JIT received an invalid service value handle");
+            return 0;
+        };
+        let Some(rendered) = service_prelude::service_display(&value) else {
+            rt.set_trap("the JIT received an unsupported service display value");
+            return 0;
+        };
+        rt.heap.alloc_string(rendered)
+    }
+}
+
+extern "C" fn jet_jit_service_call(
+    module: i64,
+    method: i64,
+    argc: i64,
+    a0: i64,
+    a1: i64,
+    a2: i64,
+    a3: i64,
+    a4: i64,
+    a5: i64,
+    a6: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        service_adapter::call(rt, module, method, argc, [a0, a1, a2, a3, a4, a5, a6])
+    })
+}
+
+extern "C" fn jet_jit_service_call_bool(
+    module: i64,
+    method: i64,
+    argc: i64,
+    a0: i64,
+    a1: i64,
+    a2: i64,
+    a3: i64,
+    a4: i64,
+    a5: i64,
+    a6: i64,
+) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        service_adapter::call_bool(rt, module, method, argc, [a0, a1, a2, a3, a4, a5, a6])
+    })
+}
+
+extern "C" fn jet_jit_service_show(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| service_adapter::show(rt, handle))
+}
+
 pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue> {
     usize::try_from(handle)
         .ok()
@@ -2546,6 +3145,16 @@ host_fns! {
         let mut sig_perf_override = Signature::new(cc);
         sig_perf_override.params.push(AbiParam::new(types::F64));
         sig_perf_override.returns.push(AbiParam::new(types::I64));
+        let mut sig_service_call = Signature::new(cc);
+        sig_service_call
+            .params
+            .extend([AbiParam::new(types::I64); 10]);
+        sig_service_call.returns.push(AbiParam::new(types::I64));
+        let mut sig_service_call_bool = Signature::new(cc);
+        sig_service_call_bool
+            .params
+            .extend([AbiParam::new(types::I64); 10]);
+        sig_service_call_bool.returns.push(AbiParam::new(types::I8));
         let mut sig_deopt = Signature::new(cc);
         // fn_idx, argc, a0..a7
         for _ in 0..10 {
@@ -2715,6 +3324,9 @@ host_fns! {
     perf_default_fidelity: "jet_jit_perf_default_fidelity" => jet_jit_perf_default_fidelity: sig_noarg_f64;
     perf_override_fidelity: "jet_jit_perf_override_fidelity" => jet_jit_perf_override_fidelity: sig_perf_override;
     perf_reset_fidelity: "jet_jit_perf_reset_fidelity" => jet_jit_perf_reset_fidelity: sig_noarg;
+    service_call: "jet_jit_service_call" => jet_jit_service_call: sig_service_call;
+    service_call_bool: "jet_jit_service_call_bool" => jet_jit_service_call_bool: sig_service_call_bool;
+    service_show: "jet_jit_service_show" => jet_jit_service_show: sig_str_unary_i64;
     is_trapped: "jet_jit_is_trapped" => jet_jit_is_trapped: sig_is_trapped;
     stack_enter: "jet_jit_stack_enter" => jet_jit_stack_enter: sig_stack_enter;
     stack_leave: "jet_jit_stack_leave" => jet_jit_stack_leave: sig_noarg;

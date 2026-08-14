@@ -8157,6 +8157,9 @@ impl LowerCtx<'_, '_> {
             Type::Named(name) if name == "Path" => {
                 Ok(self.call_host(self.host.core.path_to_string, &[value]))
             }
+            Type::Named(name) if name == "ServiceUpgradeReceipt" => {
+                Ok(self.call_host(self.host.service_show, &[value]))
+            }
             Type::Named(name)
                 if matches!(
                     name.as_str(),
@@ -9335,6 +9338,15 @@ impl LowerCtx<'_, '_> {
         if type_name == jet_foundation::Syntax::TYPE_RANGE {
             let values = self.lower_range_expr(expr)?;
             let text = self.lower_range_show(values)?;
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.str_push_str, self.b.func);
+            self.b.ins().call(push_ref, &[buf_id, text]);
+            return Ok(());
+        }
+        if type_name == "ServiceUpgradeReceipt" {
+            let value = self.lower_expr(expr)?;
+            let text = self.call_host(self.host.service_show, &[value]);
             let push_ref = self
                 .module
                 .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -11535,6 +11547,126 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    fn service_core_arity(module: &str, method: &str) -> Option<usize> {
+        match (module, method) {
+            ("core.services", "runtime") => Some(2),
+            (
+                "core.services",
+                "restart_one_for_one"
+                | "restart_one_for_all"
+                | "restart_rest_for_one"
+                | "delivery_at_most_once"
+                | "delivery_durable",
+            ) => Some(0),
+            ("core.services", "tree" | "state_store") => Some(1),
+            ("core.services", "set_restart" | "set_delivery") => Some(2),
+            ("core.services", "worker") => Some(3),
+            ("core.services", "group") => Some(3),
+            ("core.services", "start" | "stop") => Some(1),
+            ("core.services", "send") => Some(3),
+            ("core.services", "receive" | "mailbox_depth" | "restarts" | "fail_worker") => {
+                Some(2)
+            }
+            (
+                "core.services",
+                "endpoint_show"
+                | "tree_show"
+                | "dead_letter_count"
+                | "drain_dead_letters"
+                | "set_state_empty"
+                | "restore_snapshot"
+                | "event_count"
+                | "replay_events"
+                | "directory_generation"
+                | "handoff_generation"
+                | "rollback_generation"
+                | "chaos_fail"
+                | "upgrade_receipt"
+                | "observe",
+            ) => Some(1),
+            ("core.services", "send_durable") => Some(4),
+            ("core.services", "set_state_snapshot" | "set_state_event_log") => Some(5),
+            ("core.services", "commit_snapshot") => Some(2),
+            ("core.services", "append_event") => Some(2),
+            ("core.services", "workflow_start") => Some(3),
+            ("core.services", "workflow_step") => Some(3),
+            ("core.services", "workflow_history") => Some(2),
+            ("core.services", "directory_register") => Some(3),
+            ("core.services", "directory_resolve") => Some(2),
+            ("core.services", "drain_worker") => Some(2),
+            ("core.sync", "text_new") => Some(2),
+            ("core.sync", "text_set") => Some(3),
+            ("core.sync", "text_merge") => Some(2),
+            ("core.sync", "text_show" | "text_metadata") => Some(1),
+            ("core.sync", "text_edit") => Some(5),
+            ("core.sync", "counter_new") => Some(2),
+            ("core.sync", "counter_inc") => Some(3),
+            ("core.sync", "counter_merge") => Some(2),
+            ("core.sync", "counter_value") => Some(1),
+            ("core.sync", "map_new" | "list_new") => Some(0),
+            ("core.sync", "map_set" | "list_push") => Some(3),
+            ("core.sync", "map_get") => Some(2),
+            ("core.sync", "map_merge" | "list_merge") => Some(2),
+            ("core.sync", "map_show" | "list_show") => Some(1),
+            ("core.sync", "policy_new") => Some(2),
+            ("core.sync", "policy_allows") => Some(3),
+            ("core.sync", "policy_show") => Some(1),
+            ("core.sync", "sync_over" | "sync") => Some(2),
+            _ => None,
+        }
+    }
+
+    fn lower_service_host_call(
+        &mut self,
+        module: i64,
+        method: &str,
+        args: Vec<Value>,
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        if args.len() > 7 {
+            return Err(format!("jit service call has too many arguments: {method}"));
+        }
+        let method_handle = self.runtime.heap.alloc_string(method.to_string());
+        let mut values = Vec::with_capacity(10);
+        values.push(self.b.ins().iconst(types::I64, module));
+        values.push(self.b.ins().iconst(types::I64, method_handle));
+        values.push(self.b.ins().iconst(types::I64, args.len() as i64));
+        values.extend(args);
+        while values.len() < 10 {
+            values.push(self.b.ins().iconst(types::I64, 0));
+        }
+        let host = if matches!(ret_ty, Type::Bool) {
+            self.host.service_call_bool
+        } else {
+            self.host.service_call
+        };
+        Ok(self.call_host(host, &values))
+    }
+
+    fn lower_service_core_call(
+        &mut self,
+        module: &str,
+        method: &str,
+        args: &[TExpr],
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        let Some(expected) = Self::service_core_arity(module, method) else {
+            return Err(format!("jit core call unsupported: {module}.{method}"));
+        };
+        if args.len() != expected {
+            return Err(format!(
+                "jit core call arity mismatch: {module}.{method} expects {expected}, got {}",
+                args.len()
+            ));
+        }
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            values.push(self.lower_expr(arg)?);
+        }
+        let module_id = if module == "core.services" { 0 } else { 1 };
+        self.lower_service_host_call(module_id, method, values, ret_ty)
+    }
+
     /// Exhaustive match on every `TExprKind` variant (`TIR/mod.rs`) — the JIT
     /// half of the R12 two-consumer contract; `TIR/emit/expressions.rs::
     /// emit_tir_expr` is the AOT half. Each variant here is either lowered for
@@ -11840,6 +11972,9 @@ impl LowerCtx<'_, '_> {
                 args,
                 ..
             } => {
+                if module == "core.services" || module == "core.sync" {
+                    return self.lower_service_core_call(module, method, args, &expr.ty);
+                }
                 if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
                     if !row.accepts_arity(args.len()) {
                         return Err(format!(
@@ -19478,6 +19613,28 @@ impl LowerCtx<'_, '_> {
             if self.meta.is_enum(name) {
                 return self.lower_expr(inner);
             }
+            if matches!(
+                name.as_str(),
+                "ServiceTree"
+                    | "ServiceEndpoint"
+                    | "ServiceRuntime"
+                    | "ServiceMailbox"
+                    | "ServiceWorker"
+                    | "ServiceStateStore"
+                    | "ServiceStateAuthority"
+                    | "ServiceUpgradeReceipt"
+                    | "ServiceGroup"
+                    | "ServiceDirectoryEntry"
+                    | "ServiceIdempotencyEntry"
+                    | "ServiceWorkflow"
+                    | "SyncText"
+                    | "SyncCounter"
+                    | "SyncMap"
+                    | "SyncList"
+                    | "RowPolicy"
+            ) {
+                return self.lower_expr(inner);
+            }
             // Opaque net/http/ws runtime handles are i64 slots — clone copies the handle.
             if matches!(
                 name.as_str(),
@@ -22414,14 +22571,27 @@ impl LowerCtx<'_, '_> {
                 let user = self.lower_expr(&args[1])?;
                 Ok(self.call_host(self.host.db.with_policy, &[recv_val, policy, user]))
             }
-            // D-SERVICE-AUTHORITY1: durable receipts are ambient-backed so the
-            // interpreter and the JIT deopt path call the same shared authority.
+            // D-SERVICE-AUTHORITY1: this is a marshalling call into the same
+            // ServiceAuthority Prelude used by AOT and the TIR evaluator.
             THandleOp::ServiceRuntimeSend
             | THandleOp::ServiceRuntimeRetry
             | THandleOp::ServiceRuntimeDeadLetter
             | THandleOp::ServiceRuntimeRetain
             | THandleOp::ServiceRuntimeCommit => {
-                Err("ServiceRuntime authority is ambient-backed".to_string())
+                let method = match op {
+                    THandleOp::ServiceRuntimeSend => "send",
+                    THandleOp::ServiceRuntimeRetry => "retry",
+                    THandleOp::ServiceRuntimeDeadLetter => "dead_letter",
+                    THandleOp::ServiceRuntimeRetain => "retain",
+                    THandleOp::ServiceRuntimeCommit => "commit",
+                    _ => unreachable!(),
+                };
+                let mut values = Vec::with_capacity(args.len() + 1);
+                values.push(recv_val);
+                for arg in args {
+                    values.push(self.lower_expr(arg)?);
+                }
+                self.lower_service_host_call(2, method, values, ret_ty)
             }
             THandleOp::DBQuery => {
                 let sql = self.lower_expr(&args[0])?;
