@@ -2672,54 +2672,128 @@ fn dev_default_socket_echo_reports_jit_gap() {
 }
 
 #[test]
-fn dev_default_tls_deadline_reports_jit_gap() {
+fn dev_default_tls_peer_identity_matches_aot_and_interpreter() {
+    let _guard = dev_diff_lock().lock().unwrap();
     let dir = std::env::temp_dir().join(format!(
-        "jet_dev_tls_deadline_parity_{}",
+        "jet_dev_tls_peer_identity_parity_{}",
         std::process::id()
     ));
+    let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = listener.local_addr().unwrap();
-    // Accept with a deadline: default-dev deopts and may connect, so blocking
-    // blocking forever on a second accept hangs the whole --test-threads=1 suite.
-    let server = std::thread::spawn(move || {
-        let _ = listener.set_nonblocking(true);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-        let mut peers = Vec::new();
-        while peers.len() < 2 && std::time::Instant::now() < deadline {
-            match listener.accept() {
-                Ok((peer, _)) => peers.push(peer),
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                }
-                Err(_) => break,
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    });
-    let file = dir.join("tls_deadline.jet");
-    fs::write(
-        &file,
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cert = root.join("tests/fixtures/tls/localhost.cert.pem");
+    let key = root.join("tests/fixtures/tls/localhost.key.pem");
+    let root_bytes = fs::read(&cert).unwrap();
+    let jet_bytes = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let source_for = |port: u16| {
         format!(
             r#"use core.net as net
 use core.tls as tls
 
 fn run() {{
-    tcp := net.tcp_connect("{address}") ?? panic("tcp")
-    net.set_timeout(&tcp, 25) ?? panic("timeout")
-    if tls.client(^tcp, "localhost") == {{
-        Ok(_) -> panic("stalled handshake succeeded")
-        Err(error) -> print(net.error_message(error))
-    }}
+    roots :: tls.RootCertificates.from_pem([U8].{{ {roots} }}) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    cfg2 :: cfg.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("versions")
+    tcp :: net.tcp_connect("127.0.0.1:{port}") ?? panic("tcp")
+    budget :: Duration.seconds(2) ?? panic("deadline")
+    secure := tls.client(^tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
+    peer :: secure.peer_identity()
+    print(peer.cipher_suite)
+    print(peer.tls_version)
+    if !peer.cipher_suite.starts_with("TLS13_") {{ panic("cipher") }}
+    if peer.tls_version != .Tls13 {{ panic("version") }}
+    secure.close() ?? panic("close")
 }}
-"#
-        ),
-    )
-    .unwrap();
+"#,
+            roots = jet_bytes(&root_bytes),
+        )
+    };
+    let start_server = |port: u16| {
+        let mut server = Command::new("openssl")
+            .args([
+                "s_server",
+                "-quiet",
+                "-www",
+                "-tls1_3",
+                "-accept",
+                &port.to_string(),
+                "-cert",
+            ])
+            .arg(&cert)
+            .arg("-key")
+            .arg(&key)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("openssl TLS 1.3 server");
+        std::thread::sleep(Duration::from_millis(250));
+        server
+    };
+    let fresh_port = || {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        port
+    };
+
+    let aot_port = fresh_port();
+    let file = dir.join("tls_peer_identity.jet");
+    fs::write(&file, source_for(aot_port)).unwrap();
+    let mut server = start_server(aot_port);
     let shown = file.to_string_lossy().to_string();
-    let _ = compiled_binary_output(&dir, "tls_deadline", 0, "tls_deadline", &shown);
-    assert_default_dev_jit_gap("tls_deadline", &shown);
-    server.join().unwrap();
+    let aot = compiled_binary_output(
+        &dir,
+        "tls_peer_identity_aot",
+        0,
+        "tls_peer_identity",
+        &shown,
+    );
+    let _ = server.kill();
+    let _ = server.wait();
+    assert_eq!(aot.exit_code, 0, "AOT stderr: {}", aot.stderr);
+
+    let dev_port = fresh_port();
+    fs::write(&file, source_for(dev_port)).unwrap();
+    let mut server = start_server(dev_port);
+    let dev = match dev_iteration_with_timeout("tls_peer_identity", &shown, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev TLS peer identity failed: {diags:?}"),
+    };
+    let _ = server.kill();
+    let _ = server.wait();
+
+    let interpreter_port = fresh_port();
+    fs::write(&file, source_for(interpreter_port)).unwrap();
+    let mut server = start_server(interpreter_port);
+    let interpreted = match dev_iteration_with_timeout("tls_peer_identity", &shown, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("interpreter TLS peer identity failed: {diags:?}"),
+    };
+    let _ = server.kill();
+    let _ = server.wait();
+
+    let mut aot_lines = aot.stdout.lines();
+    assert!(aot_lines.next().is_some_and(|cipher| cipher.starts_with("TLS13_")));
+    assert_eq!(aot_lines.next(), Some("Tls13"));
+    assert_eq!(aot_lines.next(), None);
+    assert_eq!(dev.stdout, aot.stdout);
+    assert_eq!(interpreted.stdout, aot.stdout);
+    assert_eq!(dev.exit_code, 0, "default dev stderr: {}", dev.stderr);
+    assert_eq!(interpreted.exit_code, 0, "interpreter stderr: {}", interpreted.stderr);
     let _ = fs::remove_dir_all(dir);
 }
 

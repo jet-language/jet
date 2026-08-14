@@ -537,7 +537,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             matches!(member, "accepted" | "overloaded" | "completed" | "cancelled")
         }
         "TLSPeerIdentity" => {
-            matches!(member, "verified_server_name" | "leaf" | "certificate_chain")
+            matches!(member, "verified_server_name" | "leaf" | "certificate_chain" | "cipher_suite" | "tls_version")
         }
         "TLSCertificate" => matches!(
             member,
@@ -707,6 +707,8 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "certificate_chain" => Some(Type::List(Box::new(Type::Named(
                 "TLSCertificate".to_string(),
             )))),
+            "cipher_suite" => Some(Type::String),
+            "tls_version" => Some(Type::Named("TLSVersion".to_string())),
             _ => None,
         };
     }

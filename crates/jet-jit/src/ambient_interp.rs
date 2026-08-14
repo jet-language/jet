@@ -2351,6 +2351,126 @@ pub fn ambient_core_call(
             crate::Net::email_runtime_fns(),
         );
     }
+    if module == "core.tls" {
+        let result = match method {
+            "client" => match args.as_slice() {
+                [stream, CtValue::Str(server_name)] => {
+                    let Some(stream) = http_handle_id(stream, "TcpStream") else {
+                        return Some(Err(unsupported("core.tls.client stream", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_client(
+                        stream,
+                        server_name.clone(),
+                        None,
+                        None,
+                    ))
+                }
+                [stream, CtValue::Str(server_name), deadline] => {
+                    let Some(stream) = http_handle_id(stream, "TcpStream") else {
+                        return Some(Err(unsupported("core.tls.client stream", span)));
+                    };
+                    let Some(deadline) = duration_ns(deadline) else {
+                        return Some(Err(unsupported("core.tls.client deadline", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_client(
+                        stream,
+                        server_name.clone(),
+                        None,
+                        Some(deadline),
+                    ))
+                }
+                [stream, CtValue::Str(server_name), config, deadline] => {
+                    let Some(stream) = http_handle_id(stream, "TcpStream") else {
+                        return Some(Err(unsupported("core.tls.client stream", span)));
+                    };
+                    let Some(config) = http_handle_id(config, "TLSClientConfig") else {
+                        return Some(Err(unsupported("core.tls.client config", span)));
+                    };
+                    let Some(deadline) = duration_ns(deadline) else {
+                        return Some(Err(unsupported("core.tls.client deadline", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_client(
+                        stream,
+                        server_name.clone(),
+                        Some(config),
+                        Some(deadline),
+                    ))
+                }
+                _ => Err(unsupported("core.tls.client arguments", span)),
+            },
+            "read" => match args.as_slice() {
+                [stream, CtValue::Int(limit)] => {
+                    let Some(stream) = http_handle_id(stream, "TLSStream") else {
+                        return Some(Err(unsupported("core.tls.read stream", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_stream_read_bytes(
+                        stream, *limit, None,
+                    ))
+                }
+                _ => Err(unsupported("core.tls.read arguments", span)),
+            },
+            "read_text" => match args.as_slice() {
+                [stream, CtValue::Int(limit)] => {
+                    let Some(stream) = http_handle_id(stream, "TLSStream") else {
+                        return Some(Err(unsupported("core.tls.read_text stream", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_stream_read_text(
+                        stream, *limit,
+                    ))
+                }
+                _ => Err(unsupported("core.tls.read_text arguments", span)),
+            },
+            "write" => match args.as_slice() {
+                [stream, data] => {
+                    let Some(stream) = http_handle_id(stream, "TLSStream") else {
+                        return Some(Err(unsupported("core.tls.write stream", span)));
+                    };
+                    let Some(data) = net_bytes_value(data) else {
+                        return Some(Err(unsupported("core.tls.write bytes", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_stream_write_bytes(stream, data))
+                }
+                _ => Err(unsupported("core.tls.write arguments", span)),
+            },
+            "write_all" => match args.as_slice() {
+                [stream, data] => {
+                    let Some(stream) = http_handle_id(stream, "TLSStream") else {
+                        return Some(Err(unsupported("core.tls.write_all stream", span)));
+                    };
+                    let Some(data) = net_bytes_value(data) else {
+                        return Some(Err(unsupported("core.tls.write_all bytes", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_stream_write_all_bytes(
+                        stream, data, None,
+                    ))
+                }
+                _ => Err(unsupported("core.tls.write_all arguments", span)),
+            },
+            "write_text" => match args.as_slice() {
+                [stream, CtValue::Str(text)] => {
+                    let Some(stream) = http_handle_id(stream, "TLSStream") else {
+                        return Some(Err(unsupported("core.tls.write_text stream", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_stream_write_text(
+                        stream,
+                        text.clone(),
+                    ))
+                }
+                _ => Err(unsupported("core.tls.write_text arguments", span)),
+            },
+            "close" => match args.as_slice() {
+                [stream] => {
+                    let Some(stream) = http_handle_id(stream, "TLSStream") else {
+                        return Some(Err(unsupported("core.tls.close stream", span)));
+                    };
+                    Ok(crate::net_http_rt::runtime_tls_stream_close(stream))
+                }
+                _ => Err(unsupported("core.tls.close arguments", span)),
+            },
+            _ => return None,
+        };
+        return Some(result);
+    }
     if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
         return Some(result);
     }
@@ -3941,6 +4061,236 @@ fn ambient_net_handle(
 ) -> Option<Result<CtValue, Diagnostic>> {
     if matches!(
         op,
+        "TLSClientConfigDefault"
+            | "TLSRootCertificatesFromPem"
+            | "TLSClientIdentityFromPem"
+            | "TLSClientConfigWithAlpn"
+            | "TLSClientConfigWithTrust"
+            | "TLSClientConfigWithIdentity"
+            | "TLSClientConfigWithVersionBounds"
+            | "TLSStreamReadDeadline"
+            | "TLSStreamWriteAllDeadline"
+            | "TLSStreamReady"
+            | "TLSStreamClose"
+            | "TLSStreamCloseWrite"
+            | "TLSStreamPeerIdentity"
+    ) {
+        return Some(match op {
+            "TLSClientConfigDefault" => {
+                if !args.is_empty() {
+                    Err(unsupported("ClientConfig.default arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_client_config_default())
+                }
+            }
+            "TLSRootCertificatesFromPem" => {
+                let Some(bytes) = args.first().and_then(net_bytes_value) else {
+                    return Some(Err(unsupported(
+                        "RootCertificates.from_pem bytes",
+                        span,
+                    )));
+                };
+                if args.len() != 1 {
+                    Err(unsupported("RootCertificates.from_pem arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_root_certificates_from_pem(bytes))
+                }
+            }
+            "TLSClientIdentityFromPem" => {
+                let (Some(cert_chain), Some(private_key)) = (
+                    args.first().and_then(net_bytes_value),
+                    args.get(1).and_then(net_bytes_value),
+                ) else {
+                    return Some(Err(unsupported(
+                        "ClientIdentity.from_pem bytes",
+                        span,
+                    )));
+                };
+                if args.len() != 2 {
+                    Err(unsupported("ClientIdentity.from_pem arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_client_identity_from_pem(
+                        cert_chain,
+                        private_key,
+                    ))
+                }
+            }
+            "TLSClientConfigWithAlpn" => {
+                let Some(config) = http_handle_id(recv, "TLSClientConfig") else {
+                    return Some(Err(unsupported("TLSClientConfig receiver", span)));
+                };
+                let Some(protocols) = args.first().and_then(ct_string_list) else {
+                    return Some(Err(unsupported("TLSClientConfig.with_alpn protocols", span)));
+                };
+                if args.len() != 1 {
+                    Err(unsupported("TLSClientConfig.with_alpn arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_client_config_with_alpn(
+                        config, protocols,
+                    ))
+                }
+            }
+            "TLSClientConfigWithTrust" => {
+                let Some(config) = http_handle_id(recv, "TLSClientConfig") else {
+                    return Some(Err(unsupported("TLSClientConfig receiver", span)));
+                };
+                let Some(trust) = args.first().and_then(ct_tls_trust) else {
+                    return Some(Err(unsupported("TLSClientConfig.with_trust policy", span)));
+                };
+                if args.len() != 1 {
+                    Err(unsupported("TLSClientConfig.with_trust arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_client_config_with_trust(
+                        config, trust,
+                    ))
+                }
+            }
+            "TLSClientConfigWithIdentity" => {
+                let Some(config) = http_handle_id(recv, "TLSClientConfig") else {
+                    return Some(Err(unsupported("TLSClientConfig receiver", span)));
+                };
+                let Some(identity) = args
+                    .first()
+                    .and_then(|value| http_handle_id(value, "TLSClientIdentity"))
+                else {
+                    return Some(Err(unsupported(
+                        "TLSClientConfig.with_client_identity identity",
+                        span,
+                    )));
+                };
+                if args.len() != 1 {
+                    Err(unsupported(
+                        "TLSClientConfig.with_client_identity arguments",
+                        span,
+                    ))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_client_config_with_identity(
+                        config, identity,
+                    ))
+                }
+            }
+            "TLSClientConfigWithVersionBounds" => {
+                let Some(config) = http_handle_id(recv, "TLSClientConfig") else {
+                    return Some(Err(unsupported("TLSClientConfig receiver", span)));
+                };
+                let (Some(min), Some(max)) = (
+                    args.first().and_then(ct_tls_version),
+                    args.get(1).and_then(ct_tls_version),
+                ) else {
+                    return Some(Err(unsupported(
+                        "TLSClientConfig.with_version_bounds versions",
+                        span,
+                    )));
+                };
+                if args.len() != 2 {
+                    Err(unsupported(
+                        "TLSClientConfig.with_version_bounds arguments",
+                        span,
+                    ))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_client_config_with_version_bounds(
+                        config, min, max,
+                    ))
+                }
+            }
+            "TLSStreamReadDeadline" => {
+                let Some(stream) = http_handle_id(recv, "TLSStream") else {
+                    return Some(Err(unsupported("TLSStream receiver", span)));
+                };
+                let Some(CtValue::Int(limit)) = args.first() else {
+                    return Some(Err(unsupported("TLSStream.read limit", span)));
+                };
+                let Some(deadline) = args.get(1).and_then(duration_ns) else {
+                    return Some(Err(unsupported("TLSStream.read deadline", span)));
+                };
+                if args.len() != 2 {
+                    Err(unsupported("TLSStream.read arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_stream_read_bytes(
+                        stream,
+                        *limit,
+                        Some(deadline),
+                    ))
+                }
+            }
+            "TLSStreamWriteAllDeadline" => {
+                let Some(stream) = http_handle_id(recv, "TLSStream") else {
+                    return Some(Err(unsupported("TLSStream receiver", span)));
+                };
+                let Some(data) = args.first().and_then(net_bytes_value) else {
+                    return Some(Err(unsupported("TLSStream.write_all bytes", span)));
+                };
+                let Some(deadline) = args.get(1).and_then(duration_ns) else {
+                    return Some(Err(unsupported("TLSStream.write_all deadline", span)));
+                };
+                if args.len() != 2 {
+                    Err(unsupported("TLSStream.write_all arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_stream_write_all_bytes(
+                        stream,
+                        data,
+                        Some(deadline),
+                    ))
+                }
+            }
+            "TLSStreamReady" => {
+                let Some(stream) = http_handle_id(recv, "TLSStream") else {
+                    return Some(Err(unsupported("TLSStream receiver", span)));
+                };
+                let Some(interest) = args.first().and_then(net_ready_interest_value) else {
+                    return Some(Err(unsupported("TLSStream.ready interest", span)));
+                };
+                let Some(deadline) = args.get(1).and_then(duration_ns) else {
+                    return Some(Err(unsupported("TLSStream.ready deadline", span)));
+                };
+                if args.len() != 2 {
+                    Err(unsupported("TLSStream.ready arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_stream_ready(
+                        stream, interest, deadline,
+                    ))
+                }
+            }
+            "TLSStreamClose" => {
+                let Some(stream) = http_handle_id(recv, "TLSStream") else {
+                    return Some(Err(unsupported("TLSStream receiver", span)));
+                };
+                if !args.is_empty() {
+                    Err(unsupported("TLSStream.close arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_stream_close(stream))
+                }
+            }
+            "TLSStreamCloseWrite" => {
+                let Some(stream) = http_handle_id(recv, "TLSStream") else {
+                    return Some(Err(unsupported("TLSStream receiver", span)));
+                };
+                let Some(deadline) = args.first().and_then(duration_ns) else {
+                    return Some(Err(unsupported("TLSStream.close_write deadline", span)));
+                };
+                if args.len() != 1 {
+                    Err(unsupported("TLSStream.close_write arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_stream_close_write(
+                        stream, deadline,
+                    ))
+                }
+            }
+            "TLSStreamPeerIdentity" => {
+                let Some(stream) = http_handle_id(recv, "TLSStream") else {
+                    return Some(Err(unsupported("TLSStream receiver", span)));
+                };
+                if !args.is_empty() {
+                    Err(unsupported("TLSStream.peer_identity arguments", span))
+                } else {
+                    Ok(crate::net_http_rt::runtime_tls_stream_peer_identity(stream))
+                }
+            }
+            _ => unreachable!(),
+        });
+    }
+    if matches!(
+        op,
         "TcpListenerAccept"
             | "TcpListenerLocalAddr"
             | "TcpStreamRead"
@@ -4220,6 +4570,45 @@ fn ct_string_list(v: &CtValue) -> Option<Vec<String>> {
             }
             Some(out)
         }
+        _ => None,
+    }
+}
+
+fn ct_tls_trust(v: &CtValue) -> Option<crate::net_http_rt::JetTLSTrust> {
+    match v {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "TLSClientTrust" => match (variant.as_str(), args.as_slice()) {
+            ("System", []) => Some(crate::net_http_rt::JetTLSTrust::System),
+            ("SystemPlus", [(_, roots)]) => http_handle_id(roots, "TLSRootCertificates")
+                .and_then(|handle| {
+                    crate::net_http_rt::tls_root_certificates_for_ambient(handle)
+                })
+                .map(crate::net_http_rt::JetTLSTrust::SystemPlus),
+            ("CustomOnly", [(_, roots)]) => http_handle_id(roots, "TLSRootCertificates")
+                .and_then(|handle| {
+                    crate::net_http_rt::tls_root_certificates_for_ambient(handle)
+                })
+                .map(crate::net_http_rt::JetTLSTrust::CustomOnly),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn ct_tls_version(v: &CtValue) -> Option<crate::net_http_rt::JetTLSVersion> {
+    match v {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "TLSVersion" && args.is_empty() => match variant.as_str() {
+            "Tls12" => Some(crate::net_http_rt::JetTLSVersion::Tls12),
+            "Tls13" => Some(crate::net_http_rt::JetTLSVersion::Tls13),
+            _ => None,
+        },
         _ => None,
     }
 }

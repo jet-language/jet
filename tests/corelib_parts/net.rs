@@ -1606,7 +1606,7 @@ fn run() {{
     _plus :: tls.ClientConfig.default().with_trust(.SystemPlus(roots)) ?? panic("system plus")
     cfg0 :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("custom trust")
     cfg1 :: cfg0.with_client_identity(identity) ?? panic("client identity")
-    cfg2 :: cfg1.with_version_bounds(min: .Tls12, max: .Tls13) ?? panic("version bounds")
+    cfg2 :: cfg1.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("version bounds")
     tcp :: net.tcp_connect("127.0.0.1:{}") ?? panic("tcp")
     if cfg2.with_alpn(invalid_alpn()) == {{
         .Ok(_) -> panic("empty dynamic ALPN accepted")
@@ -1620,6 +1620,10 @@ fn run() {{
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("mTLS")
     peer :: secure.peer_identity()
     print(peer.verified_server_name)
+    print(peer.cipher_suite)
+    print(peer.tls_version)
+    if !peer.cipher_suite.starts_with("TLS13_") {{ panic("unexpected cipher suite") }}
+    if peer.tls_version != .Tls13 {{ panic("unexpected TLS version") }}
     print(peer.certificate_chain.len() == 2)
     print(peer.leaf.der == peer.certificate_chain[0].der)
     print(peer.leaf.der.len() > 0)
@@ -1662,9 +1666,17 @@ fn run() {{
     let _ = server.kill();
     let _ = server.wait();
     assert_eq!(code, 0, "{stderr}");
+    let mut lines = stdout.lines();
+    assert_eq!(lines.next(), Some("mismatch-rejected"));
+    assert_eq!(lines.next(), Some("bounds-rejected"));
+    assert_eq!(lines.next(), Some("alpn-rejected"));
+    assert_eq!(lines.next(), Some("localhost"));
+    let cipher_suite = lines.next().unwrap_or_default();
+    assert!(cipher_suite.starts_with("TLS13_"), "unexpected cipher suite: {cipher_suite}");
+    assert_eq!(lines.next(), Some("Tls13"));
     assert_eq!(
-        stdout,
-        "mismatch-rejected\nbounds-rejected\nalpn-rejected\nlocalhost\ntrue\ntrue\ntrue\n32\n32\ntrue\ntrue\ntrue\ntrue\nwrite-closed\ntrue\nlocalhost\n",
+        lines.collect::<Vec<_>>().join("\n"),
+        "true\ntrue\ntrue\n32\n32\ntrue\ntrue\ntrue\ntrue\nwrite-closed\ntrue\nlocalhost",
     );
     let _ = fs::remove_dir_all(dir);
 }

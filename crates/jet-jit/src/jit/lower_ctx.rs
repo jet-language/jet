@@ -12426,6 +12426,59 @@ impl LowerCtx<'_, '_> {
                 if module == "core.event" && method == "scope" && args.is_empty() {
                     return Ok(self.call_host(self.host.watcher.event_scope, &[]));
                 }
+                if module == "core.tls" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "client" if args.len() == 2 => (
+                            self.host.net_http.tls_client,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "client" if args.len() == 3 => (
+                            self.host.net_http.tls_client_deadline,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "client" if args.len() == 4 => (
+                            self.host.net_http.tls_client_config_deadline,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                                self.lower_expr(&args[3])?,
+                            ],
+                        ),
+                        "read" if args.len() == 2 => (
+                            self.host.net_http.tls_read_bytes,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "read_text" if args.len() == 2 => (
+                            self.host.net_http.tls_read_text,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "write" if args.len() == 2 => (
+                            self.host.net_http.tls_write_bytes,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "write_all" if args.len() == 2 => (
+                            self.host.net_http.tls_write_all_bytes,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "write_text" if args.len() == 2 => (
+                            self.host.net_http.tls_write_text,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "close" if args.len() == 1 => (
+                            self.host.net_http.tls_close,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.net" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "tcp_listen" if args.len() == 1 => (
@@ -19616,6 +19669,10 @@ impl LowerCtx<'_, '_> {
                 name.as_str(),
                 "TcpListener"
                     | "TcpStream"
+                    | "TLSStream"
+                    | "TLSClientConfig"
+                    | "TLSRootCertificates"
+                    | "TLSClientIdentity"
                     | "SocketAddr"
                     | "UdpSocket"
                     | "UDPPacket"
@@ -21286,6 +21343,91 @@ impl LowerCtx<'_, '_> {
             THandleOp::TcpStreamWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamPeerAddr => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamLocalAddr => Err("jit handle method unsupported".to_string()),
+            THandleOp::TLSStreamReadDeadline if args.len() == 2 => {
+                let limit = self.lower_expr(&args[0])?;
+                let deadline = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_read_bytes_deadline,
+                    &[recv_val, limit, deadline],
+                ))
+            }
+            THandleOp::TLSStreamWriteAllDeadline if args.len() == 2 => {
+                let data = self.lower_expr(&args[0])?;
+                let deadline = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_write_all_bytes_deadline,
+                    &[recv_val, data, deadline],
+                ))
+            }
+            THandleOp::TLSStreamReady if args.len() == 2 => {
+                let interest = self.lower_expr(&args[0])?;
+                let deadline = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_ready,
+                    &[recv_val, interest, deadline],
+                ))
+            }
+            THandleOp::TLSStreamClose => {
+                Ok(self.call_host(self.host.net_http.tls_close, &[recv_val]))
+            }
+            THandleOp::TLSStreamCloseWrite if args.len() == 1 => {
+                let deadline = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_close_write,
+                    &[recv_val, deadline],
+                ))
+            }
+            THandleOp::TLSStreamPeerIdentity => {
+                Ok(self.call_host(self.host.net_http.tls_peer_identity, &[recv_val]))
+            }
+            THandleOp::TLSClientConfigDefault => Ok(self.call_host(
+                self.host.net_http.tls_client_config_default,
+                &[],
+            )),
+            THandleOp::TLSRootCertificatesFromPem if args.len() == 1 => {
+                let pem = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_root_certificates_from_pem,
+                    &[pem],
+                ))
+            }
+            THandleOp::TLSClientIdentityFromPem if args.len() == 2 => {
+                let cert_chain = self.lower_expr(&args[0])?;
+                let private_key = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_client_identity_from_pem,
+                    &[cert_chain, private_key],
+                ))
+            }
+            THandleOp::TLSClientConfigWithAlpn if args.len() == 1 => {
+                let protocols = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_client_config_with_alpn,
+                    &[recv_val, protocols],
+                ))
+            }
+            THandleOp::TLSClientConfigWithTrust if args.len() == 1 => {
+                let trust = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_client_config_with_trust,
+                    &[recv_val, trust],
+                ))
+            }
+            THandleOp::TLSClientConfigWithIdentity if args.len() == 1 => {
+                let identity = self.lower_expr(&args[0])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_client_config_with_identity,
+                    &[recv_val, identity],
+                ))
+            }
+            THandleOp::TLSClientConfigWithVersionBounds if args.len() == 2 => {
+                let min = self.lower_expr(&args[0])?;
+                let max = self.lower_expr(&args[1])?;
+                Ok(self.call_host(
+                    self.host.net_http.tls_client_config_with_version_bounds,
+                    &[recv_val, min, max],
+                ))
+            }
             THandleOp::UdpSocketReady if args.len() == 2 => {
                 let interest = self.lower_expr(&args[0])?;
                 let deadline = self.lower_expr(&args[1])?;
@@ -21328,20 +21470,7 @@ impl LowerCtx<'_, '_> {
             | THandleOp::UnixStreamReady
             | THandleOp::UnixStreamClose
             | THandleOp::UnixStreamSetTimeout
-            | THandleOp::TLSStreamReadDeadline
-            | THandleOp::TLSStreamWriteAllDeadline
-            | THandleOp::TLSStreamReady
-            | THandleOp::TLSStreamClose
-            | THandleOp::TLSStreamCloseWrite
-            | THandleOp::TLSStreamPeerIdentity
-            | THandleOp::TLSClientConfigDefault
-            | THandleOp::HTTPClientNew
-            | THandleOp::TLSClientConfigWithAlpn
-            | THandleOp::TLSRootCertificatesFromPem
-            | THandleOp::TLSClientIdentityFromPem
-            | THandleOp::TLSClientConfigWithTrust
-            | THandleOp::TLSClientConfigWithIdentity
-            | THandleOp::TLSClientConfigWithVersionBounds => {
+            | THandleOp::HTTPClientNew => {
                 Err("jit handle method unsupported".to_string())
             }
             THandleOp::AllocAlloc if args.len() == 1 => {
@@ -27184,6 +27313,23 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "TempDir" | "TempFile" | "FileLock" => &["path"],
         "LogField" => &["key", "value", "kind", "redacted"],
         "LogSpan" => &["id", "name"],
+        "TLSCertificate" => &[
+            "der",
+            "sha256",
+            "spki_sha256",
+            "dns_names",
+            "valid_from_unix_ms",
+            "valid_until_unix_ms",
+            "subject",
+            "issuer",
+        ],
+        "TLSPeerIdentity" => &[
+            "verified_server_name",
+            "leaf",
+            "certificate_chain",
+            "cipher_suite",
+            "tls_version",
+        ],
         // Mirrors jet_std::ProcessResult field order (Open.rs).
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
         // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.

@@ -501,6 +501,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "verified_server_name" => Some(Type::String),
             "leaf" => Some(Type::Named("TLSCertificate".to_string())),
             "certificate_chain" => Some(Type::List(Box::new(Type::Named("TLSCertificate".to_string())))),
+            "cipher_suite" => Some(Type::String),
+            "tls_version" => Some(Type::Named("TLSVersion".to_string())),
             _ => None,
         };
     }

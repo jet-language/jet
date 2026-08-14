@@ -1,6 +1,7 @@
 // ── E2-M10: networking (core.net + core.http) ─────────────────────────────────
 // All networking uses std::net only — zero external crates in the prelude (I6).
-// TLS (D-NET1) is delivered as the `jet.tls` FFI package and is not included here.
+// TLS (D-NET1) uses the shared native callback bridge below; AOT and JIT hosts
+// marshal into these Prelude operations rather than implementing a second TLS policy.
 
 pub struct JetTCPListener {
     inner: std::net::TcpListener,
@@ -283,6 +284,8 @@ type JetTLSPeerSnapshot = (
     Vec<i64>,
     Vec<String>,
     Vec<String>,
+    String,
+    i64,
 );
 
 #[derive(Clone)]
@@ -303,7 +306,7 @@ pub enum JetTLSTrust {
     CustomOnly(JetTLSRootCertificates),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JetTLSVersion {
     Tls12,
     Tls13,
@@ -450,6 +453,8 @@ pub struct JetTLSPeerIdentity {
     pub verified_server_name: String,
     pub leaf: JetTLSCertificate,
     pub certificate_chain: Vec<JetTLSCertificate>,
+    pub cipher_suite: String,
+    pub tls_version: JetTLSVersion,
 }
 
 
@@ -1416,7 +1421,18 @@ fn jet_net_tls_close_write(
 fn jet_net_tls_peer_identity_from_snapshot(
     snapshot: JetTLSPeerSnapshot,
 ) -> Result<JetTLSPeerIdentity, JetNetError> {
-    let (verified_server_name, ders, spkis, dns_names, valid_from, valid_until, subjects, issuers) = snapshot;
+    let (
+        verified_server_name,
+        ders,
+        spkis,
+        dns_names,
+        valid_from,
+        valid_until,
+        subjects,
+        issuers,
+        cipher_suite,
+        tls_version,
+    ) = snapshot;
     let mut certificate_chain = Vec::with_capacity(ders.len());
     for index in 0..ders.len() {
         let der = ders[index].clone();
@@ -1434,7 +1450,24 @@ fn jet_net_tls_peer_identity_from_snapshot(
     let leaf = certificate_chain.first().cloned().ok_or_else(|| JetNetError::TLS(jet_net_detail(
         "tls peer identity", None, None, "verified TLS peer chain is empty".to_string(), None,
     )))?;
-    Ok(JetTLSPeerIdentity { verified_server_name, leaf, certificate_chain })
+    let tls_version = match tls_version {
+        12 => JetTLSVersion::Tls12,
+        13 => JetTLSVersion::Tls13,
+        other => return Err(JetNetError::TLS(jet_net_detail(
+            "tls peer identity",
+            None,
+            None,
+            format!("TLS peer negotiated unsupported protocol version `{other}`"),
+            None,
+        ))),
+    };
+    Ok(JetTLSPeerIdentity {
+        verified_server_name,
+        leaf,
+        certificate_chain,
+        cipher_suite,
+        tls_version,
+    })
 }
 
 fn jet_net_tls_peer_identity(stream: &JetTLSStream) -> JetTLSPeerIdentity {

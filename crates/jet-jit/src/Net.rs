@@ -9,7 +9,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
-mod runtime {
+pub(crate) mod runtime {
     use crate::JetShow;
 
     pub mod jet_std {

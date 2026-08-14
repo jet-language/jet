@@ -14,6 +14,10 @@ use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 enum NetHttpHandle {
     TcpListener(Arc<JetTCPListener>),
     TcpStream(Arc<Mutex<JetTCPStream>>),
+    TLSClientConfig(JetTLSClientConfig),
+    TLSRootCertificates(JetTLSRootCertificates),
+    TLSClientIdentity(JetTLSClientIdentity),
+    TLSStream(Arc<Mutex<JetTLSStream>>),
     SocketAddr(JetSocketAddr),
     UdpSocket(Arc<JetUDPSocket>),
     NetReady(Arc<JetNetReady>),
@@ -82,6 +86,40 @@ fn tcp_listener(handle: i64) -> Option<Arc<JetTCPListener>> {
 fn tcp_stream(handle: i64) -> Option<Arc<Mutex<JetTCPStream>>> {
     with_handle(handle, |h| match h {
         NetHttpHandle::TcpStream(s) => Some(Arc::clone(s)),
+        _ => None,
+    })
+}
+
+fn tls_client_config(handle: i64) -> Option<JetTLSClientConfig> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::TLSClientConfig(config) => Some(config.clone()),
+        _ => None,
+    })
+}
+
+fn tls_root_certificates(handle: i64) -> Option<JetTLSRootCertificates> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::TLSRootCertificates(roots) => Some(roots.clone()),
+        _ => None,
+    })
+}
+
+pub(crate) fn tls_root_certificates_for_ambient(
+    handle: i64,
+) -> Option<JetTLSRootCertificates> {
+    tls_root_certificates(handle)
+}
+
+fn tls_client_identity(handle: i64) -> Option<JetTLSClientIdentity> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::TLSClientIdentity(identity) => Some(identity.clone()),
+        _ => None,
+    })
+}
+
+fn tls_stream(handle: i64) -> Option<Arc<Mutex<JetTLSStream>>> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::TLSStream(stream) => Some(Arc::clone(stream)),
         _ => None,
     })
 }
@@ -229,6 +267,10 @@ fn net_err(e: JetNetError) -> i64 {
     result_err_bits(marshal_net_error(e).0)
 }
 
+fn io_err(e: jet_std::IOError) -> i64 {
+    result_err_bits(marshal_io_error(e).0)
+}
+
 fn http_err(e: JetHTTPError) -> i64 {
     result_err_bits(marshal_http_error(e).0)
 }
@@ -251,6 +293,20 @@ fn map_net_unit(r: Result<(), JetNetError>) -> i64 {
     match r {
         Ok(()) => result_ok_unit(),
         Err(e) => net_err(e),
+    }
+}
+
+fn map_io_ok<T>(r: Result<T, jet_std::IOError>, f: impl FnOnce(T) -> i64) -> i64 {
+    match r {
+        Ok(v) => result_ok_handle(f(v)),
+        Err(e) => io_err(e),
+    }
+}
+
+fn map_io_unit(r: Result<(), jet_std::IOError>) -> i64 {
+    match r {
+        Ok(()) => result_ok_unit(),
+        Err(e) => io_err(e),
     }
 }
 
@@ -404,6 +460,58 @@ fn net_io_error_value(error: jet_std::IOError) -> CtValue {
         variant: variant.to_string(),
         args: vec![(None, net_io_context_value(context))],
     }
+}
+
+fn net_io_operation_ordinal(operation: jet_std::IOOperation) -> i64 {
+    match operation {
+        jet_std::IOOperation::Read => 0,
+        jet_std::IOOperation::Write => 1,
+        jet_std::IOOperation::Flush => 2,
+        jet_std::IOOperation::Connect => 3,
+        jet_std::IOOperation::Accept => 4,
+        jet_std::IOOperation::Close => 5,
+        jet_std::IOOperation::Resolve => 6,
+        jet_std::IOOperation::Codec => 7,
+    }
+}
+
+fn net_io_context_handle(context: &jet_std::IOContext) -> i64 {
+    let operation = net_io_operation_ordinal(context.operation);
+    let resource = option_string(context.resource.clone());
+    let os_code = context
+        .os_code
+        .map(|value| value.wrapping_add(1))
+        .unwrap_or(0);
+    let cause = option_string(context.cause.clone());
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(4);
+        let _ = rt.heap.record_set_int(record, 0, operation);
+        let _ = rt.heap.record_set_int(record, 1, resource);
+        let _ = rt.heap.record_set_int(record, 2, os_code);
+        let _ = rt.heap.record_set_int(record, 3, cause);
+        record
+    })
+}
+
+fn marshal_io_error(error: jet_std::IOError) -> (i64, CtValue) {
+    let (variant, ordinal, context) = match error {
+        jet_std::IOError::InvalidInput(context) => ("InvalidInput", 0, context),
+        jet_std::IOError::NotFound(context) => ("NotFound", 1, context),
+        jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", 2, context),
+        jet_std::IOError::TimedOut(context) => ("TimedOut", 3, context),
+        jet_std::IOError::Cancelled(context) => ("Cancelled", 4, context),
+        jet_std::IOError::Closed(context) => ("Closed", 5, context),
+        jet_std::IOError::Protocol(context) => ("Protocol", 6, context),
+        jet_std::IOError::Other(context) => ("Other", 7, context),
+    };
+    let context_bits = net_io_context_handle(&context);
+    let packed = context_bits.wrapping_shl(8) | ordinal;
+    let value = CtValue::Enum {
+        type_name: "IOError".to_string(),
+        variant: variant.to_string(),
+        args: vec![(None, net_io_context_value(context))],
+    };
+    (packed, value)
 }
 
 fn decode_result(handle: i64) -> Option<(bool, u64)> {
@@ -923,6 +1031,446 @@ extern "C" fn jet_jit_tcp_stream_ready(stream: i64, interest: i64, deadline: i64
         jet_net_tcp_ready_deadline(&mut guard, interest, &deadline),
         |ready| push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
     )
+}
+
+fn tls_version_bits(version: JetTLSVersion) -> i64 {
+    match version {
+        JetTLSVersion::Tls12 => 0,
+        JetTLSVersion::Tls13 => 1,
+    }
+}
+
+fn tls_trust_bits(value: i64) -> Option<JetTLSTrust> {
+    let variant = value & 0xff;
+    let payload = value >> 8;
+    match variant {
+        0 => Some(JetTLSTrust::System),
+        1 => tls_root_certificates(payload).map(JetTLSTrust::SystemPlus),
+        2 => tls_root_certificates(payload).map(JetTLSTrust::CustomOnly),
+        _ => None,
+    }
+}
+
+fn tls_version_from_bits(value: i64) -> Option<JetTLSVersion> {
+    match value & 0xff {
+        0 => Some(JetTLSVersion::Tls12),
+        1 => Some(JetTLSVersion::Tls13),
+        _ => None,
+    }
+}
+
+fn tls_certificate_handle(certificate: JetTLSCertificate) -> i64 {
+    let der = alloc_bytes(&certificate.der);
+    let sha256 = alloc_bytes(&certificate.sha256);
+    let spki_sha256 = alloc_bytes(&certificate.spki_sha256);
+    let dns_names = list_of_strings(certificate.dns_names);
+    let subject = alloc_string(certificate.subject);
+    let issuer = alloc_string(certificate.issuer);
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(8);
+        let _ = rt.heap.record_set_int(record, 0, der);
+        let _ = rt.heap.record_set_int(record, 1, sha256);
+        let _ = rt.heap.record_set_int(record, 2, spki_sha256);
+        let _ = rt.heap.record_set_int(record, 3, dns_names);
+        let _ = rt.heap.record_set_int(record, 4, certificate.valid_from_unix_ms);
+        let _ = rt.heap.record_set_int(record, 5, certificate.valid_until_unix_ms);
+        let _ = rt.heap.record_set_string(record, 6, subject);
+        let _ = rt.heap.record_set_string(record, 7, issuer);
+        record
+    })
+}
+
+fn tls_peer_identity_handle(identity: JetTLSPeerIdentity) -> i64 {
+    let leaf = tls_certificate_handle(identity.leaf);
+    let chain = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+    for certificate in identity.certificate_chain {
+        let certificate = tls_certificate_handle(certificate);
+        Concurrency::with_runtime_mut(|rt| {
+            let _ = rt.heap.list_push_int(chain, certificate);
+        });
+    }
+    let server_name = alloc_string(identity.verified_server_name);
+    let cipher_suite = alloc_string(identity.cipher_suite);
+    let tls_version = tls_version_bits(identity.tls_version);
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(5);
+        let _ = rt.heap.record_set_string(record, 0, server_name);
+        let _ = rt.heap.record_set_int(record, 1, leaf);
+        let _ = rt.heap.record_set_int(record, 2, chain);
+        let _ = rt.heap.record_set_string(record, 3, cipher_suite);
+        let _ = rt.heap.record_set_int(record, 4, tls_version);
+        record
+    })
+}
+
+fn tls_take_tcp_stream(stream: i64) -> Result<JetTCPStream, JetNetError> {
+    let Some(NetHttpHandle::TcpStream(stream)) = take_handle(stream) else {
+        return Err(net_invalid_error("tls client", "TcpStream"));
+    };
+    Arc::try_unwrap(stream)
+        .map(|mutex| mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
+        .map_err(|_| net_invalid_error("tls client", "shared TcpStream"))
+}
+
+fn tls_client_default(
+    stream: JetTCPStream,
+    server_name: &String,
+    deadline: Option<&jet_std::Duration>,
+) -> Result<JetTLSStream, JetNetError> {
+    let callbacks = (
+        crate::Net::runtime::tls::jet_net_tls_begin_impl,
+        crate::Net::runtime::tls::jet_net_tls_handshake_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_abort_impl,
+        crate::Net::runtime::tls::jet_net_tls_wants_impl,
+        crate::Net::runtime::tls::jet_net_tls_read_ready_impl,
+        crate::Net::runtime::tls::jet_net_tls_read_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_write_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_close_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_close_write_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_peer_identity_impl,
+    );
+    match deadline {
+        Some(deadline) => jet_net_tls_client_scheduler_deadline(
+            stream, server_name, deadline, callbacks.0, callbacks.1, callbacks.2,
+            callbacks.3, callbacks.4, callbacks.5, callbacks.6, callbacks.7, callbacks.8,
+            callbacks.9,
+        ),
+        None => jet_net_tls_client_scheduler(
+            stream, server_name, callbacks.0, callbacks.1, callbacks.2, callbacks.3,
+            callbacks.4, callbacks.5, callbacks.6, callbacks.7, callbacks.8, callbacks.9,
+        ),
+    }
+}
+
+fn tls_client_configured(
+    stream: JetTCPStream,
+    server_name: &String,
+    config: &JetTLSClientConfig,
+    deadline: &jet_std::Duration,
+) -> Result<JetTLSStream, JetNetError> {
+    jet_net_tls_client_scheduler_config_deadline(
+        stream,
+        server_name,
+        config,
+        deadline,
+        crate::Net::runtime::tls::jet_net_tls_begin_config_impl,
+        crate::Net::runtime::tls::jet_net_tls_handshake_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_abort_impl,
+        crate::Net::runtime::tls::jet_net_tls_wants_impl,
+        crate::Net::runtime::tls::jet_net_tls_read_ready_impl,
+        crate::Net::runtime::tls::jet_net_tls_read_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_write_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_close_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_close_write_step_impl,
+        crate::Net::runtime::tls::jet_net_tls_peer_identity_impl,
+    )
+}
+
+extern "C" fn jet_jit_tls_client_config_default() -> i64 {
+    push_handle(NetHttpHandle::TLSClientConfig(jet_tls_client_config_default()))
+}
+
+extern "C" fn jet_jit_tls_root_certificates_from_pem(pem: i64) -> i64 {
+    let pem = clone_bytes(pem);
+    match jet_tls_root_certificates_from_pem(
+        &pem,
+        crate::Net::runtime::tls::jet_net_tls_validate_roots_impl,
+    ) {
+        Ok(roots) => result_ok_handle(push_handle(NetHttpHandle::TLSRootCertificates(roots))),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_client_identity_from_pem(cert_chain: i64, private_key: i64) -> i64 {
+    let cert_chain = clone_bytes(cert_chain);
+    let private_key = clone_bytes(private_key);
+    match jet_tls_client_identity_from_pem(
+        &cert_chain,
+        &private_key,
+        crate::Net::runtime::tls::jet_net_tls_validate_identity_impl,
+    ) {
+        Ok(identity) => result_ok_handle(push_handle(NetHttpHandle::TLSClientIdentity(identity))),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_client_config_with_alpn(config: i64, protocols: i64) -> i64 {
+    let Some(config) = tls_client_config(config) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_alpn",
+            "invalid TLSClientConfig handle".to_string(),
+        ));
+    };
+    let protocols = clone_string_list(protocols);
+    match jet_tls_client_config_with_alpn(config, &protocols) {
+        Ok(config) => result_ok_handle(push_handle(NetHttpHandle::TLSClientConfig(config))),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_client_config_with_trust(config: i64, trust: i64) -> i64 {
+    let Some(config) = tls_client_config(config) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_trust",
+            "invalid TLSClientConfig handle".to_string(),
+        ));
+    };
+    let Some(trust) = tls_trust_bits(trust) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_trust",
+            "invalid TLSClientTrust value".to_string(),
+        ));
+    };
+    match jet_tls_client_config_with_trust(config, trust) {
+        Ok(config) => result_ok_handle(push_handle(NetHttpHandle::TLSClientConfig(config))),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_client_config_with_identity(config: i64, identity: i64) -> i64 {
+    let Some(config) = tls_client_config(config) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_client_identity",
+            "invalid TLSClientConfig handle".to_string(),
+        ));
+    };
+    let Some(identity) = tls_client_identity(identity) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_client_identity",
+            "invalid TLSClientIdentity handle".to_string(),
+        ));
+    };
+    match jet_tls_client_config_with_client_identity(config, &identity) {
+        Ok(config) => result_ok_handle(push_handle(NetHttpHandle::TLSClientConfig(config))),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_client_config_with_version_bounds(
+    config: i64,
+    min: i64,
+    max: i64,
+) -> i64 {
+    let Some(config) = tls_client_config(config) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_version_bounds",
+            "invalid TLSClientConfig handle".to_string(),
+        ));
+    };
+    let (Some(min), Some(max)) = (tls_version_from_bits(min), tls_version_from_bits(max)) else {
+        return io_err(jet_tls_config_error(
+            "ClientConfig.with_version_bounds",
+            "invalid TLSVersion value".to_string(),
+        ));
+    };
+    match jet_tls_client_config_with_version_bounds(config, min, max) {
+        Ok(config) => result_ok_handle(push_handle(NetHttpHandle::TLSClientConfig(config))),
+        Err(error) => io_err(error),
+    }
+}
+
+fn tls_client_stream_result(
+    stream: i64,
+    server_name: i64,
+    config: Option<i64>,
+    deadline: Option<i64>,
+) -> Result<JetTLSStream, JetNetError> {
+    let server_name = clone_string(server_name);
+    let config = match config {
+        Some(handle) => match tls_client_config(handle) {
+            Some(config) => Some(config),
+            None => return Err(net_invalid_error("tls client", "TLSClientConfig")),
+        },
+        None => None,
+    };
+    let stream = match tls_take_tcp_stream(stream) {
+        Ok(stream) => stream,
+        Err(error) => return Err(error),
+    };
+    match (config.as_ref(), deadline) {
+        (Some(config), Some(ns)) => {
+            tls_client_configured(stream, &server_name, config, &jet_std::Duration { ns })
+        }
+        (None, Some(ns)) => {
+            tls_client_default(stream, &server_name, Some(&jet_std::Duration { ns }))
+        }
+        (None, None) => tls_client_default(stream, &server_name, None),
+        (Some(_), None) => Err(net_invalid_error("tls client", "missing configuration deadline")),
+    }
+}
+
+fn tls_client_result(stream: i64, server_name: i64, config: Option<i64>, deadline: Option<i64>) -> i64 {
+    let result = tls_client_stream_result(stream, server_name, config, deadline);
+    map_net_ok(result, |stream| {
+        push_handle(NetHttpHandle::TLSStream(Arc::new(Mutex::new(stream))))
+    })
+}
+
+extern "C" fn jet_jit_tls_client(stream: i64, server_name: i64) -> i64 {
+    tls_client_result(stream, server_name, None, None)
+}
+
+extern "C" fn jet_jit_tls_client_deadline(stream: i64, server_name: i64, deadline: i64) -> i64 {
+    tls_client_result(stream, server_name, None, Some(deadline))
+}
+
+extern "C" fn jet_jit_tls_client_config_deadline(
+    stream: i64,
+    server_name: i64,
+    config: i64,
+    deadline: i64,
+) -> i64 {
+    tls_client_result(stream, server_name, Some(config), Some(deadline))
+}
+
+extern "C" fn jet_jit_tls_read_bytes(stream: i64, limit: i64) -> i64 {
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.read",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_read_bytes(&mut stream, limit) {
+        Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.read",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_read_bytes_deadline(&mut stream, limit, &jet_std::Duration { ns: deadline }) {
+        Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.read_text",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_read_text(&mut stream) {
+        Ok(text) => result_ok_handle(alloc_string(text)),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_write_bytes(stream: i64, data: i64) -> i64 {
+    let data = clone_bytes(data);
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.write",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_write_bytes(&mut stream, &data) {
+        Ok(count) => result_ok(count as u64),
+        Err(error) => io_err(error),
+    }
+}
+
+extern "C" fn jet_jit_tls_write_all_bytes(stream: i64, data: i64) -> i64 {
+    let data = clone_bytes(data);
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.write_all",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map_io_unit(jet_net_tls_write_all_bytes(&mut stream, &data))
+}
+
+extern "C" fn jet_jit_tls_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+    let data = clone_bytes(data);
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.write_all",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map_io_unit(jet_net_tls_write_all_bytes_deadline(
+        &mut stream,
+        &data,
+        &jet_std::Duration { ns: deadline },
+    ))
+}
+
+extern "C" fn jet_jit_tls_write_text(stream: i64, text: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.write_text",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map_io_unit(jet_net_tls_write_text(&mut stream, &text))
+}
+
+extern "C" fn jet_jit_tls_close(stream: i64) -> i64 {
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.close",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map_io_unit(jet_net_tls_close(&mut stream))
+}
+
+extern "C" fn jet_jit_tls_close_write(stream: i64, deadline: i64) -> i64 {
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.close_write",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map_io_unit(jet_net_tls_close_write(
+        &mut stream,
+        &jet_std::Duration { ns: deadline },
+    ))
+}
+
+extern "C" fn jet_jit_tls_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+    let Some(interest) = net_ready_interest(interest) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.ready",
+            "invalid NetReadyInterest value".to_string(),
+        ));
+    };
+    let Some(stream) = tls_stream(stream) else {
+        return io_err(jet_tls_config_error(
+            "TLSStream.ready",
+            "invalid TLSStream handle".to_string(),
+        ));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    map_io_ok(
+        jet_net_tls_ready(&stream, interest, &jet_std::Duration { ns: deadline }),
+        |ready| push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
+    )
+}
+
+extern "C" fn jet_jit_tls_peer_identity(stream: i64) -> i64 {
+    let Some(stream) = tls_stream(stream) else {
+        return 0;
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    tls_peer_identity_handle(jet_net_tls_peer_identity(&stream))
 }
 
 extern "C" fn jet_jit_udp_socket_ready(socket: i64, interest: i64, deadline: i64) -> i64 {
@@ -2178,6 +2726,27 @@ host_fns! {
     tcp_write_all_bytes: "jet_jit_tcp_stream_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
     tcp_close: "jet_jit_tcp_stream_close" => jet_jit_tcp_stream_close: sig1;
     tcp_ready: "jet_jit_tcp_stream_ready" => jet_jit_tcp_stream_ready: sig3;
+    tls_client_config_default: "jet_jit_tls_client_config_default" => jet_jit_tls_client_config_default: sig0;
+    tls_root_certificates_from_pem: "jet_jit_tls_root_certificates_from_pem" => jet_jit_tls_root_certificates_from_pem: sig1;
+    tls_client_identity_from_pem: "jet_jit_tls_client_identity_from_pem" => jet_jit_tls_client_identity_from_pem: sig2;
+    tls_client_config_with_alpn: "jet_jit_tls_client_config_with_alpn" => jet_jit_tls_client_config_with_alpn: sig2;
+    tls_client_config_with_trust: "jet_jit_tls_client_config_with_trust" => jet_jit_tls_client_config_with_trust: sig2;
+    tls_client_config_with_identity: "jet_jit_tls_client_config_with_identity" => jet_jit_tls_client_config_with_identity: sig2;
+    tls_client_config_with_version_bounds: "jet_jit_tls_client_config_with_version_bounds" => jet_jit_tls_client_config_with_version_bounds: sig3;
+    tls_client: "jet_jit_tls_client" => jet_jit_tls_client: sig2;
+    tls_client_deadline: "jet_jit_tls_client_deadline" => jet_jit_tls_client_deadline: sig3;
+    tls_client_config_deadline: "jet_jit_tls_client_config_deadline" => jet_jit_tls_client_config_deadline: sig4;
+    tls_read_bytes: "jet_jit_tls_read_bytes" => jet_jit_tls_read_bytes: sig2;
+    tls_read_bytes_deadline: "jet_jit_tls_read_bytes_deadline" => jet_jit_tls_read_bytes_deadline: sig3;
+    tls_read_text: "jet_jit_tls_read_text" => jet_jit_tls_read_text: sig2;
+    tls_write_bytes: "jet_jit_tls_write_bytes" => jet_jit_tls_write_bytes: sig2;
+    tls_write_all_bytes: "jet_jit_tls_write_all_bytes" => jet_jit_tls_write_all_bytes: sig2;
+    tls_write_all_bytes_deadline: "jet_jit_tls_write_all_bytes_deadline" => jet_jit_tls_write_all_bytes_deadline: sig3;
+    tls_write_text: "jet_jit_tls_write_text" => jet_jit_tls_write_text: sig2;
+    tls_close: "jet_jit_tls_close" => jet_jit_tls_close: sig1;
+    tls_close_write: "jet_jit_tls_close_write" => jet_jit_tls_close_write: sig2;
+    tls_ready: "jet_jit_tls_ready" => jet_jit_tls_ready: sig3;
+    tls_peer_identity: "jet_jit_tls_peer_identity" => jet_jit_tls_peer_identity: sig1;
     udp_ready: "jet_jit_udp_socket_ready" => jet_jit_udp_socket_ready: sig3;
     udp_close: "jet_jit_udp_socket_close" => jet_jit_udp_socket_close: sig1;
     ready_readable: "jet_jit_net_ready_readable" => jet_jit_net_ready_readable: sig1;
@@ -2407,6 +2976,317 @@ fn tcp_stream_result(stream: JetTCPStream) -> CtValue {
         "TcpStream",
         push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream)))),
     )))
+}
+
+fn tls_config_result(config: JetTLSClientConfig) -> CtValue {
+    CtValue::Present(Box::new(net_ct_handle(
+        "TLSClientConfig",
+        push_handle(NetHttpHandle::TLSClientConfig(config)),
+    )))
+}
+
+fn tls_stream_result(stream: JetTLSStream) -> CtValue {
+    CtValue::Present(Box::new(net_ct_handle(
+        "TLSStream",
+        push_handle(NetHttpHandle::TLSStream(Arc::new(Mutex::new(stream)))),
+    )))
+}
+
+fn tls_io_failure(operation: &str, resource: &str) -> CtValue {
+    CtValue::failed(Box::new(net_io_error_value(jet_tls_config_error(
+        operation,
+        format!("invalid {resource} handle"),
+    ))))
+}
+
+fn tls_certificate_value(certificate: JetTLSCertificate) -> CtValue {
+    CtValue::Struct {
+        type_name: "TLSCertificate".to_string(),
+        fields: vec![
+            ("der".to_string(), CtValue::Bytes(certificate.der)),
+            ("sha256".to_string(), CtValue::Bytes(certificate.sha256)),
+            ("spki_sha256".to_string(), CtValue::Bytes(certificate.spki_sha256)),
+            (
+                "dns_names".to_string(),
+                CtValue::List(certificate.dns_names.into_iter().map(CtValue::Str).collect()),
+            ),
+            (
+                "valid_from_unix_ms".to_string(),
+                CtValue::Int(certificate.valid_from_unix_ms),
+            ),
+            (
+                "valid_until_unix_ms".to_string(),
+                CtValue::Int(certificate.valid_until_unix_ms),
+            ),
+            ("subject".to_string(), CtValue::Str(certificate.subject)),
+            ("issuer".to_string(), CtValue::Str(certificate.issuer)),
+        ],
+    }
+}
+
+fn tls_peer_identity_value(identity: JetTLSPeerIdentity) -> CtValue {
+    let leaf = tls_certificate_value(identity.leaf);
+    let chain = CtValue::List(
+        identity
+            .certificate_chain
+            .into_iter()
+            .map(tls_certificate_value)
+            .collect(),
+    );
+    CtValue::Struct {
+        type_name: "TLSPeerIdentity".to_string(),
+        fields: vec![
+            ("verified_server_name".to_string(), CtValue::Str(identity.verified_server_name)),
+            ("leaf".to_string(), leaf),
+            ("certificate_chain".to_string(), chain),
+            ("cipher_suite".to_string(), CtValue::Str(identity.cipher_suite)),
+            (
+                "tls_version".to_string(),
+                CtValue::Enum {
+                    type_name: "TLSVersion".to_string(),
+                    variant: match identity.tls_version {
+                        JetTLSVersion::Tls12 => "Tls12".to_string(),
+                        JetTLSVersion::Tls13 => "Tls13".to_string(),
+                    },
+                    args: vec![],
+                },
+            ),
+        ],
+    }
+}
+
+pub(crate) fn runtime_tls_client_config_default() -> CtValue {
+    net_ct_handle(
+        "TLSClientConfig",
+        push_handle(NetHttpHandle::TLSClientConfig(jet_tls_client_config_default())),
+    )
+}
+
+pub(crate) fn runtime_tls_root_certificates_from_pem(pem: Vec<u8>) -> CtValue {
+    match jet_tls_root_certificates_from_pem(
+        &pem,
+        crate::Net::runtime::tls::jet_net_tls_validate_roots_impl,
+    ) {
+        Ok(roots) => CtValue::Present(Box::new(net_ct_handle(
+            "TLSRootCertificates",
+            push_handle(NetHttpHandle::TLSRootCertificates(roots)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_client_identity_from_pem(
+    cert_chain: Vec<u8>,
+    private_key: Vec<u8>,
+) -> CtValue {
+    match jet_tls_client_identity_from_pem(
+        &cert_chain,
+        &private_key,
+        crate::Net::runtime::tls::jet_net_tls_validate_identity_impl,
+    ) {
+        Ok(identity) => CtValue::Present(Box::new(net_ct_handle(
+            "TLSClientIdentity",
+            push_handle(NetHttpHandle::TLSClientIdentity(identity)),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_client_config_with_alpn(
+    config: i64,
+    protocols: Vec<String>,
+) -> CtValue {
+    let Some(config) = tls_client_config(config) else {
+        return tls_io_failure("ClientConfig.with_alpn", "TLSClientConfig");
+    };
+    match jet_tls_client_config_with_alpn(config, &protocols) {
+        Ok(config) => tls_config_result(config),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_client_config_with_trust(
+    config: i64,
+    trust: JetTLSTrust,
+) -> CtValue {
+    let Some(config) = tls_client_config(config) else {
+        return tls_io_failure("ClientConfig.with_trust", "TLSClientConfig");
+    };
+    match jet_tls_client_config_with_trust(config, trust) {
+        Ok(config) => tls_config_result(config),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_client_config_with_identity(
+    config: i64,
+    identity: i64,
+) -> CtValue {
+    let Some(config) = tls_client_config(config) else {
+        return tls_io_failure("ClientConfig.with_client_identity", "TLSClientConfig");
+    };
+    let Some(identity) = tls_client_identity(identity) else {
+        return tls_io_failure("ClientConfig.with_client_identity", "TLSClientIdentity");
+    };
+    match jet_tls_client_config_with_client_identity(config, &identity) {
+        Ok(config) => tls_config_result(config),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_client_config_with_version_bounds(
+    config: i64,
+    min: JetTLSVersion,
+    max: JetTLSVersion,
+) -> CtValue {
+    let Some(config) = tls_client_config(config) else {
+        return tls_io_failure("ClientConfig.with_version_bounds", "TLSClientConfig");
+    };
+    match jet_tls_client_config_with_version_bounds(config, min, max) {
+        Ok(config) => tls_config_result(config),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_client(
+    stream: i64,
+    server_name: String,
+    config: Option<i64>,
+    deadline: Option<i64>,
+) -> CtValue {
+    match tls_client_stream_result(stream, alloc_string(server_name), config, deadline) {
+        Ok(stream) => tls_stream_result(stream),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_read_bytes(
+    stream: i64,
+    limit: i64,
+    deadline: Option<i64>,
+) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.read", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = match deadline {
+        Some(ns) => jet_net_tls_read_bytes_deadline(
+            &mut stream,
+            limit,
+            &jet_std::Duration { ns },
+        ),
+        None => jet_net_tls_read_bytes(&mut stream, limit),
+    };
+    match result {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_read_text(stream: i64, _limit: i64) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.read_text", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_read_text(&mut stream) {
+        Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_write_bytes(stream: i64, data: Vec<u8>) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.write", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_write_bytes(&mut stream, &data) {
+        Ok(count) => CtValue::Present(Box::new(CtValue::Int(count))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_write_all_bytes(
+    stream: i64,
+    data: Vec<u8>,
+    deadline: Option<i64>,
+) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.write_all", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = match deadline {
+        Some(ns) => jet_net_tls_write_all_bytes_deadline(
+            &mut stream,
+            &data,
+            &jet_std::Duration { ns },
+        ),
+        None => jet_net_tls_write_all_bytes(&mut stream, &data),
+    };
+    match result {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_write_text(stream: i64, text: String) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.write_text", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_write_text(&mut stream, &text) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_close(stream: i64) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.close", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_close(&mut stream) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_close_write(stream: i64, deadline: i64) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.close_write", "TLSStream");
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_close_write(&mut stream, &jet_std::Duration { ns: deadline }) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_ready(stream: i64, interest: i64, deadline: i64) -> CtValue {
+    let Some(interest) = net_ready_interest(interest) else {
+        return tls_io_failure("TLSStream.ready", "NetReadyInterest");
+    };
+    let Some(stream) = tls_stream(stream) else {
+        return tls_io_failure("TLSStream.ready", "TLSStream");
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_tls_ready(&stream, interest, &jet_std::Duration { ns: deadline }) {
+        Ok(ready) => CtValue::Present(Box::new(net_ct_handle(
+            "NetReady",
+            push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_peer_identity(stream: i64) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return CtValue::Struct {
+            type_name: "TLSPeerIdentity".to_string(),
+            fields: vec![],
+        };
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    tls_peer_identity_value(jet_net_tls_peer_identity(&stream))
 }
 
 pub(crate) fn runtime_tcp_listen(address: String) -> CtValue {

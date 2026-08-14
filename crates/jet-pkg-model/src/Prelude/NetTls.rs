@@ -25,6 +25,8 @@ pub type JetTLSPeerSnapshot = (
     Vec<i64>,
     Vec<String>,
     Vec<String>,
+    String,
+    i64,
 );
 
 static JET_NET_TLS_NEXT: AtomicI64 = AtomicI64::new(1);
@@ -376,7 +378,35 @@ pub fn jet_net_tls_peer_identity_impl(id: i64) -> Result<JetTLSPeerSnapshot, Str
         subjects.push(subject);
         issuers.push(issuer);
     }
-    Ok((state.server_name.clone(), ders, spkis, dns_names, valid_from, valid_until, subjects, issuers))
+    let cipher_suite = state
+        .stream
+        .conn
+        .negotiated_cipher_suite()
+        .ok_or_else(|| "TLS verified peer did not expose a negotiated cipher suite".to_string())?;
+    let cipher_suite = format!("{:?}", cipher_suite.suite());
+    let tls_version = match state.stream.conn.protocol_version() {
+        Some(rustls::ProtocolVersion::TLSv1_2) => 12,
+        Some(rustls::ProtocolVersion::TLSv1_3) => 13,
+        Some(version) => {
+            return Err(format!(
+                "TLS verified peer negotiated unsupported protocol version: {:?}",
+                version
+            ));
+        }
+        None => return Err("TLS verified peer did not expose a negotiated protocol version".to_string()),
+    };
+    Ok((
+        state.server_name.clone(),
+        ders,
+        spkis,
+        dns_names,
+        valid_from,
+        valid_until,
+        subjects,
+        issuers,
+        cipher_suite,
+        tls_version,
+    ))
 }
 
 fn jet_net_tls_der_element(input: &[u8], pos: &mut usize) -> Result<(u8, usize, usize, usize, usize), String> {

@@ -3279,6 +3279,32 @@ fn insert_core_struct_field_types(
         "BenchSuite".to_string(),
         vec![("iteration".to_string(), Type::Int), ("result".to_string(), Type::Int)],
     );
+    fields.insert(
+        "TLSCertificate".to_string(),
+        vec![
+            ("der".to_string(), Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            ("sha256".to_string(), Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            ("spki_sha256".to_string(), Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            ("dns_names".to_string(), Type::List(Box::new(Type::String))),
+            ("valid_from_unix_ms".to_string(), Type::Int),
+            ("valid_until_unix_ms".to_string(), Type::Int),
+            ("subject".to_string(), Type::String),
+            ("issuer".to_string(), Type::String),
+        ],
+    );
+    fields.insert(
+        "TLSPeerIdentity".to_string(),
+        vec![
+            ("verified_server_name".to_string(), Type::String),
+            ("leaf".to_string(), Type::Named("TLSCertificate".to_string())),
+            (
+                "certificate_chain".to_string(),
+                Type::List(Box::new(Type::Named("TLSCertificate".to_string()))),
+            ),
+            ("cipher_suite".to_string(), Type::String),
+            ("tls_version".to_string(), Type::Named("TLSVersion".to_string())),
+        ],
+    );
 }
 
 fn normalize_struct_field_types(

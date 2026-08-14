@@ -3440,7 +3440,7 @@ The built module exposes only this byte/text stream surface:
 | `write_text(stream, text)` | `() ? IOError` | Write the complete text payload |
 | `close(stream)` | `() ? IOError` | Send close-notify; repeated close is harmless |
 | `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same TLS handle, explicit per-call deadlines, readiness, and close-notify lifecycle |
-| `stream.peer_identity()` | `TLSPeerIdentity` | Retained verified name plus immutable exact-DER wire-order chain; leaf exposes DER, certificate/SPKI SHA-256, DNS SANs, validity milliseconds, subject, and issuer |
+| `stream.peer_identity()` | `TLSPeerIdentity` | Retained verified name plus immutable exact-DER wire-order chain; leaf exposes DER, certificate/SPKI SHA-256, DNS SANs, validity milliseconds, subject, and issuer; negotiated cipher suite is `cipher_suite` and protocol is `tls_version` |
 | `stream.close_write(deadline: Duration)` | `() ? IOError` | Flush close-notify and close only writes; repeated calls are harmless, reads continue, and later writes return `.Closed` |
 
 TLS handshake, read, write, and close-notify use the consumed socket's shared
@@ -3455,10 +3455,10 @@ truncation.
 `client(...)` above. `handshake` happens inside `client(...)` automatically,
 by design — there is no separate step. `verifyhostname` is mandatory
 already, visible as `stream.peer_identity().verified_server_name`; Jet gives
-no way to turn it off. `ciphersuites` and `tlsversion` (the negotiated
-values, not the `.with_version_bounds` request) are real gaps that
-`D-CORESURF-SMALL1` defers to a follow-up card, not this ballot — they need
-a native TLS-bridge change; card #1593 tracks them.
+no way to turn it off. The negotiated values deferred by the ruling now ship
+as `stream.peer_identity().cipher_suite` and
+`stream.peer_identity().tls_version`; `.with_version_bounds` remains the
+request policy, not the negotiated result.
 
 ---
 

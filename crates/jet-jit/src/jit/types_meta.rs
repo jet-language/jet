@@ -30,6 +30,8 @@ static SERVICE_RECEIPT_RETAINED_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::String, Type::Int]);
 static IO_CONTEXT_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::Named("IOContext".into())]);
+static TLS_ROOT_CERTIFICATES_PAYLOAD: LazyLock<Vec<Type>> =
+    LazyLock::new(|| vec![Type::Named("TLSRootCertificates".into())]);
 static PRELUDE_ENUM_VARIANTS: LazyLock<HashMap<String, Vec<String>>> = LazyLock::new(|| {
     prelude_enum_meta::all()
         .iter()
@@ -857,6 +859,16 @@ impl<'a> JitMeta<'a> {
         if enum_name == "IOOperation" {
             return Some(EMPTY_PAYLOAD.as_slice());
         }
+        if enum_name == "TLSVersion" {
+            return Some(EMPTY_PAYLOAD.as_slice());
+        }
+        if enum_name == "TLSClientTrust" {
+            return Some(match variant {
+                "System" => EMPTY_PAYLOAD.as_slice(),
+                "SystemPlus" | "CustomOnly" => TLS_ROOT_CERTIFICATES_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
         if enum_name == "Key" {
             return Some(key_payload(variant));
         }
@@ -1066,6 +1078,8 @@ impl<'a> JitMeta<'a> {
                 | "EmailError"
                 | "IOOperation"
                 | "IOError"
+                | "TLSVersion"
+                | "TLSClientTrust"
                 | jet_foundation::Syntax::TYPE_TASK_FAILURE
         ) || self.enum_variants.contains_key(name)
     }
@@ -1169,6 +1183,23 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "LogSpan" => &["id", "name"],
         "Rng" => &["state"],
         "TestSuite" | "BenchSuite" => &["iteration", "result"],
+        "TLSCertificate" => &[
+            "der",
+            "sha256",
+            "spki_sha256",
+            "dns_names",
+            "valid_from_unix_ms",
+            "valid_until_unix_ms",
+            "subject",
+            "issuer",
+        ],
+        "TLSPeerIdentity" => &[
+            "verified_server_name",
+            "leaf",
+            "certificate_chain",
+            "cipher_suite",
+            "tls_version",
+        ],
         // Mirrors jet_std::ProcessResult field order (Open.rs).
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
         "TerminalSize" => &["cols", "rows"],
@@ -1293,6 +1324,8 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [Type])> {
     let layout: &(Vec<String>, Vec<Type>) = match type_name {
         "AllocError" => &*ALLOC_ERROR_LAYOUT,
+        "TLSCertificate" => &*TLS_CERTIFICATE_LAYOUT,
+        "TLSPeerIdentity" => &*TLS_PEER_IDENTITY_LAYOUT,
         "FieldError" => &*FIELD_ERROR_LAYOUT,
         "Envelope" => &*EMAIL_ENVELOPE_LAYOUT,
         "RecipientReport" => &*EMAIL_RECIPIENT_REPORT_LAYOUT,
@@ -1357,6 +1390,25 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         },
         "TestSuite" | "BenchSuite" => match field {
             "iteration" | "result" => Some(Type::Int),
+            _ => None,
+        },
+        "TLSCertificate" => match field {
+            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }))),
+            "dns_names" => Some(Type::List(Box::new(Type::String))),
+            "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
+            "subject" | "issuer" => Some(Type::String),
+            _ => None,
+        },
+        "TLSPeerIdentity" => match field {
+            "verified_server_name" | "cipher_suite" => Some(Type::String),
+            "leaf" => Some(Type::Named("TLSCertificate".into())),
+            "certificate_chain" => Some(Type::List(Box::new(Type::Named(
+                "TLSCertificate".into(),
+            )))),
+            "tls_version" => Some(Type::Named("TLSVersion".into())),
             _ => None,
         },
         "ProcessResult" => match field {
@@ -1622,6 +1674,50 @@ static ALLOC_ERROR_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(||
         vec!["requested_bytes".to_string(), "allocator".to_string()],
         vec![Type::Int, Type::String],
     )
+});
+
+static TLS_CERTIFICATE_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        (
+            "der",
+            Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
+        ),
+        (
+            "sha256",
+            Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
+        ),
+        (
+            "spki_sha256",
+            Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
+        ),
+        ("dns_names", Type::List(Box::new(Type::String))),
+        ("valid_from_unix_ms", Type::Int),
+        ("valid_until_unix_ms", Type::Int),
+        ("subject", Type::String),
+        ("issuer", Type::String),
+    ])
+});
+
+static TLS_PEER_IDENTITY_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
+    email_layout(&[
+        ("verified_server_name", Type::String),
+        ("leaf", Type::Named("TLSCertificate".into())),
+        (
+            "certificate_chain",
+            Type::List(Box::new(Type::Named("TLSCertificate".into()))),
+        ),
+        ("cipher_suite", Type::String),
+        ("tls_version", Type::Named("TLSVersion".into())),
+    ])
 });
 
 static EMAIL_ENVELOPE_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
