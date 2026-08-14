@@ -13,6 +13,8 @@
 //! with the guard's stderr line — they do not "pass" in the normal sense.
 
 mod common;
+#[path = "unsafe_ratchet.rs"]
+mod unsafe_ratchet;
 
 #[test]
 fn guards_stay_quiet_on_a_healthy_run() {
@@ -24,6 +26,21 @@ fn guards_stay_quiet_on_a_healthy_run() {
         v.extend_from_slice(&[0u8; 1024]);
     }
     assert_eq!(v.len(), 1024 * 1024);
+}
+
+#[test]
+fn unsafe_region_ratchet_trips_on_seeded_growth() {
+    unsafe_ratchet::ratchet_trips_on_seeded_growth();
+}
+
+#[test]
+fn unsafe_region_ratchet_allows_shrink() {
+    unsafe_ratchet::ratchet_allows_shrink();
+}
+
+#[test]
+fn generated_ffi_does_not_move_unsafe_baseline() {
+    unsafe_ratchet::generated_ffi_does_not_move_baseline();
 }
 
 #[test]

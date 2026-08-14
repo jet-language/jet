@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+node "$repo/scripts/agent/check-unsafe-ratchet.mjs"
 if [ "${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
   "$repo/scripts/agent/clean-nix-tmp.sh"
 fi
