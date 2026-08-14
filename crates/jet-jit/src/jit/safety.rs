@@ -304,6 +304,17 @@ pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
     }
 }
 
+pub(crate) fn jit_closure_elem_type_for(ty: &Type) -> Option<Type> {
+    jit_closure_elem_type(ty).or_else(|| match ty {
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_SET && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        _ => None,
+    })
+}
+
 /// `[T?E]` / `Iter<T?E>` with JIT-representable payloads.
 pub(crate) fn jit_result_list_elem(ty: &Type) -> Option<(Type, Type)> {
     let elem = match ty {
@@ -2345,13 +2356,28 @@ fn resident_safe_closure_method(
                             }
                 )
         }
+        TIR::TClosureOp::Any | TIR::TClosureOp::All => {
+            jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
+                matches!(elem, Type::Int | Type::String | Type::Named(_))
+            }) && resident_safe_unary_lambda(args, callees)
+                && matches!(
+                    args.first().and_then(|arg| match &arg.kind {
+                        TExprKind::Lambda(lambda) => match &lambda.executable {
+                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
+                            TIR::TLambdaBody::Block(_) | TIR::TLambdaBody::SharedBlock(_) => None,
+                        },
+                        _ => None,
+                    }),
+                    Some(Type::Bool)
+                )
+        }
         TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::ViewMap => {
-            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+            jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::ParaMap => {
-            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+            jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
@@ -2365,7 +2391,7 @@ fn resident_safe_closure_method(
             ) && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::Filter | TIR::TClosureOp::ParaFilter => {
-            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+            jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
@@ -2381,7 +2407,7 @@ fn resident_safe_closure_method(
                 && resident_safe_para_fold_lambdas(args, callees)
         }
         TIR::TClosureOp::Each | TIR::TClosureOp::EachMut | TIR::TClosureOp::EachRef => {
-            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+            jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_each_lambda(args, callees)
         }
@@ -2417,7 +2443,7 @@ fn resident_safe_closure_method(
                 && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::Fold | TIR::TClosureOp::Reduce | TIR::TClosureOp::ViewFold => {
-            jit_closure_elem_type(&recv.ty)
+            jit_closure_elem_type_for(&recv.ty)
                 .or_else(|| jit_list_iter_elem_type(&recv.ty))
                 .is_some_and(|elem| matches!(elem, Type::Int | Type::Named(_)))
                 && resident_safe_fold_lambda(args, callees)
@@ -2438,7 +2464,14 @@ fn resident_safe_closure_method(
                 )
         }
         TIR::TClosureOp::FlatMap => {
-            jit_list_of_int_list_type(&recv.ty) && resident_safe_unary_lambda(args, callees)
+            let set_int = matches!(
+                &recv.ty,
+                Type::Apply { name, args }
+                    if name == jet_foundation::Syntax::TYPE_SET
+                        && matches!(args.as_slice(), [Type::Int])
+            );
+            (set_int || jit_list_of_int_list_type(&recv.ty))
+                && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::DedupBy | TIR::TClosureOp::IsSortedBy => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))

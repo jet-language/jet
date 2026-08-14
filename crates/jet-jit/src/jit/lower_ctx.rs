@@ -25,9 +25,9 @@ use super::runtime_host::{
     INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
 use super::safety::{
-    collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
-    jit_list_int_type, jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type,
-    jit_list_record_type,
+    collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_closure_elem_type_for,
+    jit_list_float_type, jit_list_int_type, jit_list_iter_elem_type, jit_list_native_type,
+    jit_list_of_int_list_type, jit_list_record_type,
     jit_list_string_type, jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type,
     jit_value_type, is_packed_process_signal, opaque_host_handle_ty, record_type_key, user_type_name,
 };
@@ -23684,16 +23684,12 @@ impl LowerCtx<'_, '_> {
 
     /// Native Iter/list closure adapters — lambda bodies inlined in Cranelift.
     fn closure_elem_type_for(recv: &TExpr) -> Option<Type> {
-        jit_closure_elem_type(&recv.ty).or_else(|| match &recv.ty {
-            Type::Apply { name, args }
-                if name == "Set" && args.len() == 1 => Some(args[0].clone()),
-            _ => None,
-        })
+        jit_closure_elem_type_for(&recv.ty)
     }
 
     fn lower_closure_source(&mut self, recv: &TExpr) -> Result<Value, String> {
         let value = self.lower_expr(recv)?;
-        if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
+        if matches!(&recv.ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SET) {
             Ok(self.call_host(self.host.coll.set_to_list, &[value]))
         } else {
             Ok(value)
