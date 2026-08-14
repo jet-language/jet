@@ -1738,9 +1738,9 @@ fn run_explain_fact(
     let bundle = explain_bundle(fact_file, profile, setting_overrides);
     let Some(fact) = bundle.build_facts.contribution(name) else {
         if let Some(key) = name.strip_prefix("Build.Settings.") {
-            crate::cli_error!(@fix "E0302", format!("`build.settings.{key}` is undeclared"), "settings are declared in the package manifest", format!("add `{key}: Type = default` to `package.jet`"));
+            crate::cli_error!(@full "E0302", format!("`build.settings.{key}` is undeclared"), "settings are declared in the package manifest", format!("add `{key}: Type = default` to `package.jet`"));
         } else {
-            crate::cli_error!("E2104", format!("the selected build has no `{name}` fact"));
+            crate::cli_error!("E2104", "the selected build has no `{name}` fact");
         }
         exit(ExitCodes::USER_ERROR);
     };
@@ -1772,7 +1772,7 @@ fn run_explain_policy(
         .cloned()
         .collect::<Vec<_>>();
     let Some(explanation) = jet::Explain::lookup_policy(key, declarations) else {
-        crate::cli_error!(@fix "E2104", format!("policy `{}` has no effective declaration", key.name()), "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site");
+        crate::cli_error!(@full "E2104", format!("policy `{}` has no effective declaration", key.name()), "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site");
         exit(ExitCodes::USER_ERROR);
     };
     print_explanation(&explanation, mode);
