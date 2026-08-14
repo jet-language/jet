@@ -1,5 +1,34 @@
 use super::*;
 
+fn register_generated_union_enums(
+    items: &[Item],
+    state: &mut crate::Sema::ModuleState,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for item in items {
+        match item {
+            Item::Enum(definition)
+                if definition.name.starts_with("__JetUnion_")
+                    && !state.registry.contains(&definition.name) =>
+            {
+                register_enum(
+                    definition,
+                    &mut state.registry,
+                    diags,
+                    &state.funcs,
+                    &state.consts,
+                );
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    register_generated_union_enums(body, state, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn existing_member_span(items: &[crate::AST::Item], type_name: &str, member: &str) -> Option<Span> {
     for item in items {
         match item {
@@ -1348,6 +1377,10 @@ fn check_bundle_opts_for_output_inner(
         // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
         // bundle builds too; this is the production multi-file path.
         super::super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);
+        // Anonymous union declarations are synthesized by the same serde pass
+        // as their typed codec impls. Register the new enum names before any
+        // generated method body is checked.
+        register_generated_union_enums(&module.items, st, &mut diags);
 
         // S62 + D-LIB2: synthesis must happen before register_impl_methods
         // so the synthesised Func nodes appear in the type registry.

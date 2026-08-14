@@ -2565,10 +2565,33 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
 
 fn emit_wasm_user_types(bundle: &ProgramBundle, out: &mut String) -> WebEmitResult<()> {
     let mut unions = std::collections::BTreeMap::new();
+    fn generated_union_names(items: &[Item], names: &mut std::collections::HashSet<String>) {
+        for item in items {
+            match item {
+                Item::Enum(definition) if definition.name.starts_with("__JetUnion_") => {
+                    names.insert(definition.name.clone());
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        generated_union_names(body, names);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut generated_unions = std::collections::HashSet::new();
     for module in &bundle.modules {
         collect_item_wasm_unions(&module.items, &mut unions);
+        generated_union_names(&module.items, &mut generated_unions);
     }
     for (name, members) in unions {
+        // D-SERDE2: sema contributes the anonymous union as an ordinary typed
+        // enum. The web backend emits that item below; keep this loop for the
+        // representation-only fallback used by bundles without the item.
+        if generated_unions.contains(&name) {
+            continue;
+        }
         let variants = members
             .iter()
             .map(|member| {

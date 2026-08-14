@@ -1623,7 +1623,9 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                     walk(t, seen, out_members);
                 }
             }
-            Type::FixedList { elem, .. } => walk(elem, seen, out_members),
+            Type::FixedList { elem, .. }
+            | Type::InlineRange { base: elem, .. }
+            | Type::Quantity { base: elem, .. } => walk(elem, seen, out_members),
             _ => {}
         }
     }
@@ -1679,7 +1681,23 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     for item in items {
         walk_item(item, &mut seen, &mut unions);
     }
-    let (encode_unions, decode_unions) = union_codec_needs(items);
+    fn generated_union_names(items: &[Item], names: &mut std::collections::HashSet<String>) {
+        for item in items {
+            match item {
+                Item::Enum(definition) if definition.name.starts_with("__JetUnion_") => {
+                    names.insert(definition.name.clone());
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        generated_union_names(body, names);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut generated_union_names_set = std::collections::HashSet::new();
+    generated_union_names(items, &mut generated_union_names_set);
     for members in unions {
         let name = crate::AST::union_enum_name(&members);
         let rust_name = mangle_path(&name);
@@ -1698,15 +1716,20 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             rust_derives.push("Eq");
             rust_derives.push("Hash");
         }
-        if !rust_derives.is_empty() {
-            out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
+        // D-SERDE2: sema supplies the anonymous union as a typed Enum item.
+        // Keep this representation fallback only for direct codegen callers;
+        // production programs already have the ordinary item above.
+        if !generated_union_names_set.contains(name.as_str()) {
+            if !rust_derives.is_empty() {
+                out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
+            }
+            out.push_str(&format!("pub enum {rust_name} {{\n"));
+            for m in &members {
+                let tag = crate::AST::union_member_tag(m);
+                out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
+            }
+            out.push_str("}\n\n");
         }
-        out.push_str(&format!("pub enum {rust_name} {{\n"));
-        for m in &members {
-            let tag = crate::AST::union_member_tag(m);
-            out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
-        }
-        out.push_str("}\n\n");
         if !has_shared_guard {
             out.push_str(&format!(
                 "impl JetShow for {rust_name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
@@ -1732,185 +1755,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                 "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
             ));
         }
-        if encode_unions.contains(&name) {
-            out.push_str(&format!(
-                "impl __jet_Encode for {rust_name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
-            ));
-            for m in &members {
-                let tag = crate::AST::union_member_tag(m);
-                out.push_str(&format!(
-                    "            Self::{tag}(v) => __jet_Encode::jet_encode(v),\n"
-                ));
-            }
-            out.push_str("        }\n    }\n}\n\n");
-        }
-        if decode_unions.contains(&name) {
-            out.push_str(&format!(
-                "impl __jet_Decode for {rust_name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        match __t {{\n"
-            ));
-            for m in &members {
-                let tag = crate::AST::union_member_tag(m);
-                let rust = cx.rust_type(m);
-                let Some(shape_pat) = union_member_datatree_pat(items, m) else {
-                    continue;
-                };
-                if let Some(decoded) = crate::Codegen::TIR::emit_inline_range_decode(
-                    m,
-                    "__t",
-                    &cx.root_prefix,
-                    true,
-                ) {
-                    out.push_str(&format!(
-                        "            {shape_pat} => Ok(Self::{tag}({decoded}?)),\n"
-                    ));
-                } else {
-                    out.push_str(&format!(
-                        "            {shape_pat} => Ok(Self::{tag}(<{rust} as __jet_Decode>::jet_decode(__t)?)),\n"
-                    ));
-                }
-            }
-            out.push_str(
-                "            _ => Err(jet_std::FieldError::one(\"no matching union member\")),\n        }\n    }\n}\n\n",
-            );
-        }
     }
-}
-
-fn union_codec_needs(
-    items: &[Item],
-) -> (
-    std::collections::BTreeSet<String>,
-    std::collections::BTreeSet<String>,
-) {
-    fn collect(
-        ty: &Type,
-        encode: bool,
-        decode: bool,
-        encodes: &mut std::collections::BTreeSet<String>,
-        decodes: &mut std::collections::BTreeSet<String>,
-    ) {
-        if let Type::Union(members) = ty {
-            let name = crate::AST::union_enum_name(members);
-            if encode {
-                encodes.insert(name.clone());
-            }
-            if decode {
-                decodes.insert(name);
-            }
-        }
-        match ty {
-            Type::List(inner)
-            | Type::Shared(inner)
-            | Type::Option(inner)
-            | Type::Tagged { inner, .. }
-            | Type::FixedList { elem: inner, .. } => {
-                collect(inner, encode, decode, encodes, decodes)
-            }
-            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                collect(key, encode, decode, encodes, decodes);
-                collect(value, encode, decode, encodes, decodes);
-            }
-            Type::Apply { args, .. } | Type::Union(args) => {
-                for arg in args {
-                    collect(arg, encode, decode, encodes, decodes);
-                }
-            }
-            Type::Tuple(fields) => {
-                for (_, field) in fields {
-                    collect(field, encode, decode, encodes, decodes);
-                }
-            }
-            Type::Fn { params, ret, .. } => {
-                for param in params {
-                    collect(param, encode, decode, encodes, decodes);
-                }
-                if let Some(ret) = ret {
-                    collect(ret, encode, decode, encodes, decodes);
-                }
-            }
-            _ => {}
-        }
-    }
-    fn walk_items(
-        items: &[Item],
-        encodes: &mut std::collections::BTreeSet<String>,
-        decodes: &mut std::collections::BTreeSet<String>,
-    ) {
-        for item in items {
-            match item {
-                Item::Struct(s) => {
-                    let encode = s
-                        .derives
-                        .iter()
-                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | "Codable"));
-                    let decode = s
-                        .derives
-                        .iter()
-                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::DECODE | "Codable"));
-                    for field in &s.fields {
-                        if !field
-                            .serde_markers
-                            .iter()
-                            .any(|marker| marker.name == crate::Syntax::MARKER_SKIP)
-                        {
-                            collect(&field.ty, encode, decode, encodes, decodes);
-                        }
-                    }
-                }
-                Item::Enum(e) => {
-                    let encode = e
-                        .derives
-                        .iter()
-                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | "Codable"));
-                    let decode = e
-                        .derives
-                        .iter()
-                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::DECODE | "Codable"));
-                    for variant in &e.variants {
-                        match &variant.payload {
-                            VariantPayload::Single(ty, _) => {
-                                collect(ty, encode, decode, encodes, decodes)
-                            }
-                            VariantPayload::Named(fields) => {
-                                for field in fields {
-                                    collect(&field.ty, encode, decode, encodes, decodes);
-                                }
-                            }
-                            VariantPayload::Unit => {}
-                        }
-                    }
-                }
-                Item::CodeModule(module) => {
-                    if let Some(body) = &module.body {
-                        walk_items(body, encodes, decodes);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    let mut encodes = std::collections::BTreeSet::new();
-    let mut decodes = std::collections::BTreeSet::new();
-    walk_items(items, &mut encodes, &mut decodes);
-    (encodes, decodes)
-}
-
-fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
-    crate::AST::resolved_decode_wire_shapes(items, ty).map(|shapes| {
-        shapes
-            .into_iter()
-            .map(|shape| match shape {
-                crate::AST::SerdeWireShape::Null => "jet_std::DataTree::Null",
-                crate::AST::SerdeWireShape::Int => "jet_std::DataTree::Int(_)",
-                crate::AST::SerdeWireShape::Float => "jet_std::DataTree::Float(_)",
-                crate::AST::SerdeWireShape::Bool => "jet_std::DataTree::Bool(_)",
-                crate::AST::SerdeWireShape::Text => "jet_std::DataTree::Text(_)",
-                crate::AST::SerdeWireShape::Array => "jet_std::DataTree::Array(_)",
-                crate::AST::SerdeWireShape::Object => "jet_std::DataTree::Object(_)",
-            })
-            .collect::<Vec<_>>()
-            .join(" | ")
-    })
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
