@@ -1704,7 +1704,7 @@ impl<'a> Parser<'a> {
     fn foreign_loop_has_block(&self) -> bool {
         let mut parens = 0usize;
         let mut brackets = 0usize;
-        for token in self.toks.iter().skip(self.pos + 2) {
+        for token in self.toks.iter().skip(self.pos + 1) {
             match token.kind {
                 TokKind::LParen => parens += 1,
                 TokKind::RParen => parens = parens.saturating_sub(1),
@@ -1721,16 +1721,14 @@ impl<'a> Parser<'a> {
 
     fn at_foreign_loop_word_statement(&self, word: &str) -> bool {
         match word {
-            Syntax::FOREIGN_FOR => {
-                matches!(self.peek2().kind, TokKind::Ident(_))
-                    && self.foreign_loop_has_block()
-            }
-            Syntax::FOREIGN_WHILE => {
-                !matches!(self.peek2().kind, TokKind::LParen)
-                    && self.foreign_loop_has_block()
-            }
+            Syntax::FOREIGN_FOR | Syntax::FOREIGN_WHILE => self.foreign_loop_has_block(),
             Syntax::FOREIGN_CONTINUE => {
                 matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof)
+                    || (matches!(self.peek2().kind, TokKind::Ident(_))
+                        && matches!(
+                            self.peek3().kind,
+                            TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                        ))
             }
             Syntax::FOREIGN_DO => matches!(self.peek2().kind, TokKind::LBrace),
             _ => false,

@@ -486,8 +486,14 @@ impl<'a> Checker<'a> {
                     value,
                 } => {
                     let is_compound = op.is_some();
-                    if let (Some(_op), LValue::Index { span, .. }) = (op, &*target) {
-                        self.diags.push(Diagnostic::from_row("E0164", &[], Some(*span)));
+                    if let (Some(compound_op), LValue::Index { span, .. }) =
+                        (op.as_ref(), &*target)
+                    {
+                        self.diags.push(Diagnostic::from_row(
+                            "E0164",
+                            &[("op", (*compound_op).spell())],
+                            Some(*span),
+                        ));
                         let saved_expected = self.expected_type.clone();
                         if let Some(place_ty) = self.lvalue_type(target) {
                             self.expected_type = Some(place_ty);

@@ -99,19 +99,26 @@ impl<'a> Checker<'a> {
         /// lvalue (same LHS policy as S17; indexed slots are rejected like `+=`).
         pub(crate) fn check_incdec(
             &mut self,
-            _op: IncDecOp,
+            op: IncDecOp,
             operand: &mut Expr,
             _postfix: bool,
             span: Span,
         ) -> Option<Type> {
+            let update_op = match op {
+                IncDecOp::Inc => "+",
+                IncDecOp::Dec => "-",
+            };
             let lvalue = match operand {
                 Expr::Ident(name, name_span) => LValue::Local {
                     name: name.clone(),
                     name_span: *name_span,
                 },
                 Expr::Index { span: idx_span, .. } => {
-                    self.diags
-                        .push(Diagnostic::from_row("E0163", &[], Some(*idx_span)));
+                    self.diags.push(Diagnostic::from_row(
+                        "E0163",
+                        &[("op", update_op)],
+                        Some(*idx_span),
+                    ));
                     return None;
                 }
                 Expr::Field(base, field, field_span) => LValue::Field {

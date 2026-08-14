@@ -27,7 +27,7 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerInfer::contains_tuple_type;
 use crate::Sema::Diagnostics::{
-    builtin_type_from_ident, expr_root_ident, is_printable, type_is_copy,
+    builtin_type_from_ident, expr_root_ident, is_printable, suggest_field, type_is_copy,
 };
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
@@ -58,32 +58,7 @@ impl<'a> Checker<'a> {
         }
         candidates.sort_unstable();
         candidates.dedup();
-        let mut best: Option<(String, usize)> = None;
-        let mut ambiguous = false;
-        for candidate in candidates {
-            let distance = crate::Syntax::edit_distance(method, &candidate);
-            if distance > 2 {
-                continue;
-            }
-            match best.as_ref().map(|(_, current)| *current) {
-                None => {
-                    best = Some((candidate, distance));
-                    ambiguous = false;
-                }
-                Some(current) if distance < current => {
-                    best = Some((candidate, distance));
-                    ambiguous = false;
-                }
-                Some(current)
-                    if distance == current
-                        && best.as_ref().is_some_and(|(known, _)| known != &candidate) =>
-                {
-                    ambiguous = true;
-                }
-                _ => {}
-            }
-        }
-        (!ambiguous).then(|| best.map(|(candidate, _)| candidate)).flatten()
+        suggest_field(method, &candidates)
     }
 
     fn receiver_method_label(receiver_ty: &Type) -> String {
