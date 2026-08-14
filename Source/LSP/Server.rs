@@ -2996,6 +2996,45 @@ mod project_part_tests {
     }
 
     #[test]
+    fn lsp_uses_registry_fix_for_report_and_action() {
+        let src = "fn run() {\n    loop item; [1, 2, 3] { print(item) }\n}\n";
+        let start = src.find(';').expect("loop separator");
+        let diagnostic = Diagnostic::from_row(
+            "E0373",
+            &[],
+            Some(Span::new(start, start + 1)),
+        );
+        let edit = diagnostic
+            .edit
+            .clone()
+            .expect("E0373 row owns replacement edit");
+        assert_eq!(edit.new_text, ",");
+
+        let json = diagnostic_json(&diagnostic, "src/main.jet", src);
+        let fix_marker = format!(
+            r#""fix_edits":[{{"file":"src/main.jet","span":{{"start":{},"end":{}}},"new_text":","}}]"#,
+            start,
+            start + 1
+        );
+        assert!(json.contains(&fix_marker), "{json}");
+
+        let mut reworded = diagnostic.clone();
+        reworded.fix = "use the canonical loop separator".to_string();
+        let fixes = collect_fixes_from_diagnostics(vec![reworded], src);
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0].edit, edit);
+        assert_eq!(fixes[0].title, "use the canonical loop separator");
+
+        let action = code_action_json(
+            "file:///workspace/main.jet",
+            1,
+            src,
+            &fixes[0],
+        );
+        assert!(action.contains("\"newText\":\",\""), "{action}");
+    }
+
+    #[test]
     fn lsp_diagnostic_projects_cause_as_related_location() {
         let root = Diagnostic::error(
             "E0956",

@@ -1230,6 +1230,16 @@ fn lsp_diagnostic_and_code_action_carry_the_registry_report() {
         "{diagnostics}"
     );
     assert!(diagnostics.contains(r##""new_text":"#Codable""##), "{diagnostics}");
+    assert!(diagnostics.contains(r#""moment":"compile""#), "{diagnostics}");
+    assert!(diagnostics.contains(r#""severity":"error""#), "{diagnostics}");
+    assert!(diagnostics.contains(r#""code":"E0999""#), "{diagnostics}");
+    assert!(
+        diagnostics.contains(
+            r#""fix_edits":[{"file":"lsp_report_test.jet","span":{"start":0,"end":10},"new_text":"#Codable"}]"#
+        ),
+        "{diagnostics}"
+    );
+    assert!(diagnostics.contains(r#""cause":[],"clears":0""#), "{diagnostics}");
 
     send_msg(
         &mut stdin,
