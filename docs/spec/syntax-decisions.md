@@ -1386,8 +1386,10 @@ wasm panic paths are replaced.
 
 **S36 — Bug stops** *(amended by D-FAIL-BREACH1 and D-FAIL-EXIT1)*:
 `panic("msg")` and `require(cond[, "msg"])` are Prelude builtins. Program-side
-stops use the registered E30xx report family and exit 70. Exit 101 is reserved
-for Jet defects.
+stops use the registered E30xx report family and exit 70. Scheduler, stream, and
+FFI producers enter the same report and cleanup boundary. Explicit process
+termination uses that cleanup boundary and preserves its requested exit code.
+Exit 101 is reserved for Jet defects.
 
 **D-IGNORERET1 / D-IGNORERET2** *(as amended by D-MARK-DISCARD1=A,
 2026-07-11, card #498)*: discarding a fallible/`#MustUse` result requires
