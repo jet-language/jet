@@ -337,6 +337,17 @@ impl<'a> Parser<'a> {
             }
             if matches!(self.peek().kind, TokKind::LBrace) {
                 let brace_span = self.bump().span;
+                // Recover the retired group as one import. Leave the following
+                // terminator for the shared import recovery path.
+                let mut brace_depth = 1usize;
+                while brace_depth > 0 && !matches!(&self.peek().kind, TokKind::Eof) {
+                    match &self.peek().kind {
+                        TokKind::LBrace => brace_depth += 1,
+                        TokKind::RBrace => brace_depth -= 1,
+                        _ => {}
+                    }
+                    self.bump();
+                }
                 return Err(Diagnostic::error(
                     "E0003",
                     "brace import groups are not supported".to_string(),
