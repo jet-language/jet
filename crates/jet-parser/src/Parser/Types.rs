@@ -730,7 +730,9 @@ impl<'a> Parser<'a> {
                             self.maybe_close_type_args(&format!("after `{name}<…>`"))?;
                             Type::Apply { name, args }
                         } else {
-                            if name.split('.').any(Syntax::is_comptime_name) {
+                            if self.derive_template_depth == 0
+                                && name.split('.').any(Syntax::is_comptime_name)
+                            {
                                 self.diags.push(Diagnostic::error(
                                     "E0119",
                                     format!("`{name}` is a fact value, not a type"),

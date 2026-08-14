@@ -58,6 +58,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         callable_tail_block_depth: None,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
+        derive_template_depth: 0,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
@@ -98,6 +99,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         callable_tail_block_depth: None,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
+        derive_template_depth: 0,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
@@ -228,6 +230,10 @@ struct Parser<'a> {
     /// inside the ratified `Recipe.build(steps: [...])` surface. Ordinary
     /// expressions keep the existing upper-case enum-variant grammar.
     allow_lowercase_leading_dot: bool,
+    /// >0 while parsing a typed item-template body (`derive`, marker, or
+    /// `b.generate`). A compile-time name in a type slot is an internal hole
+    /// here; expansion fills it before ordinary sema checks the item.
+    derive_template_depth: usize,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     applied_rules: Vec<crate::AST::AppliedRuleApplication>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
@@ -1142,6 +1148,7 @@ fn run() {
             callable_tail_block_depth: None,
             module_arg_expr_depth: None,
             allow_lowercase_leading_dot: false,
+            derive_template_depth: 0,
             policy_declarations: Vec::new(),
             applied_rules: Vec::new(),
             rule_facts: Vec::new(),

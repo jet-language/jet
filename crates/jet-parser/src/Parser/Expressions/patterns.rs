@@ -214,6 +214,7 @@ impl<'a> Parser<'a> {
                 callable_tail_block_depth: None,
                 module_arg_expr_depth: None,
                 allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
+                derive_template_depth: self.derive_template_depth,
                 policy_declarations: Vec::new(),
                 applied_rules: Vec::new(),
                 rule_facts: Vec::new(),

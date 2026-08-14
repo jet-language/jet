@@ -431,6 +431,13 @@ impl<'a> Parser<'a> {
         /// The item parser is called directly, so the definition is checked
         /// once here and never serialized to source for a second parse.
         pub(crate) fn derive_body_items(&mut self) -> Result<Vec<crate::AST::DeriveBodyItem>, Diagnostic> {
+            self.derive_template_depth += 1;
+            let result = self.derive_body_items_inner();
+            self.derive_template_depth -= 1;
+            result
+        }
+
+        fn derive_body_items_inner(&mut self) -> Result<Vec<crate::AST::DeriveBodyItem>, Diagnostic> {
             let mut body = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                 if matches!(self.peek().kind, TokKind::Semi) {
