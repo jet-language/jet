@@ -4690,8 +4690,8 @@ fn emit_bundle_benches_inner(
     out.push_str(
         "fn jet_bench_check(result: Result<(), String>) {\n\
     if let Err(error) = result {\n\
-        eprintln!(\"bench region failed: {}\", error);\n\
-        std::process::exit(70);\n\
+        let message = format!(\"bench region failed: {}\", error);\n\
+        jet_runtime_boundary(|| jet_runtime_stop(\"E3001\", \"\", 0, &message));\n\
     }\n\
 }\n\n",
     );

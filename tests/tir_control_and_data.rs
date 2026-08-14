@@ -55,6 +55,27 @@ fn body_rules_example_matches_all_execution_tiers() {
     );
 }
 
+/// D-FAIL-EXIT1=A / I9: the default-fallible entry keeps its journey and exit
+/// code byte-identical on debug AOT, default jet run, and the interpreter.
+#[test]
+fn default_entry_error_golden_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/default_error_conversion",
+        1,
+        include_str!("../examples/features/expected/errors/default_error_conversion.err.out"),
+    );
+}
+
+/// D-FAIL-EXIT1=A: explicit process termination unwinds Jet cleanup in the
+/// documented order before returning its requested code.
+#[test]
+fn explicit_process_exit_cleanup_golden_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "io/process_exit_cleanup",
+        include_str!("../examples/features/expected/io/process_exit_cleanup.out"),
+    );
+}
+
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.
 #[test]

@@ -1077,12 +1077,20 @@ violations.
   or **`panic(…)`**. The retired word **`or`** is paused under D-S14-PAUSE and
   gets an ordinary parse error.
 - **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
-  (S36) stop the program with a friendly report on stderr and exit code 70.
+  (S36), `#Todo`, raw Prelude panics, and scheduler/stream/FFI stops enter one
+  report boundary and exit code 70. Explicit process stops enter the same
+  cleanup boundary and preserve their requested code.
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
-- **`fn run()`** may stay bare for beginner programs. Use
-  **`fn run() ?`** only when the entry itself propagates errors with
-  **`?`**; returned errors print and exit non-zero.
+- **`fn run()`** is fallible by default: `?` works inside it with no annotation.
+  An unhandled entry error prints its full report and exits 1. An expert may
+  pin the family with **`fn run() ? StoreErr`**.
+
+At an explicit process stop, active `defer close(^resource)` actions run in
+reverse declaration order, `scope.guard` closures run in reverse registration
+order, and `os.atexit` handlers run in registration order after scope cleanup.
+Statements and finalizers registered after the stop do not run. A host kill or
+abort skips these finalizers.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
 ignored **`#MustUse`** results (**E0419**), bad propagation (**E0403**),

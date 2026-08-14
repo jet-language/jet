@@ -336,9 +336,15 @@ fn jet_bench_failure_is_not_reported_as_timing() {
     let fixture = root.join("tests/fixtures/bench_fail.jet");
     let out = Command::new(&jet).arg("bench").arg("--show-default").arg(&fixture).output().unwrap();
     assert!(!out.status.success(), "failed benchmark body unexpectedly passed");
+    assert_eq!(out.status.code(), Some(70), "failed benchmark must use the program-stop exit");
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("bench region failed"),
         "missing benchmark failure boundary: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("Stop [E3001]"),
+        "benchmark failure must use the shared runtime report: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(!String::from_utf8_lossy(&out.stdout).contains("ns/iter"));

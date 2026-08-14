@@ -602,6 +602,17 @@ fn jet_std_os_run_atexit() {
     jet_runtime_atexit::run();
 }
 
+/// The only native process-exit boundary for generated programs. Lexical
+/// cleanup has already happened while the stop unwound to this point; process
+/// callbacks run here before the final native exit.
+fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
+    jet_std_os_run_atexit();
+    if let Some(report) = report {
+        eprint!("{report}");
+    }
+    std::process::exit(code)
+}
+
 fn jet_runtime_boundary<F, T>(run: F) -> T
 where
     F: FnOnce() -> T,
@@ -612,7 +623,6 @@ where
             value
         }
         Err(payload) => {
-            jet_std_os_run_atexit();
             if let Some(message) = payload
                 .downcast_ref::<String>()
                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
@@ -620,21 +630,18 @@ where
                 let report = jet_render_runtime_stop(
                     "E3001", "", 0, "", "", 1, 1, message, "",
                 );
-                eprint!("{}", report.rendered);
-                std::process::exit(report.exit_code);
+                jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
             }
             match payload.downcast::<JetRuntimeDiagnostic>() {
                 Ok(report) => {
-                    eprint!("{}", report.rendered);
-                    std::process::exit(report.exit_code);
+                    jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
                 }
                 Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
                     Ok(report) => {
-                        eprint!("{}", report.rendered);
-                        jet_runtime_panic_exit();
+                        jet_runtime_process_exit(70, Some(&report.rendered));
                     }
                     Err(payload) => match payload.downcast::<JetExplicitExit>() {
-                        Ok(exit) => std::process::exit(exit.code),
+                        Ok(exit) => jet_runtime_process_exit(exit.code, None),
                         Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
                         Err(payload) => std::panic::resume_unwind(payload),
                     },
@@ -699,7 +706,7 @@ fn jet_runtime_explicit_exit(code: i64) -> ! {
 }
 
 fn jet_runtime_panic_exit() -> ! {
-    std::process::exit(70)
+    jet_runtime_process_exit(70, None)
 }
 
 fn jet_runtime_stop(code: &str, file: &str, line: u32, msg: &str) -> ! {

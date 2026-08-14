@@ -721,9 +721,9 @@ contract — codes are never repurposed.
 | Code | Meaning | Who produces it |
 |------|---------|-----------------|
 | `0`   | Success. (Includes the no-args greeting — orientation, not an error.) | driver |
-| `1`   | An unhandled entry error report, or a driver-reported user problem such as a failed `check`, missing file, or failed `test`. | entry boundary or driver |
+| `1`   | An unhandled entry error report, or a driver-reported user problem such as a failed `check`, missing file, or failed `test`. | fallible-by-default entry boundary or driver |
 | `2`   | Usage error: unknown subcommand (E2101), unknown/ambiguous flag (E2102), or a missing required argument. | driver |
-| `70`  | A built program breached or stopped at runtime (`panic`/`require`, S36, or another program-side fault). Forwarded through by `jet run`. | the user's program / Prelude boundary |
+| `70`  | A built program breached or stopped at runtime (`panic`/`require`, `#Todo`, a raw Prelude panic, S36, or another program-side fault). Every producer enters the shared report and cleanup boundary; `jet run` forwards the result. | the user's program / Prelude boundary |
 | `101` | Jet's own compiler defect (I2/R5): rustc rejected generated code or the compiler reached an impossible state. Never a user-program exit. | compiler |
 
 The final boundary keeps the same report and changes only its transport.
@@ -735,7 +735,8 @@ target chooses that boundary; runtime inspection never does.
 Explicit `process.exit(code)` and `os.stop(code)` use the same cleanup law.
 The boundary runs deferred closes in reverse declaration order, scope guards in
 reverse registration order, and `atexit` handlers in registration order. A
-host kill or abort skips all three mechanisms.
+host kill or abort skips all three mechanisms; finalizers registered after the
+stop are never run.
 
 Presentation is TTY-aware (E2-M3): color and progress appear only when
 the relevant stream is a terminal. `NO_COLOR` and `--color=never` force

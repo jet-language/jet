@@ -823,12 +823,19 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     let scheduler = include_str!("../../crates/jet-codegen/src/Prelude/Scheduler.rs");
     let scheduler_host = include_str!("../../crates/jet-codegen/src/SchedulerHost.rs");
     let stream = include_str!("../../crates/jet-codegen/src/Prelude/Stream.rs");
+    let ffi = include_str!("../../crates/jet-pkg-model/src/FFI.rs");
+    let codegen = include_str!("../../crates/jet-codegen/src/Codegen/mod.rs");
     let core = include_str!("../../crates/jet-codegen/src/Prelude/Core.rs");
     assert!(!task_mem.contains("process::exit(70)"));
     assert!(!time.contains("process::exit(70)"));
     assert_eq!(scheduler.matches("process::exit(70)").count(), 0);
     assert_eq!(scheduler_host.matches("process::exit(70)").count(), 0);
     assert_eq!(stream.matches("process::exit(70)").count(), 0);
+    assert_eq!(ffi.matches("process::exit(70)").count(), 0);
+    assert_eq!(codegen.matches("std::process::exit(70)").count(), 0);
+    assert!(codegen.contains(
+        "jet_runtime_boundary(|| jet_runtime_stop(\"E3001\", \"\", 0, &message))"
+    ));
     assert!(scheduler_host.contains("std::panic::panic_any(rendered)"));
     assert!(task_mem.contains("super::jet_panic("));
     // The deadline helper binds the rendered E3003 to a local so it can feed
@@ -856,7 +863,8 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
         .0;
     assert!(typed_task_spawn.contains("let _typed_deadline_boundary"));
     assert!(typed_task_spawn.contains("super::JetTypedDeadlineBoundary::enter()"));
-    assert_eq!(core.matches("std::process::exit(70)").count(), 1);
+    assert_eq!(core.matches("std::process::exit(").count(), 1);
+    assert!(core.contains("fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> !"));
     assert!(core.contains(
         "Self::SchedulerFatal { msg } => jet_runtime_stop(\"E3001\", \"\", 0, &msg)"
     ));
