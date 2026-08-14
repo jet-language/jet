@@ -2831,18 +2831,18 @@ fn check_bundle_opts_for_output_inner(
     );
 
     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
-    // D-CLIFLAG1: a `#[CLI]`-derived struct's generated `__jet_cli_spec_*`/
-    // `__jet_cli_decode_*` functions (and the synthesized `fn main` for a
-    // typed `fn run`) call straight into `core.args`'s `JetArgsSpec`/
-    // `JetParsedArgs` prelude — but they're pure codegen text, not a Jet
-    // method call `collect_used_core` can see by walking function bodies.
+    // D-CLIFLAG1: generated CLI specs/decoders and job argv dispatch call
+    // straight into `core.args`'s `JetArgsSpec`/`JetParsedArgs`/argv Prelude
+    // — but they're pure codegen text, not a Jet method call `collect_used_core`
+    // can see by walking function bodies.
     // Force the same `CORELIB_PRELUDE` inclusion a hand-written
     // `use core.args` would trigger (any key works; the caller only checks
     // "is this set empty").
     if bundle.modules.iter().any(|m| {
-        m.items
-            .iter()
-            .any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "CLI")))
+        m.items.iter().any(|i| {
+            matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "CLI"))
+                || matches!(i, Item::Func(f) if f.is_task)
+        })
     }) {
         used_core.insert("core.args::spec".to_string());
     }

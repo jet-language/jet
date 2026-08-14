@@ -190,7 +190,7 @@ fn emit_struct_command_entry(
             String::new()
         };
         arms.push_str(&format!(
-            "                {name:?} => {{\n                    let __spec = {variable}.clone();\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    let __decoded = (|| {{\n{decode_lines}                        Ok::<_, String>({tuple})\n                    }})();\n                    match __decoded {{\n                        Ok({tuple}) => {{\n{receiver}{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n",
+            "                Some({name:?}) => {{\n                    let __spec = {variable}.clone();\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    let __decoded = (|| {{\n{decode_lines}                        Ok::<_, String>({tuple})\n                    }})();\n                    match __decoded {{\n                        Ok({tuple}) => {{\n{receiver}{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n",
             name = command.name,
             variable = variable,
         ));
@@ -200,7 +200,7 @@ fn emit_struct_command_entry(
         .iter()
         .map(|(command, _, _, variable)| {
             format!(
-                "                        {name:?} => {variable}.clone(),\n",
+                "                        Some({name:?}) => {variable}.clone(),\n",
                 name = command.name
             )
         })
@@ -806,7 +806,7 @@ fn cli_decode_input_line(
                 unreachable!("canonical CLI flag input must have a Bool type")
             };
             format!(
-                "{indent}{binding} {variable}: bool = {root}jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
+                "{indent}{binding} {variable}: bool = {root}jet_parsed_flag(&__parsed, &{flag:?}.to_string());\n"
             )
         }
         jet_foundation::CLISchema::CLIInputShape::Value { optional: true, .. } => {
@@ -816,7 +816,7 @@ fn cli_decode_input_line(
             let rust = cx.rust_type(inner);
             let conv = cli_scalar_from_string(inner, "__v", flag, root);
             format!(
-                "{indent}{binding} {variable}: {root}JetOutcome<{rust}, {root}JetAbsent> = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Ok(__v) => Ok({conv}), Err({root}JetAbsent) => Err({root}JetAbsent) }};\n"
+                "{indent}{binding} {variable}: {root}JetOutcome<{rust}, {root}JetAbsent> = match {root}jet_parsed_option(&__parsed, &{flag:?}.to_string()) {{ Ok(__v) => Ok({conv}), Err({root}JetAbsent) => Err({root}JetAbsent) }};\n"
             )
         }
         jet_foundation::CLISchema::CLIInputShape::Value {
@@ -842,7 +842,7 @@ fn cli_decode_input_line(
                 ),
             };
             format!(
-                "{indent}{binding} {variable}: {rust} = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Ok(__v) => {conv}, Err(_) => {absent} }};\n"
+                "{indent}{binding} {variable}: {rust} = match {root}jet_parsed_option(&__parsed, &{flag:?}.to_string()) {{ Ok(__v) => {conv}, Err(_) => {absent} }};\n"
             )
         }
     }
@@ -907,7 +907,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     ));
                 }
                 decode_lines.push_str(&format!(
-                    "    let {m}: bool = {root}jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
+                    "    let {m}: bool = {root}jet_parsed_flag(&__parsed, &{flag:?}.to_string());\n"
                 ));
             }
             jet_foundation::CLISchema::CLIInputShape::Value {
@@ -922,7 +922,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 let conv = cli_scalar_from_string(inner, "__v", &flag, root);
                 // D-FAIL-CARRIER1=A: an optional CLI input is the carrier, not an `Option`.
                 decode_lines.push_str(&format!(
-                    "    let {m}: {root}JetOutcome<{rust}, {root}JetAbsent> = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Ok(__v) => Ok({conv}), Err({root}JetAbsent) => Err({root}JetAbsent) }};\n"
+                    "    let {m}: {root}JetOutcome<{rust}, {root}JetAbsent> = match {root}jet_parsed_option(&__parsed, &{flag:?}.to_string()) {{ Ok(__v) => Ok({conv}), Err({root}JetAbsent) => Err({root}JetAbsent) }};\n"
                 ));
             }
             jet_foundation::CLISchema::CLIInputShape::Value {
@@ -963,7 +963,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 // Named wins: ArgsSpec merges bare positionals into options under
                 // the same name when the named form is absent, so one decode path.
                 decode_lines.push_str(&format!(
-                    "    let {m}: {rust} = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Ok(__v) => {conv}, Err(_) => {absent} }};\n"
+                    "    let {m}: {rust} = match {root}jet_parsed_option(&__parsed, &{flag:?}.to_string()) {{ Ok(__v) => {conv}, Err(_) => {absent} }};\n"
                 ));
             }
         }
