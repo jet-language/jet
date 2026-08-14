@@ -2,9 +2,10 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, CModule, ExternFn, ExternRustBlock, Func, FuncSig, Item, Type,
+    AccessConvention, CModule, ExternFn, ExternRustBlock, Func, FuncSig, Item, Param, Type,
     VariantPayload,
 };
+use crate::Sema::Bundle::fn_types_compatible;
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 
@@ -474,7 +475,7 @@ pub(crate) fn validate_foreign_undo_contracts(
                 for foreign in &block.functions {
                     validate_undo_target_parts(
                         &foreign.name,
-                        foreign.params.len(),
+                        &foreign.params,
                         foreign.undo.as_ref(),
                         funcs,
                         diags,
@@ -485,7 +486,7 @@ pub(crate) fn validate_foreign_undo_contracts(
                 for foreign in &module.functions {
                     validate_undo_target_parts(
                         &foreign.name,
-                        foreign.params.len(),
+                        &foreign.params,
                         foreign.undo.as_ref(),
                         funcs,
                         diags,
@@ -503,7 +504,7 @@ fn validate_undo_target(function: &Func, funcs: &HashMap<String, FuncSig>, diags
     }
     validate_undo_target_parts(
         &function.name,
-        function.params.len(),
+        &function.params,
         function.undo.as_ref(),
         funcs,
         diags,
@@ -512,7 +513,7 @@ fn validate_undo_target(function: &Func, funcs: &HashMap<String, FuncSig>, diags
 
 fn validate_undo_target_parts(
     forward_name: &str,
-    forward_arity: usize,
+    forward_params: &[Param],
     undo: Option<&(String, Span)>,
     funcs: &HashMap<String, FuncSig>,
     diags: &mut Vec<Diagnostic>,
@@ -530,18 +531,98 @@ fn validate_undo_target_parts(
         ));
         return;
     };
-    if inverse_sig.params.len() != forward_arity {
+    let forward_params = forward_params
+        .iter()
+        .map(|param| {
+            let ty = if param.variadic {
+                Type::List(Box::new(param.ty.clone()))
+            } else {
+                param.ty.clone()
+            };
+            (param.convention, ty)
+        })
+        .collect::<Vec<_>>();
+    if inverse_sig.params.len() != forward_params.len() {
         diags.push(Diagnostic::error(
             "E0104",
             format!(
-                "undo function `{inverse}` expects {} argument{}, but `{forward_name}` has {forward_arity}",
+                "undo function `{inverse}` expects {} argument{}, but `{forward_name}` has {}",
                 inverse_sig.params.len(),
                 if inverse_sig.params.len() == 1 { "" } else { "s" },
+                forward_params.len(),
             ),
             "the compensating call receives the same captured arguments as the foreign call"
                 .to_string(),
             format!("give `{inverse}` the same parameter count as `{forward_name}`"),
             Some(*span),
         ));
+        return;
     }
+
+    for (index, ((forward_convention, forward_type), (inverse_convention, inverse_type))) in
+        forward_params.iter().zip(&inverse_sig.params).enumerate()
+    {
+        let same_type = fn_types_compatible(
+            &undo_callable_type(std::slice::from_ref(forward_type), None),
+            &undo_callable_type(std::slice::from_ref(inverse_type), None),
+        );
+        if *forward_convention != *inverse_convention || !same_type {
+            let reason = if forward_convention != inverse_convention {
+                format!(
+                    "access convention `{}` does not match `{}`",
+                    access_keyword(*inverse_convention),
+                    access_keyword(*forward_convention),
+                )
+            } else {
+                format!(
+                    "type `{}` does not match `{}`",
+                    inverse_type.name(),
+                    forward_type.name(),
+                )
+            };
+            diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "undo function `{inverse}` parameter {} is incompatible with `{forward_name}`: {reason}",
+                    index + 1,
+                ),
+                "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature"
+                    .to_string(),
+                format!(
+                    "make parameter {} of `{inverse}` use the same type and access convention as `{forward_name}`",
+                    index + 1,
+                ),
+                Some(*span),
+            ));
+        }
+    }
+
+    if let Some(return_type) = inverse_sig.return_type.as_ref().filter(|ty| !is_unit_return(ty)) {
+        diags.push(Diagnostic::error(
+            "E0113",
+            format!(
+                "undo function `{inverse}` returns `{}`, but rollback functions must return Unit",
+                return_type.name(),
+            ),
+            "rollback invokes the inverse for its side effect and cannot use a returned value"
+                .to_string(),
+            format!("remove `{}` from `{inverse}` so it returns Unit", return_type.name()),
+            Some(*span),
+        ));
+    }
+}
+
+fn undo_callable_type(params: &[Type], return_type: Option<Type>) -> Type {
+    Type::Fn {
+        params: params.to_vec(),
+        ret: return_type.map(Box::new),
+        effect_bound: None,
+        param_contract: None,
+        call_metadata: None,
+        return_view_provenance: None,
+    }
+}
+
+fn is_unit_return(ty: &Type) -> bool {
+    matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }

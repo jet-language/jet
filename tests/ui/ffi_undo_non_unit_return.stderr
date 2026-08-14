@@ -1,0 +1,7 @@
+Error [E0113]: undo function `undo_mutate` returns `Int`, but rollback functions must return Unit
+  --> tests/ui/ffi_undo_non_unit_return.jet:2:11
+    |
+  2 |     #Undo(undo_mutate) fn mutate(left: Int, right: Int) => Int = "std::cmp::max";
+    |           ^^^^^^^^^^^
+ Why: rollback invokes the inverse for its side effect and cannot use a returned value
+ Fix: remove `Int` from `undo_mutate` so it returns Unit

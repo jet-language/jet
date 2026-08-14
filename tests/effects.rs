@@ -1008,6 +1008,30 @@ fn run() {
     );
 }
 
+#[test]
+fn transact_ffi_undo_rejects_parameter_type_mismatch() {
+    let src = r#"
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) => Int = "std::cmp::max";
+}
+fn undo_mutate(left: String, right: Int) {}
+fn run() {}
+"#;
+    assert!(codes(src).iter().any(|code| code == "E0112"));
+}
+
+#[test]
+fn transact_ffi_undo_rejects_non_unit_return() {
+    let src = r#"
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) => Int = "std::cmp::max";
+}
+fn undo_mutate(left: Int, right: Int) => Int { return 0 }
+fn run() {}
+"#;
+    assert!(codes(src).iter().any(|code| code == "E0113"));
+}
+
 /// D-BOUND-UNDO1=A: the native inline-FFI bridge executes the compensating
 /// function when the transaction fails, so the declaration cannot bypass the
 /// existing rollback guard at runtime.
