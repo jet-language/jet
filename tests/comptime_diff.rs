@@ -746,6 +746,15 @@ fn parity_frame_rejects_unequal_same_length_multiline_values() {
 }
 
 #[test]
+fn comptime_grouped_core_use_list_matches_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping grouped Core use-list differential");
+        return;
+    }
+    check_comptime_src(1000, "grouped Core use list", MODULE_CASES[0]);
+}
+
+#[test]
 fn comptime_module_calls_match_runtime() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping comptime module-call differential battery");
