@@ -218,7 +218,7 @@ pub fn jet_scheduler_shielded() -> bool {
     SHIELD_DEPTH.with(|d| d.get() > 0)
 }
 
-#[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
+#[allow(dead_code)] // wired to the ratified `#Shield` lowering
 pub fn jet_scheduler_shield_enter() {
     // Outside a scheduler task/catch frame, `#Shield` is a transparent block.
     if current_task_control().is_some() {
@@ -226,7 +226,7 @@ pub fn jet_scheduler_shield_enter() {
     }
 }
 
-#[allow(dead_code)] // wired to a user sigil once D-SHIELDNAME1 ratifies
+#[allow(dead_code)] // wired to the ratified `#Shield` lowering
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JetShieldExit {
     None,
