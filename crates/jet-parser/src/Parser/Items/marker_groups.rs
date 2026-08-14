@@ -950,11 +950,46 @@ impl<'a> Parser<'a> {
                 ))
         }
 
+        // D-MARK-SCOPE1: at file scope a newline-terminated `#Policy` can be
+        // a module declaration; inside a type it can prefix a method.
+        fn policy_marker_sequence_leads_to_method(&self) -> bool {
+            if self.marker_name_at(self.pos) != Some(Syntax::MARKER_POLICY) {
+                return false;
+            }
+            let mut cursor = self.pos;
+            loop {
+                while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) {
+                    cursor += 1;
+                }
+                if self.marker_name_at(cursor).is_none() {
+                    break;
+                }
+                let Some(next) = self.skip_bare_marker(cursor) else {
+                    return false;
+                };
+                cursor = next;
+            }
+            while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) {
+                cursor += 1;
+            }
+            matches!(
+                self.toks.get(cursor).map(|token| &token.kind),
+                Some(TokKind::KwFn)
+            ) || matches!(
+                (
+                    self.toks.get(cursor).map(|token| &token.kind),
+                    self.toks.get(cursor + 1).map(|token| &token.kind),
+                ),
+                (Some(TokKind::KwPub), Some(TokKind::KwFn))
+            )
+        }
+
         pub(in crate::Parser) fn method_starts_here(&self) -> bool {
             matches!(self.peek().kind, TokKind::KwFn)
                 || matches!(self.peek().kind, TokKind::KwPub)
                     && matches!(self.peek2().kind, TokKind::KwFn)
                 || self.marker_sequence_leads_to_function()
+                || self.policy_marker_sequence_leads_to_method()
         }
 
         fn parse_function_marker_sequence(&mut self) -> Result<Vec<Marker>, Diagnostic> {
