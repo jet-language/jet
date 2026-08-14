@@ -791,7 +791,7 @@ impl Circle {
   and `struct Pair<T> { … }`. Built-in traits follow S55:
   `Printable`/`Equatable`/`Debug`/`Comparable`/`Encode`/`Decode` auto-derive
   whenever every field qualifies.
-  The package default is on; `policy: .{ auto_derive: false }` disables silent
+  The package default is on; `policy: .{ lints: .{ deny: [auto_derive] } }` refuses silent
   generation. A signed type marker opts one trait in or out (`#Debug`,
   `#!Debug`), and a hand-written implementation wins (D-AUTODERIVE1=E,
   D-AUTODERIVE-SYNTAX1=D). `#Codable` requests both codec directions;

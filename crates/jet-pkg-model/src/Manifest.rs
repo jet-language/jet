@@ -492,8 +492,8 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::BadMemoryPolicy { detail } => {
             e1206(&file, &format!("memory policy is malformed: {detail}"))
         }
-        PackageParseError::BadAutoDerivePolicy { detail } => {
-            e1206(&file, &format!("`policy.auto_derive` is malformed: {detail}"))
+        PackageParseError::RetiredPolicyField { field, replacement } => {
+            e1206_retired_policy(&file, field, replacement)
         }
         PackageParseError::BadGuaranteePolicy { detail } => e1206(
             &file,
@@ -548,6 +548,20 @@ fn e1206(_file: &str, detail: &str) -> Diagnostic {
         format!(
             "check `{}` against docs/spec/syntax-decisions.md (U1)",
             Syntax::PACKAGE_FILE
+        ),
+        None,
+    )
+}
+
+fn e1206_retired_policy(_file: &str, field: &str, replacement: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("`{field}` is retired"),
+        format!(
+            "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning."
+        ),
+        format!(
+            "remove `{field}` for the default, or use `{replacement}` to refuse auto-derive"
         ),
         None,
     )

@@ -4,7 +4,7 @@
 //! their own, separate decisions (D-JPK23, D-TGT1/D-TGT2/D-TGT3, D-CFFI2,
 //! D-BUILDPROFILE1, D-CTEFFECT1, D-EFFBUDGET1, D-JPK-GRANTSCHEMA1,
 //! D-JPK-PROVIDERAUTH1, D-LINTPOLICY1, D-PACKAGE-POLICY-SCOPE1,
-//! D-AUTODERIVE1) — this module is the single reader for all of them, so
+//! D-ONCE-AUTODERIVE1) — this module is the single reader for all of them, so
 //! `package.jet` never again has two parsers for one fact.
 
 use super::PackageParseError;
@@ -134,10 +134,6 @@ fn err(detail: impl Into<String>) -> PackageParseError {
 
 fn bad_mem(detail: impl Into<String>) -> PackageParseError {
     PackageParseError::BadMemoryPolicy { detail: detail.into() }
-}
-
-fn bad_auto(detail: impl Into<String>) -> PackageParseError {
-    PackageParseError::BadAutoDerivePolicy { detail: detail.into() }
 }
 
 fn bad_guarantee(detail: impl Into<String>) -> PackageParseError {
@@ -726,7 +722,7 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
 }
 
 // ── policy: … (D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
-//    D-PACKAGE-POLICY-SCOPE1, D-AUTODERIVE1, D-MEM-GUARANTEE1) ──────────────
+//    D-PACKAGE-POLICY-SCOPE1, D-ONCE-AUTODERIVE1, D-MEM-GUARANTEE1) ──────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustDecision {
@@ -887,9 +883,17 @@ pub(super) fn parse_memory_policy(
                 || (package_only_fields
                     && (name == Syntax::POLICY_FIELD_CONTAIN
                         || name == Syntax::POLICY_FIELD_HARDEN))
-                || name == Syntax::MANIFEST_POLICY_AUTO_DERIVE
             {
                 continue;
+            }
+            if name == jet_foundation::LintPolicy::AUTO_DERIVE_LINT.name {
+                return Err(PackageParseError::RetiredPolicyField {
+                    field: format!("policy.{name}"),
+                    replacement: format!(
+                        "policy: .{{ lints: .{{ deny: [{}] }} }}",
+                        jet_foundation::LintPolicy::AUTO_DERIVE_LINT.name
+                    ),
+                });
             }
             return Err(bad_mem(format!("`{name}` is not a registered package policy")));
         };
@@ -986,23 +990,6 @@ pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDecl
         return Err(bad_mem("organization policy file may contain only the `policy` block"));
     }
     parse_memory_policy(&rest[..close], false)
-}
-
-pub(super) fn parse_auto_derive_policy(body: &str) -> Result<Option<bool>, PackageParseError> {
-    let values = key_value_entries(body)?
-        .into_iter()
-        .filter(|(name, _)| name == Syntax::MANIFEST_POLICY_AUTO_DERIVE)
-        .map(|(_, raw)| match raw.trim() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            _ => Err(bad_auto("`auto_derive` must be `true` or `false`")),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    match values.as_slice() {
-        [] => Ok(None),
-        [value] => Ok(Some(*value)),
-        _ => Err(bad_auto("`auto_derive` may be declared once")),
-    }
 }
 
 // ── `fn build` co-location (D-BUILDSCOPE1) ──────────────────────────────────

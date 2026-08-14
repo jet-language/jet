@@ -406,7 +406,7 @@ fn load_entry_with_overlays_mode_with_sink(
         pkg_dep_dirs,
         pkg_resolution,
         package_policy,
-        package_auto_derive,
+        package_lints_deny,
     ) = if let Some(manifest_dir) = manifest_root
     {
         // Found a Package root — validate it and collect dep source paths.
@@ -468,18 +468,15 @@ fn load_entry_with_overlays_mode_with_sink(
                     ),
                 ));
             }
-            Err(crate::Package::PackageParseError::BadAutoDerivePolicy { detail }) => {
+            Err(error @ crate::Package::PackageParseError::RetiredPolicyField { .. }) => {
                 return Err(record_loader_error(
                     &mut sink,
                     LoaderError::at(
                         &pack_path.display().to_string(),
                         &raw,
-                        vec![Diagnostic::error(
-                            "E0355",
-                            "invalid package auto-derive policy".to_string(),
-                            detail,
-                            "set `policy: .{ auto_derive: true }` or `policy: .{ auto_derive: false }` in `package.jet`".to_string(),
-                            None,
+                        vec![crate::Manifest::manifest_parse_diagnostic(
+                            &pack_path,
+                            &error,
                         )],
                     ),
                 ));
@@ -705,7 +702,7 @@ fn load_entry_with_overlays_mode_with_sink(
                     )
                 })?;
                 let mut policy = organization_policy.clone();
-                let auto_derive = package_manifest.policy.auto_derive.unwrap_or(true);
+                let package_lints_deny = package_manifest.policy.lints_deny.unwrap_or_default();
                 policy.extend(package_manifest.policy.memory);
                 let source = pack_path.display().to_string();
                 for declaration in policy.iter_mut().filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package) { declaration.source = source.clone(); }
@@ -719,7 +716,7 @@ fn load_entry_with_overlays_mode_with_sink(
                         ),
                     )
                 })?;
-                (manifest_dir, dep_dirs, resolution, policy, auto_derive)
+                (manifest_dir, dep_dirs, resolution, policy, package_lints_deny)
             }
         }
     } else {
@@ -778,7 +775,7 @@ fn load_entry_with_overlays_mode_with_sink(
             HashMap::new(),
             resolution,
             organization_policy,
-            true,
+            Vec::new(),
         )
     };
 
@@ -807,7 +804,7 @@ fn load_entry_with_overlays_mode_with_sink(
         &pkg_dep_dirs,
         &pkg_resolution,
         &package_policy,
-        package_auto_derive,
+        &package_lints_deny,
         &mut modules,
         &mut path_to_idx,
         &mut stack,
@@ -899,7 +896,7 @@ fn load_entry_with_overlays_mode_with_sink(
                     &pkg_dep_dirs,
                     &pkg_resolution,
                     &package_policy,
-                    package_auto_derive,
+                    &package_lints_deny,
                     &mut modules,
                     &mut path_to_idx,
                     &mut stack,
@@ -1536,7 +1533,7 @@ fn project_resolution(
 fn auto_derive_default_for_file(
     path: &Path,
     project_root: &Path,
-    project_default: bool,
+    project_lints_deny: &[String],
     dependency_roots: &HashMap<String, DependencyDir>,
 ) -> Result<bool, Diagnostic> {
     let dependency = dependency_roots
@@ -1558,10 +1555,17 @@ fn auto_derive_default_for_file(
                     None,
                 )
             })?;
-        return Ok(package.policy.auto_derive.unwrap_or(true));
+        let deny = package.policy.lints_deny.as_deref().unwrap_or_default();
+        return Ok(!jet_foundation::LintPolicy::is_denied(
+            deny,
+            jet_foundation::LintPolicy::AUTO_DERIVE_LINT.code,
+        ));
     }
     if path.starts_with(project_root) {
-        Ok(project_default)
+        Ok(!jet_foundation::LintPolicy::is_denied(
+            project_lints_deny,
+            jet_foundation::LintPolicy::AUTO_DERIVE_LINT.code,
+        ))
     } else {
         Ok(true)
     }
@@ -1590,7 +1594,7 @@ fn load_file(
     pkg_dep_dirs: &HashMap<String, DependencyDir>,
     pkg_resolution: &PkgResolution,
     package_policy: &[crate::Policy::PolicyDeclaration],
-    package_auto_derive: bool,
+    package_lints_deny: &[String],
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
@@ -1651,7 +1655,7 @@ fn load_file(
     let auto_derive_default = auto_derive_default_for_file(
         &norm,
         project_root,
-        package_auto_derive,
+        package_lints_deny,
         pkg_dep_dirs,
     )
     .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;
@@ -1736,7 +1740,7 @@ fn load_file(
             pkg_dep_dirs,
             pkg_resolution,
             package_policy,
-            package_auto_derive,
+            package_lints_deny,
             modules,
             path_to_idx,
             stack,
@@ -1798,7 +1802,7 @@ fn load_file(
             pkg_dep_dirs,
             pkg_resolution,
             package_policy,
-            package_auto_derive,
+            package_lints_deny,
             modules,
             path_to_idx,
             stack,

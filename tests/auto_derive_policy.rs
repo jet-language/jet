@@ -142,10 +142,10 @@ fn run() {
 }
 
 #[test]
-fn package_off_requires_opt_in_and_manual_impl_wins() {
+fn generic_deny_list_refuses_auto_derive() {
     let bundle = checked_project(
         "package_off",
-        "policy: .{ auto_derive: false }",
+        "policy: .{ lints: .{ deny: [auto_derive] } }",
         r#"
 #[Printable, Equatable, Debug]
 struct Enabled { value: Int }
@@ -210,6 +210,30 @@ fn run() {
         stdout,
         "Enabled { value: 3 }\nEnabled { value: 3 }\ntrue\nmanual\n"
     );
+}
+
+#[test]
+fn old_auto_derive_key_is_rejected() {
+    let dir = project_dir("old_key");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let legacy_key = ["auto", "derive"].join("_");
+    std::fs::write(
+        dir.join("package.jet"),
+        format!(
+            "name: \"old-key\"\nversion: \"1\"\npolicy: .{{ {legacy_key}: false }}\n"
+        ),
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let diagnostics = jet::Loader::load_entry(entry.to_str().unwrap())
+        .expect_err("retired policy key must be rejected");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert_eq!(diagnostics[0].code, "E1206");
+    assert!(diagnostics[0].what.contains("policy.auto_derive"), "{diagnostics:#?}");
+    assert!(diagnostics[0].fix.contains("policy.lints.deny"), "{diagnostics:#?}");
 }
 
 #[test]
@@ -299,7 +323,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     std::fs::create_dir_all(&nested_dir).unwrap();
     std::fs::write(
         nested_dir.join("package.jet"),
-        "name: \"nested\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
+        "name: \"nested\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
     )
     .unwrap();
     std::fs::write(
@@ -328,7 +352,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     std::fs::create_dir_all(dep.join(".jet")).unwrap();
     std::fs::write(
         app.join("package.jet"),
-        "name: \"app\"\nversion: \"1\"\ndeps: { dep: ../dep }\npolicy: .{ auto_derive: true }\n",
+        "name: \"app\"\nversion: \"1\"\ndeps: { dep: ../dep }\n",
     )
     .unwrap();
     std::fs::write(
@@ -338,7 +362,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     .unwrap();
     std::fs::write(
         dep.join("package.jet"),
-        "name: \"dep\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
+        "name: \"dep\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
     )
     .unwrap();
     std::fs::write(
@@ -419,7 +443,7 @@ fn run() {
     .unwrap();
     std::fs::write(
         dep.join("package.jet"),
-        "name: \"dep\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
+        "name: \"dep\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
     )
     .unwrap();
     std::fs::write(

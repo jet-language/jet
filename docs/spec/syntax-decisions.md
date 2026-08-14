@@ -1532,8 +1532,8 @@ D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D, and D-META-AUTO1=A, 2026-08-06,
 cards #1267/#1545)*: every structurally derivable built-in capability
 (`Printable`, `Equatable`, `Debug`, `Comparable`, `Encode`, and `Decode`)
 auto-derives whenever every field qualifies. `Encode` + `Decode` is the
-`Codable` family. The package default is on. `policy: .{ auto_derive: false }`
-turns silent generation off for that package. At a type site, a bare trait
+`Codable` family. The package default is on. `policy: .{ lints: .{ deny: [auto_derive] } }`
+refuses silent generation for that package. At a type site, a bare trait
 marker opts in and `!` refuses compiler generation: `#!Printable` or
 `#[!Debug, !Equatable, Printable]`; `#!Codable` refuses both wire directions.
 A missing trait follows the package default. Positive markers generate only

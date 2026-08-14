@@ -457,6 +457,7 @@ renumbered, and no new `W` code may be allocated.
 | L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
 | L0507 | parse | prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68, D-BRANCH-LINT1=A) |
 | L0508 | sema | arrow loop body computes and drops a non-unit value (D-LOOP-STMT-ARROW1=C) |
+| L0509 | jet | reserved auto-derive policy name on the shared deny surface (D-ONCE-AUTODERIVE1) |
 | L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
@@ -1531,6 +1532,7 @@ already-freed arena), these track the views themselves.
 | L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | L0507 | prefer an ordered arm table for this branch | one ordered arm table is Jet's normal form for multi-line and chained choices | write `if { condition -> body else -> body }` |
 | L0508 | This arrow loop body computes a value and drops it. | A statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source. | Bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place. |
+| L0509 | auto-derive refusal is a named package policy entry | `auto_derive` is registered on the shared `policy.lints.deny` surface; the policy itself emits no warning. | write `policy: .{ lints: .{ deny: [auto_derive] } }` in `package.jet` |
 | L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |

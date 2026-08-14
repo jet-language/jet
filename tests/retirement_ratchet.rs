@@ -38,6 +38,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("manifest-file", 2),
     ("manifest-identity", 7),
     ("lint-policy-code", 0),
+    ("auto-derive-policy", 0),
     ("package-ref-order", 0),
     ("interpolation-selector-rail", 0),
     ("core-io-println", 0),
@@ -342,6 +343,22 @@ fn tally(row: &Retirement) -> (usize, usize) {
                 if has_retired {
                     retired += 1;
                 } else if has_canonical {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "auto-derive-policy" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.extension().is_none_or(|ext| ext != "jet") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains("policy: .{ auto_derive") {
+                    retired += 1;
+                } else if text.contains("policy: .{ lints: .{ deny: [auto_derive]") {
                     canonical += 1;
                 }
             }

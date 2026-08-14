@@ -224,8 +224,6 @@ pub struct PackagePolicy {
     /// D-PACKAGE-POLICY-SCOPE1: typed, tighten-only memory-policy facts
     /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`, `sentries`).
     pub memory: Vec<crate::Policy::PolicyDeclaration>,
-    /// D-AUTODERIVE1=E: absent means the safe beginner default, enabled.
-    pub auto_derive: Option<bool>,
     /// D-JPK-GRANTSCHEMA1=A: `policy.trust`.
     pub trust: Option<Blocks::TrustPolicy>,
     /// D-JPK-PROVIDERAUTH1=A: `policy.providers`.
@@ -353,8 +351,8 @@ pub enum PackageParseError {
     BadEffectsBlock(String),
     /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
     BadMemoryPolicy { detail: String },
-    /// D-AUTODERIVE-SYNTAX1=D: malformed `policy.auto_derive`.
-    BadAutoDerivePolicy { detail: String },
+    /// D-ONCE-RETIRE1=C: a retired package policy field needs migration.
+    RetiredPolicyField { field: String, replacement: String },
     /// D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
     BadGuaranteePolicy { detail: String },
 }
@@ -384,7 +382,9 @@ impl fmt::Display for PackageParseError {
             Self::ReservedSection(section) => write!(f, "`{section}` is reserved"),
             Self::BadEffectsBlock(detail) => f.write_str(detail),
             Self::BadMemoryPolicy { detail } => f.write_str(detail),
-            Self::BadAutoDerivePolicy { detail } => f.write_str(detail),
+            Self::RetiredPolicyField { field, replacement } => {
+                write!(f, "`{field}` is retired; use `{replacement}`")
+            }
             Self::BadGuaranteePolicy { detail } => f.write_str(detail),
         }
     }
@@ -1718,7 +1718,6 @@ fn parse_common(
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
                 facts.policy = PackagePolicy {
                     memory: Blocks::parse_memory_policy(body, true)?,
-                    auto_derive: Blocks::parse_auto_derive_policy(body)?,
                     trust: Blocks::parse_trust_policy(body)?,
                     providers: Blocks::parse_provider_policy(body)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,

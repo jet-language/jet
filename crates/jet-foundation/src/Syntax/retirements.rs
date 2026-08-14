@@ -105,6 +105,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         code: Some("E1206"),
     },
     Retirement {
+        id: "auto-derive-policy",
+        retired: "policy.auto_derive",
+        canonical: "policy.lints.deny: [auto_derive]",
+        kind: RetirementKind::Semantic,
+        decision: "D-ONCE-AUTODERIVE1",
+        since: "2026-08-08",
+        code: Some("E1206"),
+    },
+    Retirement {
         id: "package-ref-order",
         retired: "provider@target",
         canonical: "target@provider",

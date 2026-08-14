@@ -153,10 +153,11 @@
 // `.Equatable`, and `.Comparable` reuse ordinary trait-impl dot syntax.
 // D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D (ratified 2026-07-29,
 // card #1267) amend S55 and D-MARK-DEBUG1. Printable, Equatable, and Debug
-// auto-derive when fields qualify. MANIFEST_POLICY_AUTO_DERIVE controls the
-// package default. At a type site, the ordinary marker names opt in and a
-// leading Bang opts out (`#!Printable`, `#[!Debug, Equatable]`). Missing
-// traits follow the package default; a hand-written impl always wins.
+// auto-derive when fields qualify. The package default is refused through the
+// named `policy.lints.deny` entry `auto_derive`. At a type site, the ordinary
+// marker names opt in and a leading Bang opts out (`#!Printable`,
+// `#[!Debug, Equatable]`). Missing traits follow the package default; a
+// hand-written impl always wins.
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.

@@ -15,6 +15,14 @@ pub struct RegisteredLint {
     pub code: &'static str,
 }
 
+/// The package-level auto-derive refusal is a named entry in the shared lint
+/// deny list. It is reserved because no source lint is emitted for the policy
+/// itself; the loader consumes the same registry identity.
+pub const AUTO_DERIVE_LINT: RegisteredLint = RegisteredLint {
+    name: "auto_derive",
+    code: "L0509",
+};
+
 /// Every registered lint has one stable snake_case name. Retired and reserved
 /// rows stay registered so old reports and future migrations keep one identity.
 pub const REGISTERED_LINTS: &[RegisteredLint] = &[
@@ -36,6 +44,7 @@ pub const REGISTERED_LINTS: &[RegisteredLint] = &[
     RegisteredLint { name: "heap_growth_in_loop", code: "L0505" },
     RegisteredLint { name: "hidden_context_allocation", code: "L0506" },
     RegisteredLint { name: "branch_arm_table", code: "L0507" },
+    AUTO_DERIVE_LINT,
     RegisteredLint { name: "prelude_alias_shadow", code: "L0510" },
     RegisteredLint { name: "err_fallback_shadow", code: "L0511" },
     RegisteredLint { name: "display_migration", code: "L0520" },
