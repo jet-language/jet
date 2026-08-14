@@ -5598,7 +5598,7 @@ fn swap_command_entry_point(
     bundle: &mut crate::AST::ProgramBundle,
     kind: crate::Codegen::CommandOverrideKind,
 ) {
-    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt};
+    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt, Type};
     use crate::Diagnostics::Span;
 
     let (entry_name, suite_name, suite_method) = match kind {
@@ -5716,6 +5716,10 @@ fn swap_command_entry_point(
     wrapper.task_metadata = None;
     wrapper.every = None;
     wrapper.markers = Vec::new();
+    if wrapper.return_type.is_none() {
+        wrapper.return_type = Some(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()));
+        wrapper.return_type_span = Some(zero);
+    }
     wrapper.body = body;
     entry_module.items.push(Item::Func(Func { ..wrapper }));
 }

@@ -4370,6 +4370,10 @@ pub(crate) fn build(
     // into codegen.
     cmd.arg("--crate-name")
         .arg(jet::Syntax::sanitize_crate_name(&stem(file)));
+    if let Ok(work_prefix) = fs::canonicalize(&work) {
+        cmd.arg("--remap-path-prefix")
+            .arg(format!("{}=build/.work", work_prefix.display()));
+    }
     cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
     prepared_runtime.add_rustc_args(&mut cmd);
     if let Some(link) = ffi {

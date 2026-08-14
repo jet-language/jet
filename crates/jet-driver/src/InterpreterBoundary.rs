@@ -40,6 +40,7 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
 }
 
 fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary> {
+    let has_typed_cli = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
     for module in &bundle.modules {
         let interpreted_functions: HashSet<&str> = module
             .items
@@ -79,7 +80,7 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                             span: Some(function.name_span),
                         });
                     }
-                    if function.name == "run" && !function.params.is_empty() {
+                    if function.name == "run" && !function.params.is_empty() && !has_typed_cli {
                         return Some(Boundary {
                             feature: "uses a typed CLI entry signature (`fn run(args: T)`)".to_string(),
                             span: Some(function.name_span),

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v1";
+const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v2";
 const CRATE_NAME: &str = "jet_runtime";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
@@ -166,10 +166,13 @@ fn prepare_at(
     let mut command = Command::new(rustc);
     command
         .args(["--edition", "2021", "--crate-name", CRATE_NAME, "--crate-type", "rlib"])
-        .args(rustc_flags)
-        .arg(&source)
-        .arg("-o")
-        .arg(&staged_rlib);
+        .args(rustc_flags);
+    if let Ok(source_prefix) = fs::canonicalize(&source) {
+        command
+            .arg("--remap-path-prefix")
+            .arg(format!("{}=jet-runtime.rs", source_prefix.display()));
+    }
+    command.arg(&source).arg("-o").arg(&staged_rlib);
     for (name, value) in rustc_env {
         command.env(name, value);
     }
