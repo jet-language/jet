@@ -818,6 +818,7 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Clone(operand)
         | TIR::TExprKind::ExplicitCopy(operand)
         | TIR::TExprKind::MaterializeView(operand)
+        | TIR::TExprKind::DistinctRaw(operand)
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
@@ -846,6 +847,15 @@ fn web_wasm_expr_supported(
             arg, op, fallible, ..
         } if web_distinct_convert_supported(op, *fallible) => {
             web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::OverflowOpt {
+            prefix,
+            op,
+            lhs,
+            rhs,
+        } if web_overflow_opt_supported(prefix, op) => {
+            web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::OptionLift2 { f, a, b } => {
             web_wasm_expr_supported(f, bundle, file_prefix, reconstructions)
@@ -1278,6 +1288,12 @@ fn web_distinct_convert_supported(op: &TIR::TNumericOp, fallible: bool) -> bool 
     }
 }
 
+/// The web engines can marshal the settled knowledge-gate operation through
+/// their existing integer addition lowering.
+fn web_overflow_opt_supported(prefix: &str, op: &str) -> bool {
+    prefix == "wrapping" && op == "add"
+}
+
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
@@ -1298,6 +1314,14 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::DistinctConvert {
             arg, op, fallible, ..
         } if web_distinct_convert_supported(op, *fallible) => web_expr_supported(arg),
+        E::OverflowOpt {
+            prefix,
+            op,
+            lhs,
+            rhs,
+        } if web_overflow_opt_supported(prefix, op) => {
+            web_expr_supported(lhs) && web_expr_supported(rhs)
+        }
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::EnumLit { payload, .. } => match payload {
@@ -4144,12 +4168,26 @@ fn wasm_emit_distinct_convert(
     };
     match op {
         TIR::TNumericOp::CastAs { dst_rust } => {
-            let converted = format!("(({input}) as {dst_rust})");
+            let wasm_int_carrier = dst_rust == "i64"
+                && matches!(&arg.ty, Type::Int | Type::InlineRange { .. });
+            let converted = if wasm_int_carrier {
+                input.clone()
+            } else {
+                format!("(({input}) as {dst_rust})")
+            };
             if !fallible {
                 return Ok(converted);
             }
             let Some((lo, hi)) = range else {
                 return Ok(format!("Ok({converted})"));
+            };
+            let (lo, hi) = if wasm_int_carrier {
+                (
+                    format!("JetWasmInt::from_i64({lo})"),
+                    format!("JetWasmInt::from_i64({hi})"),
+                )
+            } else {
+                (lo.to_string(), hi.to_string())
             };
             Ok(jet_format!(
                 "{{ let {jet_prefix}value = {converted}; if {jet_prefix}value >= {lo} && {jet_prefix}value <= {hi} {{ Ok({jet_prefix}value) }} else {{ Err({}) }} }}",
@@ -4589,6 +4627,19 @@ fn wasm_emit_expr(
                 loc.file,
                 loc.line,
             )
+        }
+        TIR::TExprKind::DistinctRaw(inner) => {
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        }
+        TIR::TExprKind::OverflowOpt {
+            prefix,
+            op,
+            lhs,
+            rhs,
+        } if web_overflow_opt_supported(prefix, op) => {
+            let lhs = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
+            let rhs = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
+            format!("({lhs} + {rhs})")
         }
         TIR::TExprKind::OptionLift2 { f, a, b } => jet_format!(
             "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |{jet_prefix}value| Ok({jet_prefix}value), || {{ let {jet_prefix}f = ({}); move |{jet_prefix}a, {jet_prefix}b| ({jet_prefix}f)({jet_prefix}a, {jet_prefix}b) }})",
@@ -6404,6 +6455,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             funcs,
             file_prefix,
         )?,
+        E::OverflowOpt {
+            prefix,
+            op,
+            lhs,
+            rhs,
+        } if web_overflow_opt_supported(prefix, op) => {
+            let lhs = tir_js_expr(lhs, funcs, file_prefix)?;
+            let rhs = tir_js_expr(rhs, funcs, file_prefix)?;
+            format!("({lhs} + {rhs})")
+        }
         E::Field { recv, field, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field)),
         E::StructLit { fields, .. }
             if matches!(&expr.ty, Type::Named(name) if name == Syntax::TYPE_ERR) =>

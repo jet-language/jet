@@ -114,6 +114,23 @@ pub(crate) fn method_call_in_subset(
     if method == "clone" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // D-TYPE2-SPELL1: the inline-range descriptor is a static typed-value head,
+    // not a runtime receiver. Sema records the resolved range on `Int(lo..hi)`;
+    // lowering consumes that same fact into `TNumericOp::InlineRange`.
+    let inline_range_head = matches!(receiver, Expr::Call(call)
+        if call.name == Syntax::TYPE_INT
+            && call.args.len() == 1
+            && match call.resolved_ret.as_ref() {
+                Some(Type::InlineRange { .. }) => true,
+                Some(Type::Result { ok, .. }) => matches!(ok.as_ref(), Type::InlineRange { .. }),
+                _ => false,
+            });
+    if method == Syntax::conversion_method_for_source("Int")
+        && args.len() == 1
+        && inline_range_head
+    {
+        return expr_in_subset(&args[0].expr, cx, locals);
+    }
     // D-TOOL4: `expect(x).snapshot()` — snapshot assertion. Receiver is a Call to
     // the ambient `expect` builtin (not a user fn / local). Zero method args; the
     // wrapped value must itself be in-subset. Lowers to `jet_expect(…).snapshot(…)?`.
