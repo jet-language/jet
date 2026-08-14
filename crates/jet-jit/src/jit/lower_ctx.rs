@@ -4518,10 +4518,8 @@ impl LowerCtx<'_, '_> {
                         }
                         return Ok(());
                     }
-                    // IfLet/IsNone/Matches lower to a pre-computed `matches!`/`is_none`
-                    // string in the AOT emitter (TIR/emit/statements.rs); the JIT has no
-                    // pattern-test lowering, so each is named (not `_`) to keep this match
-                    // exhaustive over `TIfCond`.
+                    // Keep non-plain conditions named so this match stays exhaustive over
+                    // `TIfCond` while each condition uses its dedicated lowering path.
                     TIfCond::And { left, right } => {
                         // A guarded variant arm is represented as
                         // `if let Variant(payload) && guard`. Lower the
@@ -11632,8 +11630,13 @@ impl LowerCtx<'_, '_> {
                     TIfCond::IsNone { .. } => {
                         return Err("jit if-expression is-none unsupported".to_string())
                     }
-                    TIfCond::Matches { .. } => {
-                        return Err("jit if-expression pattern match unsupported".to_string())
+                    TIfCond::Matches { pattern, subj } => {
+                        let value = self.lower_expr(subj)?;
+                        let enum_name = pattern
+                            .enum_type
+                            .as_deref()
+                            .or_else(|| user_type_name(&subj.ty));
+                        self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)?
                     }
                 };
                 if self.dead {

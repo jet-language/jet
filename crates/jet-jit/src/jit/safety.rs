@@ -1746,7 +1746,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             else_body,
             else_value,
         } => {
-            // #1444: expression-position union dispatch → Variant if-lets (same as stmt If).
+            // Expression-position pattern conditions share statement lowering.
             let cond_ok = match cond.as_ref() {
                 TIfCond::Plain(e) => {
                     matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
@@ -1758,7 +1758,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     )
                         && resident_safe_expr(subj, callees)
                 }
-                TIfCond::IsNone { .. } | TIfCond::Matches { .. } | TIfCond::And { .. } => false,
+                TIfCond::Matches { subj, .. } => resident_safe_expr(subj, callees),
+                TIfCond::IsNone { .. } | TIfCond::And { .. } => false,
             };
             cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
