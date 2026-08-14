@@ -686,7 +686,7 @@ pub(crate) fn run_completions(args: &[String]) {
             completion_metadata_error(program, "the program is larger than the 512 MiB metadata-reader limit");
         }
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.by_ref().take(MAX_PROGRAM_BYTES + 1).read_to_end(&mut bytes)
+        Read::by_ref(&mut file).take(MAX_PROGRAM_BYTES + 1).read_to_end(&mut bytes)
             .unwrap_or_else(|error| completion_metadata_error(program, &format!("the opened program could not be read ({error})")));
         if bytes.len() as u64 > MAX_PROGRAM_BYTES {
             completion_metadata_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read");
