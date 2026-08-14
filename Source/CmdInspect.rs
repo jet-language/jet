@@ -469,56 +469,49 @@ fn render_provenance_json(
     requirement: jet::Package::ProvenanceRequirement,
     reports: &[jet::Lock::DependencyProvenanceReport],
 ) {
-    print!(
-        "{{\"schema_version\":1,\"require\":\"{}\",\"packages\":[",
-        json_escape(requirement.label())
+    let packages = reports
+        .iter()
+        .map(render_provenance_json_package)
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "{{\"schema_version\":1,\"require\":\"{}\",\"packages\":[{}]}}",
+        json_escape(requirement.label()),
+        packages
     );
-    for (index, report) in reports.iter().enumerate() {
-        if index > 0 {
-            print!(",");
-        }
-        print!(
-            "{{\"name\":\"{}\",\"version\":\"{}\",",
-            json_escape(&report.name),
-            json_escape(&report.version)
-        );
-        let integrity_evidence = matches!(
-            report.integrity.status,
-            jet::Lock::ProvenanceStatus::Enforced
-        )
-        .then_some("E1204");
-        render_provenance_json_field(
-            "integrity",
-            &report.integrity,
-            integrity_evidence,
-            true,
-        );
-        render_provenance_json_field("transparency", &report.transparency, None, true);
-        render_provenance_json_field("publisher", &report.publisher, None, true);
-        render_provenance_json_field("build", &report.build, None, false);
-        print!("}}");
-    }
-    println!("]}}");
+}
+
+fn render_provenance_json_package(report: &jet::Lock::DependencyProvenanceReport) -> String {
+    let integrity_evidence = matches!(
+        report.integrity.status,
+        jet::Lock::ProvenanceStatus::Enforced
+    )
+    .then_some("E1204");
+    let fields = [
+        format!("\"name\":\"{}\"", json_escape(&report.name)),
+        format!("\"version\":\"{}\"", json_escape(&report.version)),
+        render_provenance_json_field("integrity", &report.integrity, integrity_evidence),
+        render_provenance_json_field("transparency", &report.transparency, None),
+        render_provenance_json_field("publisher", &report.publisher, None),
+        render_provenance_json_field("build", &report.build, None),
+    ]
+    .join(",");
+    format!("{{{}}}", fields)
 }
 
 fn render_provenance_json_field(
     key: &str,
     field: &jet::Lock::ProvenanceField,
     evidence: Option<&str>,
-    trailing_comma: bool,
-) {
-    print!(
-        "\"{key}\":{{\"value\":\"{}\",\"status\":\"{}\"",
-        json_escape(&field.value),
-        field.status.label()
-    );
+) -> String {
+    let mut fields = vec![
+        format!("\"value\":\"{}\"", json_escape(&field.value)),
+        format!("\"status\":\"{}\"", field.status.label()),
+    ];
     if let Some(evidence) = evidence {
-        print!(",\"evidence\":\"{}\"", json_escape(evidence));
+        fields.push(format!("\"evidence\":\"{}\"", json_escape(evidence)));
     }
-    if trailing_comma {
-        print!(",");
-    }
-    print!("}}");
+    format!("\"{key}\":{{{}}}", fields.join(","))
 }
 
 fn entry_file(args: &[String]) -> Option<String> {
