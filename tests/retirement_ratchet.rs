@@ -98,7 +98,10 @@ const CONTENT_ROOTS: &[&str] = &["crates", "examples", "tests", "Source"];
 /// working tree happens to hold: worktrees, scratch, caches and build output
 /// are not the repository.
 fn is_skipped_dir(name: &str) -> bool {
-    name.starts_with('.') || name.starts_with("target") || name == "node_modules"
+    name.starts_with('.')
+        || name.starts_with("target")
+        || name == "build"
+        || name == "node_modules"
 }
 
 fn walk(root: &Path, out: &mut Vec<PathBuf>) {
@@ -162,6 +165,13 @@ fn contains_word(text: &str, word: &str) -> bool {
         !is_word(text[..index].chars().next_back())
             && !is_word(text[index + word.len()..].chars().next())
     })
+}
+
+#[test]
+fn retirement_walk_skips_build_output_but_keeps_live_source_visible() {
+    assert!(is_skipped_dir("build"));
+    assert!(!is_skipped_dir("examples"));
+    assert!(contains_word("let queue: Deque<Int> = Deque.new()", "Deque"));
 }
 
 /// A manifest written with the retired `payload: { … }` identity wrapper,
