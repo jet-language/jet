@@ -1896,6 +1896,9 @@ fn run() ? {
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(js.contains("jet_web_try("), "JS `?` did not use the edge adapter:\n{js}");
     let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
 const { jet_main } = await import("./app.js");
 try {
   await jet_main();
