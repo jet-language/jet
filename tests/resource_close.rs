@@ -44,11 +44,27 @@ fn codes(src: &str) -> Vec<String> {
 fn compile_and_run(src: &str, tag: &str) -> Output {
     assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
     let compiled = compile(src);
+    run_compiled(compiled.rust, tag)
+}
+
+fn compile_and_run_with_scheduler_unwind(src: &str, tag: &str) -> Output {
+    assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
+    let compiled = compile(src);
+    let rust = compiled.rust.replacen(
+        "    jet_runtime_boundary(|| __jet_run());",
+        "    jet_scheduler_task_panic_enter();\n    jet_runtime_boundary(|| __jet_run());",
+        1,
+    );
+    assert_ne!(rust, compiled.rust, "scheduler unwind probe did not attach");
+    run_compiled(rust, tag)
+}
+
+fn run_compiled(rust: String, tag: &str) -> Output {
     let root = common::unique_tmp(tag);
     fs::create_dir_all(&root).unwrap();
     let rs = root.join("main.rs");
     let bin = root.join("main");
-    fs::write(&rs, compiled.rust).unwrap();
+    fs::write(&rs, rust).unwrap();
     let built = Command::new("rustc")
         .args(["--edition", "2021"])
         .arg(&rs)
@@ -139,9 +155,13 @@ fn run() {
     panic("stop")
 }
 "#;
-    let ran = compile_and_run(src, "jet_resource_close_automatic_panic");
+    let ran = compile_and_run_with_scheduler_unwind(src, "jet_resource_close_automatic_panic");
     assert!(!ran.status.success());
+    assert_eq!(ran.status.code(), Some(70));
     assert_eq!(ran.stdout, b"body\nauto panic\n");
+    let stderr = String::from_utf8_lossy(&ran.stderr);
+    assert_eq!(stderr.matches("Stop [E3001]").count(), 1, "{stderr}");
+    assert!(stderr.contains("Stop [E3001]: panic: stop"), "{stderr}");
 }
 
 #[test]

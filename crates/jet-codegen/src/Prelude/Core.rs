@@ -626,6 +626,17 @@ where
             value
         }
         Err(payload) => {
+            // Program stops that cross a scheduler/interrupt unwind frame
+            // carry the already-rendered report as a String so the inner
+            // frame can inspect it. Classify only the canonical E3001 panic
+            // shape here; arbitrary host/compiler payloads must still unwind
+            // raw and become exit 101.
+            if let Some(report) = payload
+                .downcast_ref::<String>()
+                .filter(|report| report.starts_with("Stop [E3001]: panic: "))
+            {
+                jet_runtime_process_exit(70, Some(report));
+            }
             if let Some(message) = payload
                 .downcast_ref::<String>()
                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
