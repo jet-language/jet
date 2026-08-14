@@ -79,7 +79,11 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     let stderr = String::from_utf8(json.stderr).unwrap();
     assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
     assert!(stdout.contains("\"code\":\"E3107\"") && stdout.contains("helper.jet") && stdout.contains("\"line\":4,\"col\":16"), "{stdout}");
-    assert!(parse_json(&stdout).is_ok(), "inspection diagnostic JSON must parse: {stdout}");
+    let report = parse_json(&stdout).unwrap();
+    assert_eq!(
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(&report, "file").unwrap()).unwrap(),
+        helper.to_str().unwrap()
+    );
     assert!(stderr.is_empty(), "JSON inspection diagnostics should keep stderr quiet: {stderr}");
 
     let bad_main = dir.join("bad_main.jet");
@@ -94,8 +98,15 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     let loader_json = Command::new(jet()).args(["inspect", "unsafe", bad_main.to_str().unwrap(), "--json"]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(loader_json.status.code(), Some(1), "{}", String::from_utf8_lossy(&loader_json.stderr));
     let loader_stdout = String::from_utf8(loader_json.stdout).unwrap();
-    assert!(loader_stdout.contains("\"file\":\"bad_helper.jet\"") && loader_stdout.contains("\"line\":1,\"col\":9"), "{loader_stdout}");
-    assert!(parse_json(&loader_stdout).is_ok(), "imported loader diagnostic JSON must parse: {loader_stdout}");
+    assert!(loader_stdout.contains("\"code\":\"E0003\"") && loader_stdout.contains("\"line\":1,\"col\":9"), "{loader_stdout}");
+    let loader_report = parse_json(&loader_stdout).unwrap();
+    assert_eq!(
+        jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(&loader_report, "file").unwrap(),
+        )
+        .unwrap(),
+        bad_helper.to_str().unwrap()
+    );
     assert!(loader_json.stderr.is_empty(), "JSON imported loader diagnostics should keep stderr quiet");
 }
 
