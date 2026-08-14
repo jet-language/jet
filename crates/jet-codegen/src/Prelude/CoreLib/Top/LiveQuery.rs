@@ -17,7 +17,7 @@ const JET_LIVE_ERR_INVALID_INPUT: i64 = -1;
 const JET_LIVE_ERR_UNAVAILABLE: i64 = -2;
 
 type JetLiveRerun = JetLiveArc<dyn Fn() -> Result<String, String> + Send + Sync + 'static>;
-type JetLiveSink = JetLiveArc<dyn Fn(String) + Send + Sync + 'static>;
+pub(crate) type JetLiveSink = JetLiveArc<dyn Fn(String) + Send + Sync + 'static>;
 
 /// A normalized read/write footprint. The public Core API still accepts the
 /// source spelling as a String, but the runtime never compares raw labels:
@@ -263,7 +263,7 @@ fn jet_app_live_bind_sink(query: &JetLiveQuery, sink: JetLiveSink) -> JetLiveQue
 /// Register one core.ws connection as a live transport. WebSocket writes are
 /// supplied by the existing connection adapter; the live runtime owns only
 /// bounded registration and event fan-out.
-fn jet_app_ws_register(sink: JetLiveSink) -> u64 {
+pub(crate) fn jet_app_ws_register(sink: JetLiveSink) -> u64 {
     let (id, replay) = {
         let Ok(mut state) = jet_live_registry().lock() else {
             return 0;
@@ -292,7 +292,7 @@ fn jet_app_ws_register(sink: JetLiveSink) -> u64 {
     id
 }
 
-fn jet_app_ws_unregister(id: u64) {
+pub(crate) fn jet_app_ws_unregister(id: u64) {
     if id == 0 {
         return;
     }

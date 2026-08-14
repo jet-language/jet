@@ -9,6 +9,7 @@
 )]
 
 use crate::JetShow;
+use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
 use crate::Crypto::runtime::{
     jet_crypto_entropy_fill_for_host as jet_crypto_entropy_fill, JetCryptoSecretBytes,
 };

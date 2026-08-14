@@ -16,7 +16,7 @@ use jet_codegen::Codegen::TIR::{
     TStaticOwner, TStmt, TStrPart, TirWorklist, TTypedTextForm, TTypedTextInterpKind,
     TZipFillMode, TContract, TContractDisposition, TContractKind,
 };
-use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
+use jet_foundation::AST::{BinOp, GcPromotion, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::{HashMap, HashSet};
 
 use super::runtime_host::{
@@ -10166,7 +10166,7 @@ impl LowerCtx<'_, '_> {
     fn gc_root_value(&mut self, place: &str) -> Result<Value, String> {
         let place = Self::gc_place_key(place);
         let key = if self.vars.contains_key(&place) {
-            place
+            place.clone()
         } else {
             TIR::local_place(&place)
         };
@@ -10210,7 +10210,7 @@ impl LowerCtx<'_, '_> {
     fn lower_gc_promotion_edges(
         &mut self,
         root: Value,
-        promotion: &crate::AST::GcPromotion,
+        promotion: &GcPromotion,
     ) -> Result<(), String> {
         let edges = promotion
             .edges

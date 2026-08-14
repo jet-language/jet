@@ -1001,6 +1001,7 @@ extern "C" fn jet_jit_compute_transform(
             6 => jet_jit_compute_transform_factory_6 as usize as i64,
             _ => return transform_failure(runtime, "core.compute transform function arity exceeds the resident ABI"),
         };
+        let method = runtime.heap.alloc_string(method);
         let env = alloc_record_words(
             runtime,
             &[base, targets, method, base_arity as i64, result_fields as i64],
