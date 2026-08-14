@@ -540,14 +540,13 @@ pub const COMPILER_BUILD_FACT_PACKAGE_NAME: &str = "@build.package.name";
 pub const COMPILER_BUILD_FACT_PACKAGE_VERSION: &str = "@build.package.version";
 pub const COMPILER_BUILD_FACT_OS: &str = "@build.os";
 pub const COMPILER_BUILD_FACT_PROFILE_PATH: &str = "@build.profile";
+/// D-CONF-MODULE1=A: declared settings are dynamic leaves of the same
+/// compiler-owned build-fact namespace.
 pub const COMPILER_BUILD_FACT_SETTINGS_PREFIX: &str = "@build.settings.";
 pub const COMPILER_BUILD_FACT_STAMP_GIT: &str = "@build.stamp.git";
 pub const COMPILER_BUILD_FACT_STAMP_DIRTY: &str = "@build.stamp.dirty";
 pub const COMPILER_BUILD_FACT_STAMP_TOOLCHAIN: &str = "@build.stamp.toolchain";
 pub const COMPILER_BUILD_FACT_STAMP_AT: &str = "@build.stamp.at";
-/// D-CONF-MODULE1=A: declared settings are dynamic leaves of the same
-/// compiler-owned build-fact namespace.
-pub const COMPILER_BUILD_FACT_SETTINGS_PREFIX: &str = "@build.settings.";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.

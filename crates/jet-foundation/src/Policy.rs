@@ -540,12 +540,15 @@ fn resolve_fact(
         .iter()
         .position(|declaration| std::ptr::eq(declaration, *first))
         .expect("effective fact candidate belongs to chain");
+    let value = first.value.clone();
+    let forced = first.force || force_layer.is_some();
+    drop(candidates);
     Ok(Some(EffectiveFact {
         key,
-        value: first.value.clone(),
+        value,
         provenance: chain,
         effective,
-        forced: first.force || force_layer.is_some(),
+        forced,
     }))
 }
 
