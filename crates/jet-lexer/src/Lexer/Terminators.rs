@@ -4,7 +4,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Scan::{lex_raw, lex_raw_generated};
-use super::Tokens::{TokKind, Token};
+use super::Tokens::{is_comment, TokKind, Token};
 
 /// Lex the whole file. Always returns a token stream (ending in Eof) plus
 /// every problem found along the way — M1 error recovery.
