@@ -574,6 +574,12 @@ impl<'a> Checker<'a> {
                 let recv_ty = self.infer(receiver)?;
                 if let Type::Named(ref n) = recv_ty {
                     if let Some(base) = self.registry.distinct_base(n).cloned() {
+                        if !crate::Sema::knowledge_gate_allows(
+                            crate::Sema::KnowledgePlane::Range,
+                            crate::Sema::KnowledgeGate::RawProjection,
+                        ) {
+                            return None;
+                        }
                         if !args.is_empty() {
                             self.diags.push(Diagnostic::error(
                                 "E0103",

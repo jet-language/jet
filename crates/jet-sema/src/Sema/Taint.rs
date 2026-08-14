@@ -3,6 +3,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Effects::core_effect;
 use crate::Sema::FlowFacts::{Facts, Plane};
+use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Item, LValue, Lambda, LambdaBody, OrFallback, Stmt, StrPart, Type,
 };
@@ -238,7 +239,12 @@ impl<'a> TaintCtx<'a> {
                 let mut tags = self.union(call.args.iter().map(|argument| &argument.expr));
                 tags.extend(self.source_tags(std::slice::from_ref(&call.name)));
                 tags.extend(self.returns.get(&call.name).cloned().unwrap_or_default());
-                if let Some(tag) = self.scrubbers.get(&call.name) {
+                if let Some(tag) = self.scrubbers.get(&call.name)
+                    && crate::Sema::knowledge_gate_allows(
+                        KnowledgePlane::Classification,
+                        KnowledgeGate::ClassificationScrub,
+                    )
+                {
                     tags.remove(tag);
                     clear_origin_facts(&mut tags);
                 }
@@ -253,7 +259,12 @@ impl<'a> TaintCtx<'a> {
                 if let Some(returned) = key.as_ref().and_then(|key| self.returns.get(key)) {
                     tags.extend(returned.iter().cloned());
                 }
-                if let Some(tag) = key.as_ref().and_then(|key| self.scrubbers.get(key)) {
+                if let Some(tag) = key.as_ref().and_then(|key| self.scrubbers.get(key))
+                    && crate::Sema::knowledge_gate_allows(
+                        KnowledgePlane::Classification,
+                        KnowledgeGate::ClassificationScrub,
+                    )
+                {
                     tags.remove(tag);
                     clear_origin_facts(&mut tags);
                 }

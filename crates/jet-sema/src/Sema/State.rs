@@ -28,6 +28,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::FlowFacts::{FlowFacts, Plane};
+use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::Syntax::edit_distance;
 use crate::AST::{Call, Expr, Func, Item, LValue, Stmt};
 use std::collections::{HashMap, HashSet};
@@ -410,6 +411,12 @@ impl<'a> StateCtx<'a> {
         let Some(state) = self.entry_state_of(init) else {
             return false;
         };
+        if !crate::Sema::knowledge_gate_allows(
+            KnowledgePlane::State,
+            KnowledgeGate::StateTransition,
+        ) {
+            return false;
+        }
         self.flow.states.set(name, state);
         true
     }
@@ -608,6 +615,12 @@ impl<'a> StateCtx<'a> {
                 }
                 let key = format!("{ty}::{method}");
                 let (_, to) = self.tbl.transitions.get(&key)?;
+                if !crate::Sema::knowledge_gate_allows(
+                    KnowledgePlane::State,
+                    KnowledgeGate::StateTransition,
+                ) {
+                    return None;
+                }
                 // Only meaningful when the receiver is a tracked local.
                 if let Expr::Ident(_, _) = receiver.as_ref() {
                     Some(to.clone())
@@ -617,6 +630,12 @@ impl<'a> StateCtx<'a> {
             }
             Expr::Call(Call { name, args, .. }) => {
                 let (_, to) = self.tbl.fn_transitions.get(name)?;
+                if !crate::Sema::knowledge_gate_allows(
+                    KnowledgePlane::State,
+                    KnowledgeGate::StateTransition,
+                ) {
+                    return None;
+                }
                 // The first argument is the tracked value.
                 if let Some(first) = args.first() {
                     if let Expr::Ident(_, _) = &first.expr {
@@ -681,7 +700,12 @@ impl<'a> StateCtx<'a> {
                             self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
                         }
                     }
-                    self.flow.states.set(local, to.clone());
+                    if crate::Sema::knowledge_gate_allows(
+                        KnowledgePlane::State,
+                        KnowledgeGate::StateTransition,
+                    ) {
+                        self.flow.states.set(local, to.clone());
+                    }
                 }
             }
             Expr::Call(Call { name, args, .. }) => {
@@ -706,7 +730,12 @@ impl<'a> StateCtx<'a> {
                     if let Some(req) = from {
                         self.check_state(&local, cur.as_deref(), req, name, name, span);
                     }
-                    self.flow.states.set(&local, to.clone());
+                    if crate::Sema::knowledge_gate_allows(
+                        KnowledgePlane::State,
+                        KnowledgeGate::StateTransition,
+                    ) {
+                        self.flow.states.set(&local, to.clone());
+                    }
                 }
             }
             Expr::Tainted(inner, _, _)

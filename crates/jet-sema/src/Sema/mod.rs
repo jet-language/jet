@@ -1623,9 +1623,9 @@ impl<'a> Checker<'a> {
         result
     }
 
-    pub(crate) fn knowledge_gate_allows_range_loss(&self) -> bool {
+    pub(crate) fn knowledge_gate_allows(&self, plane: KnowledgePlane) -> bool {
         self.knowledge_gate
-            .is_some_and(KnowledgeGate::allows_range_loss)
+            .is_some_and(|gate| KnowledgeLoss::allows_gate(plane, gate))
     }
 
     pub(crate) fn register_binder_refs(&mut self, args: &[crate::AST::CallArg]) {
@@ -1872,12 +1872,14 @@ impl<'a> Checker<'a> {
                 |value| source_fact.converted_value_is_exact_to(&destination_fact, value),
             );
         if !exact {
-            self.diags.push(self.inexact_unit_diagnostic(
-                &destination_name,
-                &source_name,
-                expr.span(),
-            ));
-            return true;
+            if crate::Sema::knowledge_loss_requires_gate(KnowledgePlane::Unit, None) {
+                self.diags.push(self.inexact_unit_diagnostic(
+                    &destination_name,
+                    &source_name,
+                    expr.span(),
+                ));
+                return true;
+            }
         }
         if self.explicit_units_enabled() && destination_name != source_name {
             self.diags.push(self.explicit_units_diagnostic(
@@ -2065,12 +2067,14 @@ impl<'a> Checker<'a> {
                     |value| source.converted_value_is_exact_to(&destination, value),
                 );
             if !exact {
-                self.diags.push(self.inexact_unit_diagnostic(
-                    destination_name,
-                    source_name,
-                    span,
-                ));
-                return true;
+                if crate::Sema::knowledge_loss_requires_gate(KnowledgePlane::Unit, None) {
+                    self.diags.push(self.inexact_unit_diagnostic(
+                        destination_name,
+                        source_name,
+                        span,
+                    ));
+                    return true;
+                }
             }
         }
         if self.explicit_units_enabled() && destination_name != source_name {
@@ -2153,7 +2157,13 @@ mod KnowledgeLoss;
 mod App;
 mod WebPartition;
 
-pub(crate) use KnowledgeLoss::{diagnostic as knowledge_loss_diagnostic, KnowledgeGate, KnowledgePlane};
+pub(crate) use KnowledgeLoss::{
+    allows_gate as knowledge_gate_allows,
+    diagnostic as knowledge_loss_diagnostic,
+    requires_gate as knowledge_loss_requires_gate,
+    KnowledgeGate,
+    KnowledgePlane,
+};
 
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;

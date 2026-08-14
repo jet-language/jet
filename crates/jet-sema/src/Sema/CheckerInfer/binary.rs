@@ -6,6 +6,7 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, substitute_type, COMPARABLE};
 use crate::AST::{BinOp, Dimension, Expr, Type};
+use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use std::collections::HashMap;
 
 /// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
@@ -234,7 +235,12 @@ impl<'a> Checker<'a> {
         };
         let span = expr.span();
         let approximate = Self::take_numeric_approx_operand(expr, span);
-        let checked = approximate.is_none();
+        let checked = crate::Sema::knowledge_loss_requires_gate(
+            KnowledgePlane::Exactness,
+            approximate
+                .as_ref()
+                .map(|_| KnowledgeGate::Approximation),
+        );
 
         if checked {
             if let Expr::Float(_, _, is_f32) = expr {
@@ -1091,10 +1097,10 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 if self.registry.distinct_range(distinct_name).is_some() {
-                    if !self.knowledge_gate_allows_range_loss() {
+                    if !self.knowledge_gate_allows(KnowledgePlane::Range) {
                         self.diags.push(crate::Sema::knowledge_loss_diagnostic(
                             crate::Sema::KnowledgePlane::Range,
-                            crate::Syntax::BUILTIN_WRAPPING,
+                            KnowledgeGate::BoundedArithmetic.spelling(),
                             span,
                         ));
                     }

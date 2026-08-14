@@ -70,11 +70,22 @@ fn run() {
 }
 
 fn write_tier_fixture(root: &Path) {
-    fs::write(
-        root.join("tier.jet"),
-        "@answer :: 40 + 2\n\nfn run() {\n    print(\"{@answer}\")\n}\n",
-    )
-    .unwrap();
+    fs::write(root.join("tier.jet"), knowledge_tier_source()).unwrap();
+}
+
+fn knowledge_tier_source() -> &'static str {
+    r#"@answer :: 40 + 2
+#Numeric Severity :: distinct Int(0..10)
+
+fn run() {
+    left :: Severity.from_int(4)
+    right :: Severity.from_int(5)
+    // The range fact is kept until this written bounded-arithmetic gate.
+    total :: wrapping(left + right)
+    print("{@answer}")
+    print("{total}")
+}
+"#
 }
 
 fn have_tool(name: &str) -> bool {
@@ -88,6 +99,7 @@ fn have_tool(name: &str) -> bool {
 fn assert_tier_output(output: Output) {
     let text = stdout(&output);
     assert!(text.contains("42"), "expected tier output 42, got {text}");
+    assert!(text.contains("9"), "expected gated range output 9, got {text}");
 }
 
 #[test]
@@ -234,6 +246,8 @@ fn i9_parser_tier_keeps_the_gate_source() {
     ));
     assert!(parsed.contains("\"operation\":\"parse\""), "{parsed}");
     assert!(parsed.contains("#Scrub"), "{parsed}");
+    assert!(parsed.contains("wrapping"), "{parsed}");
+    assert!(parsed.contains("from_meter_rounded"), "{parsed}");
 }
 
 #[test]
@@ -247,6 +261,9 @@ fn i9_sema_tier_reads_the_same_gate_ledger() {
     assert!(ledger.contains("\"schema_version\":1"), "{ledger}");
     assert!(ledger.contains("\"kind\":\"dependency_grant\""), "{ledger}");
     assert!(ledger.contains("\"kind\":\"precision_demotion\""), "{ledger}");
+    assert!(ledger.contains("\"subject\":\"approx\""), "{ledger}");
+    assert!(ledger.contains("\"subject\":\"wrapping\""), "{ledger}");
+    assert!(ledger.contains("\"subject\":\"from_meter_rounded\""), "{ledger}");
 }
 
 #[test]
@@ -304,9 +321,12 @@ fn i9_repl_tier_keeps_the_fixture_behavior() {
         .stdin
         .as_mut()
         .expect("REPL stdin")
-        .write_all(b"40 + 2\n:quit\n")
+        .write_all(b"40 + 2\nwrapping(1 + 2)\n:quit\n")
         .expect("write REPL input");
-    assert_tier_output(child.wait_with_output().expect("finish REPL"));
+    let output = child.wait_with_output().expect("finish REPL");
+    let text = stdout(&output);
+    assert!(text.contains("42"), "expected REPL output 42, got {text}");
+    assert!(text.contains("3"), "expected REPL gate output 3, got {text}");
 }
 
 #[test]
@@ -318,7 +338,7 @@ fn i9_web_tier_keeps_the_fixture_buildable() {
     let scratch = common::Scratch::new("gate-tier-web");
     fs::write(
         scratch.join("web.jet"),
-        "#Target(Web)\nfn run() { print(\"tier-parity\") }\n",
+        format!("#Target(Web)\n{}", knowledge_tier_source()),
     )
     .unwrap();
     let _ = stdout(&run(

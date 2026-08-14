@@ -883,7 +883,12 @@ impl<'a> Checker<'a> {
                                     args[2].label.as_ref(),
                                     Some((label, _)) if label == "digits"
                                 );
-                            if (exact || rounded)
+                            let rounded_gate = rounded
+                                && crate::Sema::knowledge_gate_allows(
+                                    crate::Sema::KnowledgePlane::Unit,
+                                    crate::Sema::KnowledgeGate::RoundedConversion,
+                                );
+                            if (exact || rounded_gate)
                                 && source_fact.package == destination_fact.package
                                 && source_fact.family == destination_fact.family
                                 && source_fact.dimension == destination_fact.dimension
