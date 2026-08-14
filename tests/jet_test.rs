@@ -442,17 +442,123 @@ fn release_test_uses_aot_tier_marker() {
         stdout.contains("tier aot profile=release"),
         "release test did not report its AOT tier:\n{stdout}"
     );
+    assert_eq!(
+        stdout.matches("tier aot profile=release").count(),
+        1,
+        "release test must report exactly one AOT tier marker:\n{stdout}"
+    );
     let combined = format!("{stdout}{stderr}").to_ascii_lowercase();
-    assert!(!combined.contains("jit"), "release test reported a JIT tier:\n{combined}");
     assert!(
-        !combined.contains("interpreter"),
+        !combined.contains("tier jit"),
+        "release test reported a JIT tier:\n{combined}"
+    );
+    assert!(
+        !combined.contains("tier interpreter"),
         "release test reported an interpreter tier:\n{combined}"
     );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PropertySample {
+    case_index: u64,
+    seed: u64,
+    input: i64,
+}
+
+fn parse_property_samples(output: &[u8], engine: &str) -> Vec<PropertySample> {
+    let stdout = String::from_utf8_lossy(output);
+    stdout
+        .lines()
+        .filter(|line| line.starts_with("JET_PROP_SAMPLE "))
+        .map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(
+                fields.len(),
+                5,
+                "malformed property sample marker: {line}"
+            );
+            assert_eq!(fields[0], "JET_PROP_SAMPLE");
+            let expected_engine = format!("engine={engine}");
+            assert_eq!(fields[1], expected_engine.as_str());
+            let case_index = fields[2]
+                .strip_prefix("case=")
+                .expect("property sample case field")
+                .parse()
+                .expect("property sample case index");
+            let seed = fields[3]
+                .strip_prefix("seed=")
+                .expect("property sample seed field")
+                .parse()
+                .expect("property sample seed");
+            let input = fields[4]
+                .strip_prefix("input=")
+                .expect("property sample input field")
+                .parse()
+                .expect("property sample input");
+            PropertySample {
+                case_index,
+                seed,
+                input,
+            }
+        })
+        .collect()
+}
+
+fn property_sample_digest(samples: &[PropertySample]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for sample in samples {
+        let line = format!("{}:{}:{}\n", sample.case_index, sample.seed, sample.input);
+        for byte in line.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("{hash:016x}")
+}
+
+fn property_distribution(samples: &[PropertySample]) -> [usize; 4] {
+    let explicit_landmarks = [
+        0,
+        1,
+        -1,
+        2,
+        -2,
+        42,
+        -42,
+        99,
+        100,
+        255,
+        256,
+        512,
+        1024,
+        i64::MIN,
+        i64::MAX,
+    ];
+    let mut counts = [0usize; 4];
+    for sample in samples {
+        if sample.input == 42 {
+            counts[0] += 1;
+        }
+        if sample.input == 0 || sample.input == 1 || sample.input == -1 {
+            counts[1] += 1;
+        }
+        if sample.input == i64::MIN || sample.input == i64::MAX {
+            counts[2] += 1;
+        }
+        if !explicit_landmarks.contains(&sample.input) {
+            counts[3] += 1;
+        }
+    }
+    counts
 }
 
 #[test]
 fn property_generator_distribution_report_is_reproducible() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
     let report_path = root.join("tests/fixtures/property-generator-distribution.json");
     let report_text = fs::read_to_string(&report_path).expect("property distribution report");
     let JSONValue::Object(report) = parse_json(&report_text).expect("valid property report JSON") else {
@@ -484,6 +590,27 @@ fn property_generator_distribution_report_is_reproducible() {
             "int_random_fallback",
         ]
     );
+    let predicate_expressions: Vec<&str> = predicates
+        .iter()
+        .map(|predicate| {
+            let JSONValue::Object(predicate) = predicate else {
+                panic!("predicate must be an object");
+            };
+            match predicate.get("expression") {
+                Some(JSONValue::String(expression)) => expression.as_str(),
+                _ => panic!("predicate expression must be a string"),
+            }
+        })
+        .collect();
+    assert_eq!(
+        predicate_expressions,
+        [
+            "x == 42",
+            "x == 0 || x == 1 || x == -1",
+            "x == Int.MIN || x == Int.MAX",
+            "x is outside the 15 explicit i64 landmarks",
+        ]
+    );
     let JSONValue::Array(engines) = report.get("engines").expect("engines") else {
         panic!("engines must be an array");
     };
@@ -492,7 +619,13 @@ fn property_generator_distribution_report_is_reproducible() {
     let JSONValue::Object(comparison) = report.get("comparison").expect("comparison") else {
         panic!("comparison must be an object");
     };
-    for field in ["predicates", "seeds", "sample_counts", "hit_rates"] {
+    for field in [
+        "predicates",
+        "seeds",
+        "sample_counts",
+        "hit_rates",
+        "sample_stream",
+    ] {
         assert!(matches!(comparison.get(field), Some(JSONValue::String(value)) if value == "identical"));
     }
 
@@ -502,11 +635,28 @@ fn property_generator_distribution_report_is_reproducible() {
     let JSONValue::Object(sample_counts) = report.get("sample_counts").expect("sample_counts") else {
         panic!("sample_counts must be an object");
     };
-    for (field, expected) in [("seeds", 168), ("sample_counts", 200)] {
-        let values = if field == "seeds" { seeds } else { sample_counts };
-        assert!(matches!(values.get("jet_test"), Some(JSONValue::Number(value)) if *value == expected));
-        assert!(matches!(values.get("jet_fuzz"), Some(JSONValue::Number(value)) if *value == expected));
-    }
+    let JSONValue::Number(test_seed) = seeds.get("jet_test").expect("jet_test seed") else {
+        panic!("jet_test seed must be a number");
+    };
+    let JSONValue::Number(fuzz_seed) = seeds.get("jet_fuzz").expect("jet_fuzz seed") else {
+        panic!("jet_fuzz seed must be a number");
+    };
+    assert_eq!(test_seed, fuzz_seed, "engines use different base seeds");
+    let seed = u64::try_from(*test_seed).expect("property seed must fit u64");
+    let JSONValue::Number(test_count) = sample_counts
+        .get("jet_test")
+        .expect("jet_test sample count")
+    else {
+        panic!("jet_test sample count must be a number");
+    };
+    let JSONValue::Number(fuzz_count) = sample_counts
+        .get("jet_fuzz")
+        .expect("jet_fuzz sample count")
+    else {
+        panic!("jet_fuzz sample count must be a number");
+    };
+    assert_eq!(test_count, fuzz_count, "engines use different sample counts");
+    let sample_count = usize::try_from(*test_count).expect("sample count must fit usize");
 
     let JSONValue::Object(hit_rates) = report.get("hit_rates").expect("hit_rates") else {
         panic!("hit_rates must be an object");
@@ -517,12 +667,13 @@ fn property_generator_distribution_report_is_reproducible() {
     let JSONValue::Object(fuzz_rates) = hit_rates.get("jet_fuzz").expect("jet_fuzz hit rates") else {
         panic!("jet_fuzz hit rates must be an object");
     };
-    for (id, expected) in [
-        ("int_eq_42", 0.03),
-        ("int_small_anchor", 0.10),
-        ("int_extreme", 0.075),
-        ("int_random_fallback", 0.54),
-    ] {
+    let predicate_names = [
+        "int_eq_42",
+        "int_small_anchor",
+        "int_extreme",
+        "int_random_fallback",
+    ];
+    for id in predicate_names {
         let Some(JSONValue::Flt(test_rate)) = test_rates.get(id) else {
             panic!("missing jet_test rate for {id}");
         };
@@ -530,8 +681,18 @@ fn property_generator_distribution_report_is_reproducible() {
             panic!("missing jet_fuzz rate for {id}");
         };
         assert_eq!(test_rate, fuzz_rate, "engines disagree for {id}");
-        assert!((*test_rate - expected).abs() < f64::EPSILON, "wrong rate for {id}");
     }
+
+    let JSONValue::Object(expected_hit_counts) =
+        report.get("hit_counts").expect("hit_counts")
+    else {
+        panic!("hit_counts must be an object");
+    };
+    let JSONValue::Object(expected_digests) =
+        report.get("sample_digests").expect("sample_digests")
+    else {
+        panic!("sample_digests must be an object");
+    };
 
     let JSONValue::Array(card_ids) = report
         .get("finding_card_ids")
@@ -554,12 +715,114 @@ fn property_generator_distribution_report_is_reproducible() {
         assert!(ids.iter().any(|id| matches!(id, JSONValue::String(id) if id == "#1905")));
     }
 
-    let codegen = fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/mod.rs"))
-        .expect("property generator source");
-    assert!(codegen.contains("match rng.below(32)"));
-    assert!(codegen.contains("5 => 42"));
-    assert!(codegen.contains("let case_seed = driver_rng.next_u64();"));
-    assert!(codegen.contains("let seed = driver_rng.next_u64();"));
+    let fixture = root.join("tests/fixtures/property-generator-distribution.jet");
+    let seed_arg = seed.to_string();
+    let test_out = Command::new(&jet)
+        .args(["test", "--serial"])
+        .arg(&fixture)
+        .env("JET_PROP_SEED", &seed_arg)
+        .env("JET_PROP_TRACE", "1")
+        .output()
+        .expect("run jet test property generator fixture");
+    assert!(
+        test_out.status.success(),
+        "jet test property distribution failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&test_out.stdout),
+        String::from_utf8_lossy(&test_out.stderr)
+    );
+
+    let corpus = std::env::temp_dir().join(format!(
+        "jet-property-generator-distribution-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&corpus);
+    fs::create_dir_all(&corpus).expect("create empty fuzz corpus");
+    let iterations_arg = format!("--iterations={sample_count}");
+    let corpus_arg = format!("--corpus={}", corpus.display());
+    let fuzz_out = Command::new(&jet)
+        .arg("fuzz")
+        .arg(&fixture)
+        .arg("generator_contract")
+        .arg(&iterations_arg)
+        .arg(format!("--seed={seed}"))
+        .arg(&corpus_arg)
+        .env("JET_PROP_TRACE", "1")
+        .output()
+        .expect("run jet fuzz property generator fixture");
+    let _ = fs::remove_dir_all(&corpus);
+    assert!(
+        fuzz_out.status.success(),
+        "jet fuzz property distribution failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&fuzz_out.stdout),
+        String::from_utf8_lossy(&fuzz_out.stderr)
+    );
+
+    let test_samples = parse_property_samples(&test_out.stdout, "jet_test");
+    let fuzz_samples = parse_property_samples(&fuzz_out.stdout, "jet_fuzz");
+    assert_eq!(test_samples.len(), sample_count);
+    assert_eq!(fuzz_samples.len(), sample_count);
+    for (expected_case, sample) in test_samples.iter().enumerate() {
+        assert_eq!(sample.case_index, expected_case as u64);
+    }
+    for (expected_case, sample) in fuzz_samples.iter().enumerate() {
+        assert_eq!(sample.case_index, expected_case as u64);
+    }
+    assert_eq!(
+        test_samples, fuzz_samples,
+        "jet test and jet fuzz generated different case seeds or inputs"
+    );
+
+    let test_counts = property_distribution(&test_samples);
+    let fuzz_counts = property_distribution(&fuzz_samples);
+    assert_eq!(test_counts, fuzz_counts, "engines disagree on predicate hits");
+    for (index, id) in predicate_names.iter().enumerate() {
+        let JSONValue::Object(test_counts_by_id) =
+            expected_hit_counts.get("jet_test").expect("jet_test hit counts")
+        else {
+            panic!("jet_test hit counts must be an object");
+        };
+        let JSONValue::Number(expected_test_count) =
+            test_counts_by_id.get(*id).expect("jet_test predicate count")
+        else {
+            panic!("jet_test predicate count must be a number");
+        };
+        assert_eq!(*expected_test_count as usize, test_counts[index], "wrong hit count for {id}");
+
+        let JSONValue::Object(fuzz_counts_by_id) =
+            expected_hit_counts.get("jet_fuzz").expect("jet_fuzz hit counts")
+        else {
+            panic!("jet_fuzz hit counts must be an object");
+        };
+        let JSONValue::Number(expected_fuzz_count) =
+            fuzz_counts_by_id.get(*id).expect("jet_fuzz predicate count")
+        else {
+            panic!("jet_fuzz predicate count must be a number");
+        };
+        assert_eq!(*expected_fuzz_count as usize, fuzz_counts[index], "wrong fuzz hit count for {id}");
+
+        let JSONValue::Flt(expected_test_rate) = test_rates.get(*id).expect("test rate") else {
+            panic!("test rate must be a number");
+        };
+        let JSONValue::Flt(expected_fuzz_rate) = fuzz_rates.get(*id).expect("fuzz rate") else {
+            panic!("fuzz rate must be a number");
+        };
+        let observed_rate = test_counts[index] as f64 / sample_count as f64;
+        assert!((observed_rate - expected_test_rate).abs() < 1e-12, "wrong test rate for {id}");
+        assert!((observed_rate - expected_fuzz_rate).abs() < 1e-12, "wrong fuzz rate for {id}");
+    }
+
+    for (engine, samples) in [("jet_test", &test_samples), ("jet_fuzz", &fuzz_samples)] {
+        let JSONValue::String(expected_digest) =
+            expected_digests.get(engine).expect("engine sample digest")
+        else {
+            panic!("sample digest must be a string");
+        };
+        assert_eq!(
+            property_sample_digest(samples),
+            expected_digest.as_str(),
+            "generator contract drifted for {engine}"
+        );
+    }
 }
 
 #[test]

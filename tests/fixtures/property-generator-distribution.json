@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "measured_on": "2026-08-13",
+  "measured_on": "2026-08-14",
   "generator": {
     "source": "crates/jet-codegen/src/Codegen/mod.rs",
-    "algorithm": "splitmix64 JetRng",
+    "algorithm": "splitmix64 JetRng with 15 explicit i64 landmarks and a uniform full-range fallback",
     "case_seed_stream": "driver.next_u64() -> JetRng(case_seed)",
     "corpus": "empty",
     "sample_count": 200
@@ -44,13 +44,13 @@
       "int_eq_42": 6,
       "int_small_anchor": 20,
       "int_extreme": 15,
-      "int_random_fallback": 108
+      "int_random_fallback": 109
     },
     "jet_fuzz": {
       "int_eq_42": 6,
       "int_small_anchor": 20,
       "int_extreme": 15,
-      "int_random_fallback": 108
+      "int_random_fallback": 109
     }
   },
   "hit_rates": {
@@ -58,20 +58,25 @@
       "int_eq_42": 0.03,
       "int_small_anchor": 0.1,
       "int_extreme": 0.075,
-      "int_random_fallback": 0.54
+      "int_random_fallback": 0.545
     },
     "jet_fuzz": {
       "int_eq_42": 0.03,
       "int_small_anchor": 0.1,
       "int_extreme": 0.075,
-      "int_random_fallback": 0.54
+      "int_random_fallback": 0.545
     }
   },
   "comparison": {
     "predicates": "identical",
     "seeds": "identical",
     "sample_counts": "identical",
-    "hit_rates": "identical"
+    "hit_rates": "identical",
+    "sample_stream": "identical"
+  },
+  "sample_digests": {
+    "jet_test": "d4861535093e199c",
+    "jet_fuzz": "d4861535093e199c"
   },
   "findings": [
     {
@@ -84,7 +89,13 @@
       "id": "F1905-2",
       "predicate": "engine_case_seed_stream",
       "finding_card_ids": ["#1905"],
-      "observation": "jet test and jet fuzz use the same 200 case seeds and identical hit rates."
+      "observation": "jet test and jet fuzz use the same 200 case seeds, exact inputs, and identical hit rates."
+    },
+    {
+      "id": "F1905-3",
+      "predicate": "int_random_fallback",
+      "finding_card_ids": ["#1905"],
+      "observation": "the fallback draws a uniform full-range i64 value; the prior modulo-bounded fallback did not cover the declared domain."
     }
   ],
   "finding_card_ids": ["#1905"]

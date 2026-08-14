@@ -427,13 +427,14 @@ trait JetGen: Sized + Clone {
 impl JetGen for i64 {
     fn generate(rng: &mut JetRng) -> i64 {
         // D-E3-1905: keep common predicate landmarks visible while retaining
-        // a broad random fallback. Test and fuzz use the same case seed stream.
+        // a uniform full-range fallback. Test and fuzz use the same case seed
+        // stream; the explicit landmarks make boundary predicates observable.
         match rng.below(32) {
             0 => 0, 1 => 1, 2 => -1, 3 => 2, 4 => -2,
             5 => 42, 6 => -42, 7 => 99, 8 => 100, 9 => 255,
             10 => 256, 11 => 512, 12 => 1024,
             13 => i64::MIN, 14 => i64::MAX,
-            _ => (rng.next_u64() as i64) % 1000,
+            _ => rng.next_u64() as i64,
         }
     }
     fn shrink(&self) -> Vec<i64> {
@@ -545,6 +546,10 @@ fn jet_prop_seed() -> u64 {
     std::env::var("JET_PROP_SEED").ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0x5EED_1234_ABCD_0001)
+}
+fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) {
+    if std::env::var_os("JET_PROP_TRACE").is_none() { return; }
+    println!("JET_PROP_SAMPLE engine={} case={} seed={} input={}", engine, case_index, seed, input);
 }
 "#;
 /// D-COV1 (`jet test --coverage`): the coverage recorder. Emitted only when the
@@ -3453,6 +3458,9 @@ fn emit_test_fns(
         out.push_str("    let mut driver_rng = JetRng::new(seed);\n");
         // call helper that takes the tuple, returns Result
         let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
+        let sample_renders: Vec<String> = (0..n)
+            .map(|k| format!("input.{}.render()", k))
+            .collect();
         out.push_str(&format!(
             "    let run = |input: &{}| -> Result<(), String> {{ jet_prop_{}({}) }};\n",
             tuple_ty,
@@ -3471,6 +3479,13 @@ fn emit_test_fns(
             tuple_ty,
             gen_components.join(", ")
         ));
+        out.push_str(&format!(
+            "        let sample = vec![{}].join(\", \");\n",
+            sample_renders.join(", ")
+        ));
+        out.push_str(
+            "        jet_prop_trace_sample(\"jet_test\", case_index as u64, case_seed, &sample);\n",
+        );
         out.push_str("        if let Err(first_msg) = run(&input) {\n");
         out.push_str("            let mut msg = first_msg;\n");
         out.push_str("            let mut improved = true;\n");
@@ -3913,7 +3928,9 @@ fn emit_bundle_tests_cov_inner(
         if tests.iter().any(|test| {
             test.module.as_deref() == Some(module_path.as_str()) && !test.test.params.is_empty()
         }) {
-            out.push_str("use super::{jet_prop_seed, JetGen, JetRng};\n");
+            out.push_str(
+                "use super::{jet_prop_seed, jet_prop_trace_sample, JetGen, JetRng};\n",
+            );
         }
         let mut cx = build_cx_items(
             &module.items,
@@ -4313,6 +4330,9 @@ fn emit_fuzz_main(
         .enumerate()
         .map(|(k, p)| format!("format!(\"{} = {{}}\", input.{}.render())", p.name, k))
         .collect();
+    let sample_renders: Vec<String> = (0..n)
+        .map(|k| format!("input.{}.render()", k))
+        .collect();
     let name_lit = escape_rust_str(
         test.name
             .as_deref()
@@ -4381,6 +4401,11 @@ fn emit_fuzz_main(
     out.push_str("        let seed = driver_rng.next_u64();\n");
     out.push_str("        let mut rng = JetRng::new(seed);\n");
     out.push_str("        let mut input = gen_input(&mut rng);\n");
+    out.push_str(&format!(
+        "        let sample = vec![{}].join(\", \");\n",
+        sample_renders.join(", ")
+    ));
+    out.push_str("        jet_prop_trace_sample(\"jet_fuzz\", n, seed, &sample);\n");
     out.push_str("        n += 1;\n");
     out.push_str("        if let Err(first_msg) = run(&input) {\n");
     out.push_str("            let mut msg = first_msg;\n");
