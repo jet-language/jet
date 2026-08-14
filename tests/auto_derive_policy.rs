@@ -81,7 +81,14 @@ fn collect_struct_defaults(items: &[jet::AST::Item], out: &mut Vec<(String, bool
     }
 }
 
-fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
+struct AotMeasurement {
+    exit: i32,
+    stdout: String,
+    generated_rust_bytes: usize,
+    binary_bytes: u64,
+}
+
+fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMeasurement> {
     if !common::have_rustc() {
         return None;
     }
@@ -90,9 +97,10 @@ fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, Stri
     std::fs::create_dir_all(&dir).unwrap();
     let rust = dir.join("main.rs");
     let binary = dir.join("main_bin");
+    let generated = jet::Codegen::emit_bundle(bundle, jet::Sema::CompileMode::Run, None);
     std::fs::write(
         &rust,
-        jet::Codegen::emit_bundle(bundle, jet::Sema::CompileMode::Run, None),
+        &generated,
     )
     .unwrap();
     let built = Command::new("rustc")
@@ -108,10 +116,16 @@ fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, Stri
         String::from_utf8_lossy(&built.stderr)
     );
     let ran = Command::new(binary).output().unwrap();
-    Some((
-        ran.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&ran.stdout).into_owned(),
-    ))
+    Some(AotMeasurement {
+        exit: ran.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&ran.stdout).into_owned(),
+        generated_rust_bytes: generated.len(),
+        binary_bytes: std::fs::metadata(dir.join("main_bin")).unwrap().len(),
+    })
+}
+
+fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
+    aot_measurement(bundle, name).map(|measurement| (measurement.exit, measurement.stdout))
 }
 
 #[test]
@@ -160,6 +174,120 @@ fn run() {}
 }
 
 #[test]
+fn ineligible_struct_does_not_expand_codec_body() {
+    let bundle = checked_project(
+        "ineligible_codec",
+        "",
+        r#"
+struct Record { id: U64; flags: U32 }
+
+fn run() {}
+"#,
+    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    assert!(!facts.auto_encode.contains("Record"));
+    assert!(!facts.auto_decode.contains("Record"));
+
+    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    assert!(!rust.contains("impl __jet_Encode for __jet_Record"));
+    assert!(!rust.contains("impl __jet_Decode for __jet_Record"));
+}
+
+#[test]
+fn plain_struct_auto_codable_matches_all_execution_tiers() {
+    let bundle = checked_project(
+        "plain_codable",
+        "",
+        r#"
+use core.encoding.json as json
+
+struct Record { id: Int; name: String }
+
+fn run() {
+    print(json.to_string(Record.{ id: 7, name: "plain" }))
+}
+"#,
+    );
+    let expected = "{\"id\":7,\"name\":\"plain\"}\n";
+    if let Some((exit, stdout)) = aot_output(&bundle, "plain_codable_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, expected);
+    }
+
+    let mut backend = jet_jit::CraneliftBackend::new();
+    let outcome = backend.run(&bundle, false);
+    let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+        panic!("plain Codable program did not run in the default JIT: {outcome:?}");
+    };
+    assert_eq!(stdout, expected);
+
+    let outcome = jet::Interpreter::dev_iteration(
+        project_dir("plain_codable").join("main.jet").to_str().unwrap(),
+        false,
+        true,
+    );
+    let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+        panic!("plain Codable program did not run in the forced interpreter: {outcome:?}");
+    };
+    assert_eq!(stdout, expected);
+}
+
+#[test]
+fn auto_derive_keeps_compile_and_binary_measurements_stable() {
+    let before = checked_project(
+        "auto_measure_before",
+        "",
+        r#"
+use core.encoding.json as json
+
+#[Encode, Decode]
+struct Record { id: Int; name: String }
+
+fn run() {
+    print(json.to_string(Record.{ id: 7, name: "plain" }))
+}
+"#,
+    );
+    let after = checked_project(
+        "auto_measure_after",
+        "",
+        r#"
+use core.encoding.json as json
+
+struct Record { id: Int; name: String }
+
+fn run() {
+    print(json.to_string(Record.{ id: 7, name: "plain" }))
+}
+"#,
+    );
+    let Some(before) = aot_measurement(&before, "auto_measure_before_aot") else {
+        return;
+    };
+    let Some(after) = aot_measurement(&after, "auto_measure_after_aot") else {
+        return;
+    };
+    assert_eq!(before.exit, 0);
+    assert_eq!(after.exit, 0);
+    assert_eq!(before.stdout, after.stdout);
+    assert_eq!(
+        before.generated_rust_bytes,
+        after.generated_rust_bytes,
+        "before/after compile-time artifact bytes: {} -> {}",
+        before.generated_rust_bytes,
+        after.generated_rust_bytes,
+    );
+    assert_eq!(
+        before.binary_bytes,
+        after.binary_bytes,
+        "before/after binary bytes: {} -> {}",
+        before.binary_bytes,
+        after.binary_bytes,
+    );
+}
+
+#[test]
 fn generic_deny_list_refuses_auto_derive() {
     let bundle = checked_project(
         "package_off",
@@ -201,6 +329,10 @@ fn run() {
     ] {
         assert!(!rust.contains(implementation), "{implementation}");
     }
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    assert!(!facts.auto_encode.contains("Missing"));
+    assert!(!facts.auto_decode.contains("Missing"));
     assert_eq!(rust.matches("impl JetDebug for __jet_Manual").count(), 1);
 
     let mut backend = jet_jit::CraneliftBackend::new();

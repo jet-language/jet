@@ -321,10 +321,6 @@ pub(super) fn apply_serde_ok(
     }
 }
 
-pub(crate) fn sized_int_has_datatree_form(ty: &Type) -> bool {
-    !matches!(ty, Type::IntN { signed: false, bits: 64 })
-}
-
 pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     match ty {
         Type::Int
@@ -334,7 +330,7 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::Char
         | Type::Float32
         | Type::InlineRange { .. } => true,
-        Type::IntN { .. } => sized_int_has_datatree_form(ty),
+        Type::IntN { .. } => crate::Traits::sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_encodable_ty(value, reg),
@@ -365,7 +361,7 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::Char
         | Type::Float32
         | Type::InlineRange { .. } => true,
-        Type::IntN { .. } => sized_int_has_datatree_form(ty),
+        Type::IntN { .. } => crate::Traits::sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_decodable_ty(value, reg),

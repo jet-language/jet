@@ -1069,7 +1069,9 @@ impl TraitRegistry {
                 }
             }
             Type::Result { ok, err } => {
-                if trait_name == COMPARABLE {
+                if matches!(trait_name, ENCODE | DECODE) {
+                    false
+                } else if trait_name == COMPARABLE {
                     Self::native_ordering_ready(ty)
                 } else {
                     self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
@@ -1086,6 +1088,8 @@ impl TraitRegistry {
                     false
                 } else {
                     trait_name != EQUATABLE
+                        && (!matches!(trait_name, ENCODE | DECODE)
+                            || matches!(**key, Type::String))
                         && self.auto_derive_type_ready(
                             key,
                             trait_name,
@@ -1101,7 +1105,9 @@ impl TraitRegistry {
                 }
             }
             Type::Tuple(fields) => {
-                if trait_name == COMPARABLE {
+                if matches!(trait_name, ENCODE | DECODE) {
+                    false
+                } else if trait_name == COMPARABLE {
                     Self::native_ordering_ready(ty)
                 } else {
                     fields.iter().all(|(_, field)| {
@@ -1145,7 +1151,9 @@ impl TraitRegistry {
                 }
             }
             Type::Tagged { inner, .. } => {
-                if trait_name == COMPARABLE {
+                if matches!(trait_name, ENCODE | DECODE) {
+                    false
+                } else if trait_name == COMPARABLE {
                     Self::native_ordering_ready(ty)
                 } else {
                     self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
@@ -1166,14 +1174,20 @@ impl TraitRegistry {
             Type::Int
             | Type::Bool
             | Type::String
-            | Type::Char
-            | Type::IntN { .. } => true,
-            Type::Quantity { base, .. } => {
-                self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
+            | Type::Char => true,
+            Type::IntN { .. } => {
+                !matches!(trait_name, ENCODE | DECODE) || sized_int_has_datatree_form(ty)
             }
-            // A const compute dimension carries no runtime value; it's
-            // compile-time-only, so it's trivially ready for any trait.
-            Type::ComputeDim(_) => true,
+            Type::Quantity { base, .. } => {
+                if matches!(trait_name, ENCODE | DECODE) {
+                    false
+                } else {
+                    self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
+                }
+            }
+            // A const compute dimension carries no runtime value; it is
+            // compile-time-only and therefore has no DataTree codec.
+            Type::ComputeDim(_) => !matches!(trait_name, ENCODE | DECODE),
             Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
@@ -2338,6 +2352,13 @@ pub fn auto_derive_requested(
                     && marker.name == Syntax::MARKER_CODABLE)
         })
         .map_or(package_default, |marker| !marker.negated)
+}
+
+/// D-SERDE: the shared DataTree `Int` representation cannot preserve U64.
+/// Keep this predicate in the foundation so auto-derive eligibility and the
+/// explicit serde checker make the same decision before codec expansion.
+pub fn sized_int_has_datatree_form(ty: &Type) -> bool {
+    !matches!(ty, Type::IntN { signed: false, bits: 64 })
 }
 
 pub fn struct_auto_derive_ok(s: &StructDef) -> bool {

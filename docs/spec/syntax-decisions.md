@@ -6828,6 +6828,16 @@ D-VERDICT-1308-1 and D-VERDICT-1308-2 and retires D-CTMARKER1.
 default unless the user refuses it. The existing refusal spelling and eligibility
 gates remain. This amends D-AUTODERIVE1=E and D-AUTODERIVE-SYNTAX1.
 
+The implementation records the eligibility decision in the shared trait registry
+before built-in codec expansion. An ineligible field therefore gives the owning
+type no automatic `Encode`/`Decode` implementation, with no generated body or
+cascade diagnostic; explicit `#Codable` still reports the existing serde
+diagnostic. The package refusal remains the declared `policy.lints.deny`
+setting on the typed fact plane. `tests/auto_derive_policy.rs` records the
+deterministic before/after measurement: explicit `#[Encode, Decode]` and a
+marker-free struct produce equal generated-Rust bytes and equal linked-binary
+bytes.
+
 **2026-08-07 — the compiler-facts slate: D-FACT-LAW1=B, D-FACT-WORD1=A,
 D-FACT-GATE1=A, D-FACT-READ1=A, D-FACT-HOME1=A, D-FACT-OWN1=A,
 D-FACT-FLOW1=A** *(card #1620, proposal `docs/proposals/compiler-facts-one-law.md`)*.

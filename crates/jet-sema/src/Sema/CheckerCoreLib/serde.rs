@@ -1,9 +1,10 @@
 use crate::AST::Type;
 use crate::Diagnostics::Span;
 use crate::Sema::Checker;
+use crate::Traits::sized_int_has_datatree_form;
 use super::core_types::is_json_type_name;
 use super::serde_diags::{
-    apply_serde_ok, e2411, sized_int_has_datatree_form,
+    apply_serde_ok, e2411,
 };
 impl<'a> Checker<'a> {
         fn serde_trait_impl(&self, name: &str, trait_name: &str) -> bool {
