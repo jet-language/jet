@@ -1,0 +1,7 @@
+Error [E1113]: `frozen` cannot be assigned; it was frozen at `freeze(...)` at byte 87
+  --> tests/ui/frozen_write.jet:8:5
+    |
+  8 |     frozen.value = 2
+    |     ^^^^^^^^^^^^
+ Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
+ Fix: create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional

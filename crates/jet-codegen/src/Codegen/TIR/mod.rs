@@ -57,6 +57,9 @@ thread_local! {
 pub struct TJitSpawnLambda {
     pub params: Vec<(String, Type)>,
     pub captures: Vec<JitSpawnCapture>,
+    /// D-CONC-FREEZE1=A: frozen source names carried from sema's one flow
+    /// fact; the JIT only marshals the already-owned capture slots.
+    pub frozen_captures: Vec<String>,
     pub body: TJitSpawnBody,
     pub ret: Type,
 }
@@ -68,6 +71,9 @@ pub struct JitSpawnCapture {
     pub source: String,
     pub ty: Type,
     pub clone_at_spawn: bool,
+    /// D-CONC-FREEZE1=A: sema proved this capture is an immutable snapshot.
+    /// The JIT carries the fact; it does not re-run crossing policy.
+    pub frozen_at_spawn: bool,
     /// D-MEM-COPYSEM1=A: a read-only view capture is copied into its owning
     /// destination at the spawn/callback boundary. The JIT only marshals the
     /// already-resolved owned type; copy semantics stay on the shared Prelude
@@ -4307,6 +4313,9 @@ pub struct TLambda {
     /// D-MEM-COPYSEM1=A: source names whose capture slot is an owned
     /// materialization of a read-only view rather than a reference clone.
     pub materialized_captures: Vec<String>,
+    /// D-CONC-FREEZE1=A: frozen source names carried from sema's one flow-fact
+    /// proof. This is metadata only; the capture slot is already owned.
+    pub frozen_captures: Vec<String>,
 }
 
 pub enum TLambdaBody {

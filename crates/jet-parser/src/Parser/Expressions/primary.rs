@@ -746,6 +746,16 @@ impl<'a> Parser<'a> {
                 });
             }
 
+            // D-CONC-FREEZE1=A: a task may consume one enclosing binding
+            // explicitly with `task ^name { … }`. This is task-capture syntax,
+            // not the ordinary call-argument capability convention.
+            let take_names = if matches!(self.peek().kind, TokKind::Caret) {
+                let caret = self.bump().span;
+                let (name, name_span) = self.expect_ident("after the task capture `^`")?;
+                vec![(name, Span::new(caret.start, name_span.end))]
+            } else {
+                Vec::new()
+            };
             let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
                 let open = self.bump().span;
                 let body = self.block_stmts();
@@ -757,7 +767,7 @@ impl<'a> Parser<'a> {
                 (LambdaBody::Expr(Box::new(body)), body_span)
             };
             let lambda = Lambda {
-                take_names: Vec::new(),
+                take_names,
                 params: Vec::new(),
                 body,
                 span: body_span,

@@ -4,4 +4,4 @@ Error [E1101]: `count` is a mutable value — the new task might outlive this sc
   4 |         task {
     |              ^
  Why: tasks run concurrently; changing an outer binding inside a task would make ownership unclear
- Fix: create task-local state inside the task, or send updates through a channel
+ Fix: give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock for deliberate shared mutation

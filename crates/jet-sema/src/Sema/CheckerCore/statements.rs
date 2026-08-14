@@ -608,7 +608,11 @@ impl<'a> Checker<'a> {
                                 }
                                 return;
                             };
-                            if !info.mutable && !self.is_write_view(name) {
+                            let target_was_frozen = self.frozen_for(name).is_some();
+                            if !info.mutable
+                                && !self.is_write_view(name)
+                                && self.frozen_for(name).is_none()
+                            {
                                 let what = if info.param_conv.is_some() {
                                     format!("the parameter `{}` can't be changed here", name)
                                 } else {
@@ -651,6 +655,20 @@ impl<'a> Checker<'a> {
                                 self.diags.push(diagnostic);
                             }
                             self.clear_moved_binding(name);
+                            // D-CONC-FREEZE1=A: rebinding a local replaces its
+                            // frozen proof only after the write check above.
+                            // A rejected write through a frozen target keeps
+                            // the original freeze site intact.
+                            if !target_was_frozen && !is_compound && vt.is_some() {
+                                let depth = self
+                                    .binding_fact_depth(name)
+                                    .unwrap_or_else(|| self.scope_depth());
+                                if let Some(site) = self.frozen_expr_site(value) {
+                                    self.flow.frozen.set_at(name, depth, site);
+                                } else {
+                                    self.flow.frozen.remove_at(name, depth);
+                                }
+                            }
                             if matches!(&info.ty, Type::Fn { .. }) {
                                 let sendable = !is_compound
                                     && vt.as_ref().is_some_and(|value_ty| {

@@ -14,6 +14,8 @@ sema rewrite) into core nodes engines already handle.
 
 | Surface | Core form | Card |
 |---|---|---|
+| `freeze(x)` | `Clone`, `MaterializeView`, or `ExplicitCopy` selected by sema-approved source type; frozen provenance stays in the capture metadata | D-CONC-FREEZE1=A |
+| `task ^name { … }` | existing task lambda with an explicit consuming capture; the task crossing prover owns legality | D-CONC-FREEZE1=A |
 
 ## Still wide (ranked #779; next shrink slices)
 
@@ -39,3 +41,7 @@ Literals (`IntLit`/`FloatLit`/`BoolLit`/`CharLit`/`StrLit` plain), `Local`,
 ## Proof
 
 - No new `tests/jit_gaps.txt` entries on this wave.
+- `examples/features/concurrency/freeze_capture.jet` is the executable proof
+  for AOT, default `jet run`, and forced interpretation. Comptime returns an
+  already-owned `CtValue` for `freeze`; the REPL task boundary remains E1802,
+  and web has no separate freeze policy or engine-side capture check.

@@ -1076,6 +1076,12 @@ impl<'a> Checker<'a> {
                 },
                 binding_sendable,
             );
+            // D-CONC-FREEZE1=A: publish the freeze provenance in the shared
+            // flow store after the declaration owns the new binding.
+            if let Some(site) = self.frozen_expr_site(&b.init) {
+                let depth = self.binding_fact_depth(&b.name).unwrap_or_else(|| self.scope_depth());
+                self.flow.frozen.set_at(&b.name, depth, site);
+            }
             if b.reactive_shared() && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {
                 self.note_reactive_upgrade(&b.name, &final_ty, "#Shared pin");
                 b.reactive_upgrade = true;

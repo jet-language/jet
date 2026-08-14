@@ -18,7 +18,7 @@ const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "Stream", "String", "Subscription", "Tally", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
-const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "input", "join", "print"];
+const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", ".{", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||", "~|", "~|="];
@@ -915,6 +915,7 @@ module.exports = grammar({
         $.type_identifier,
         $.copy_expr,
         $.primitive_type,
+        $.task_expr,
         $.call_expr,
         $.turbofish_call,
         $.build_recipe_expr,
@@ -1087,6 +1088,18 @@ module.exports = grammar({
             ),
           ),
           $.arg_list,
+        ),
+      ),
+
+    // D-CONC-FREEZE1=A: the task-only consuming capture surface. Ordinary
+    // `task work()` remains the generic call form; this rule owns `task ^x`.
+    task_expr: ($) =>
+      prec.right(
+        2,
+        seq(
+          "task",
+          optional(seq("^", field("capture", $.identifier))),
+          choice($.block, $._expr),
         ),
       ),
 

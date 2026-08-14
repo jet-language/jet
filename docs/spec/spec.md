@@ -2279,10 +2279,42 @@ use core.tasks as tasks;
 
 `task work()` or `task { work() }` starts a zero-parameter child. Copyable
 captures are copied at closure creation. Owned non-copyable captures move.
-Shared mutable captures are **E1101**; use task-local state or a channel to send
-results back. Values crossing the task boundary must be sendable (**E1102**):
-no `view` borrows, no structs that contain `ref` fields, no trait values, and no
-closures with non-sendable captures.
+Mutable or otherwise non-sendable captures are **E1101**/**E1102**; give the
+value to the task with `^`, make an owned immutable snapshot with `freeze`, or
+use `Shared`/a lock for deliberate shared mutation. Values crossing the task
+boundary must be sendable (**E1102**): no `view` borrows, no structs that
+contain `ref` fields, no trait values, and no closures with non-sendable
+captures.
+
+#### Frozen snapshots and consuming captures (D-CONC-FREEZE1=A)
+
+`freeze(x)` is the prefix verb for one deeply immutable, owned snapshot. The
+snapshot can be read by bare task captures, including after a lexical group
+ends, because no task can write through it. A write through the root, a field,
+or an index is **E1113** and names the `freeze(...)` source site. `freeze` of a
+frozen value is the identity; it does not copy twice. A source that contains a
+lock-backed `Shared`, a resource, or another non-cloneable value is **E1114**;
+any remaining crossing-proof failure keeps the shared **E1102** diagnostic.
+
+`task ^name { ... }` explicitly consumes `name` into that child. It uses the
+same crossing prover as an ordinary capture; after the child is created,
+using `name` is the normal **E0121** use-after-move. This capture spelling is
+task-only; `^` on an ordinary call argument keeps its existing move-capability
+meaning. `Shared` and `Cell` keep their existing synchronized and local-only
+semantics.
+
+The freeze proof is one `Frozen` plane in `FlowFacts`, not a second sendability
+rail. TIR carries only the approved provenance and lowers `freeze` to existing
+`Clone`, `MaterializeView`, or `ExplicitCopy` nodes. AOT, default `jet run`,
+the interpreter, comptime, and any applicable web lowering consume that same
+representation. The REPL can evaluate the pure `freeze(x)` value operation;
+tasks and task captures remain its registered **E1802** hard boundary.
+
+Example and golden: `examples/features/concurrency/freeze_capture.jet` and
+`examples/features/expected/concurrency/freeze_capture.out`. UI snapshots:
+`tests/ui/frozen_write.jet` and
+`tests/ui/frozen_capture_use_after_move.jet` and
+`tests/ui/freeze_shared_source.jet`.
 
 `handle.join() => T ? TaskFailure` waits for the task and consumes its handle.
 Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a

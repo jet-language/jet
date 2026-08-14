@@ -105,6 +105,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordControl,
     },
     HighlightToken {
+        text: KW_FREEZE,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
         text: TASK_ALL,
         class: HighlightClass::KeywordControl,
     },
@@ -1150,7 +1154,7 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
 use super::{
     MARKER_PREFIX, BUILTIN_ASSERT, BUILTIN_ASSERT_EQ, BUILTIN_CHANNEL, BUILTIN_INPUT,
     BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
-    KW_CONC_TASK, KW_SHARED, READINESS_AFTER, TASK_ALL, TASK_ANY, TASK_GROUP, TASK_JOIN, TASK_RACE,
+    KW_CONC_TASK, KW_FREEZE, KW_SHARED, READINESS_AFTER, TASK_ALL, TASK_ANY, TASK_GROUP, TASK_JOIN, TASK_RACE,
     TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
     TYPE_RECEIVER, TYPE_SENDER, TYPE_TASK, TYPE_TASK_FAILURE,
     KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,

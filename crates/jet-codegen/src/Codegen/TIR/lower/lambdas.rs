@@ -255,12 +255,13 @@ fn lower_lambda_expecting_with_host_borrow(
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
     {
         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
-        let reads = match &lam.body {
+        let mut reads = match &lam.body {
             LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
             LambdaBody::Expr(e) => {
                 crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())])
             }
         };
+        reads.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
         for name in reads {
             if param_names.contains(name.as_str()) {
                 continue;
@@ -386,6 +387,7 @@ fn lower_lambda_expecting_with_host_borrow(
         arc: http_handler,
         captures,
         materialized_captures: lam.meta.materialized_captures.clone(),
+        frozen_captures: lam.meta.frozen_captures.clone(),
     }
 }
 
@@ -440,6 +442,8 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
         LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
         LambdaBody::Expr(e) => crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())]),
     };
+    let mut reads = reads;
+    reads.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
     let mut captures: Vec<JitSpawnCapture> = reads
         .into_iter()
         .filter(|n| !param_names.contains(n.as_str()))
@@ -471,6 +475,11 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
             JitSpawnCapture {
                 materialize_at_spawn,
                 clone_at_spawn: cloned.contains(source.as_str()),
+                frozen_at_spawn: lam
+                    .meta
+                    .frozen_captures
+                    .iter()
+                    .any(|capture| capture == &source),
                 // D-TASKBORROW1=A: an unmaterialized borrowed split-view crosses
                 // as its window handle, not as the element type its Jet binding
                 // shows. Read-only captures marked for materialization use the
@@ -559,6 +568,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
             })
             .collect(),
         captures,
+        frozen_captures: lam.meta.frozen_captures.clone(),
         body,
         ret,
     }

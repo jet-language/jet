@@ -9,7 +9,7 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_cloneable, is_printable, type_fix_hint, type_is_copy,
+    edit_distance, is_cloneable, is_printable, owned_type_for_read_view, type_fix_hint, type_is_copy,
     typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
@@ -18,6 +18,63 @@ use crate::Syntax;
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
+        /// D-CONC-FREEZE1=A: validate one owned, deeply snapshot-able value.
+        /// The result keeps the source type; the frozen proof lives in the
+        /// flow store when a binding receives this call.
+        fn check_freeze(&mut self, call: &mut Call) -> Option<Type> {
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!("`freeze` takes exactly one value, got {}", call.args.len()),
+                    "`freeze(x)` creates one deeply immutable owned snapshot for a crossing"
+                        .to_string(),
+                    "write `freeze(value)` with exactly one value".to_string(),
+                    Some(call.name_span),
+                ));
+                for arg in &mut call.args {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
+            let arg = &mut call.args[0];
+            let saved_borrow = self.borrow_ctx;
+            self.borrow_ctx = true;
+            let source_ty = self.infer(&mut arg.expr);
+            self.borrow_ctx = saved_borrow;
+            let source_ty = source_ty?;
+            let result_ty = owned_type_for_read_view(&source_ty).unwrap_or_else(|| source_ty.clone());
+            let reason = if self.type_contains_shared(&source_ty) {
+                Some("the value contains `Shared`, whose lock-backed handle would keep shared mutation".to_string())
+            } else if self.is_resource_type(&source_ty) {
+                Some("a resource has one cleanup owner and cannot be duplicated into a snapshot".to_string())
+            } else if !is_cloneable(&result_ty, self.registry) {
+                Some("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate".to_string())
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                let shown_ty = source_ty.show();
+                self.diags.push(Diagnostic::from_row(
+                    "E1114",
+                    &[("ty", &shown_ty), ("reason", &reason)],
+                    Some(arg.expr.span()),
+                ));
+                return None;
+            }
+            if let Some(problem) = self.sendability_problem(&result_ty, true) {
+                self.report_unsendable(
+                    "this frozen value",
+                    &result_ty,
+                    problem,
+                    crate::Sema::SendCrossing::TaskCapture,
+                    arg.expr.span(),
+                );
+                return None;
+            }
+            call.resolved_ret = Some(result_ty.clone());
+            Some(result_ty)
+        }
+
         /// D-CALLPOLICY1=E: `apply(p1, …, fn)` replaces the callable's policy
         /// chain exactly. The last argument is the callable value; policy
         /// expressions are checked as typed values and are not ordinary calls.
@@ -183,6 +240,12 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+            if call.name == Syntax::KW_FREEZE
+                && self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+            {
+                return Some(self.check_freeze(call));
+            }
             if call.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP {
                 let Some(Type::Named(type_name)) = call.type_args.first().cloned() else {
                     return Some(None);

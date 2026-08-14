@@ -842,6 +842,18 @@ impl<'a> Interp<'a> {
         if name == "require" || name == "require_eq" {
             return self.eval_require(name, args, span, scope);
         }
+        // D-CONC-FREEZE1=A: comptime values are already owned snapshots. The
+        // evaluator returns the value by value, preserving freeze's identity
+        // law without inventing a second runtime representation.
+        if name == crate::Syntax::KW_FREEZE
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            if args.len() != 1 {
+                return Err(unsupported("`freeze` needs exactly one value", span));
+            }
+            return self.eval(&args[0].expr, scope);
+        }
         // D-META-USER1=A: a checked rule may reject with a registered
         // project diagnostic. Labels keep the product fields explicit; the
         // registry still owns the code's severity and rendering metadata.

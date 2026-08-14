@@ -2033,6 +2033,11 @@ impl<'a> Fmt<'a> {
                 return false;
             }
             self.write(&format!("{} ", Syntax::KW_CONC_TASK));
+            for (name, _) in &lam.take_names {
+                self.write(Syntax::SIGIL_MOVE);
+                self.write(name);
+                self.write(" ");
+            }
             match &lam.body {
                 crate::AST::LambdaBody::Expr(expr) => self.fmt_expr(expr, Prec::OrFallback),
                 crate::AST::LambdaBody::Block(stmts) => {

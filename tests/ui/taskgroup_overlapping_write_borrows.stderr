@@ -4,4 +4,4 @@ Error [E1101]: `two` and `one` can reach the same place at the same time
  16 |             { two.position += 1; two.position }
     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: a task.group runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap
- Fix: borrow separate fields or constant indexes, give each task its own owned copy, or send results back through a channel
+ Fix: give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock; in a group, borrow separate fields or constant indexes

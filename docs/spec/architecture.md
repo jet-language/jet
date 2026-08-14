@@ -110,9 +110,12 @@ snapshots):
 - A child created by `task` owns or copies its captures.
   Values accepted by Jet's ordinary copy law are copied when the closure is
   created, so the source binding remains available without a preparatory
-  binding. Owned values that cannot be copied move.
+  binding. Owned values that cannot be copied move. `freeze(x)` creates a
+  deeply immutable owned snapshot, and `task ^name { ... }` explicitly consumes
+  one owned binding into the child. Both use the same crossing prover; a later
+  use of a consumed name is ordinary E0121.
   Sema rejects a mutable capture, a borrowed view, or another value that cannot
-  cross a task boundary. No explicit capture prefix changes these laws.
+  cross a task boundary. A frozen write is E1113 and names its freeze site.
 - A channel moves a sendable owned value. The sender cannot keep an alias that
   permits unsynchronized writes after the send.
 - A task group changes child lifetimes and cancellation only. Its children use
@@ -131,6 +134,12 @@ snapshots):
 - `#Local` pins the fast one-thread form; a crossing is E1102.
 - `#Shared` pins the synchronized form (today every reactive box already uses
   that form). Crossing sites are recorded for the upgrade report.
+
+`freeze` does not add a backend policy rail. Its `Frozen` flow fact is lowered
+to the existing owned clone/materialization TIR nodes, so AOT, Cranelift,
+interpreter, and any applicable web path consume one checked meaning. The
+REPL remains an interpreter-only surface and rejects task execution with E1802;
+pure `freeze(x)` evaluation is still a value operation.
 
 These boundary guarantees do not imply deadlock freedom. See the [Deadlock stance](spec.md#deadlock-stance)
 for the narrow `#Transact` lock-order guarantee and the non-guarantee for

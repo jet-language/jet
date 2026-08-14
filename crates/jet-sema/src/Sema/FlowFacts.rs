@@ -11,6 +11,7 @@
 //! |---|---|---|
 //! | [`Binding`] | everything a declaration says about a name | `CheckerCore` |
 //! | [`Sendability`] | whether a value may cross a task boundary | ownership prover |
+//! | [`Frozen`] | freeze site that proved a value deeply immutable | ownership prover |
 //! | [`Narrow`] | a binding refined by a proven test (D-FLOWTYPE1) | `CheckerCore` |
 //! | [`Moved`] | the use that gave a place away | `CheckerOwnership` |
 //! | [`Uninit`] | a `Type.{ uninit }` place not yet written (D-UNINIT1) | `CheckerCore` |
@@ -422,6 +423,21 @@ impl Plane for Sendability {
     }
 }
 
+/// D-CONC-FREEZE1=A: the source span of the `freeze(...)` proof attached to a
+/// binding. This is one ordinary flow plane, not a second crossing checker.
+pub(crate) enum Frozen {}
+
+impl Plane for Frozen {
+    type Fact = super::Span;
+
+    fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
+        match (left, right) {
+            (Some(left), Some(_)) => Some(*left),
+            _ => None,
+        }
+    }
+}
+
 /// D-FLOWTYPE1: a binding a proven test refined for the rest of a path
 /// (`x != None` refines `T?` to `T`). The refined row shadows the declaration
 /// at the same depth and leaves with it.
@@ -530,6 +546,7 @@ pub(crate) struct FlowFacts {
     pub(crate) reachable: bool,
     pub(crate) bindings: Facts<Binding>,
     pub(crate) sendability: Facts<Sendability>,
+    pub(crate) frozen: Facts<Frozen>,
     pub(crate) narrow: Facts<Narrow>,
     pub(crate) moved: Facts<Moved>,
     pub(crate) uninit: Facts<Uninit>,
@@ -544,6 +561,7 @@ impl Default for FlowFacts {
             reachable: true,
             bindings: Facts::default(),
             sendability: Facts::default(),
+            frozen: Facts::default(),
             narrow: Facts::default(),
             moved: Facts::default(),
             uninit: Facts::default(),
@@ -563,6 +581,7 @@ impl FlowFacts {
         let depth = self.depth;
         self.bindings.leave_depth(depth);
         self.sendability.leave_depth(depth);
+        self.frozen.leave_depth(depth);
         self.narrow.leave_depth(depth);
         self.views.leave_depth(depth);
         self.states.leave_depth(depth);
@@ -609,6 +628,11 @@ impl FlowFacts {
             sendability: Facts::merge_paths(
                 &before.sendability,
                 &Self::plane(&paths, |facts| &facts.sendability),
+                &mut Vec::new(),
+            ),
+            frozen: Facts::merge_paths(
+                &before.frozen,
+                &Self::plane(&paths, |facts| &facts.frozen),
                 &mut Vec::new(),
             ),
             narrow: Facts::merge_paths(
@@ -663,6 +687,7 @@ impl FlowFacts {
                 &after_body.sendability,
                 &mut Vec::new(),
             ),
+            frozen: Facts::after_loop(&before.frozen, &after_body.frozen, &mut Vec::new()),
             narrow: Facts::after_loop(&before.narrow, &after_body.narrow, &mut Vec::new()),
             moved: Facts::after_loop(&before.moved, &after_body.moved, &mut Vec::new()),
             uninit: Facts::after_loop(&before.uninit, &after_body.uninit, &mut Vec::new()),

@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, Type};
+use crate::AST::{AccessConvention, Expr, Type};
 use crate::Diagnostics::Span;
 use crate::Sema::Registration::already_defined;
 use crate::Sema::{Checker, LocalInfo};
@@ -157,19 +157,62 @@ impl<'a> Checker<'a> {
         }
 
         pub(crate) fn sendability_for(&self, name: &str) -> bool {
-            let declared = self.flow.bindings.depth_of(name);
-            let narrowed = self.flow.narrow.depth_of(name);
-            let depth = match (declared, narrowed) {
-                (Some(declared), Some(narrowed)) if narrowed >= declared => narrowed,
-                (Some(declared), _) => declared,
-                (None, Some(narrowed)) => narrowed,
-                (None, None) => return true,
+            let Some(depth) = self.binding_fact_depth(name) else {
+                return true;
             };
             self.flow
                 .sendability
                 .get_at(name, depth)
                 .copied()
                 .unwrap_or(true)
+        }
+
+        /// D-CONC-FREEZE1=A: read the one frozen proof attached to the active
+        /// binding/refinement. A missing row means the value is not frozen.
+        pub(crate) fn frozen_for(&self, name: &str) -> Option<Span> {
+            let declared = self.flow.bindings.depth_of(name);
+            let narrowed = self.flow.narrow.depth_of(name);
+            match (declared, narrowed) {
+                (Some(declared), Some(narrowed)) if narrowed >= declared => self
+                    .flow
+                    .frozen
+                    .get_at(name, narrowed)
+                    .or_else(|| self.flow.frozen.get_at(name, declared))
+                    .copied(),
+                (Some(declared), _) => self.flow.frozen.get_at(name, declared).copied(),
+                (None, Some(narrowed)) => self.flow.frozen.get_at(name, narrowed).copied(),
+                (None, None) => None,
+            }
+        }
+
+        pub(crate) fn binding_fact_depth(&self, name: &str) -> Option<usize> {
+            let declared = self.flow.bindings.depth_of(name);
+            let narrowed = self.flow.narrow.depth_of(name);
+            match (declared, narrowed) {
+                (Some(declared), Some(narrowed)) if narrowed >= declared => Some(narrowed),
+                (Some(declared), _) => Some(declared),
+                (None, Some(narrowed)) => Some(narrowed),
+                (None, None) => None,
+            }
+        }
+
+        /// D-CONC-FREEZE1=A: find the proof that a place expression is backed
+        /// by a frozen value. Deep immutability follows every place projection.
+        pub(crate) fn frozen_expr_site(&self, expr: &Expr) -> Option<Span> {
+            match expr {
+                Expr::Ident(name, _) => self.frozen_for(name),
+                Expr::Field(base, ..)
+                | Expr::Index { base, .. }
+                | Expr::Slice { base, .. }
+                | Expr::Place(base, ..)
+                | Expr::Paren(base, _) => self.frozen_expr_site(base),
+                Expr::Call(call)
+                    if call.name == crate::Syntax::KW_FREEZE && call.args.len() == 1 =>
+                {
+                    Some(call.name_span)
+                }
+                _ => None,
+            }
         }
 
         /// Update the callback representation fact after a function-valued
@@ -212,6 +255,7 @@ impl<'a> Checker<'a> {
             // name in this scope: the new binding is what the name now means.
             self.flow.narrow.remove_at(name, depth);
             self.flow.sendability.remove_at(name, depth);
+            self.flow.frozen.remove_at(name, depth);
             self.flow.bindings.set_at(name, depth, info);
             self.flow.sendability.set_at(name, depth, true);
         }

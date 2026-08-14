@@ -459,6 +459,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     CTX_BLOCK,
     // D-CONC-SPAWN1=D: one reserved word owns task spawning and fan-out.
     KW_CONC_TASK,
+    // D-CONC-FREEZE1=A: immutable task-crossing snapshot verb.
+    KW_FREEZE,
     // D-CONC-SHARE1=A: shared-cell construction is contextual syntax.
     KW_SHARED,
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
@@ -653,7 +655,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
     KW_BREAK, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
-    KW_CONC_TASK, KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE,
+    KW_CONC_TASK, KW_FREEZE, KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN,
     KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST,
     KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_FALSE,

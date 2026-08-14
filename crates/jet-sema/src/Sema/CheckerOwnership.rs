@@ -2089,9 +2089,18 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn validate_write_place(&mut self, expr: &Expr, span: Span) {
+        if let Some(freeze_site) = self.frozen_expr_site(expr) {
+            let name = expr_root_ident(expr).unwrap_or("the frozen value");
+            self.report_frozen_write(name, freeze_site, "be edited", span);
+            return;
+        }
         let Some(root) = expr_root_ident(expr).map(str::to_string) else {
             return;
         };
+        if let Some(freeze_site) = self.frozen_for(&root) {
+            self.report_frozen_write(&root, freeze_site, "be edited", span);
+            return;
+        }
         if let Some(fact) = self.view_fact(&root) {
             if fact.access == ViewAccess::Write {
                 return;
@@ -2159,6 +2168,11 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
+        if let Some(freeze_site) = self.frozen_expr_site(expr) {
+            let name = expr_root_ident(expr).unwrap_or("the frozen value");
+            self.report_frozen_write(name, freeze_site, action, span);
+            return;
+        }
         if let Some(name) = expr_root_ident(expr) {
             if self.reject_expiring_secret_loan_change(name, action, span) {
                 return;
@@ -2208,7 +2222,7 @@ impl<'a> Checker<'a> {
             );
         }
         if let Some(info) = self.lookup(&root) {
-            if !info.mutable {
+            if !info.mutable && self.frozen_for(&root).is_none() {
                 let (what, fix) = if root == Syntax::KW_SELF {
                     (
                         format!(
@@ -2260,6 +2274,17 @@ impl<'a> Checker<'a> {
         };
         if through_write_view {
             return;
+        }
+        let frozen_base = match target {
+            LValue::Index { base, .. } | LValue::Field { base, .. } => Some(base.as_ref()),
+            LValue::Local { .. } => None,
+        };
+        if let Some(base) = frozen_base {
+            if let Some(freeze_site) = self.frozen_expr_site(base) {
+                let name = expr_root_ident(base).unwrap_or("the frozen value");
+                self.report_frozen_write(name, freeze_site, action, target.span());
+                return;
+            }
         }
         let place = match target {
             LValue::Local { name, .. } => Some(ViewPlace {
@@ -2349,6 +2374,15 @@ impl<'a> Checker<'a> {
     }
 
     fn check_place_change(&mut self, changed: &ViewPlace, action: &str, span: Span) {
+        // D-CONC-FREEZE1=A: a frozen snapshot may be moved, but no operation
+        // may mutate its root or any projected place.
+        if action != "be moved"
+            && !action.contains("moved")
+            && let Some(freeze_site) = self.frozen_for(&changed.owner.name)
+        {
+            self.report_frozen_write(&changed.owner.name, freeze_site, action, span);
+            return;
+        }
         // A task group loan outlives the borrow binding's last lexical use: the
         // child still holds it until the group joins. Check that first — the
         // view scan below would already have let this place go.
@@ -2406,6 +2440,17 @@ impl<'a> Checker<'a> {
             format!(
                 "finish using `{view}` before changing `{changed_name}`, narrow the view's scope, or make an owned copy"
             ),
+            Some(span),
+        ));
+    }
+
+    /// E1113: the typed row owns the frozen-write wording; the checker only
+    /// supplies the source name, operation, and freeze-site provenance.
+    fn report_frozen_write(&mut self, name: &str, freeze_site: Span, action: &str, span: Span) {
+        let site = format!("`freeze(...)` at byte {}", freeze_site.start);
+        self.diags.push(Diagnostic::from_row(
+            "E1113",
+            &[("name", name), ("action", action), ("freeze_site", &site)],
             Some(span),
         ));
     }
@@ -4218,6 +4263,7 @@ impl<'a> Checker<'a> {
         let mut read_caps = HashSet::new();
         let mut mut_caps = HashSet::new();
         lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
+        read_caps.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
         for name in read_caps.iter().chain(mut_caps.iter()) {
             if param_names.contains(name) {
                 continue;
@@ -4434,6 +4480,78 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn type_contains_cell_guard(&self, ty: &Type) -> bool {
         self.type_contains_cell_guard_inner(ty, &mut HashSet::new())
+    }
+
+    /// D-CONC-FREEZE1=A: `freeze` must not hide a lock-backed `Shared` handle
+    /// inside an aggregate. A snapshot is deeply immutable; sharing a handle
+    /// would preserve shared mutation instead.
+    pub(crate) fn type_contains_shared(&self, ty: &Type) -> bool {
+        self.type_contains_shared_inner(ty, &mut HashSet::new())
+    }
+
+    fn type_contains_shared_inner(&self, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Shared(_) => true,
+            Type::List(inner) | Type::Option(inner) => {
+                self.type_contains_shared_inner(inner, seen)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                self.type_contains_shared_inner(key, seen)
+                    || self.type_contains_shared_inner(value, seen)
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .any(|(_, field)| self.type_contains_shared_inner(field, seen)),
+            Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
+                self.type_contains_shared_inner(elem, seen)
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|member| self.type_contains_shared_inner(member, seen)),
+            Type::Named(name) => self.named_type_contains_shared(name, &[], seen),
+            Type::Apply { name, args } => self.named_type_contains_shared(name, args, seen),
+            _ => false,
+        }
+    }
+
+    fn named_type_contains_shared(
+        &self,
+        name: &str,
+        args: &[Type],
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(name.to_string()) {
+            return false;
+        }
+        let subst = if args.is_empty() {
+            HashMap::new()
+        } else {
+            self.struct_subst(name, args)
+        };
+        let found = match self.registry.types.get(name) {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty)| {
+                let actual = self.trait_reg.instantiate_type(ty, &subst);
+                self.type_contains_shared_inner(&actual, seen)
+            }),
+            Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, payload)| match payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Single(ty, _) => {
+                    let actual = self.trait_reg.instantiate_type(ty, &subst);
+                    self.type_contains_shared_inner(&actual, seen)
+                }
+                VariantPayload::Named(fields) => fields.iter().any(|field| {
+                    let actual = self.trait_reg.instantiate_type(&field.ty, &subst);
+                    self.type_contains_shared_inner(&actual, seen)
+                }),
+            }),
+            Some(TypeDef::Alias { target, .. }) => {
+                let actual = self.trait_reg.instantiate_type(target, &subst);
+                self.type_contains_shared_inner(&actual, seen)
+            }
+            Some(TypeDef::Distinct { .. }) | None => false,
+        };
+        seen.remove(name);
+        found
     }
 
     pub(crate) fn cell_guard_storage_is_unsupported(&self, ty: &Type) -> bool {

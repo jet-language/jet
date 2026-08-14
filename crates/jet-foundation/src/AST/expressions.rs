@@ -260,6 +260,10 @@ pub struct LambdaMeta {
     pub needs_fn_mut: bool,
     pub mut_captures: Vec<String>,
     pub cloned_captures: Vec<String>,
+    /// D-CONC-FREEZE1=A: captures whose source value was proved frozen. The
+    /// fact is carried beside the ordinary cloned-capture slot; codegen does
+    /// not re-prove crossing policy.
+    pub frozen_captures: Vec<String>,
     /// D-MEM-COPYSEM1=A: escaping read-only view captures are materialized at
     /// closure construction. The source names remain in `cloned_captures` so
     /// all closure engines use the same capture slot; this list selects the
@@ -300,7 +304,9 @@ pub struct LambdaMeta {
 /// S46/S47 (M8): `(params) => body`; captures are inferred.
 #[derive(Debug, Clone)]
 pub struct Lambda {
-    /// Retired `take(...)` names kept only for one-pass migration diagnostics.
+    /// Explicit consuming captures (`task ^name { … }`). The retired
+    /// `take(...)` spelling uses the same semantic slot only while its parser
+    /// emits migration diagnostics.
     pub take_names: Vec<(String, Span)>,
     pub params: Vec<LambdaParam>,
     pub body: LambdaBody,

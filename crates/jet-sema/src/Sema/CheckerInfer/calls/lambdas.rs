@@ -90,6 +90,7 @@ use std::collections::HashSet;
             let escapes = self.lambda_escapes;
             lam.meta.escapes = escapes;
             lam.meta.materialized_captures.clear();
+            lam.meta.frozen_captures.clear();
     
             let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
             let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
@@ -104,6 +105,10 @@ use std::collections::HashSet;
                     &mut mut_caps,
                 );
             }
+            // D-CONC-FREEZE1=A: explicit `task ^name` captures are captures
+            // even when the body never reads the name directly. The move is
+            // checked by the same crossing loop below.
+            read_caps.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
     
             for name in read_caps.iter().chain(mut_caps.iter()) {
                 if take_set.contains(name) || param_names.contains(name) {
@@ -250,12 +255,18 @@ use std::collections::HashSet;
                         continue;
                     }
                     let taken = take_set.contains(name);
+                    let frozen_site = self.frozen_for(name);
+                    if self.is_task_spawn && frozen_site.is_some() {
+                        if !lam.meta.frozen_captures.iter().any(|capture| capture == name) {
+                            lam.meta.frozen_captures.push(name.clone());
+                        }
+                    }
                     let cloneable = is_cloneable(&cap_ty, self.registry);
                     // D-TASKBORROW1=A: a `task.group` child is joined by its group,
                     // so it may borrow places the owner still holds. Reads are free;
                     // writes need proven-disjoint places. Detached tasks, channels,
                     // and detached tasks keep the ownership-only rules below.
-                    if self.in_taskgroup_spawn {
+                    if self.in_taskgroup_spawn && !taken && frozen_site.is_none() {
                         let fallback = match cap_conv {
                             Some(AccessConvention::Write) => Some(ViewAccess::Write),
                             Some(AccessConvention::Read) => Some(ViewAccess::Read),
@@ -364,7 +375,19 @@ use std::collections::HashSet;
                         }
                         continue;
                     }
-                    if self.is_task_spawn && mut_caps.contains(name) {
+                    // D-CONC-FREEZE1=A: a bare mutable capture is rejected by
+                    // the same E1101 rail as a body write. A consuming `^`
+                    // capture or a frozen snapshot removes the outer alias.
+                    let shared_capture = matches!(&cap_ty, Type::Shared(_))
+                        || is_reactive_handle_ty(&cap_ty)
+                        || self.type_contains_cell_guard(&cap_ty);
+                    let mutable_capture = self.lookup(name).is_some_and(|info| info.mutable);
+                    if self.is_task_spawn
+                        && !taken
+                        && frozen_site.is_none()
+                        && !shared_capture
+                        && (mut_caps.contains(name) || mutable_capture)
+                    {
                         self.diags.push(Diagnostic::error(
                             "E1101",
                             format!(
@@ -373,7 +396,7 @@ use std::collections::HashSet;
                             ),
                             "tasks run concurrently; changing an outer binding inside a task would make ownership unclear"
                                 .to_string(),
-                            "create task-local state inside the task, or send updates through a channel"
+                            "give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock for deliberate shared mutation"
                                 .to_string(),
                             Some(lam.span),
                         ));

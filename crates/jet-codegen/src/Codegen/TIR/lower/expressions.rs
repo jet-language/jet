@@ -2511,6 +2511,65 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Call(call) => {
+            // D-CONC-FREEZE1=A: sema has proved the source is an owned,
+            // deeply snapshot-able value. Reuse the existing structural
+            // clone/materialization nodes so every execution tier consumes
+            // one already-typed TIR representation. A nested freeze is the
+            // identity by law and therefore does not clone twice.
+            if call.name == Syntax::KW_FREEZE
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+                && call.args.len() == 1
+            {
+                let source = &call.args[0].expr;
+                if let Expr::Call(inner) = source
+                    && inner.name == Syntax::KW_FREEZE
+                    && inner.args.len() == 1
+                {
+                    return lower_expr(source, cx, env);
+                }
+                let operand = lower_expr(source, cx, env);
+                let view_owned_ty = match &operand.ty {
+                    Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                        Some(if matches!(&args[0], Type::Named(element) if element == "str") {
+                            Type::String
+                        } else {
+                            Type::List(Box::new(args[0].clone()))
+                        })
+                    }
+                    _ => None,
+                }
+                .or_else(|| match source {
+                    Expr::Ident(name, _)
+                        if matches!(
+                            env.split_view_handle(name),
+                            Some(Type::Apply { name, .. }) if name == "View"
+                        ) => env.split_view_handle(name).and_then(|ty| match ty {
+                            Type::Apply { args, .. } if args.len() == 1 => Some(
+                                if matches!(&args[0], Type::Named(element) if element == "str") {
+                                    Type::String
+                                } else {
+                                    Type::List(Box::new(args[0].clone()))
+                                },
+                            ),
+                            _ => None,
+                        }),
+                    _ => None,
+                });
+                let string_view = matches!(source, Expr::Ident(name, _) if env.is_string_view_local(name));
+                let is_view = view_owned_ty.is_some();
+                let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
+                let kind = if is_view || string_view {
+                    TExprKind::MaterializeView(Box::new(operand))
+                } else if operand.ty.is_compute_tensor_family() {
+                    env.note_clone(&ty);
+                    TExprKind::ExplicitCopy(Box::new(operand))
+                } else {
+                    env.note_clone(&ty);
+                    TExprKind::Clone(Box::new(operand))
+                };
+                return TExpr { ty, kind };
+            }
             // D-CALLPOLICY1=E: `apply` is a typed value transformation. Sema
             // records the replacement on its final callable argument; lowering
             // forwards that value through the one shared function-value seam.
@@ -5033,6 +5092,7 @@ pub(crate) fn wrap_foreign_undo(
         arc: false,
         captures,
         materialized_captures: Vec::new(),
+        frozen_captures: Vec::new(),
     };
     let registration = TExpr {
         ty: Type::Named("TransactionGuard".to_string()),
