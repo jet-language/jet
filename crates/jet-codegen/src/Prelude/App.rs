@@ -227,7 +227,14 @@ source.onmessage = () => location.reload();
 
         pub fn serve_on(&self, port: i64) {
             let port = u16::try_from(port)
-                .unwrap_or_else(|_| panic!("app port must be between 0 and 65535"));
+                .unwrap_or_else(|_| {
+                    super::jet_runtime_stop(
+                        "E3001",
+                        "",
+                        0,
+                        "app port must be between 0 and 65535",
+                    )
+                });
             self.serve_port(port, false);
         }
 

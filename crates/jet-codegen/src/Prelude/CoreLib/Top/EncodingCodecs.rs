@@ -414,7 +414,8 @@ fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(
 
 fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
     jet_enc_cbor_to_bytes(value).unwrap_or_else(|error| {
-        panic!("cbor.encode failed: {}", error.reason)
+        let message = format!("cbor.encode failed: {}", error.reason);
+        jet_runtime_stop("E3001", "", 0, &message)
     })
 }
 

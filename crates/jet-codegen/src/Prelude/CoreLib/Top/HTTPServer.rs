@@ -4873,16 +4873,25 @@ pub(crate) fn jet_app_http_reload(mux: &JetHTTPMux) {
 pub(crate) fn jet_app_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
     use std::io::Write;
     let server = jet_http_server_bind(&format!("127.0.0.1:{port}"), mux)
-        .unwrap_or_else(|error| panic!("web app server failed: {error}"));
+        .unwrap_or_else(|error| {
+            let message = format!("web app server failed: {error}");
+            jet_runtime_stop("E3001", "", 0, &message)
+        });
     println!(
         "serving http://{}{}",
         jet_http_server_local_addr(&server)
-            .unwrap_or_else(|error| panic!("web app address failed: {error}")),
+            .unwrap_or_else(|error| {
+                let message = format!("web app address failed: {error}");
+                jet_runtime_stop("E3001", "", 0, &message)
+            }),
         if dev { " (live reload)" } else { "" }
     );
     let _ = std::io::stdout().flush();
     jet_http_server_serve(&server)
-        .unwrap_or_else(|error| panic!("web app server failed: {error}"));
+        .unwrap_or_else(|error| {
+            let message = format!("web app server failed: {error}");
+            jet_runtime_stop("E3001", "", 0, &message)
+        });
 }
 
 fn jet_http_srv_json_text(status: i64, body: &String) -> JetHTTPResponse {
