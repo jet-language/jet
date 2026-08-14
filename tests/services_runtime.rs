@@ -20,8 +20,8 @@ use core.time as time
 
 fn receipt_id(receipt: ServiceReceipt) => String {
     if receipt == {
-        .Accepted(id) -> { return id }
-        .Duplicate(id) -> { return id }
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
         .Retained(id, _) -> { return id }
         .DeadLettered(id) -> { return id }
     }
@@ -30,8 +30,8 @@ fn receipt_id(receipt: ServiceReceipt) => String {
 
 fn receipt_kind(receipt: ServiceReceipt) => String {
     if receipt == {
-        .Accepted(_) -> { return "accepted" }
-        .Duplicate(_) -> { return "duplicate" }
+        .Enqueued(_) -> { return "enqueued" }
+        .Executed(_) -> { return "executed" }
         .Retained(_, _) -> { return "retained" }
         .DeadLettered(_) -> { return "dead" }
         .Rejected(_) -> { return "rejected" }
@@ -52,7 +52,7 @@ fn run() {
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
     id :: receipt_id(first)
     if id == "" { panic("missing receipt id") }
-    print("first:accepted")
+    print("first:enqueued")
     recovered := services.runtime(store, retention: retention)
     recovered_duplicate :: recovered.retry(id) ?? panic("recover")
     print("recovered:{receipt_kind(recovered_duplicate)}")
@@ -94,7 +94,7 @@ fn service_authority_receipts_survive_reopen_and_lifecycle() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "first:accepted\nrecovered:duplicate\ndelivered:order\ncommitted:ok\nduplicate:duplicate\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -108,7 +108,7 @@ fn service_authority_receipts_match_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "first:accepted\nrecovered:duplicate\ndelivered:order\ncommitted:ok\nduplicate:duplicate\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -119,8 +119,8 @@ use core.time as time
 
 fn receipt_id(receipt: ServiceReceipt) => String {
     if receipt == {
-        .Accepted(id) -> { return id }
-        .Duplicate(id) -> { return id }
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
         .Retained(id, _) -> { return id }
         .DeadLettered(id) -> { return id }
     }
@@ -129,8 +129,8 @@ fn receipt_id(receipt: ServiceReceipt) => String {
 
 fn receipt_kind(receipt: ServiceReceipt) => String {
     if receipt == {
-        .Accepted(_) -> { return "accepted" }
-        .Duplicate(_) -> { return "duplicate" }
+        .Enqueued(_) -> { return "enqueued" }
+        .Executed(_) -> { return "executed" }
         .Retained(_, _) -> { return "retained" }
         .DeadLettered(_) -> { return "dead" }
         .Rejected(_) -> { return "rejected" }
@@ -245,7 +245,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "send process did not return a receipt id");
     assert_eq!(
         run_restart_process(&bin, &store, "recover", Some(id)),
-        "duplicate\norder\n"
+        "enqueued\norder\n"
     );
 
     let default_store = dir.join("authority-default.log");
@@ -254,7 +254,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "default send process did not return a receipt id");
     assert_eq!(
         run_restart_process(&bin, &default_store, "recover", Some(id)),
-        "duplicate\norder\n"
+        "enqueued\norder\n"
     );
 
     let aot_store = dir.join("authority-aot-to-default.log");

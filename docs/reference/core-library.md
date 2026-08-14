@@ -3635,8 +3635,8 @@ fn run() {
     runtime := services.runtime("orders.log", retention: time.hours(24))
     receipt := runtime.send(order_endpoint, order, key: order.id)?
     if receipt == {
-        .Accepted(id) -> audit(id)
-        .Duplicate(_) -> continue
+        .Enqueued(id) -> audit(id)
+        .Executed(_) -> continue
         .Retained(_, until) -> schedule_retry(until)
         .DeadLettered(_) -> report("dead letter")
         .Rejected(reason) | .Unavailable(reason) | .Partitioned(reason)
