@@ -446,7 +446,7 @@ fn checksum(bytes: [U8]) => U8 {
     return sum
 }
 
-#Kernel fn blend(a: F32x4, b: F32x4) => F32x4 =
+#Kernel fn blend(a: F32x4, b: F32x4) => F32x4 ::
     a * 0.5 + b * 0.5                         // approximate and fast — on purpose, and it shows
 
 fn set_brightness(level: Int(0..100)) { ... }  // settled inline refinement

@@ -854,7 +854,7 @@ fn run_build() =[Exec]=> ProcessReceipt {
     process.run("jet build", spec)
 }
 // Meanwhile, live today:
-fn f(x: Capability) => Int = 0     // accepted, then a dead end:
+fn f(x: Capability) => Int :: 0    // accepted, then a dead end:
 // every call is E0112 and no value of Capability can ever exist
 ```
 

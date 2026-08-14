@@ -1274,7 +1274,7 @@ overlay. (Full spec follows in this section.)
 | Overlay | `#Extern module c.<lib> { … }` — empty `{ }` = no overrides |
 | Call site | `use "header.h" as alias`, `use c.<lib> as alias`, or `use c.[lib as alias, other]` (one bring-in per lib per file) |
 
-Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
+Foreign function bindings mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
 "InitWindow";` (the string is the C linker symbol). On any C `use`, the compiler
 loads the bindgen cache at `.jet/bindings/c/<lib>.jet` (when present), merges the
 user overlay over it (**effective module = bindgen ∪ overlay; overlay wins**;

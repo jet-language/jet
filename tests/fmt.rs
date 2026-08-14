@@ -1407,6 +1407,11 @@ fn fmt_preserves_single_line_loops_and_fn() {
     let fn_src = "fn one() => Int :: 1\n";
     assert_fmt_stable(fn_src, "single-line fn body");
 
+    let retired_fn_src = "fn one() => Int = 1\n";
+    let retired_fn =
+        jet::format_source(retired_fn_src).expect("retired fn body should be fixable");
+    assert!(retired_fn.contains("fn one() => Int :: 1"), "{retired_fn}");
+
     let empty_fn_src = "fn noop() {}\n";
     assert_fmt_stable(empty_fn_src, "empty single-line fn body");
 }

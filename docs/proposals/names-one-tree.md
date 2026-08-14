@@ -472,7 +472,7 @@ pub fn curve(score: Int) => Int { … }
 
 // util.jet
 #PubFile
-fn shout(s: String) => String = s.upper() + "!"
+fn shout(s: String) => String :: s.upper() + "!"
 priv fn pad(s: String) => String { … }
 ```
 
@@ -492,7 +492,7 @@ pub fn curve(score: Int) => Int { … }
 // util.jet
 pub module util                        // header: public-by-default file,
                                        // replaces #PubFile (proposed)
-fn shout(s: String) => String = s.upper() + "!"       // public by default
+fn shout(s: String) => String :: s.upper() + "!"      // public by default
 fn _pad(s: String) => String { … }     // internal, one `_` story (proposed)
 ```
 

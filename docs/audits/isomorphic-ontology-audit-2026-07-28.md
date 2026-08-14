@@ -138,7 +138,7 @@ Rows unchanged since 2026-07-27 are carried forward; changed rows are marked
 
 | Jet form | Ids | Axes | What it is | Status |
 | --- | --- | --- | --- | --- |
-| `fn` / expression body `=> T = e` | D03,V60 | X01 | Named callable = binding of a function | celebrated |
+| `fn` / expression body `=> T :: e` | D03,V60 | X01 | Named callable = binding of a function | celebrated |
 | `struct`/`enum`/`alias`/`distinct` | D04,D05 | — | Type intro | teaches well |
 | `trait`/`impl` / `fn Type.method` | D06–D08 | — | Contract plus orphan extension | teaches well |
 | `module` / generic modules / `module _name` | D09,M8 | X03,X14 | Namespace unit; comptime args; discovery opt-out | teaches well |

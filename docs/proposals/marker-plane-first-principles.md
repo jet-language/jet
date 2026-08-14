@@ -247,7 +247,7 @@ User :: struct {
 fn refresh() { … }
 
 #Inline
-fn hot(a: Int) => Int = a * limit               // bare rule, line above
+fn hot(a: Int) => Int :: a * limit              // bare rule, line above
 
 fn read_device(p: *Int) => Int {
     #Unsafe("p is a live MMIO register; the read has no side effects") {

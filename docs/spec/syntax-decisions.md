@@ -354,7 +354,7 @@ after a call is E0335 with a fix that shows `callee(() => { … })`.
 
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
 inlining via `#Inline`/`#Inline(Always)` contracts instead (D-METHODMACRO1);
-the earlier untyped expression-body `fn f() = expr` (D-FP2), superseded by
+the earlier untyped expression-body form (D-FP2), superseded by
 D-ONELINE-BODY1=B's typed `fn f() => T :: expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 

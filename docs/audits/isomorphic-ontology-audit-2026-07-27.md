@@ -125,7 +125,7 @@ false rhyme / absent.
 
 | Jet form | Ids | Axes | What it is | Status |
 | --- | --- | --- | --- | --- |
-| `fn` / expression body `=> T = e` | D03,V60 | X01 | Named callable = binding of a function | celebrated |
+| `fn` / expression body `=> T :: e` | D03,V60 | X01 | Named callable = binding of a function | celebrated |
 | `struct`/`enum`/`alias`/`distinct` | D04,D05 | — | Type intro | teaches well |
 | `trait`/`impl` / `fn Type.method` | D06–D08 | — | Contract plus orphan extension | teaches well |
 | `module` / generic modules | D09,M8 | X03 | Namespace unit; optional comptime args | teaches well |

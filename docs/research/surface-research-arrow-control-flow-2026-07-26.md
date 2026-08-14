@@ -167,20 +167,15 @@ fn normalize(value: Int) => Int {
 
 ### Concise body
 
-Use `=` because `=>` already introduces the result type:
+Use `::` because a one-line body is a definition:
 
 ```jet
-fn double(value: Int) => Int = value * 2
+fn double(value: Int) => Int :: value * 2
 
-fn User.label(self) => String = self.name
+fn User.label(self) => String :: self.name
 ```
 
-This avoids:
-
-```jet
-// Reject.
-fn double(value: Int) => Int => value * 2
-```
+The result arrow only introduces the return type; `::` opens the body.
 
 ### Void function
 
@@ -236,10 +231,10 @@ function types now use one result syntax.
 ### Multi-head functions
 
 ```jet
-fn area(Circle(radius: Float)) => Float =
+fn area(Circle(radius: Float)) => Float ::
     3.14 * radius * radius
 
-fn area(Rect(width: Float, height: Float)) => Float =
+fn area(Rect(width: Float, height: Float)) => Float ::
     width * height
 ```
 
@@ -1256,7 +1251,7 @@ The migration is mechanical and removes category overlap.
 ## Canonical package
 
 ```jet
-fn classify(score: Int) => Grade =
+fn classify(score: Int) => Grade ::
     if score == {
         90..100 -> .A
         80..89 -> .B

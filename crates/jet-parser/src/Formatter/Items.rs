@@ -744,11 +744,15 @@ impl<'a> Fmt<'a> {
         }
         // D-ONELINE-BODY1=B: preserve the canonical concise callable body.
         // The parser desugars the marker plus expression to `return expr`; its
-        // synthetic return span starts on the author-written marker.
+        // synthetic return span starts on the author-written marker. Retired
+        // `=` input is recovered for the teaching diagnostic and rewritten.
         if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
-            if self.src.get(span.start..span.start.saturating_add(2)).is_some_and(|source| {
-                source == "::"
-            }) {
+            let marker = self.src.get(span.start..span.start.saturating_add(2));
+            let retired_marker = self
+                .src
+                .get(span.start..span.start.saturating_add(1))
+                .is_some_and(|source| source == "=");
+            if marker == Some("::") || retired_marker {
                 self.write(" :: ");
                 self.fmt_expr(expr, Prec::OrFallback);
                 return;

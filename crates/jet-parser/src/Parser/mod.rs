@@ -1255,6 +1255,17 @@ fn notify(ready: Bool) =[Net]=> () {
                 diagnostics.iter().any(|diagnostic| diagnostic.code == code),
                 "expected {code}, got {diagnostics:?}"
             );
+            if code == "E0065" {
+                assert_eq!(
+                    diagnostics
+                        .iter()
+                        .find(|diagnostic| diagnostic.code == code)
+                        .and_then(|diagnostic| diagnostic.edit.as_ref())
+                        .map(|edit| edit.new_text.as_str()),
+                    Some("::"),
+                    "the retired function-body marker must offer the canonical replacement"
+                );
+            }
         }
     }
 

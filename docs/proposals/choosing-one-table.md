@@ -209,8 +209,8 @@ The wall stands: wait arms take no patterns and no guards — a filter after a d
 **A — today (S83).**
 
 ```jet
-fn area(Circle(r: Float)) => Float = 3.14 * r * r
-fn area(Rect(w: Float, h: Float)) => Float = w * h
+fn area(Circle(r: Float)) => Float :: 3.14 * r * r
+fn area(Rect(w: Float, h: Float)) => Float :: w * h
 ```
 
 **B — proposed (HEADS1, rescoped).** The audit found the honest blocker: S83 heads are a second pattern dialect — bare names where every arm head requires `.Circle` (D-ENUMDOT1), typed sub-bindings that no arm head has. So the ballot now asks only for the unification that is safe today: coverage and overlap are checked by the table's proofs (E0307, unreachable-arm lint), one error copy instead of two. Whether the *surface* becomes literal table sugar is a named follow-up that must first reconcile the head dialect with D-ENUMDOT1 and D-PAT6.
@@ -220,7 +220,7 @@ fn area(Rect(w: Float, h: Float)) => Float = w * h
 **A — today (D-ARROW-CONTROL1=A).**
 
 ```jet
-fn area(r: Float) => Float = 3.14 * r * r
+fn area(r: Float) => Float :: 3.14 * r * r
 ```
 
 **B — proposed (FNBODY1).** A one-line body is a definition, and definitions are moving to `::`: aliases (`alias Parsed<T> :: T ? AppError`, D-ALIAS-OP1=B) and module instantiation (`module int_cache :: cache<Int>(64)`, D-CONF-GENSPELL1=A) already made the move. The law: **`::` defines, `=` fills.** Defaults (`timeout: Int = 30`), field defaults, enum discriminants, and reassignment fill a slot inside something being defined — they keep `=`.

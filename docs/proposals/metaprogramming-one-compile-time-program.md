@@ -287,7 +287,7 @@ The old source-emission form is retired. The provider body is the member list:
 
 ```jet
 derive T.DebugText {
-    fn debug_string(self) => String = T.@name
+    fn debug_string(self) => String :: T.@name
 }
 ```
 
@@ -425,7 +425,7 @@ block as a derive:
 
 ```jet
 b.generate("build_message") {
-    fn generated_build_message() => String = @stamp
+    fn generated_build_message() => String :: @stamp
 }?
 ```
 
@@ -433,7 +433,7 @@ Settled:
 
 ```jet
 b.generate("build_message") {
-    fn generated_build_message() => String = @stamp
+    fn generated_build_message() => String :: @stamp
 }?
 ```
 
