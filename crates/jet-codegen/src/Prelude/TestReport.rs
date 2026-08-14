@@ -144,10 +144,10 @@ impl JetTestFailure {
             jet_test_json_string(&self.message),
             jet_test_json_string("a checked test assertion evaluated false"),
             jet_test_json_string("fix the expected value or the code under test, then rerun the test"),
-            detail = detail,
             file,
             line,
             col,
+            detail = detail,
             cause = cause,
             clears = self.clears,
         )
