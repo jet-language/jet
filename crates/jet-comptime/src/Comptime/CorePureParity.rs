@@ -764,10 +764,13 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
                     let name = name
                         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                         .unwrap_or(name.as_str());
-                    Some(format!("{name}: {}", nested_display(value)?))
+                    Some((name.to_string(), nested_display(value)?))
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(format!("{type_name}({})", fields.join(", ")))
+            Some(jet_foundation::StructuralDebug::jet_debug_record(
+                type_name,
+                fields,
+            ))
         }
         CtValue::Enum { variant, args, .. } => {
             let variant = variant

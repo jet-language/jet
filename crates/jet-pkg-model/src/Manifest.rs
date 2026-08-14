@@ -561,7 +561,7 @@ fn e1206_retired_policy(_file: &str, field: &str, replacement: &str) -> Diagnost
             "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning."
         ),
         format!(
-            "remove `{field}` for the default, or use `{replacement}` to refuse auto-derive"
+            "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive"
         ),
         None,
     )
