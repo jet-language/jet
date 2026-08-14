@@ -925,12 +925,17 @@ pub(super) fn parse_memory_policy(
             {
                 continue;
             }
-            if name == jet_foundation::LintPolicy::AUTO_DERIVE_LINT.name {
+            if name == jet_foundation::LintPolicy::auto_derive_lint()
+                .lint_name
+                .expect("auto_derive lint must have a name")
+            {
                 return Err(PackageParseError::RetiredPolicyField {
                     field: format!("policy.{name}"),
                     replacement: format!(
                         "policy: .{{ lints: .{{ deny: [{}] }} }}",
-                        jet_foundation::LintPolicy::AUTO_DERIVE_LINT.name
+                        jet_foundation::LintPolicy::auto_derive_lint()
+                            .lint_name
+                            .expect("auto_derive lint must have a name")
                     ),
                 });
             }

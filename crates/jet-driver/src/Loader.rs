@@ -1585,13 +1585,13 @@ fn auto_derive_default_for_file(
         let deny = package.policy.lints_deny.as_deref().unwrap_or_default();
         return Ok(!jet_foundation::LintPolicy::is_denied(
             deny,
-            jet_foundation::LintPolicy::AUTO_DERIVE_LINT.code,
+            jet_foundation::LintPolicy::auto_derive_lint().code,
         ));
     }
     if path.starts_with(project_root) {
         Ok(!jet_foundation::LintPolicy::is_denied(
             project_lints_deny,
-            jet_foundation::LintPolicy::AUTO_DERIVE_LINT.code,
+            jet_foundation::LintPolicy::auto_derive_lint().code,
         ))
     } else {
         Ok(true)

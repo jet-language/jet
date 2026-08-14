@@ -97,8 +97,8 @@ pub const RETIREMENTS: &[Retirement] = &[
     },
     Retirement {
         id: "lint-policy-code",
-        retired: "policy.lints.deny: [L####]",
-        canonical: "policy.lints.deny: [lint_name]",
+        retired: "policy.lints.deny: [L####] / #allow(L####)",
+        canonical: "policy.lints.deny: [lint_name] / #allow(lint_name)",
         kind: RetirementKind::Semantic,
         decision: "D-LINTPOLICY1",
         since: "2026-08-07",

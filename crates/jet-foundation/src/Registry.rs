@@ -448,6 +448,9 @@ impl DiagnosticStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiagnosticRow {
     pub code: &'static str,
+    /// Stable snake_case selector name for lint rows. Errors have no selector
+    /// name because codes remain their rendered identity.
+    pub lint_name: Option<&'static str>,
     pub stage: &'static str,
     pub severity: Severity,
     pub moment: ReportMoment,
@@ -672,6 +675,13 @@ pub fn diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
     diagnostic_rows().iter().find(|row| row.code == code)
 }
 
+/// Every lint row in the one diagnostic registry.
+pub fn lint_rows() -> impl Iterator<Item = &'static DiagnosticRow> {
+    diagnostic_rows()
+        .iter()
+        .filter(|row| row.severity == Severity::Lint)
+}
+
 /// Diagnostic rows as rows of the shared registration table.
 pub fn diagnostic_registry_rows() -> impl Iterator<Item = &'static RegistryRow> {
     rows().iter().filter(|row| row.kind() == RowKind::Diagnostic)
@@ -688,19 +698,24 @@ fn read_diagnostic_rows() -> Vec<DiagnosticRow> {
 
 fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     let fields: Vec<&str> = line.split('\t').collect();
-    assert_eq!(
-        fields.len(),
-        12,
-        "diagnostic row needs 12 tab-separated fields: {line}"
+    assert!(
+        matches!(fields.len(), 12 | 13),
+        "diagnostic row needs 12 fields, or 13 with a lint name: {line}"
     );
     assert_eq!(fields[0], "diagnostic", "unknown diagnostic row kind: {line}");
     let code = leak(&unescape_source(fields[1]));
+    let lint_name = (fields.len() == 13).then(|| leak(&unescape_source(fields[12])));
     let stage = leak(&unescape_source(fields[2]));
     let severity = match fields[3] {
         "error" => Severity::Error,
         "lint" => Severity::Lint,
         other => panic!("unknown diagnostic severity `{other}` in {line}"),
     };
+    assert_eq!(
+        severity == Severity::Lint,
+        lint_name.is_some(),
+        "only lint rows carry a stable selector name: {line}"
+    );
     let moment = match fields[4] {
         "compile" => ReportMoment::Compile,
         "run" => ReportMoment::Run,
@@ -732,6 +747,7 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     };
     DiagnosticRow {
         code,
+        lint_name,
         stage,
         severity,
         moment,

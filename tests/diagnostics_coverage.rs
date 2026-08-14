@@ -145,17 +145,20 @@ fn every_registered_lint_has_a_unique_snake_case_name() {
         .filter(|row| row.severity == jet_foundation::Diagnostics::Severity::Lint)
         .map(|row| row.code)
         .collect();
-    let lints = jet_foundation::LintPolicy::registered_lints();
+    let lints: Vec<_> = jet_foundation::Registry::lint_rows().collect();
     let mut names = BTreeSet::new();
     let mut codes = BTreeSet::new();
 
     for lint in lints {
+        let name = lint
+            .lint_name
+            .expect("every registered lint must carry a stable name");
         assert!(
-            is_snake_case(lint.name),
+            is_snake_case(name),
             "lint `{}` is not a stable snake_case name",
-            lint.name
+            name
         );
-        assert!(names.insert(lint.name), "lint name `{}` is duplicated", lint.name);
+        assert!(names.insert(name), "lint name `{name}` is duplicated");
         assert!(codes.insert(lint.code), "lint code `{}` is duplicated", lint.code);
         assert_eq!(
             jet_foundation::Registry::diagnostic(lint.code)
@@ -166,15 +169,30 @@ fn every_registered_lint_has_a_unique_snake_case_name() {
         );
         assert_eq!(
             jet_foundation::LintPolicy::name_for_code(lint.code),
-            Some(lint.name),
+            Some(name),
             "lint `{}` does not round-trip through the name registry",
             lint.code
+        );
+        assert_eq!(
+            jet_foundation::LintPolicy::code_for_name(name),
+            Some(lint.code),
+            "lint name `{name}` does not resolve to its registered code"
         );
     }
 
     assert_eq!(
         codes, registered_codes,
         "every registered lint row must carry exactly one stable name"
+    );
+}
+
+#[test]
+fn rendered_lint_keeps_code_beside_name() {
+    let diagnostic = jet_foundation::Diagnostics::Diagnostic::from_row("L0302", &[], None);
+    let rendered = diagnostic.render("example.jet", "");
+    assert!(
+        rendered.starts_with("Warning [L0302] (same_enum_guard_table):"),
+        "rendered lint lost its code/name pair: {rendered}"
     );
 }
 

@@ -1,90 +1,32 @@
 //! D-LINTPOLICY1=A: one package lint wall for every sema lint.
 
 use crate::Diagnostics::{Diagnostic, Severity, Span};
+use crate::Registry::DiagnosticRow;
 use crate::Syntax;
 
-/// One stable user-facing name for one registered lint.
-///
-/// The diagnostic row remains the authority for the rendered code and prose;
-/// this is the lint-selection registry used by every config surface. Keeping
-/// the two fields together makes a policy value name-first while preserving
-/// the code for rendered reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RegisteredLint {
-    pub name: &'static str,
-    pub code: &'static str,
+/// The complete lint-selection registry, projected from the typed diagnostic
+/// rows. No config surface owns a second code/name table.
+pub fn registered_lints() -> impl Iterator<Item = &'static DiagnosticRow> {
+    crate::Registry::lint_rows()
 }
 
-/// The package-level auto-derive refusal is a named entry in the shared lint
-/// deny list. It is reserved because no source lint is emitted for the policy
-/// itself; the loader consumes the same registry identity.
-pub const AUTO_DERIVE_LINT: RegisteredLint = RegisteredLint {
-    name: "auto_derive",
-    code: "L0509",
-};
+/// Resolve the reserved auto-derive policy entry from the same lint registry.
+pub fn auto_derive_lint() -> &'static DiagnosticRow {
+    lint_by_name("auto_derive").expect("auto_derive must stay registered")
+}
 
-/// Every registered lint has one stable snake_case name. Retired and reserved
-/// rows stay registered so old reports and future migrations keep one identity.
-pub const REGISTERED_LINTS: &[RegisteredLint] = &[
-    RegisteredLint { name: "dead_end_state", code: "L0151" },
-    RegisteredLint { name: "divergent_state_paths", code: "L0152" },
-    RegisteredLint { name: "implicit_clone", code: "L0201" },
-    RegisteredLint { name: "shared_auto_clone", code: "L0202" },
-    RegisteredLint { name: "unpinned_script_dependency", code: "L0203" },
-    RegisteredLint { name: "untranslated_flake_field", code: "L0204" },
-    RegisteredLint { name: "unsandboxed_build_fallback", code: "L0205" },
-    RegisteredLint { name: "shared_guard_long_scope", code: "L0206" },
-    RegisteredLint { name: "compiler_extension", code: "L1401" },
-    RegisteredLint { name: "unreachable_dispatch_arm", code: "L0301" },
-    RegisteredLint { name: "same_enum_guard_table", code: "L0302" },
-    RegisteredLint { name: "slice_copy_in_loop", code: "L0501" },
-    RegisteredLint { name: "float_comparison", code: "L0502" },
-    RegisteredLint { name: "compound_assignment", code: "L0503" },
-    RegisteredLint { name: "float_money", code: "L0504" },
-    RegisteredLint { name: "heap_growth_in_loop", code: "L0505" },
-    RegisteredLint { name: "hidden_context_allocation", code: "L0506" },
-    RegisteredLint { name: "branch_arm_table", code: "L0507" },
-    RegisteredLint { name: "arrow_loop_value_drop", code: "L0508" },
-    AUTO_DERIVE_LINT,
-    RegisteredLint { name: "prelude_alias_shadow", code: "L0510" },
-    RegisteredLint { name: "err_fallback_shadow", code: "L0511" },
-    RegisteredLint { name: "display_migration", code: "L0520" },
-    RegisteredLint { name: "soft_public_use", code: "L0601" },
-    RegisteredLint { name: "inline_autodiff", code: "L1141" },
-    RegisteredLint { name: "bare_unsafe", code: "L3101" },
-    RegisteredLint { name: "impure_reason", code: "L3102" },
-    RegisteredLint { name: "unjoined_task", code: "L1101" },
-    RegisteredLint { name: "random_crypto_context", code: "W0410" },
-    RegisteredLint { name: "raw_reference_view", code: "L2301" },
-    RegisteredLint { name: "deprecated_item", code: "L2001" },
-    RegisteredLint { name: "doctor_advisory", code: "L2101" },
-    RegisteredLint { name: "regex_backtracking", code: "L2701" },
-    RegisteredLint { name: "missing_accessible_label", code: "E2930" },
-    RegisteredLint { name: "duplicate_accessible_label", code: "E2931" },
-    RegisteredLint { name: "duplicate_layout_constraint", code: "E2934" },
-    RegisteredLint { name: "positional_bool_parameter", code: "L2401" },
-    RegisteredLint { name: "whole_file_read", code: "L2501" },
-    RegisteredLint { name: "blocking_accept_loop", code: "L2801" },
-    RegisteredLint { name: "empty_test", code: "L2901" },
-];
-
-/// The complete lint-selection registry.
-pub const fn registered_lints() -> &'static [RegisteredLint] {
-    REGISTERED_LINTS
+pub fn lint_by_name(name: &str) -> Option<&'static DiagnosticRow> {
+    registered_lints().find(|lint| lint.lint_name == Some(name))
 }
 
 /// Resolve a lint name to its rendered diagnostic code.
 pub fn code_for_name(name: &str) -> Option<&'static str> {
-    REGISTERED_LINTS
-        .iter()
-        .find_map(|lint| (lint.name == name).then_some(lint.code))
+    lint_by_name(name).map(|lint| lint.code)
 }
 
 /// Resolve a rendered diagnostic code to its stable lint name.
 pub fn name_for_code(code: &str) -> Option<&'static str> {
-    REGISTERED_LINTS
-        .iter()
-        .find_map(|lint| (lint.code == code).then_some(lint.name))
+    crate::Registry::diagnostic(code).and_then(|lint| lint.lint_name)
 }
 
 /// Build the registered manifest fix for a lint-policy value that used a
@@ -237,9 +179,8 @@ fn parse_lint_name_list(value: &str) -> Result<Vec<String>, String> {
 }
 
 fn known_lint_policy_names() -> String {
-    REGISTERED_LINTS
-        .iter()
-        .map(|lint| format!("`{}`", lint.name))
+    registered_lints()
+        .map(|lint| format!("`{}`", lint.lint_name.expect("lint rows have names")))
         .collect::<Vec<_>>()
         .join(", ")
 }
