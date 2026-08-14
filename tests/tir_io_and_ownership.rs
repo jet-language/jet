@@ -220,10 +220,10 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// D-MEM-PARAM1=A: assigning a read parameter into an owned field must never
-/// insert a hidden clone or reach rustc as a move out of a shared reference.
+/// D-MEM-COPYSEM1: assigning a read parameter into an owned field materializes
+/// the same owning copy as `~`.
 #[test]
-fn borrowed_parameter_field_assignment_needs_explicit_copy() {
+fn borrowed_parameter_field_assignment_materializes_copy() {
     let src = "\
 struct Ledger {
     rows: [Int]
@@ -240,15 +240,15 @@ fn run() {
     print(ledger.rows[2])
 }
 ";
-    let diags = jet::compile(src).expect_err("borrowed parameter cannot fill owned field");
-    let diag = diags.iter().find(|d| d.code == "E0120").expect("E0120");
-    assert!(diag.fix.contains("~s"), "{diag:?}");
+    let (code, stdout) = build_and_run("tir_borrowed_parameter_field_copy", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n2\n3\n");
 }
 
-/// D-MEM-PARAM1=A: extracting an owned optional payload from a read
-/// parameter also needs an explicit copy before codegen.
+/// D-MEM-COPYSEM1: extracting an owned optional payload from a read parameter
+/// materializes the payload before the fallback expression consumes it.
 #[test]
-fn borrowed_parameter_option_fallback_needs_explicit_copy() {
+fn borrowed_parameter_option_fallback_materializes_copy() {
     let src = "\
 struct Config {
     path: String?
@@ -260,9 +260,9 @@ fn run() {
     print(selected(Config.{ path: None }))
 }
 ";
-    let diags = jet::compile(src).expect_err("borrowed optional payload needs an explicit copy");
-    let diag = diags.iter().find(|d| d.code == "E0120").expect("E0120");
-    assert!(diag.fix.contains('~'), "{diag:?}");
+    let (code, stdout) = build_and_run("tir_borrowed_parameter_option_copy", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "default.toml\n");
 }
 
 /// D-MUTSELF1: a `mut self` method that assigns a field in place — `self.field = v`

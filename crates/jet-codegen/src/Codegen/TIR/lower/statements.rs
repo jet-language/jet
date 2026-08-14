@@ -1984,9 +1984,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             } else {
                 None
             };
-            // D-MEM1 stage S5 (2026-07-04): a string-view binding (`x :: s.trim()` /
-            // `x :: s.after(sep)` / `x :: s.before(sep)`; sema set `string_view`
-            // after proving E2307-safety — see `CheckerCore.rs`'s binding check).
+            // D-MEM1/D-MEM-COPYSEM1: a string-view binding (`x :: s.trim()` /
+            // `x :: s.after(sep)` / `x :: s.before(sep)`; sema sets
+            // `string_view` after proving the local view fact is sound — see
+            // `CheckerCore.rs`'s binding check). An owning destination copies
+            // this binding later through the shared Prelude.
             // Unlike `arena_view` this binds a plain `&str` (no deref needed to
             // read it): `ty_clause: ": &str"`, `kw: "let"` (non-reassignable,
             // non-escaping local, I8, same as arena/list views), and the init

@@ -41,6 +41,32 @@ fn reactive_capture_name(name: &str) -> String {
     ))
 }
 
+/// D-MEM-COPYSEM1=A: resolve the owning capture type and shared Prelude
+/// operation for a read-only view. Sema records the names; lowering only
+/// marshals that fact into the target tier.
+pub(super) fn materialized_capture_kind(
+    name: &str,
+    env: &LowerEnv,
+) -> Option<(&'static str, Type)> {
+    if env.is_string_view_local(name) {
+        return Some(("jet_string_view_copy", Type::String));
+    }
+    let source = env
+        .split_view_handle(name)
+        .or_else(|| env.ty_of(name))?;
+    let Type::Apply { name, args } = source else {
+        return None;
+    };
+    if name != "View" || args.len() != 1 {
+        return None;
+    }
+    if matches!(&args[0], Type::Named(element) if element == "str") {
+        Some(("jet_string_view_copy", Type::String))
+    } else {
+        Some(("jet_view_copy", Type::List(Box::new(args[0].clone()))))
+    }
+}
+
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
 /// Every capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
 /// analysis here. The body is lowered on a CLONED env extended with: the cloned
@@ -148,10 +174,11 @@ fn lower_lambda_expecting_with_host_borrow(
     // Computed before the clone-capture prelude so a moving escape can also clone
     // borrowed/Fn captures rustc would otherwise reject (E0521).
     let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
-    // The clone-capture prelude: `let __jet___cap_<n> = (<outer place>).clone();`. The
-    // outer place comes from the *outer* env (the capture is an outer local). The cap
-    // rebinds the name with place `__jet___cap_<n>`, no deref, type `None` (matching the
-    // AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
+    // The clone/materialization capture prelude: `let __jet___cap_<n> =
+    // (<outer place>).clone();` or its shared Prelude copy equivalent. The
+    // outer place comes from the *outer* env (the capture is an outer local).
+    // The cap rebinds the name with place `__jet___cap_<n>`, no deref, type
+    // `None` (matching the AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
     let mut prep = String::new();
     let mut extra_cloned: Vec<String> = Vec::new();
     let mut captures: Vec<(String, String, Type)> = Vec::new();
@@ -194,14 +221,29 @@ fn lower_lambda_expecting_with_host_borrow(
         // Clone temps must be `mut` when the closure body assigns through them
         // (FnMut / captured `:=` locals). Always emit `let mut` for cloned
         // captures — over-mutability is safe; missing mut is rustc E0594 (I2).
-        prep.push_str(&format!(
-            "let mut {} = ({}).clone();\n    ",
-            cap,
-            env.place_of(name)
-        ));
-        let cap_ty = env
-            .ty_of(name)
-            .unwrap_or_else(|| Type::Named("Unit".to_string()));
+        let materialized = lam
+            .meta
+            .materialized_captures
+            .iter()
+            .any(|capture| capture == name);
+        let (cap_ty, init) = if materialized {
+            if let Some((helper, ty)) = materialized_capture_kind(name, env) {
+                (ty, format!("{helper}(({}))", env.place_of(name)))
+            } else {
+                (
+                    env.ty_of(name)
+                        .unwrap_or_else(|| Type::Named("Unit".to_string())),
+                    format!("({}).clone()", env.place_of(name)),
+                )
+            }
+        } else {
+            (
+                env.ty_of(name)
+                    .unwrap_or_else(|| Type::Named("Unit".to_string())),
+                format!("({}).clone()", env.place_of(name)),
+            )
+        };
+        prep.push_str(&format!("let mut {cap} = {init};\n    "));
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
         let slot = match env.origin_of(name) {
             Some(origin) => TLocal::generated(&cap).with_origin(origin),
@@ -343,6 +385,7 @@ fn lower_lambda_expecting_with_host_borrow(
             && host_borrow.is_none(),
         arc: http_handler,
         captures,
+        materialized_captures: lam.meta.materialized_captures.clone(),
     }
 }
 
@@ -407,14 +450,32 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
             } else {
                 source.clone()
             };
+            let materialize_at_spawn = lam
+                .meta
+                .materialized_captures
+                .iter()
+                .any(|capture| capture == &source)
+                || (shared_body.is_some()
+                    && materialized_capture_kind(&source, env).is_some());
+            let source_ty = env
+                .split_view_handle(&source)
+                .or_else(|| env.ty_of(&source))
+                .unwrap_or_else(|| Type::Named("Unit".to_string()));
+            let ty = if materialize_at_spawn {
+                materialized_capture_kind(&source, env)
+                    .map(|(_, ty)| ty)
+                    .unwrap_or_else(|| source_ty.clone())
+            } else {
+                source_ty
+            };
             JitSpawnCapture {
+                materialize_at_spawn,
                 clone_at_spawn: cloned.contains(source.as_str()),
-                // D-TASKBORROW1=A: a borrowed split-view crosses as its window
-                // handle, not as the element type its Jet binding shows.
-                ty: env
-                    .split_view_handle(&source)
-                    .or_else(|| env.ty_of(&source))
-                    .unwrap_or_else(|| Type::Named("Unit".to_string())),
+                // D-TASKBORROW1=A: an unmaterialized borrowed split-view crosses
+                // as its window handle, not as the element type its Jet binding
+                // shows. Read-only captures marked for materialization use the
+                // owned target type above.
+                ty,
                 name,
                 source,
             }
@@ -615,16 +676,25 @@ fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, Lowe
         let cap = reactive_capture_name(name);
         // Reactive bodies may update their private clone on every rerun. The
         // runtime serializes the resulting FnMut closure behind a Mutex.
-        prep.push_str(&format!(
-            "let mut {} = ({}).clone();\n    ",
-            cap,
-            outer_env.place_of(name)
-        ));
+        let (cap_ty, init) = materialized_capture_kind(name, outer_env)
+            .map(|(helper, ty)| {
+                (
+                    ty,
+                    format!("{helper}(({}))", outer_env.place_of(name)),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    outer_env.ty_of(name),
+                    format!("({}).clone()", outer_env.place_of(name)),
+                )
+            });
+        prep.push_str(&format!("let mut {cap} = {init};\n    "));
         let slot = match outer_env.origin_of(name) {
             Some(origin) => TLocal::generated(&cap).with_origin(origin),
             None => TLocal::generated(&cap),
         };
-        lam_env.bind(name, slot, outer_env.ty_of(name));
+        lam_env.bind(name, slot, cap_ty);
     }
     (prep, lam_env)
 }

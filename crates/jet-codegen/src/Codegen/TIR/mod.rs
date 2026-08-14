@@ -68,6 +68,11 @@ pub struct JitSpawnCapture {
     pub source: String,
     pub ty: Type,
     pub clone_at_spawn: bool,
+    /// D-MEM-COPYSEM1=A: a read-only view capture is copied into its owning
+    /// destination at the spawn/callback boundary. The JIT only marshals the
+    /// already-resolved owned type; copy semantics stay on the shared Prelude
+    /// path used by AOT and the interpreter.
+    pub materialize_at_spawn: bool,
 }
 
 /// One bounded traversal primitive for TIR lowering consumers.
@@ -3662,11 +3667,11 @@ pub enum TExprKind {
         place: Box<TExpr>,
         mutable: bool,
     },
-    /// D-MEM1 stage S5 (2026-07-04): `copy d` where `d` is a string-view local
-    /// (`Binding.string_view`, a bare `&str` Rust place) — materializes it into
-    /// an owned `String` via `.to_string()`. A plain `.clone()` (the `Clone`
-    /// node above) would be wrong here: cloning a `&str` hands back another
-    /// `&str`, not the owned `String` the copy needs to escape the view's scope.
+    /// D-MEM-COPYSEM1: an explicit `~` or an implicit read-only view crossing
+    /// an owning destination materializes the owned target through the shared
+    /// Prelude. A plain `.clone()` is not sufficient for string views: cloning
+    /// a `&str` hands back another `&str`, not the owned `String` needed to leave
+    /// the view's scope. Generic `View<T>` uses the same path to produce `[T]`.
     MaterializeView(Box<TExpr>),
     /// c109 Phase 6: a user-defined instance method call `recv.method(args)` on a
     /// covered struct/enum. All dispatch facts are resolved at lowering (totality):
@@ -4244,8 +4249,8 @@ pub enum TClosureOp {
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
-/// `Lambda.meta`. `prep` is the rendered clone-capture prelude (`let __jet_cap_<n> =
-/// (place).clone();\n    ` per cloned capture); `params` the rendered `name[: ty]`
+/// `Lambda.meta`. `prep` is the rendered clone/materialization capture prelude
+/// (`let __jet_cap_<n> = (place).clone();\n    ` per capture); `params` the rendered `name[: ty]`
 /// param list; `body` the rendered closure body string (an expression body, or a
 /// `{ … }` block) — rendered at lowering from the lowered body so emit stays a pure
 /// wrapper; `is_move`/`boxed` reproduce the AST wrappers.
@@ -4269,6 +4274,9 @@ pub struct TLambda {
     pub arc: bool,
     /// JIT capture pack: (enclosing Jet name, body place, type). Empty = non-capturing.
     pub captures: Vec<(String, String, Type)>,
+    /// D-MEM-COPYSEM1=A: source names whose capture slot is an owned
+    /// materialization of a read-only view rather than a reference clone.
+    pub materialized_captures: Vec<String>,
 }
 
 pub enum TLambdaBody {

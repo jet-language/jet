@@ -199,7 +199,8 @@ pub struct Binding {
     /// the same D-DYNARRAY1 reasoning as `View<T>`, applied to strings since
     /// they have no distinct Jet-level view type (`String` stays one type).
     /// Codegen emits `&str` for the binding and calls the `_view` prelude
-    /// helper; sema (E2307) forbids it escaping the owner's scope.
+    /// helper; sema keeps the binding scoped to its owner and materializes it
+    /// when a default owning destination needs a `String`.
     pub string_view: bool,
     /// D-OPTGC1=A: sema-authored proof that this heap-owning binding crosses
     /// an ownership boundary inside an effective scoped-GC policy. Codegen

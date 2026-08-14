@@ -2340,6 +2340,19 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
 }
 
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
+    // D-MEM-COPYSEM1=A: sema-inserted owning copies remain visible as a ghost
+    // hint. An authored `~` has a span beginning at its sigil; an implicit
+    // materializer reuses the operand span, which is the one distinction the
+    // semantic index needs to expose.
+    if let AST::Expr::Copy(inner, copy_span) = e
+        && *copy_span == inner.span()
+    {
+        ctx.db.inlay.push(InlayHint {
+            span: *copy_span,
+            module_path: mp.to_string(),
+            label: " ~ copy".to_string(),
+        });
+    }
     let structural_id = record_node(ctx, "expr", &expr_shape(e), mp, structural_expr_span(e));
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match e {

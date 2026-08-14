@@ -1,0 +1,7 @@
+Error [E2307]: `d` cannot be used directly here without an owning copy
+  --> tests/ui/string_view_outlives_owner_explicit.jet:6:12
+    |
+  6 |     return d
+    |            ^
+ Why: `d` is a zero-copy view into `email` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: write `~d` first, or remove `copies: .Explicit` to use the default owning copy

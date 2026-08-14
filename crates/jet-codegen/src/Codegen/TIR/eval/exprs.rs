@@ -6534,7 +6534,13 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Borrow { place, .. } => self.eval_expr_child(place, scope),
-            TExprKind::MaterializeView(inner) => self.eval_expr_child(inner, scope),
+            // D-MEM-COPYSEM1=A: comptime/interpreter materializes the same
+            // owned value as the AOT Prelude copy helper. The engine only
+            // performs structural result marshalling here.
+            TExprKind::MaterializeView(inner) => {
+                let value = self.eval_expr_child(inner, scope)?;
+                self.clone_structural_value(value, &expr.ty)
+            }
             TExprKind::MethodCall {
                 recv,
                 method,

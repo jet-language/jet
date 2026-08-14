@@ -13,11 +13,11 @@ impl PolicyScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Sentries }
+pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Copies, Sentries }
 
 impl PolicyKey {
-    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units", Self::Sentries => "sentries" } }
-    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), "sentries" => Some(Self::Sentries), _ => None } }
+    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units", Self::Copies => "copies", Self::Sentries => "sentries" } }
+    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), "copies" => Some(Self::Copies), "sentries" => Some(Self::Sentries), _ => None } }
     pub const fn is_audited_gate(self) -> bool { matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic) }
 }
 
@@ -36,6 +36,7 @@ pub enum PolicyValue {
     Allow,
     On,
     Off,
+    Explicit,
 }
 
 impl PolicyValue {
@@ -45,7 +46,7 @@ impl PolicyValue {
         Self::GateOnly => ".GateOnly".into(), Self::Obligations => ".Obligations".into(),
         Self::Relaxed => ".Relaxed".into(), Self::PerSite => ".PerSite".into(),
         Self::Track => ".Track".into(), Self::Skip => ".Skip".into(), Self::Allow => ".Allow".into(),
-        Self::On => ".On".into(), Self::Off => ".Off".into(),
+        Self::On => ".On".into(), Self::Off => ".Off".into(), Self::Explicit => ".Explicit".into(),
     } }
 }
 
@@ -302,6 +303,7 @@ pub const POLICY_RULES: &[PolicyRule] = &[
     PolicyRule { key: PolicyKey::Nondeterministic, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule { key: PolicyKey::ScopedGc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Override },
     PolicyRule { key: PolicyKey::ExplicitUnits, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule { key: PolicyKey::Copies, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule { key: PolicyKey::Sentries, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
 ];
 
@@ -355,6 +357,7 @@ fn resolve_policy(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyD
             let widens = match (key, outer, declaration.value) {
                 (PolicyKey::ArenaBounded, PolicyValue::Limit(a), PolicyValue::Limit(b)) => b > a,
                 (PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits, PolicyValue::Enabled, PolicyValue::Enabled) => false,
+                (PolicyKey::Copies, PolicyValue::Explicit, PolicyValue::Explicit) => false,
                 (PolicyKey::Sentries, PolicyValue::On, PolicyValue::On | PolicyValue::Off) => false,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::On) => true,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::Off) => false,
@@ -592,6 +595,10 @@ pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
     let raw = raw.trim();
     match key {
         PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits if raw == "true" => Ok(PolicyValue::Enabled),
+        PolicyKey::Copies => match raw {
+            ".Explicit" => Ok(PolicyValue::Explicit),
+            _ => Err("`copies` must be `.Explicit`".to_string()),
+        },
         PolicyKey::Sentries => match raw {
             ".On" => Ok(PolicyValue::On),
             ".Off" => Ok(PolicyValue::Off),
@@ -915,6 +922,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
             "unsafe",
             "gc",
             "explicit_units",
+            "copies",
             "sentries",
         ],
         "State" => &[],
@@ -1137,7 +1145,7 @@ impl RuleSignature {
                 .enumerate()
                 .map(|(source_index, label)| {
                     if let Some((name, _)) = label {
-                        (name == "sentries").then_some(RuleArgumentBinding {
+                        matches!(name.as_str(), "copies" | "sentries").then_some(RuleArgumentBinding {
                             source_index,
                             parameter_index: None,
                             ty: self.variadic?,

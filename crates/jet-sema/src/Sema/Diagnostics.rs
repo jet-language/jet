@@ -408,6 +408,23 @@ pub(crate) fn is_cloneable(ty: &Type, registry: &TypeRegistry) -> bool {
     is_cloneable_rec(ty, registry, &mut visiting)
 }
 
+/// D-MEM-COPYSEM1=A: a read-only window has one owning materialization shape.
+/// Keep this mapping in sema so every consumer (inference, ownership, and
+/// diagnostics) agrees before TIR lowers the one shared copy node.
+pub(crate) fn owned_type_for_read_view(ty: &Type) -> Option<Type> {
+    let Type::Apply { name, args } = ty else {
+        return None;
+    };
+    if name != "View" || args.len() != 1 {
+        return None;
+    }
+    if matches!(&args[0], Type::Named(element) if element == "str") {
+        Some(Type::String)
+    } else {
+        Some(Type::List(Box::new(args[0].clone())))
+    }
+}
+
 /// `is_cloneable`'s recursion, with a `visiting` guard against self-referential
 /// types (`enum Nat { Succ(n: Nat) }`). Every such type compiles to a `Box`
 /// indirection (I3: sema already proves this elsewhere), so a cycle back to a

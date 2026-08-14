@@ -586,6 +586,50 @@ fn check_json_output() {
     );
 }
 
+#[test]
+fn explicit_copy_format_matches_copy_audit() {
+    let dir = tmpdir(&line!().to_string());
+    let source = "\
+fn take() => String {
+    owner := \"a@b\"
+    domain :: owner.after(\"@\")
+    return domain
+}
+fn run() { print(take()) }
+";
+    let file = write(&dir, "main.jet", source);
+
+    let audit = Command::new(jet())
+        .args(["audit", "copies", "--json"])
+        .arg(&file)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        audit.status.code(),
+        Some(0),
+        "copy audit failed\nstderr: {}",
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit_json = String::from_utf8_lossy(&audit.stdout);
+    assert!(audit_json.contains("\"command\":\"audit copies\""));
+    assert!(audit_json.contains("\"kind\":\"implicit\""), "{audit_json}");
+
+    let formatted = Command::new(jet())
+        .args(["fmt", "--explicit-copies"])
+        .arg(&file)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        formatted.status.code(),
+        Some(0),
+        "explicit-copy formatting failed\nstderr: {}",
+        String::from_utf8_lossy(&formatted.stderr)
+    );
+    assert!(read(&file).contains("return ~domain"), "{}", read(&file));
+}
+
 /// Empty directory: `jet fmt` exits 0 silently (no files to format).
 #[test]
 fn empty_dir_exits_0() {

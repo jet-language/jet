@@ -2420,11 +2420,14 @@ impl<'a> Checker<'a> {
     // share one provenance graph; only product diagnostics and lowering flags
     // differ.
     //
-    // E2305 fires when a view escapes: returned, rebound to another local, or
-    // stored in a struct field. Crossing a task/channel boundary is instead
-    // caught by the general sendability check (`SendProblemKind::ViewBorrow`
-    // on `Type::Apply { name: "View", .. }`, reported as E1102) — no tracking
-    // needed there, the value's TYPE alone is enough.
+    // E2305 fires when a declared view reaches another view boundary:
+    // returned, rebound to another declared view, or stored in a declared view
+    // field. A read-only view entering an owning destination materializes by
+    // default; `copies: .Explicit` restores the explicit-copy diagnostic.
+    // Crossing a task/channel boundary is instead caught by the general
+    // sendability check (`SendProblemKind::ViewBorrow` on `Type::Apply {
+    // name: "View", .. }`, reported as E1102) — no tracking is needed there,
+    // the value's TYPE alone is enough.
     // ──────────────────────────────────────────────────────────────────────
 
     /// If `init` is `list.view(a..b)` on a plain local name, return the list's
@@ -2437,7 +2440,23 @@ impl<'a> Checker<'a> {
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
         let init = init.without_parens();
-        if let Expr::Copy(inner, _) | Expr::Try(inner, _, _, _) = init {
+        if let Expr::Copy(inner, _) = init {
+            let sources = self.view_call_sources(inner);
+            // A copy turns a direct read-only view into an owned value. Do not
+            // reattach the old owner relation to a binding or aggregate that
+            // now contains that value. Nested paths remain visible: copying a
+            // struct that still contains a declared View field must preserve
+            // that field's boundary fact.
+            if !sources.is_empty()
+                && sources.iter().all(|(path, _, _, access)| {
+                    path.is_empty() && *access == ViewAccess::Read
+                })
+            {
+                return Vec::new();
+            }
+            return sources;
+        }
+        if let Expr::Try(inner, _, _, _) = init {
             return self.view_call_sources(inner);
         }
         if let Expr::Ident(name, _) = init {
@@ -3686,10 +3705,11 @@ impl<'a> Checker<'a> {
     // into `s` instead of an owned `String`. Unlike `View<T>` (a distinct Jet
     // type), `String` stays ONE type end to end (D-MEM1 gallery: "one String
     // type") — so the view-ness lives on the *binding* (`Binding::string_view`,
-    // set below), not on the value's static type. The shared fact graph reports
-    // E2307 on escape
-    // (returned, rebound, stored in a struct field); crossing a task boundary
-    // is caught separately at the capture-check site (`CheckerInfer/calls.rs`)
+    // set below), not on the value's static type. A read-only view crossing an
+    // owning destination is materialized by D-MEM-COPYSEM1; the shared fact
+    // graph still reports E2307 for a declared view boundary or when
+    // `copies: .Explicit` restores the refusal. Crossing a task boundary is
+    // caught separately at the capture-check site (`CheckerInfer/calls.rs`)
     // since a plain `Type::String` carries no view marker for the general
     // sendability check to key off.
     // ──────────────────────────────────────────────────────────────────────
@@ -3742,19 +3762,13 @@ impl<'a> Checker<'a> {
         self.view_kind(name) == Some(ViewKind::String)
     }
 
-    /// E2307: a string view named `name` was used somewhere only its full
-    /// `String` representation supports — this is the ONE call site for the
-    /// whole class of unsupported uses (return, rebind, struct field, call
-    /// argument, list/tuple literal element, an arbitrary builtin/user
-    /// method, …): the general `Expr::Ident` inference arm calls this
-    /// whenever it reads a live string-view name outside the two positions
-    /// its bare `&str` Rust place actually supports (chaining another
-    /// `.trim()`/`.after()`/`.before()`, or `copy`'s operand). This is a
-    /// representation limit, not a lifetime one — the view DOES live long
-    /// enough; it just isn't the value shape the destination needs — so the
-    /// wording says so rather than claiming it "doesn't live long enough"
-    /// (unlike `View<T>`, which needs its own escape check since a `List`
-    /// re-assignment/return is otherwise silent). `what` describes the use site.
+    /// E2307: a string view named `name` was used at an owning destination while
+    /// `copies: .Explicit` is active. This is the ONE call site for the whole
+    /// class of explicit-policy refusals (return, rebind, struct field, call
+    /// argument, list/tuple literal element, arbitrary builtin/user method,
+    /// …): the general `Expr::Ident` inference arm calls this whenever it reads
+    /// a live string-view name outside the direct `&str` positions. `what`
+    /// describes the use site.
     pub(crate) fn report_string_view_unsupported_use(
         &mut self,
         name: &str,
@@ -3766,12 +3780,12 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| "its owner".to_string());
         self.diags.push(Diagnostic::error(
             "E2307",
-            format!("`{}` can't {} yet", name, what),
+            format!("`{}` cannot {} without an owning copy", name, what),
             format!(
-                "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); only chaining another `.trim()`/`.after()`/`.before()` on it works directly — other methods and calls need the full owned value",
+                "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled",
                 name, owner
             ),
-            format!("write `{}{}` first to get an owned `String`, then use that", Syntax::SIGIL_COPY, name),
+            format!("write `{}{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::SIGIL_COPY, name),
             Some(span),
         ));
     }

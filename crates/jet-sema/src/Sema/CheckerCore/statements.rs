@@ -1481,14 +1481,11 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                             }
-                            // D-MEM1 stage S5: no dedicated "returning a string
-                            // view" check here — the general E2307 check on the
-                            // `Expr::Ident` read (`self.infer(e)` above already
-                            // ran it) already caught `return d` for a live view;
-                            // a second check here would just double-report the
-                            // same span (unlike `View<T>`, which needs its OWN
-                            // check since its escape is otherwise silent — a
-                            // string view's bare-`&str` read is never silent).
+                            // D-MEM-COPYSEM1: default owning returns have already
+                            // become `Expr::Copy` in `self.infer(e)`. Declared
+                            // view returns still use the boundary checks above;
+                            // an explicit-copy policy leaves the original read
+                            // in place so its registered E2307 refusal remains.
                             // Returning a borrowed parameter would move out of a
                             // borrow in the generated Rust (I2) — require a copy.
                             self.reject_borrowed_param_subplace(
@@ -2321,6 +2318,29 @@ impl<'a> Checker<'a> {
                     captures.sort();
                     for name in captures {
                         if self.is_view(&name) {
+                            let read_only = self
+                                .view_facts(&name)
+                                .iter()
+                                .all(|fact| fact.access == ViewAccess::Read);
+                            let copy_ty = self
+                                .lookup(&name)
+                                .map(|info| info.ty.clone())
+                                .and_then(|ty| {
+                                    crate::Sema::Diagnostics::owned_type_for_read_view(&ty)
+                                        .or_else(|| {
+                                            (self.is_string_view(&name)
+                                                && matches!(ty, Type::String))
+                                                .then_some(Type::String)
+                                        })
+                                });
+                            if !self.copies_explicit()
+                                && read_only
+                                && copy_ty
+                                    .as_ref()
+                                    .is_some_and(|ty| is_cloneable(ty, self.registry))
+                            {
+                                continue;
+                            }
                             self.report_view_escape(
                                 &name,
                                 "be captured by a reactive effect",

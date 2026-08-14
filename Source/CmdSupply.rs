@@ -866,6 +866,104 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     // Non-critical matches are advisory only: exit 0 so a scan doesn't break CI.
 }
 
+/// `jet audit copies [<entry.jet>]` — show every compiler-inserted owning
+/// copy. The ledger is read from the checked AST, so it reports the same
+/// implicit `Expr::Copy` nodes that TIR, fmt, and the language server consume.
+pub(crate) fn run_copy_audit(args: &[String], json: bool) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let entry = args
+        .iter()
+        .find(|argument| !argument.starts_with('-'))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd.clone());
+            crate::find_project_entry(&root)
+        });
+    let entry = if entry.is_absolute() {
+        entry
+    } else {
+        cwd.join(entry)
+    };
+    let entry_text = entry.display().to_string();
+    let mut bundle = match jet::Loader::load_entry(&entry_text) {
+        Ok(bundle) => bundle,
+        Err(diagnostics) => {
+            let source = fs::read_to_string(&entry).unwrap_or_default();
+            if json {
+                eprint!(
+                    "{}",
+                    jet::render_all_json(&entry_text, &source, &diagnostics)
+                );
+            } else {
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(&entry_text, &source, &diagnostics)
+                );
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    {
+        let source = fs::read_to_string(&entry).unwrap_or_default();
+        if json {
+            eprint!(
+                "{}",
+                jet::render_all_json(&entry_text, &source, &diagnostics)
+            );
+        } else {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(&entry_text, &source, &diagnostics)
+            );
+        }
+        exit(ExitCodes::USER_ERROR);
+    }
+    let mut rows = Vec::new();
+    for module in &bundle.modules {
+        for span in crate::CmdCompile::implicit_copy_spans_in_module(module) {
+            let (line, column) = jet::Diagnostics::span_line_col(&module.source, span.start);
+            rows.push((module.display.clone(), line, column, span));
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.3.start.cmp(&right.3.start))
+    });
+    if json {
+        let entries = rows
+            .iter()
+            .map(|(path, line, column, span)| {
+                format!(
+                    "{{\"path\":\"{}\",\"line\":{},\"column\":{},\"span\":{{\"start\":{},\"end\":{}}},\"size\":\"dynamic\",\"kind\":\"implicit\"}}",
+                    jet_foundation::JSON::json_escape(path),
+                    line,
+                    column,
+                    span.start,
+                    span.end,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema_version\":1,\"command\":\"audit copies\",\"copies\":[{}]}}",
+            entries
+        );
+        return;
+    }
+    println!("implicit read-view copies: {}", rows.len());
+    for (path, line, column, span) in rows {
+        println!(
+            "  {path}:{line}:{column}  span={}..{}  size=dynamic  kind=implicit",
+            span.start, span.end
+        );
+    }
+}
+
 /// `jet inspect sbom [--cyclonedx]` — emit a software bill of materials from the lockfile.
 pub(crate) fn run_sbom(cyclonedx: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

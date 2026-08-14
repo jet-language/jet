@@ -226,7 +226,8 @@ pub struct PackageFacts {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackagePolicy {
     /// D-PACKAGE-POLICY-SCOPE1: typed, tighten-only memory-policy facts
-    /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`, `sentries`).
+    /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`, `copies`,
+    /// `sentries`).
     pub memory: Vec<crate::Policy::PolicyDeclaration>,
     /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
     /// at all (warn-never-block stays the default).

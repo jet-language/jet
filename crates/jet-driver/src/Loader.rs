@@ -469,7 +469,7 @@ fn load_entry_with_overlays_mode_with_sink(
                             "E0355",
                             "invalid package memory policy".to_string(),
                             detail,
-                            "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid, sentries: .Off }` in `package.jet`".to_string(),
+                            "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, copies: .Explicit, unsafe: .Forbid, sentries: .Off }` in `package.jet`".to_string(),
                             None,
                         )],
                     ),

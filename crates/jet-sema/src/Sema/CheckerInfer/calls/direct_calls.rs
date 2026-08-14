@@ -1228,7 +1228,19 @@ impl<'a> Checker<'a> {
                         if arg.convention == AccessConvention::Move {
                             checker.suppress_partial_move_root_read = true;
                         }
+                        let saved_string_view_read = checker.allow_string_view_read;
+                        if !checker.copies_explicit()
+                            && *param_conv == AccessConvention::Move
+                        {
+                            // Generic inference has not resolved the owning
+                            // destination yet. Permit the read-only view to
+                            // be typed now; the concrete Move parameter below
+                            // decides whether this exact value gets the
+                            // shared implicit-copy node.
+                            checker.allow_string_view_read = true;
+                        }
                         let inferred = checker.infer(&mut arg.expr);
+                        checker.allow_string_view_read = saved_string_view_read;
                         checker.suppress_partial_move_root_read = suppress;
                         checker.check_call_argument_captures(&arg.expr);
                         inferred
@@ -1298,6 +1310,13 @@ impl<'a> Checker<'a> {
                 let saved_exp = self.expected_type.clone();
                 let saved_esc = self.lambda_escapes;
                 if let Some((param_conv, param_ty)) = effective_params.get(i) {
+                    if matches!(param_conv, AccessConvention::Move) {
+                        // D-MEM-COPYSEM1: a move parameter is an owning slot.
+                        // Give read-only views the same expected destination type
+                        // as every other owning store so infer_checked can insert
+                        // the shared implicit-copy node.
+                        self.expected_type = Some(param_ty.clone());
+                    }
                     if matches!(param_ty, Type::Fn { .. }) {
                         self.expected_type = Some(param_ty.clone());
                         self.lambda_escapes = matches!(param_conv, AccessConvention::Move);
@@ -1337,7 +1356,23 @@ impl<'a> Checker<'a> {
                     self.memory_control_multiplier = None;
                 }
                 let arg_ty = if args_pre_inferred {
-                    pre_inferred.get(i).and_then(|t| t.clone())
+                    let inferred = pre_inferred.get(i).and_then(|t| t.clone());
+                    if let (Some((AccessConvention::Move, param_ty)), Some(source_ty)) =
+                        (effective_params.get(i), inferred.as_ref())
+                    {
+                        let param_ty = self.resolve_type(param_ty.clone());
+                        if !self.copies_explicit()
+                            && let Some(target) = self.implicit_copy_target(&arg.expr, source_ty)
+                            && target == param_ty
+                            && is_cloneable(&target, self.registry)
+                        {
+                            Some(self.insert_implicit_copy(&mut arg.expr, &target))
+                        } else {
+                            inferred
+                        }
+                    } else {
+                        inferred
+                    }
                 } else {
                     self.with_call_access(&mut call_access, |checker| {
                         if let Some((param_conv, param_ty)) = effective_params.get(i) {

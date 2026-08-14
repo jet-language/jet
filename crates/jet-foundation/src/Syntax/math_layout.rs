@@ -431,10 +431,11 @@ pub const KW_AS: &str = "as";
 /// module-level allocation floor, file-scoped like `web_target_ceiling`/
 /// `#PubFile`. Sema flags allocation-shaped expressions written directly in
 /// this file's own function bodies (E0921) — local only, never follows calls
-/// into other modules. `no_alloc` is the only ratified policy name; the full
-/// policy list is a follow-on ballot (an unknown name after `policy` is E0003).
+/// into other modules. `no_alloc` and `copies: .Explicit` are ratified policy
+/// names; unknown names after `policy` are E0003.
 pub const MARKER_POLICY: &str = "Policy"; // D-POLICY-WORD1
 pub const POLICY_NO_ALLOC: &str = "no_alloc";
+pub const POLICY_COPIES: &str = "copies"; // D-MEM-COPYSEM1
 
 /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
 pub const CORE_SHORT: &str = "core";

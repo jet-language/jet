@@ -171,7 +171,7 @@ fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
         "Maturity" => "write it only inside `#Meta(maturity: .Tested)`",
         "NamingCase" => "write it only inside `#RenameAll(case: snake)`",
         "ObligationMode" => "write it only inside `#Unsafe(\"reason\", obligations: .Track)`",
-        "PolicySetting" => "write it only inside `#Policy(no_alloc)`",
+        "PolicySetting" => "write it only inside `#Policy(no_alloc)` or `#Policy(copies: .Explicit)`",
         "Site" => "write it only as `@sites: [...]` on a `marker` declaration",
         "State" => "write it only inside `#State(state: .Draft)` or `#Transition(from:, to:)`",
         "TaintKind" => "it has no live marker: its only user was the retired `#Tainted`, now `#Input`",

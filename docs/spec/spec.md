@@ -331,12 +331,13 @@ inference, no elevation):
 
 An unmarked parameter is **always** read — a body write to it, or handing it
 to a `&`/`^` position, is a hard error at the definition (fix-it: add `&` at
-the parameter and every call site). This is allocation-free for every
-non-scalar shape, including strings, collections, structs, generic values, and
-callbacks: the compiler borrows the existing value and never inserts a copy,
-reference count, or allocation. Binding, returning, or storing an owned value
-from that borrow requires an explicit copy or a `^` parameter. Call sites
-mirror the parameter's sigil:
+the parameter and every call site). A read call remains allocation-free for
+every non-scalar shape, including strings, collections, structs, generic
+values, and callbacks: the compiler borrows the existing value. A cloneable
+read value entering an owning destination is materialized automatically; a
+bare `::` binding remains a read window, while non-cloneable values and
+`copies: .Explicit` require `~` or a `^` parameter. Call sites mirror the
+parameter's sigil:
 
 ```jet
 fn bump(n: &Int) { n += 1 }
@@ -421,6 +422,15 @@ instead of a raw stored reference. Fill `View<str>` only from
 `.trim()` / `.after()` / `.before()` or a tracked string-view binding. A plain
 owned `String` is not a borrowed window.
 
+An implicit read-only `View<T>` or string view entering a non-view owning slot
+means an owning copy, exactly as if the source were prefixed with `~`. This
+applies to bindings, returns, fields, collection elements, enum payloads,
+fallback values, and stored read-only captures. Declared `View<T>`/`ViewMut<T>` boundaries keep their
+provenance rules: `ViewMut<T>` is never copied implicitly, and
+`#Policy(copies: .Explicit)` restores the refusal for read-only views.
+The semantic materialization is shared by AOT, JIT, interpreter, comptime, and
+web lowering; engines only marshal its approved result.
+
 #### Place access (D-SHAPE-PLACE1=A)
 
 A place is a name followed by its maximal field, index, or range projection.
@@ -435,7 +445,9 @@ edit :: &values[2..3]
 copy :: ~values[0..1]
 ```
 
-The two windows above are disjoint. Constant disjoint ranges and indexes lower
+The two windows above are disjoint. A bare read window remains a view when it
+stays in a non-owning place; when it enters an owning slot, D-MEM-COPYSEM1
+materializes an owned value. Constant disjoint ranges and indexes lower
 through a safe structural split, while different fields use Rust's native
 field disjointness. Dynamic projections stay conservatively overlapping. Jet
 never asks rustc to validate Jet semantics. A call or temporary is not a
@@ -483,10 +495,12 @@ field/index/range projections. Branches and compatible trait implementations
 union their possible sources. Sema computes these maps to a deterministic fixed
 point, so declaration and implementation order do not change the result.
 
-All paths for one output slot must agree on read or write access. Open dynamic
-dispatch without a proven contract, temporary owners, captured local owners,
-and incompatible access paths are rejected as **E2305** (or **E2307** for
-string views). Rebinding a stored view cannot replace its proven source
+All paths for one declared view output slot must agree on read or write access.
+Open dynamic dispatch without a proven contract, temporary owners, captured
+mutable views, and incompatible access paths are rejected as **E2305** (or
+**E2307** for string views). A read-only view captured or stored into a
+non-view owning slot is materialized by default; `copies: .Explicit` restores
+the refusal. Rebinding a declared stored view cannot replace its proven source
 relation. Function types carry the same hidden relation; a generic callback
 without a narrower declaration conservatively keeps every compatible
 non-scalar argument live.
@@ -519,12 +533,14 @@ print("padded still readable: {padded}")   // reading the owner still works
 
 (examples/features/memory/string_view.jet) A local view may chain another
 `.trim()/.after()/.before()`, be interpolated (`"{domain}"`), be carried in a
-view-typed aggregate, or be copied into an owned `String` with `~`. At a named
-boundary, `View<str>` states the same owner-tied contract as `View<T>`: a
-parameter- or receiver-rooted view may be returned or stored, with public
-provenance inferred by sema. **E2307** reports a local or temporary owner that
-cannot outlive the view, an unstable public source, or a use that requires an
-owned `String`. See `examples/features/memory/returned_views.jet` for a
+view-typed aggregate, or be copied into an owned `String` with `~`. An
+owning destination performs that materialization by default; use
+`#Policy(copies: .Explicit)` when every copy must be written as `~`. At a
+named boundary, `View<str>` states the same owner-tied contract as
+`View<T>`: a parameter- or receiver-rooted view may be returned or stored,
+with public provenance inferred by sema. **E2307** reports a local or temporary
+owner that cannot outlive a declared view, an unstable public source, or an
+explicit-policy refusal. See `examples/features/memory/returned_views.jet` for a
 runtime-selected source, a multi-buffer parser, and a borrowing deserializer.
 Either kind of view crossing a `task`/
 `Sender.send` boundary is reported once, as **E1102** (unsendable value) —

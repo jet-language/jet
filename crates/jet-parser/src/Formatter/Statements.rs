@@ -294,7 +294,9 @@ impl<'a> Fmt<'a> {
                             self.write(declaration.key.name());
                             match declaration.value {
                                 crate::Policy::PolicyValue::Limit(limit) => self.write(&format!("({limit})")),
-                                crate::Policy::PolicyValue::On | crate::Policy::PolicyValue::Off => {
+                                crate::Policy::PolicyValue::On
+                                | crate::Policy::PolicyValue::Off
+                                | crate::Policy::PolicyValue::Explicit => {
                                     self.write(": ");
                                     self.write(&declaration.value.display());
                                 }

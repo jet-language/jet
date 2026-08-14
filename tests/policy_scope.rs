@@ -121,6 +121,40 @@ fn package_policy_document_accepts_explicit_units() {
 }
 
 #[test]
+fn copies_policy_is_package_and_source_explicit_only() {
+    let declarations = jet::Package::parse_policy_document(
+        "policy: .{ copies: .Explicit }\n",
+    )
+    .unwrap();
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].key, PolicyKey::Copies);
+    assert_eq!(declarations[0].value, PolicyValue::Explicit);
+    assert!(jet::Package::parse_policy_document("policy: .{ copies: true }\n").is_err());
+
+    let source = "#Policy(copies: .Explicit)\nfn run() {}\n";
+    let (tokens, lex) = jet::Lexer::lex(source);
+    assert!(lex.is_empty());
+    let program = jet::Parser::parse(&tokens).unwrap();
+    assert!(program
+        .policy_declarations
+        .iter()
+        .any(|declaration| declaration.key == PolicyKey::Copies
+            && declaration.value == PolicyValue::Explicit));
+}
+
+#[test]
+fn package_copies_policy_restores_string_view_refusal() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/policy_copies_explicit/main.jet");
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E2307"),
+        "package copies policy must restore the refusal: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn audited_gates_share_the_five_scope_tightening_ladder() {
     for key in Policy::AUDITED_GATE_KEYS {
         let rule = Policy::rule(*key);

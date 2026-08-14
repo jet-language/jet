@@ -2111,6 +2111,22 @@ fn run() {
 }
 
 #[test]
+fn fmt_copies_policy_d_mem_copysem1_stability() {
+    let src = "\
+#Policy(copies: .Explicit)
+
+fn run() {
+    print(\"ok\")
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["#Policy(copies: .Explicit)"],
+        "D-MEM-COPYSEM1 copies policy",
+    );
+}
+
+#[test]
 fn fmt_copy_sigil_d_shape_copy1_stability() {
     // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `~x` is a prefix-verb
     // expression — must survive fmt unchanged in binding position, call-arg

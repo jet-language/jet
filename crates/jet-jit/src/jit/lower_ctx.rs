@@ -289,6 +289,36 @@ impl LowerCtx<'_, '_> {
     /// function-value lowering performs the same packing; transaction hooks
     /// keep the handle directly because they call the compiled callback later
     /// instead of binding it to a host callable.
+    fn lower_lambda_capture_value(
+        &mut self,
+        lambda: &TLambda,
+        outer: &str,
+        ty: &Type,
+    ) -> Result<Value, String> {
+        let captured = TExpr {
+            ty: ty.clone(),
+            kind: TExprKind::Local(TLocal::user(outer)),
+        };
+        if lambda
+            .materialized_captures
+            .iter()
+            .any(|capture| capture == outer)
+        {
+            // The TIR type is already the owned destination selected by sema;
+            // the JIT only performs the ABI clone/marshal for that Prelude
+            // materialization.
+            self.lower_clone(&captured)
+        } else {
+            let key = TIR::local_place(outer);
+            let var = self
+                .vars
+                .get(&key)
+                .copied()
+                .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
+            Ok(self.b.use_var(var))
+        }
+    }
+
     fn lower_lambda_capture_env(&mut self, lambda: &TLambda) -> Result<Option<Value>, String> {
         if lambda.captures.is_empty() {
             return Ok(None);
@@ -298,13 +328,7 @@ impl LowerCtx<'_, '_> {
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
         for (outer, _place, ty) in &lambda.captures {
-            let key = TIR::local_place(outer);
-            let var = self
-                .vars
-                .get(&key)
-                .copied()
-                .ok_or_else(|| format!("jit transaction hook capture unknown `{outer}`"))?;
-            let value = self.b.use_var(var);
+            let value = self.lower_lambda_capture_value(lambda, outer, ty)?;
             let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
                 Some(clif) if clif == types::F64 => self.b.ins().bitcast(
                     types::I64,
@@ -3381,7 +3405,9 @@ impl LowerCtx<'_, '_> {
                         ty: cap.ty.clone(),
                         kind: TExprKind::Local(TLocal::user(&cap.source)),
                     };
-                    let val = if cap.clone_at_spawn {
+                    let val = if cap.materialize_at_spawn {
+                        self.lower_clone(&captured)?
+                    } else if cap.clone_at_spawn {
                         self.lower_clone(&captured)?
                     } else {
                         self.lower_expr(&captured)?
@@ -7702,11 +7728,7 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.coll.list_push, self.b.func);
                         for (outer, _place, ty) in &lambda.captures {
-                            let key = TIR::local_place(outer);
-                            let var = self.vars.get(&key).copied().ok_or_else(|| {
-                                format!("jit shared transaction capture unknown `{outer}`")
-                            })?;
-                            let value = self.b.use_var(var);
+                            let value = self.lower_lambda_capture_value(lambda, outer, ty)?;
                             let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
                                 Some(clif) if clif == types::F64 => self.b.ins().bitcast(
                                     types::I64,
@@ -8922,7 +8944,15 @@ impl LowerCtx<'_, '_> {
                 .get(&outer_key)
                 .copied()
                 .ok_or_else(|| format!("jit unknown capture `{outer}`"))?;
-            let val = self.b.use_var(outer_var);
+            let val = if lambda
+                .materialized_captures
+                .iter()
+                .any(|capture| capture == outer)
+            {
+                self.lower_lambda_capture_value(lambda, outer, ty)?
+            } else {
+                self.b.use_var(outer_var)
+            };
             let key = if place.is_empty() {
                 outer_key.clone()
             } else {
@@ -11799,11 +11829,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     let environment = self.call_host(self.host.coll.list_new, &[]);
                     for (outer, _place, ty) in &lam.captures {
-                        let key = TIR::local_place(outer);
-                        let var = self.vars.get(&key).copied().ok_or_else(|| {
-                            format!("jit interrupt callback capture unknown `{outer}`")
-                        })?;
-                        let value = self.b.use_var(var);
+                        let value = self.lower_lambda_capture_value(lam, outer, ty)?;
                         let push = self.module.declare_func_in_func(
                             if matches!(ty, Type::Float) {
                                 self.host.coll.list_push_f64
@@ -17555,6 +17581,11 @@ impl LowerCtx<'_, '_> {
                 }
                 self.lower_math_host_call(type_name, "swizzle_read", &arg_vals, &expr.ty)
             }
+            // D-MEM-COPYSEM1=A: View producers already return an owning list
+            // handle in the JIT ABI (`ViewNew` uses `list_slice`), so this is
+            // the adapter half of the shared Prelude materialization. The
+            // capture/store type has already been resolved to `String` or
+            // `[T]` by TIR; no policy is re-encoded here.
             TExprKind::MaterializeView(inner) => self.lower_expr(inner),
             TExprKind::FnFieldCall { recv, field, args } => {
                 let handle = self.lower_expr(recv)?;
@@ -17654,14 +17685,8 @@ impl LowerCtx<'_, '_> {
                     // middleware shape (`owned :: ~next`); JIT list_push was
                     // arriving empty at bind time on the serve thread.
                     if lam.captures.len() == 1 {
-                        let (outer, _place, _ty) = &lam.captures[0];
-                        let key = TIR::local_place(outer);
-                        let var = self
-                            .vars
-                            .get(&key)
-                            .copied()
-                            .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
-                        let cap0 = self.b.use_var(var);
+                        let (outer, _place, ty) = &lam.captures[0];
+                        let cap0 = self.lower_lambda_capture_value(lam, outer, ty)?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_handler_bind1,
                             self.b.func,
@@ -17673,14 +17698,8 @@ impl LowerCtx<'_, '_> {
                         let push = self
                             .module
                             .declare_func_in_func(self.host.coll.list_push, self.b.func);
-                        for (outer, _place, _ty) in &lam.captures {
-                            let key = TIR::local_place(outer);
-                            let var = self
-                                .vars
-                                .get(&key)
-                                .copied()
-                                .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
-                            let val = self.b.use_var(var);
+                        for (outer, _place, ty) in &lam.captures {
+                            let val = self.lower_lambda_capture_value(lam, outer, ty)?;
                             self.b.ins().call(push, &[env, val]);
                         }
                         let host = self.module.declare_func_in_func(
@@ -17696,13 +17715,7 @@ impl LowerCtx<'_, '_> {
                         .module
                         .declare_func_in_func(self.host.coll.list_push, self.b.func);
                     for (outer, _place, ty) in &lam.captures {
-                        let key = TIR::local_place(outer);
-                        let var = self
-                            .vars
-                            .get(&key)
-                            .copied()
-                            .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
-                        let value = self.b.use_var(var);
+                        let value = self.lower_lambda_capture_value(lam, outer, ty)?;
                         let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
                             Some(clif) if clif == types::F64 => self.b.ins().bitcast(
                                 types::I64,
@@ -17893,11 +17906,7 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.coll.list_push, self.b.func);
                         for (outer, _place, ty) in &lambda.captures {
-                            let key = TIR::local_place(outer);
-                            let var = self.vars.get(&key).copied().ok_or_else(|| {
-                                format!("jit fn-value capture unknown `{outer}`")
-                            })?;
-                            let value = self.b.use_var(var);
+                            let value = self.lower_lambda_capture_value(lambda, outer, ty)?;
                             let raw = match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
                                 Some(clif) if clif == types::F64 => self.b.ins().bitcast(
                                     types::I64,
@@ -21025,7 +21034,9 @@ impl LowerCtx<'_, '_> {
                 ty: cap.ty.clone(),
                 kind: TExprKind::Local(TLocal::user(&cap.source)),
             };
-            let val = if cap.clone_at_spawn {
+            let val = if cap.materialize_at_spawn {
+                self.lower_clone(&captured)?
+            } else if cap.clone_at_spawn {
                 self.lower_clone(&captured)?
             } else {
                 self.lower_expr(&captured)?
@@ -21109,7 +21120,9 @@ impl LowerCtx<'_, '_> {
                 ty: cap.ty.clone(),
                 kind: TExprKind::Local(TLocal::user(&cap.source)),
             };
-            let val = if cap.clone_at_spawn {
+            let val = if cap.materialize_at_spawn {
+                self.lower_clone(&captured)?
+            } else if cap.clone_at_spawn {
                 self.lower_clone(&captured)?
             } else {
                 self.lower_expr(&captured)?

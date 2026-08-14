@@ -1137,10 +1137,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("&({place})")
             }
         }
-        // D-MEM1 stage S5: `copy d` on a string-view local — `.to_string()`,
-        // not `.clone()` (see the node's doc comment for why).
+        // D-MEM-COPYSEM1=A: every read-view materialization calls the shared
+        // Prelude operation. The emitter only selects the typed adapter; copy
+        // policy and allocation semantics do not live in an engine.
         TExprKind::MaterializeView(recv) => {
-            format!("({}).to_string()", emit_tir_expr(recv, cx))
+            let value = emit_tir_expr(recv, cx);
+            match &recv.ty {
+                crate::AST::Type::Apply { name, args }
+                    if name == "View"
+                        && matches!(args.as_slice(), [crate::AST::Type::Named(element)] if element == "str") =>
+                {
+                    format!("jet_string_view_copy({value})")
+                }
+                crate::AST::Type::Apply { name, .. } if name == "View" => {
+                    format!("jet_view_copy({value})")
+                }
+                crate::AST::Type::List(_) | crate::AST::Type::FixedList { .. } => {
+                    format!("jet_view_copy({value})")
+                }
+                _ => format!("jet_string_view_copy({value})"),
+            }
         }
         // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. Mirrors
         // `emit_method_call`'s `METHOD_DISTINCT_RAW` early return byte-for-byte.

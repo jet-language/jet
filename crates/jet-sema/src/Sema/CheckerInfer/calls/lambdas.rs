@@ -89,6 +89,7 @@ use std::collections::HashSet;
     
             let escapes = self.lambda_escapes;
             lam.meta.escapes = escapes;
+            lam.meta.materialized_captures.clear();
     
             let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
             let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
@@ -308,6 +309,44 @@ use std::collections::HashSet;
                         continue;
                     }
                     if self.is_view(name) {
+                        let read_only = self
+                            .view_facts(name)
+                            .iter()
+                            .all(|fact| fact.access == ViewAccess::Read);
+                        let copy_ty = crate::Sema::Diagnostics::owned_type_for_read_view(&cap_ty)
+                            .or_else(|| {
+                                (self.is_string_view(name) && matches!(cap_ty, Type::String))
+                                    .then_some(Type::String)
+                            });
+                        if !self.is_task_spawn
+                            && !self.copies_explicit()
+                            && read_only
+                            && copy_ty
+                                .as_ref()
+                                .is_some_and(|ty| is_cloneable(ty, self.registry))
+                        {
+                            // The capture is an owning slot. Record the same
+                            // materialization fact for AOT/JIT/interpreter;
+                            // codegen must not turn a view into another view
+                            // with `Clone`.
+                            if !lam
+                                .meta
+                                .materialized_captures
+                                .iter()
+                                .any(|capture| capture == name)
+                            {
+                                lam.meta.materialized_captures.push(name.clone());
+                            }
+                            if !lam
+                                .meta
+                                .cloned_captures
+                                .iter()
+                                .any(|capture| capture == name)
+                            {
+                                lam.meta.cloned_captures.push(name.clone());
+                            }
+                            continue;
+                        }
                         if self.is_task_spawn {
                             self.report_unsendable(
                                 name,

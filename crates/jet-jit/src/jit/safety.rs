@@ -5002,6 +5002,15 @@ pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSe
 }
 
 pub(crate) fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
+    if c.materialize_at_spawn {
+        // D-MEM-COPYSEM1=A: read-view captures have already crossed to their
+        // owning ABI type. The resident path supports the same list/string
+        // clone doors as ordinary TIR ownership lowering.
+        return matches!(&c.ty, Type::String)
+            || jit_list_native_type(&c.ty)
+            || jit_list_of_int_list_type(&c.ty)
+            || jit_list_record_type(&c.ty);
+    }
     if c.clone_at_spawn {
         // Sender and Receiver are Arc-backed handles (Prelude Clone); spawn
         // capture clones the handle id the same way AOT clones JetSender /

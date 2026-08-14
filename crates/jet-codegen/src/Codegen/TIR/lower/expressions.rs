@@ -2159,15 +2159,32 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // Arc-backed storage.
         Expr::Copy(inner, copy_span) => {
             let operand = lower_expr(inner, cx, env);
-            let ty = operand.ty.clone();
-            // D-MEM1 stage S5: `copy d` where `d` is a string-view local is the
-            // one legal way to materialize it into an owned `String` that can
-            // leave the view's scope. `d`'s Rust place is a bare `&str` — a
-            // plain `.clone()` on that would hand back another `&str` (the
-            // wrong Rust type for `ty: Type::String`), not an owned `String`;
-            // `.to_string()` is the correct materialization here.
-            let is_view_copy =
-                matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name));
+            let view_owned_ty = match &operand.ty {
+                Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                    Some(if matches!(&args[0], Type::Named(element) if element == "str") {
+                        Type::String
+                    } else {
+                        Type::List(Box::new(args[0].clone()))
+                    })
+                }
+                _ => None,
+            };
+            let is_view_type = view_owned_ty.is_some();
+            let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
+            // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
+            // read-only views use the shared materialization path. A string
+            // view's Rust place is a bare `&str`, so cloning it would return
+            // another `&str`; the Prelude must produce the owned `String`.
+            let is_view_copy = is_view_type
+                || matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name))
+                || matches!(
+                    &**inner,
+                    Expr::Ident(name, _)
+                        if matches!(
+                            env.split_view_handle(name),
+                            Some(Type::Apply { name, .. }) if name == "View"
+                        )
+                );
             // Parser-created `~` spans begin at the sigil. Sema-created
             // ownership clones reuse the operand span. Preserve that
             // existing provenance fact as a TIR distinction; do not inspect
@@ -5002,6 +5019,7 @@ pub(crate) fn wrap_foreign_undo(
         rc: false,
         arc: false,
         captures,
+        materialized_captures: Vec::new(),
     };
     let registration = TExpr {
         ty: Type::Named("TransactionGuard".to_string()),

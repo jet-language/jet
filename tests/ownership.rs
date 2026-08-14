@@ -1368,7 +1368,7 @@ fn run() {
 }
 
 #[test]
-fn reactive_capture_rejects_local_views_before_rustc() {
+fn reactive_capture_materializes_local_views_before_rustc() {
     let source = r#"
 fn run() {
     values := [1, 2]
@@ -1376,28 +1376,14 @@ fn run() {
     #Reactive { print(first.len()) }
 }
 "#;
-    let diags =
-        jet::compile(source).expect_err("a stored reactive effect cannot capture a local View");
-    assert!(diags.iter().any(|diag| diag.code == "E2305"), "{diags:?}");
-
-    let root = common::unique_tmp("jet_reactive_view_capture");
-    fs::create_dir_all(&root).unwrap();
-    let path = root.join("main.jet");
-    fs::write(&path, source).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["build", path.to_str().unwrap()])
-        .current_dir(&root)
-        .output()
-        .expect("run the production build path");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success(), "the frontend must reject the View capture");
-    assert_ne!(
-        output.status.code(),
-        Some(101),
-        "a reactive View capture leaked to rustc: {stderr}"
-    );
-    assert!(stderr.contains("E2305"), "wrong frontend diagnostic: {stderr}");
-    assert!(!stderr.contains("E0597"), "rustc lifetime error leaked: {stderr}");
+    let compiled = jet::compile(source).expect("a stored read View gets an owning copy");
+    assert!(compiled.rust.contains("jet_view_copy"), "{}", compiled.rust);
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_reactive_view_capture", "whole_root", source);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "1\n");
+    }
 }
 
 #[test]
@@ -2980,10 +2966,10 @@ fn run() {
     );
 }
 
-/// #1164: returning a string view as owned String teaches E2307 once — no
-/// extra E2305 from treating the ident as a view-return boundary.
+/// #1164: returning a string view as owned String materializes the same copy
+/// that `~` requests — no extra E2305 from treating the ident as a boundary.
 #[test]
-fn string_view_as_owned_return_teaches_copy_once() {
+fn string_view_as_owned_return_materializes_copy_once() {
     let src = r#"
 fn make() => String {
     email := "nate@jet.dev"
@@ -2995,15 +2981,8 @@ fn run() {
     print(make())
 }
 "#;
-    let diags = jet::compile(src).expect_err("string view as String must fail");
-    assert!(
-        diags.iter().any(|d| d.code == "E2307"),
-        "expected E2307, got {diags:?}"
-    );
-    assert!(
-        diags.iter().all(|d| d.code != "E2305"),
-        "owned String return must not also fire E2305, got {diags:?}"
-    );
+    let compiled = jet::compile(src).expect("string view as String must materialize");
+    assert!(compiled.rust.contains("jet_string_view_copy"), "{}", compiled.rust);
 }
 
 /// #1163: the memory example runs the owner-backed library through the
@@ -5356,7 +5335,7 @@ fn run() {
 }
 
 #[test]
-fn borrowed_parameter_subplaces_need_explicit_copy_in_owning_positions() {
+fn borrowed_parameter_subplaces_copy_in_owning_positions() {
     let cases = [
         r#"
 struct Parcel { label: String }
@@ -5379,8 +5358,7 @@ fn run() { print(0) }
 "#,
     ];
     for src in cases {
-        let diags = jet::compile(src).expect_err("borrowed subplace must not copy implicitly");
-        assert!(diags.iter().any(|d| d.code == "E0120"), "{diags:?}");
+        jet::compile(src).expect("an owning destination must materialize a read subplace");
     }
 }
 
@@ -5432,7 +5410,7 @@ fn run() { print(0) }
 }
 
 #[test]
-fn borrowed_parameter_cannot_fill_an_owned_struct_field_without_explicit_copy() {
+fn borrowed_parameter_fills_an_owned_struct_field_with_an_implicit_copy() {
     let src = r#"
 struct Holder { value: String }
 fn wrap(value: String) => Holder {
@@ -5440,9 +5418,48 @@ fn wrap(value: String) => Holder {
 }
 fn run() { print(0) }
 "#;
-    let diags = jet::compile(src).expect_err("borrowed field value must not clone silently");
-    let escape = diags.iter().find(|d| d.code == "E0120").expect("E0120");
-    assert!(escape.fix.contains("~value"), "{escape:?}");
+    jet::compile(src).expect("an owned field must materialize a read parameter");
+}
+
+#[test]
+fn stored_lambda_materializes_a_read_view_capture() {
+    let src = r#"
+fn store(text: String) => fn() => String {
+    domain :: text.after("@")
+    return () => domain
+}
+fn run() {
+    callback :: store("nate@jet.dev")
+    print(callback())
+}
+"#;
+    let compiled = jet::compile(src).expect("stored read-view capture must become owning");
+    assert!(compiled.rust.contains("jet_string_view_copy"), "{}", compiled.rust);
+    if common::have_rustc() {
+        let (code, stdout, stderr) = common::build_and_run(
+            "jet_stored_view_capture",
+            "whole_root",
+            src,
+        );
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "jet.dev\n");
+    }
+}
+
+#[test]
+fn owning_collection_elements_materialize_read_views_without_expected_type() {
+    let src = r#"
+fn collect(text: String) => [String] {
+    domain :: text.after("@")
+    values :: [domain]
+    return values
+}
+fn run() {
+    print(collect("nate@jet.dev")[0])
+}
+"#;
+    let compiled = jet::compile(src).expect("an owning collection element must materialize");
+    assert!(compiled.rust.contains("jet_string_view_copy"), "{}", compiled.rust);
 }
 
 #[test]

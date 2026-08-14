@@ -166,6 +166,8 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),
+    // D-MEM-COPYSEM1=A: one Rust Prelude copy kernel for native and wasm.
+    include_str!("../Prelude/Core/ViewCopy.rs"),
     include_str!("../Prelude/Core/Loadable.rs"),
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),
@@ -2491,6 +2493,8 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let string_concat =
             std::fs::read_to_string(root.join("src/Prelude/Core/StringConcat.rs")).unwrap();
+        let view_copy =
+            std::fs::read_to_string(root.join("src/Prelude/Core/ViewCopy.rs")).unwrap();
         let loadable =
             std::fs::read_to_string(root.join("src/Prelude/Core/Loadable.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
@@ -2555,6 +2559,7 @@ mod tests {
             ),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/StringConcat.rs", string_concat.as_str()),
+            ("src/Prelude/Core/ViewCopy.rs", view_copy.as_str()),
             ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),

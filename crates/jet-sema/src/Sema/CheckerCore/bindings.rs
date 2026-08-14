@@ -441,32 +441,34 @@ impl<'a> Checker<'a> {
                     annot_valid = false;
                 }
             }
-            if let Expr::Ident(n, nspan) = &mut b.init {
-                if let Some(info) = self.lookup(n) {
-                    if !info.ty.is_scalar()
-                        && matches!(
-                            info.param_conv,
-                            Some(AccessConvention::Read) | Some(AccessConvention::Write)
-                        )
-                    {
-                        self.diags.push(Diagnostic::error(
-                            "E0120",
-                            format!("`{}` was not moved here, so it cannot be taken with the move-capability marker `^`", n),
-                            "this function has read access only and does not own the value"
-                                .to_string(),
-                            format!(
-                                "copy it instead: `{} {} {}{}`",
-                                b.name,
-                                if b.mutable {
-                                    Syntax::SIGIL_BIND_MUT
-                                } else {
-                                    Syntax::SIGIL_BIND_IMMUT
-                                },
-                                Syntax::SIGIL_COPY,
-                                n
-                            ),
-                            Some(*nspan),
-                        ));
+            if !b.mutable {
+                if let Expr::Ident(n, nspan) = &mut b.init {
+                    if let Some(info) = self.lookup(n) {
+                        if !info.ty.is_scalar()
+                            && matches!(
+                                info.param_conv,
+                                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                            )
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0120",
+                                format!("`{}` was not moved here, so it cannot be taken with the move-capability marker `^`", n),
+                                "this function has read access only and does not own the value"
+                                    .to_string(),
+                                format!(
+                                    "copy it instead: `{} {} {}{}`",
+                                    b.name,
+                                    if b.mutable {
+                                        Syntax::SIGIL_BIND_MUT
+                                    } else {
+                                        Syntax::SIGIL_BIND_IMMUT
+                                    },
+                                    Syntax::SIGIL_COPY,
+                                    n
+                                ),
+                                Some(*nspan),
+                            ));
+                        }
                     }
                 }
             }
@@ -513,7 +515,8 @@ impl<'a> Checker<'a> {
             // field-read clone rule inspect the selected type without treating
             // the read as an owning escape; the clone is inserted immediately
             // after inference when the field is duplicable. Mutable bindings
-            // and all other owning positions keep the ordinary E0120 path.
+            // and all other owning positions use the default materialization
+            // path; `copies: .Explicit` keeps the refusal.
             let implicit_field_read = !b.mutable
                 && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
                 && field_read_to_clone(&b.init, self.registry, self.imports);
@@ -521,7 +524,11 @@ impl<'a> Checker<'a> {
             if implicit_field_read {
                 self.borrow_ctx = true;
             }
-            let mut it = self.infer(&mut b.init);
+            let mut it = if b.mutable {
+                self.infer_owning_value(&mut b.init)
+            } else {
+                self.infer(&mut b.init)
+            };
             self.borrow_ctx = saved_borrow_ctx;
             if implicit_field_read
                 && it
@@ -570,7 +577,7 @@ impl<'a> Checker<'a> {
             self.lambda_binding = saved_bind;
             self.expected_type = saved_expected;
             self.reject_borrowed_param_subplace(
-                &b.init,
+                &mut b.init,
                 it.as_ref(),
                 "be stored in a binding",
             );

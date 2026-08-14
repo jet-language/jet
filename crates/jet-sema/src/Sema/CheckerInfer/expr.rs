@@ -8,7 +8,7 @@ use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
-use crate::Sema::Diagnostics::soft_public_use;
+use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::AST::{
     AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
     TypedLitBody, UnOp, noelse_terminated,
@@ -699,6 +699,148 @@ impl<'a> Checker<'a> {
         result
     }
 
+    pub(crate) fn infer_with_expected(
+        &mut self,
+        e: &mut Expr,
+        expected: &Type,
+    ) -> Option<Type> {
+        let saved = self.expected_type.replace(expected.clone());
+        let result = self.infer(e);
+        self.expected_type = saved;
+        result
+    }
+
+    fn implicit_copy_target(&mut self, e: &Expr, ty: &Type) -> Option<Type> {
+        if let Some(target) = owned_type_for_read_view(ty) {
+            return Some(target);
+        }
+        if matches!(e, Expr::Ident(name, _) if self.is_string_view(name))
+            && matches!(ty, Type::String)
+        {
+            return Some(Type::String);
+        }
+        // Range/list windows deliberately keep `Type::List<T>` at the Jet
+        // surface. Their borrow shape lives in the provenance graph, so the
+        // owning-copy rule must consult that graph instead of looking only for
+        // the explicit `View<T>` type. A mutable window is never an implicit
+        // copy source: its `Write` fact keeps the existing refusal path live.
+        if matches!(ty, Type::List(_)) {
+            let sources = self.view_call_sources(e);
+            if !sources.is_empty()
+                && sources.iter().all(|(path, _, kind, access)| {
+                    path.is_empty()
+                        && *access == crate::Sema::ViewAccess::Read
+                        && matches!(
+                            kind,
+                            crate::Sema::ViewKind::List
+                                | crate::Sema::ViewKind::Buffer
+                                | crate::Sema::ViewKind::Matrix
+                        )
+                })
+            {
+                return Some(ty.clone());
+            }
+        }
+        if !type_is_copy(ty)
+            && matches!(e, Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. })
+            && expr_root_ident(e).is_some_and(|root| {
+                self.lookup(root).is_some_and(|info| {
+                    matches!(
+                        info.param_conv,
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                    )
+                })
+            })
+        {
+            return Some(ty.clone());
+        }
+        None
+    }
+
+    /// Infer an expression that is about to occupy an owning aggregate slot.
+    ///
+    /// Most owning positions provide an expected type, so `infer_checked` can
+    /// insert the copy while it is checking that type. Collection literals,
+    /// tuple/map entries, and unannotated payloads do not always have that
+    /// context. Give those positions the same default materialization rule,
+    /// with the same `Expr::Copy` node and the same policy gate.
+    pub(crate) fn infer_owning_value(&mut self, e: &mut Expr) -> Option<Type> {
+        let default_copy = !self.copies_explicit();
+        let borrowed_param_place = matches!(e, Expr::Field(..) | Expr::Index { .. })
+            && crate::Sema::Diagnostics::expr_root_ident(e).is_some_and(|root| {
+                self.lookup(root).is_some_and(|info| {
+                    matches!(
+                        info.param_conv,
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                    )
+                })
+            });
+        let saved_borrow_ctx = self.borrow_ctx;
+        let saved_string_view_read = self.allow_string_view_read;
+        if default_copy && borrowed_param_place {
+            // A borrowed parameter projection is readable here because this
+            // caller is an owning slot; defer the ownership decision until the
+            // source type is known, then materialize it below.
+            self.borrow_ctx = true;
+        }
+        if default_copy
+            && matches!(e, Expr::Ident(name, _) if self.is_string_view(name))
+        {
+            // String views keep `String` as their Jet type. Allow the read long
+            // enough to turn it into the shared owning-copy node.
+            self.allow_string_view_read = true;
+        }
+        let ty = self.infer(e);
+        self.borrow_ctx = saved_borrow_ctx;
+        self.allow_string_view_read = saved_string_view_read;
+        let Some(ty) = ty else {
+            return None;
+        };
+        if !default_copy
+            || matches!(
+                self.expected_type.as_ref(),
+                Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
+            )
+        {
+            return Some(ty);
+        }
+        let Some(target) = self.implicit_copy_target(e, &ty) else {
+            return Some(ty);
+        };
+        if self
+            .expected_type
+            .as_ref()
+            .is_some_and(|expected| expected != &target)
+        {
+            return Some(ty);
+        }
+        if is_cloneable(&target, self.registry) {
+            Some(self.insert_implicit_copy(e, &target))
+        } else {
+            Some(ty)
+        }
+    }
+
+    pub(crate) fn insert_implicit_copy(&mut self, e: &mut Expr, ty: &Type) -> Type {
+        let span = e.span();
+        let old = std::mem::replace(e, Expr::Absent(span));
+        *e = Expr::Copy(Box::new(old), span);
+        if matches!(ty, Type::Shared(_)) {
+            self.record_memory_event(crate::Sema::MemoryEvent::new(
+                crate::Sema::MemoryEventKind::RetainRelease,
+                span,
+                format!("implicit copy of `{}` retains a shared reference", ty.show()),
+            ));
+        } else if type_owns_heap(ty, self.registry) {
+            self.record_memory_event(crate::Sema::MemoryEvent::new(
+                crate::Sema::MemoryEventKind::Allocation,
+                span,
+                format!("implicit copy of `{}` allocates owned heap data", ty.show()),
+            ));
+        }
+        ty.clone()
+    }
+
     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
         // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
         // fallible at runtime; the explicit `_rounded` spelling carries the
@@ -809,7 +951,16 @@ impl<'a> Checker<'a> {
         }
 
         let borrowed = std::mem::take(&mut self.borrow_ctx);
+        let implicit_string_view_copy = !borrowed
+            && !self.copies_explicit()
+            && matches!(self.expected_type.as_ref(), Some(Type::String))
+            && matches!(e, Expr::Ident(name, _) if self.is_string_view(name));
+        let saved_string_view_read = self.allow_string_view_read;
+        if implicit_string_view_copy {
+            self.allow_string_view_read = true;
+        }
         let ty = self.infer_inner(e);
+        self.allow_string_view_read = saved_string_view_read;
         if let Some(aggregate_ty) = ty.as_ref() {
             let constructs_value = matches!(
                 e,
@@ -836,6 +987,15 @@ impl<'a> Checker<'a> {
             }
         }
         if !borrowed {
+            if !self.copies_explicit()
+                && let Some(target) = ty
+                    .as_ref()
+                    .and_then(|source| self.implicit_copy_target(e, source))
+                && self.expected_type.as_ref() == Some(&target)
+                && is_cloneable(&target, self.registry)
+            {
+                return Some(self.insert_implicit_copy(e, &target));
+            }
             if let Some(t) = &ty {
                 let borrowed_param_place = !type_is_copy(t)
                     && matches!(e, Expr::Field(..) | Expr::Index { .. })
@@ -1708,16 +1868,11 @@ impl<'a> Checker<'a> {
                     let read_expr = Expr::Ident(name.clone(), *span);
                     self.check_place_read(&read_expr, *span);
                 }
-                // D-MEM1 stage S5: E2307 — reading a string-view name anywhere
-                // other than the two positions its bare `&str` Rust place
-                // supports (`allow_string_view_read`, set only around chaining
-                // `.trim()`/`.after()`/`.before()` and `copy`'s operand). This
-                // is the ONE general choke point for the whole class of uses
-                // that would otherwise mismatch a callee's `&String`/`String`
-                // signature at the Rust level (list/tuple literal elements,
-                // call arguments, plain assignment, struct fields not already
-                // caught earlier, …) — every one of them reads this same
-                // `Expr::Ident` node to get the name's value.
+                // D-MEM-COPYSEM1: a read-only string-view name crossing an
+                // owning destination is materialized by `infer_checked`.
+                // `allow_string_view_read` remains false here only when the
+                // destination is an explicit-copy policy refusal or a direct
+                // non-owning operation that cannot accept the view.
                 if self.is_string_view(name)
                     && !self.allow_string_view_read
                     && !(self.in_lambda_body && self.lambda_escapes)
@@ -2077,10 +2232,9 @@ impl<'a> Checker<'a> {
                 // expression already IS that clone, and wrapping again would
                 // double-clone in the generated Rust.
                 self.borrow_ctx = true;
-                // D-MEM1 stage S5: `copy d` on a string-view name is the one
-                // legal way to materialize it into an owned `String` — the
-                // general E2307 check on a bare `Expr::Ident` read must not
-                // fire for `copy`'s own operand.
+                // D-MEM-COPYSEM1: `~d` and the default owning materialization
+                // both produce an owned `String`; the general E2307 check on
+                // a bare `Expr::Ident` must not fire for `~`'s operand.
                 let was_view_read = self.allow_string_view_read;
                 self.allow_string_view_read = true;
                 let inner_t = self.infer(inner);
@@ -2096,9 +2250,10 @@ impl<'a> Checker<'a> {
                             .push(crate::Sema::e3403("Clock copy", Some(*span)));
                     }
                 }
+                let copy_ty = owned_type_for_read_view(&inner_t).unwrap_or_else(|| inner_t.clone());
                 let resource = self.is_resource_type(&inner_t);
                 if resource
-                    || (!type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry))
+                    || (!type_is_copy(&inner_t) && !is_cloneable(&copy_ty, self.registry))
                 {
                     let cell_guard = matches!(
                         &inner_t,
@@ -2147,20 +2302,20 @@ impl<'a> Checker<'a> {
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `copy` of a heap-owning type
                 // is itself an allocation (the whole point of `.clone()`-style
                 // duplication) — flagged regardless of whether it's cloneable.
-                if matches!(inner_t, Type::Shared(_)) {
+                if matches!(copy_ty, Type::Shared(_)) {
                     self.record_memory_event(crate::Sema::MemoryEvent::new(
                         crate::Sema::MemoryEventKind::RetainRelease,
                         *span,
-                        format!("`copy` of `{}` retains a shared reference", inner_t.show()),
+                        format!("`copy` of `{}` retains a shared reference", copy_ty.show()),
                     ));
-                } else if type_owns_heap(&inner_t, self.registry) {
+                } else if type_owns_heap(&copy_ty, self.registry) {
                     self.record_memory_event(crate::Sema::MemoryEvent::new(
                         crate::Sema::MemoryEventKind::Allocation,
                         *span,
-                        format!("`copy` of `{}` allocates owned heap data", inner_t.show()),
+                        format!("`copy` of `{}` allocates owned heap data", copy_ty.show()),
                     ));
                 }
-                Some(inner_t)
+                Some(copy_ty)
             }
             Expr::Place(inner, access, span) => {
                 if self.place_from_expr(inner).is_none() {
@@ -2641,7 +2796,15 @@ impl<'a> Checker<'a> {
                 self.infer(inner)
             }
             Expr::Present(inner, _span) => {
-                let t = self.infer(inner)?;
+                let t = if let Some(expected) = self
+                    .expected_type
+                    .clone()
+                    .and_then(|ty| ty.unwrap_option().cloned())
+                {
+                    self.infer_with_expected(inner, &expected)?
+                } else {
+                    self.infer_owning_value(inner)?
+                };
                 Some(Type::Option(Box::new(t)))
             }
             Expr::Absent(span) => {
@@ -3000,7 +3163,7 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
-        let ty = self.infer(elem);
+        let ty = self.infer_owning_value(elem);
         if ty.is_some() {
             self.note_move_if_direct_ident(elem);
         }
@@ -3256,7 +3419,19 @@ impl<'a> Checker<'a> {
                     Some(expr.span()),
                 ));
             }
-            let ty = self.infer(expr).unwrap_or(Type::Int);
+            let expected_field = match self.expected_type.as_ref() {
+                Some(Type::Tuple(expected_fields)) => expected_fields
+                    .iter()
+                    .find(|(expected_name, _)| expected_name == name)
+                    .map(|(_, expected_ty)| (**expected_ty).clone()),
+                _ => None,
+            };
+            let ty = expected_field
+                .as_ref()
+                .map_or_else(|| self.infer_owning_value(expr), |expected| {
+                    self.infer_with_expected(expr, expected)
+                })
+                .unwrap_or(Type::Int);
             typed.push((name.clone(), ty));
         }
         let canonical = crate::AST::canonicalize_tuple_fields(typed);
@@ -3307,13 +3482,28 @@ impl<'a> Checker<'a> {
         }
         let mut key_ty = None;
         let mut val_ty = None;
+        let expected_map = self.expected_type.as_ref().and_then(|expected| {
+            if let Type::Map { key, value, .. } = expected {
+                Some(((**key).clone(), (**value).clone()))
+            } else {
+                None
+            }
+        });
         for (k, v) in entries.iter_mut() {
             self.reject_fixed_storage(k, "be stored in a map");
             self.reject_fixed_storage(v, "be stored in a map");
-            let Some(kt) = self.infer(k) else {
+            let Some(kt) = expected_map
+                .as_ref()
+                .map(|(expected_key, _)| self.infer_with_expected(k, expected_key))
+                .unwrap_or_else(|| self.infer_owning_value(k))
+            else {
                 continue;
             };
-            let Some(vt) = self.infer(v) else {
+            let Some(vt) = expected_map
+                .as_ref()
+                .map(|(_, expected_value)| self.infer_with_expected(v, expected_value))
+                .unwrap_or_else(|| self.infer_owning_value(v))
+            else {
                 continue;
             };
             if !is_map_key_type(&kt) {

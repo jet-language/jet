@@ -2372,7 +2372,7 @@ fn fmt_json_dirty_diffs(entries: &[(&str, &str)]) -> String {
 
 /// `jet fmt - [--stdin-path=<label>]`: read from stdin, format, write to stdout.
 /// Ignore rules do NOT apply. Exit 2 on parse error.
-fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
+fn run_fmt_stdin(stdin_path: Option<&str>, explicit_copies: bool, mode: OutputMode) {
     use std::io::Read;
     let mut src = String::new();
     if std::io::stdin().read_to_string(&mut src).is_err() {
@@ -2385,7 +2385,7 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
         jet::Formatter::retired_interpolation_selector_edits(&src).len();
     let retired_print_count = jet::Formatter::retired_print_family_edits(&src).len();
     let retired_type_count = jet::Formatter::retired_type_edits(&src).len();
-    match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>")) {
+    match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>"), explicit_copies) {
         Ok(formatted) => {
             print!("{}", formatted);
             if retired_target_count > 0 {
@@ -2436,17 +2436,162 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
 fn format_source_for_fmt(
     src: &str,
     origin: &str,
+    explicit_copies: bool,
 ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
-    let (migrated, _) = rewrite_retired_package_targets(src, origin);
-    match jet::format_source(&migrated) {
+    let materialized = if explicit_copies
+        && Path::new(origin).is_file()
+        && !is_typed_package_source(src, origin)
+    {
+        // Sema spans point into the source as read. Insert copy verbs before
+        // any package-target migration can change those offsets.
+        let mut source = src.to_string();
+        let mut bundle = jet::Loader::load_entry(origin)?;
+        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        {
+            return Err(diagnostics);
+        }
+        for span in implicit_copy_spans(&bundle, origin).into_iter().rev() {
+            if span.start <= source.len() {
+                source.insert_str(span.start, jet::Syntax::SIGIL_COPY);
+            }
+        }
+        rewrite_retired_package_targets(&source, origin).0
+    } else {
+        rewrite_retired_package_targets(src, origin).0
+    };
+    match jet::format_source(&materialized) {
         Ok(formatted) => Ok(formatted),
-        Err(diagnostics) if is_typed_package_source(&migrated, origin) => {
-            match jet::Package::format_source(&migrated, origin) {
+        Err(diagnostics) if is_typed_package_source(&materialized, origin) => {
+            match jet::Package::format_source(&materialized, origin) {
                 Ok(formatted) => Ok(formatted),
                 Err(_) => Err(diagnostics),
             }
         }
         Err(diagnostics) => Err(diagnostics),
+    }
+}
+
+pub(crate) fn implicit_copy_spans(
+    bundle: &jet::AST::ProgramBundle,
+    origin: &str,
+) -> Vec<jet::Diagnostics::Span> {
+    let requested = fs::canonicalize(origin).ok();
+    let module = bundle
+        .modules
+        .iter()
+        .find(|module| {
+            requested.as_ref().is_some_and(|path| {
+                fs::canonicalize(&module.path).ok().as_ref() == Some(path)
+            }) || module.display == origin
+        })
+        .or_else(|| bundle.modules.get(bundle.entry));
+    let Some(module) = module else { return Vec::new() };
+    implicit_copy_spans_in_module(module)
+}
+
+pub(crate) fn implicit_copy_spans_in_module(
+    module: &jet::AST::LoadedModule,
+) -> Vec<jet::Diagnostics::Span> {
+    let mut spans = Vec::new();
+    collect_stmts_implicit_copy_spans(&module.script_body, &mut spans);
+    for item in &module.items {
+        collect_item_implicit_copy_spans(item, &mut spans);
+    }
+    spans.sort_by_key(|span| std::cmp::Reverse(span.start));
+    spans.dedup_by_key(|span| span.start);
+    spans
+}
+
+fn collect_stmts_implicit_copy_spans(
+    statements: &[jet::AST::Stmt],
+    spans: &mut Vec<jet::Diagnostics::Span>,
+) {
+    for statement in statements {
+        let mut statement = statement.clone();
+        statement.for_each_expr_mut(|expr| {
+            if let jet::AST::Expr::Copy(inner, copy_span) = expr
+                && *copy_span == inner.span()
+            {
+                spans.push(*copy_span);
+            }
+        });
+    }
+}
+
+fn collect_func_implicit_copy_spans(
+    function: &jet::AST::Func,
+    spans: &mut Vec<jet::Diagnostics::Span>,
+) {
+    collect_stmts_implicit_copy_spans(&function.body, spans);
+}
+
+fn collect_item_implicit_copy_spans(
+    item: &jet::AST::Item,
+    spans: &mut Vec<jet::Diagnostics::Span>,
+) {
+    use jet::AST::Item;
+    match item {
+        Item::Func(function) => collect_func_implicit_copy_spans(function, spans),
+        Item::Struct(definition) => {
+            for function in &definition.methods {
+                collect_func_implicit_copy_spans(function, spans);
+            }
+            for implementation in &definition.trait_impls {
+                for function in &implementation.methods {
+                    collect_func_implicit_copy_spans(function, spans);
+                }
+            }
+        }
+        Item::Enum(definition) => {
+            for function in &definition.methods {
+                collect_func_implicit_copy_spans(function, spans);
+            }
+            for implementation in &definition.trait_impls {
+                for function in &implementation.methods {
+                    collect_func_implicit_copy_spans(function, spans);
+                }
+            }
+        }
+        Item::Impl(definition) => {
+            for function in &definition.methods {
+                collect_func_implicit_copy_spans(function, spans);
+            }
+        }
+        Item::Test(definition) => collect_stmts_implicit_copy_spans(&definition.body, spans),
+        Item::Bench(definition) => collect_stmts_implicit_copy_spans(&definition.body, spans),
+        Item::CodeModule(definition) => {
+            if let Some(body) = &definition.body {
+                for item in body {
+                    collect_item_implicit_copy_spans(item, spans);
+                }
+            }
+        }
+        Item::GenericModule(definition) => {
+            for item in &definition.body {
+                collect_item_implicit_copy_spans(item, spans);
+            }
+        }
+        Item::MarkerDecl(definition) => {
+            if let Some(body) = &definition.body {
+                collect_stmts_implicit_copy_spans(body, spans);
+            }
+            if let Some(text) = &definition.text {
+                for expression in [&text.check, &text.hole] {
+                    let mut expression = expression.clone();
+                    expression.for_each_expr_mut(|expr| {
+                        if let jet::AST::Expr::Copy(inner, copy_span) = expr
+                            && *copy_span == inner.span()
+                        {
+                            spans.push(*copy_span);
+                        }
+                    });
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -2495,10 +2640,11 @@ pub(crate) fn run_fmt(
     check_only: bool,
     show_diff: bool,
     changed_only: bool,
+    explicit_copies: bool,
     mode: OutputMode,
 ) {
     if stdin_mode {
-        run_fmt_stdin(stdin_path, mode);
+        run_fmt_stdin(stdin_path, explicit_copies, mode);
         return;
     }
 
@@ -2553,7 +2699,7 @@ pub(crate) fn run_fmt(
                 continue;
             }
         };
-        match format_source_for_fmt(&src, &path.display().to_string()) {
+        match format_source_for_fmt(&src, &path.display().to_string(), explicit_copies) {
             Ok(formatted) => {
                 let changed = formatted != src;
                 let retired_interpolation_selectors =

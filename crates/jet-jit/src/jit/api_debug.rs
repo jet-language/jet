@@ -819,8 +819,8 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
                     why.push(format!("cap{ci} ty not jit_value: {:?}", c.ty));
                 } else if !resident_safe_capture_policy(c) {
                     why.push(format!(
-                        "cap{ci} clone_at_spawn={} ty={:?}",
-                        c.clone_at_spawn, c.ty
+                        "cap{ci} clone_at_spawn={} materialize_at_spawn={} ty={:?}",
+                        c.clone_at_spawn, c.materialize_at_spawn, c.ty
                     ));
                 }
             }

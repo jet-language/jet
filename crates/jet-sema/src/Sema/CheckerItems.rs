@@ -1,7 +1,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::Sema::Diagnostics::soft_public_use;
+use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::AST::{
     AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
     VariantPayload,
@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn reject_borrowed_param_subplace(
         &mut self,
-        expr: &Expr,
+        expr: &mut Expr,
         ty: Option<&Type>,
         destination: &str,
     ) -> bool {
@@ -275,15 +275,20 @@ impl<'a> Checker<'a> {
         if !borrowed {
             return false;
         }
+        if !self.copies_explicit()
+            && ty
+                .is_some_and(|ty| owned_type_for_read_view(ty).is_none())
+            && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
+        {
+            self.insert_implicit_copy(expr, ty.expect("cloneable borrowed subplace has a type"));
+            return false;
+        }
         self.diags.push(Diagnostic::error(
             "E0120",
             format!("`{root}` was not moved here, so this part cannot {destination}"),
             "the function can access this parameter, but it does not own any part of it"
                 .to_string(),
-            format!(
-                "copy the selected value explicitly by prefixing it with `{}`",
-                Syntax::SIGIL_COPY
-            ),
+            format!("copy the selected value explicitly by prefixing it with `{}`", Syntax::SIGIL_COPY),
             Some(expr.span()),
         ));
         true
@@ -2065,14 +2070,16 @@ impl<'a> Checker<'a> {
 
     /// Rewrite a struct-literal (or enum-payload, via the same call from
     /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into an
-    /// `Expr::Copy` node (D-CAP2 — the same node `copy x` desugars to), when
-    /// leaving it a move would either (a) not
-    /// type-check (a borrowed param) or (b) silently move an OWNED LOCAL that
-    /// is still read later — both would otherwise reach rustc as a raw,
-    /// unreported E0507/E0382 (I2). Two cases:
+    /// `Expr::Copy` node (D-CAP2 — the same node `~x` uses), when leaving it a
+    /// move would either (a) not type-check (a borrowed param) or (b) silently
+    /// move an OWNED LOCAL that is still read later — both would otherwise
+    /// reach rustc as a raw, unreported E0507/E0382 (I2). Read-only values use
+    /// that node implicitly at an owning destination; `copies: .Explicit`
+    /// restores the diagnostic for borrowed subplaces.
+    ///
     ///   - a `read`/`mut` param is `&T`/`&mut T`, so using it directly as the
-    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Reject it
-    ///     before codegen and require an explicit copy.
+    ///     (owning) field value would emit `(*user_n)` → rustc E0507. Materialize
+    ///     it before codegen when the target type is cloneable.
     ///   - an OWNED local (no param convention) moves for real in the
     ///     generated Rust; if a later statement in the same/enclosing block
     ///     still reads it, that would be rustc E0382 ("use after move") with
@@ -2091,11 +2098,9 @@ impl<'a> Checker<'a> {
         if self.reject_borrowed_param_subplace(expr, ty, "fill an owned field") {
             return;
         }
-        // A repeated field/parameter name is the explicit owning shorthand
-        // (`value: value`), not a selected field read. Keep that boundary
-        // explicit: a read parameter must use `~value` here. Differently named
-        // bare read parameters retain the established implicit clone rule used
-        // by ordinary owning slots.
+        // A repeated field/parameter name is still an owning slot. Read-only
+        // values materialize here under D-MEM-COPYSEM1; the explicit policy
+        // restores the old refusal and its `~value` fix.
         if let Some(field_name) = field_name {
             let borrowed = matches!(expr, Expr::Ident(name, _) if name == field_name)
                 && if let Expr::Ident(name, _) = &*expr {
@@ -2113,6 +2118,16 @@ impl<'a> Checker<'a> {
                 } else {
                     false
                 };
+            if borrowed
+                && !self.copies_explicit()
+                && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
+            {
+                self.insert_implicit_copy(
+                    expr,
+                    ty.expect("cloneable borrowed same-name field has a type"),
+                );
+                return;
+            }
             if borrowed {
                 let (name, span) = match &*expr {
                     Expr::Ident(name, span) => (name.clone(), *span),
@@ -2263,7 +2278,8 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if let Some(EnumLitArg::Positional(e)) = args.first_mut() {
-                    let et = self.infer(e);
+                    let expected_for_child = expected.clone();
+                    let et = self.infer_with_expected(e, &expected_for_child);
                     if let Some(et) = &et {
                         if contextual_payload.is_some() && et != expected {
                             self.diags.push(Diagnostic::error(
@@ -2321,7 +2337,15 @@ impl<'a> Checker<'a> {
                                     Some(expr.span()),
                                 ));
                             }
-                            let et = self.infer(expr);
+                            let expected_for_child = fields
+                                .iter()
+                                .find(|field| field.name == *label)
+                                .map(|field| field.ty.clone());
+                            let et = expected_for_child
+                                .as_ref()
+                                .map_or_else(|| self.infer(expr), |expected| {
+                                    self.infer_with_expected(expr, expected)
+                                });
                             // D-EPPAYLOAD1 (I2 fix): see the positional-payload call above.
                             self.clone_borrowed_struct_field_value(None, expr, et.as_ref());
                             if let Some(f) = fields.iter().find(|f| f.name == *label) {

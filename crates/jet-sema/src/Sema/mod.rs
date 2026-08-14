@@ -1496,14 +1496,10 @@ pub(crate) struct Checker<'a> {
     /// `Fixed.new` / `Fixed.over` must be the whole initializer of one lexical
     /// binding so codegen can place and lifetime-order its inline backing.
     allow_fixed_constructor: bool,
-    /// D-MEM1 stage S5: true only while inferring a string-view fact in one of
-    /// the TWO positions its bare `&str` Rust place
-    /// actually supports — the receiver of a chained `.trim()`/`.after()`/
-    /// `.before()`, or the operand of `copy`. The general `Expr::Ident` arm
-    /// reports E2307 whenever it reads a string-view name and this is false —
-    /// a single, general choke point instead of hunting down every possible
-    /// consuming context (list/tuple literal element, call argument, plain
-    /// assignment, …) one at a time.
+    /// D-MEM-COPYSEM1: true while inferring a string-view fact for a direct
+    /// non-owning operation, the operand of `~`, or a read-only view entering
+    /// an owning destination. The general `Expr::Ident` arm reports E2307
+    /// when this is false and `copies: .Explicit` has disabled materialization.
     allow_string_view_read: bool,
     /// M8: when false, a lambda is consumed inline (collection methods / borrow).
     lambda_escapes: bool,
@@ -1912,6 +1908,29 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(|declaration| declaration.key == crate::Policy::PolicyKey::ExplicitUnits)
         })
+    }
+
+    /// D-MEM-COPYSEM1=A: the default materializes a read-only view at an
+    /// owning destination. `copies: .Explicit` is the opt-in refusal ladder;
+    /// it follows the same package/module/function/block scope chain as the
+    /// other source policies.
+    pub(crate) fn copies_explicit(&self) -> bool {
+        let declared = |declaration: &crate::Policy::PolicyDeclaration| {
+            declaration.key == crate::Policy::PolicyKey::Copies
+                && declaration.value == crate::Policy::PolicyValue::Explicit
+                && (matches!(
+                    declaration.scope,
+                    crate::Policy::PolicyScope::Package | crate::Policy::PolicyScope::Module
+                ) || (declaration.scope == crate::Policy::PolicyScope::Function
+                    && declaration.target == Some(self.current_function_span)))
+        };
+        self.policy_declarations.iter().any(declared)
+            || self.memory_policy_stack.last().is_some_and(|region| {
+                region.declarations.iter().any(|declaration| {
+                    declaration.key == crate::Policy::PolicyKey::Copies
+                        && declaration.value == crate::Policy::PolicyValue::Explicit
+                })
+            })
     }
 
     pub(crate) fn audited_gate_allowed(&mut self, key: crate::Policy::PolicyKey, span: Span) -> bool {

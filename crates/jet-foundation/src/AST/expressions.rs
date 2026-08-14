@@ -260,6 +260,11 @@ pub struct LambdaMeta {
     pub needs_fn_mut: bool,
     pub mut_captures: Vec<String>,
     pub cloned_captures: Vec<String>,
+    /// D-MEM-COPYSEM1=A: escaping read-only view captures are materialized at
+    /// closure construction. The source names remain in `cloned_captures` so
+    /// all closure engines use the same capture slot; this list selects the
+    /// shared view-copy Prelude operation instead of reference cloning.
+    pub materialized_captures: Vec<String>,
     pub moved_captures: Vec<String>,
     /// D-LOOPEVAL1: compiler-private zero-parameter closure used to carry one
     /// finite yielding loop through existing expression, comptime, JIT, and

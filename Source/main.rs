@@ -69,7 +69,7 @@ use CmdRemote::run_remote;
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
 use CmdSupply::{
-    run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
+    run_audit, run_copy_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
 };
 use CmdStructuralMerge::{run_diff, run_merge, structural_help};
 
@@ -1650,6 +1650,7 @@ fn main() {
                 .find_map(|a| a.strip_prefix("--stdin-path=").map(str::to_string));
             let show_diff = jet_argv.iter().any(|a| a == "--diff") || dry_run;
             let changed_only = jet_argv.iter().any(|a| a == "--changed");
+            let explicit_copies = jet_argv.iter().any(|a| a == "--explicit-copies");
             let explicit_paths: Vec<String> =
                 path_args.into_iter().filter(|p| p != "-").collect();
             run_fmt(
@@ -1659,6 +1660,7 @@ fn main() {
                 fmt_check || dry_run,
                 show_diff,
                 changed_only,
+                explicit_copies,
                 mode,
             );
             return;
@@ -1861,6 +1863,10 @@ fn main() {
             return;
         }
         "audit" => {
+            if raw.get(1).map(String::as_str) == Some("copies") {
+                run_copy_audit(&raw[2..], mode.json);
+                return;
+            }
             let db_path = flag_value(&raw, "--advisory-db");
             run_audit(db_path);
             return;

@@ -9,30 +9,37 @@ use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
 
 impl<'a> Checker<'a> {
     pub(crate) fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
-        let payload = self.infer(inner)?;
-        if let Some(expected) = self.expected_type.clone() {
-            if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
-                let ok_payload = payload == *ok_ty
-                    || matches!(ok_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
-                if !ok_payload {
-                    self.diags.push(Diagnostic::error(
-                        "E0108",
-                        format!(
-                            "this `{}` holds {}, but {} was expected",
-                            Syntax::LIT_OK,
-                            payload.show(),
-                            ok_ty.show()
-                        ),
-                        "the success value must match the result's value type".to_string(),
-                        type_fix_hint(ok_ty, &payload),
-                        Some(span),
-                    ));
-                }
-                return Some(Type::Result {
-                    ok: Box::new(ok_ty.clone()),
-                    err: Box::new(err_ty.clone()),
-                });
+        let expected_result = self.expected_type.clone().and_then(|expected| {
+            expected
+                .unwrap_result()
+                .map(|(ok_ty, err_ty)| (ok_ty.clone(), err_ty.clone()))
+        });
+        let payload = if let Some((ok_ty, _)) = expected_result.as_ref() {
+            self.infer_with_expected(inner, ok_ty)?
+        } else {
+            self.infer_owning_value(inner)?
+        };
+        if let Some((ok_ty, err_ty)) = expected_result {
+            let ok_payload = payload == ok_ty
+                || matches!(&ok_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
+            if !ok_payload {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "this `{}` holds {}, but {} was expected",
+                        Syntax::LIT_OK,
+                        payload.show(),
+                        ok_ty.show()
+                    ),
+                    "the success value must match the result's value type".to_string(),
+                    type_fix_hint(&ok_ty, &payload),
+                    Some(span),
+                ));
             }
+            return Some(Type::Result {
+                ok: Box::new(ok_ty),
+                err: Box::new(err_ty),
+            });
         }
         self.diags.push(Diagnostic::error(
             "E0404",
@@ -49,51 +56,65 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_err(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
-        let mut payload = self.infer(inner)?;
-        if let Some(expected) = self.expected_type.clone() {
-            if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
-                if is_default_error(err_ty) && payload == Type::String {
-                    let message = std::mem::replace(inner.as_mut(), Expr::Absent(span));
-                    let call = Call {
-                        name: Syntax::LIT_ERR.to_string(),
-                        name_span: span,
-                        type_args: Vec::new(),
-                        args: vec![crate::AST::CallArg {
-                            convention: crate::AST::AccessConvention::Read,
-                            span,
-                            expr: message,
-                            flags: Default::default(),
-                            label: None,
-                            spread: false,
-                        }],
-                        resolved_ret: None,
-                        range_checked: false,
-                        widen_approx: false,
-                    };
-                    *inner = Box::new(self.default_err_value(call, false));
-                    payload = Type::Named(Syntax::TYPE_ERR.to_string());
-                }
-                let ok_payload = payload == *err_ty
-                    || matches!(err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
-                if !ok_payload {
-                    self.diags.push(Diagnostic::error(
-                        "E0108",
-                        format!(
-                            "this `{}` holds {}, but {} was expected",
-                            Syntax::LIT_ERR,
-                            payload.show(),
-                            err_ty.show()
-                        ),
-                        "the failure value must match the result's error type".to_string(),
-                        type_fix_hint(err_ty, &payload),
-                        Some(span),
-                    ));
-                }
-                return Some(Type::Result {
-                    ok: Box::new(ok_ty.clone()),
-                    err: Box::new(err_ty.clone()),
-                });
+        let expected_result = self.expected_type.clone().and_then(|expected| {
+            expected
+                .unwrap_result()
+                .map(|(ok_ty, err_ty)| (ok_ty.clone(), err_ty.clone()))
+        });
+        let payload_expected = expected_result.as_ref().map(|(_, err_ty)| {
+            if is_default_error(err_ty) {
+                Type::String
+            } else {
+                err_ty.clone()
             }
+        });
+        let mut payload = if let Some(expected) = payload_expected.as_ref() {
+            self.infer_with_expected(inner, expected)?
+        } else {
+            self.infer_owning_value(inner)?
+        };
+        if let Some((ok_ty, err_ty)) = expected_result {
+            if is_default_error(&err_ty) && payload == Type::String {
+                let message = std::mem::replace(inner.as_mut(), Expr::Absent(span));
+                let call = Call {
+                    name: Syntax::LIT_ERR.to_string(),
+                    name_span: span,
+                    type_args: Vec::new(),
+                    args: vec![crate::AST::CallArg {
+                        convention: crate::AST::AccessConvention::Read,
+                        span,
+                        expr: message,
+                        flags: Default::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    resolved_ret: None,
+                    range_checked: false,
+                    widen_approx: false,
+                };
+                *inner = Box::new(self.default_err_value(call, false));
+                payload = Type::Named(Syntax::TYPE_ERR.to_string());
+            }
+            let ok_payload = payload == err_ty
+                || matches!(&err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
+            if !ok_payload {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "this `{}` holds {}, but {} was expected",
+                        Syntax::LIT_ERR,
+                        payload.show(),
+                        err_ty.show()
+                    ),
+                    "the failure value must match the result's error type".to_string(),
+                    type_fix_hint(&err_ty, &payload),
+                    Some(span),
+                ));
+            }
+            return Some(Type::Result {
+                ok: Box::new(ok_ty),
+                err: Box::new(err_ty),
+            });
         }
         self.diags.push(Diagnostic::error(
             "E0404",
@@ -308,7 +329,7 @@ impl<'a> Checker<'a> {
             }
         };
         self.reject_borrowed_param_subplace(
-            value.as_ref(),
+            value.as_mut(),
             Some(&value_ty),
             "supply an owned exhaustion-route payload",
         );
@@ -512,7 +533,10 @@ impl<'a> Checker<'a> {
         };
         self.reject_borrowed_param_subplace(
             value,
-            Some(&payload),
+            // The owning destination is the whole Option/Result expression.
+            // `payload` is only the value exposed after `??`; copying the
+            // subplace as that type would change the wrapper's type metadata.
+            Some(&val_ty),
             "supply an owned fallback payload",
         );
         // D-FAIL-BIND1=A: make the report a normal typed local in a fresh

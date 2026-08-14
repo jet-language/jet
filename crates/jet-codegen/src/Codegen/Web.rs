@@ -53,6 +53,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/StringConcat.js"),
     "\n",
+    include_str!("../Prelude/Core/ViewCopy.js"),
+    "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
 );
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
@@ -4036,10 +4038,24 @@ fn wasm_emit_expr(
                 format!("&({place})")
             }
         }
-        TIR::TExprKind::MaterializeView(inner) => format!(
-            "({}).to_string()",
-            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
-        ),
+        TIR::TExprKind::MaterializeView(inner) => {
+            let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            match &inner.ty {
+                Type::Apply { name, args }
+                    if name == "View"
+                        && matches!(args.as_slice(), [Type::Named(element)] if element == "str") =>
+                {
+                    format!("jet_string_view_copy({value})")
+                }
+                Type::Apply { name, .. } if name == "View" => {
+                    format!("jet_view_copy({value})")
+                }
+                Type::List(_) | Type::FixedList { .. } => {
+                    format!("jet_view_copy({value})")
+                }
+                _ => format!("jet_string_view_copy({value})"),
+            }
+        },
         TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Field { recv, field, boxed: false } => {
             let recv_expr = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
@@ -5904,10 +5920,27 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             &operand.ty,
             &tir_js_expr(operand, funcs, file_prefix)?,
         ),
-        E::Clone(inner)
-        | E::ExplicitCopy(inner)
-        | E::MaterializeView(inner)
-        | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::Clone(inner) | E::ExplicitCopy(inner) | E::DistinctRaw(inner) => {
+            tir_js_expr(inner, funcs, file_prefix)?
+        }
+        E::MaterializeView(inner) => {
+            let value = tir_js_expr(inner, funcs, file_prefix)?;
+            match &inner.ty {
+                Type::Apply { name, args }
+                    if name == "View"
+                        && matches!(args.as_slice(), [Type::Named(element)] if element == "str") =>
+                {
+                    format!("jet_string_view_copy({value})")
+                }
+                Type::Apply { name, .. } if name == "View" => {
+                    format!("jet_view_copy({value})")
+                }
+                Type::List(_) | Type::FixedList { .. } => {
+                    format!("jet_view_copy({value})")
+                }
+                _ => format!("jet_string_view_copy({value})"),
+            }
+        }
         E::Close(inner) => {
             let key = web_close_key(&inner.ty).ok_or(())?;
             format!("{}({})", key, tir_js_expr(inner, funcs, file_prefix)?)
@@ -6575,6 +6608,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Division.rs"),
     "\n",
     include_str!("../Prelude/Core/StringConcat.rs"),
+    "\n",
+    include_str!("../Prelude/Core/ViewCopy.rs"),
     "\n",
     include_str!("../Prelude/Memo.rs"),
     "\n"

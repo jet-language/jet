@@ -5172,6 +5172,7 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "memory/returned_views",
         "memory/shared_config",
         "memory/shared_transact",
+        "memory/copy_verb",
         "memory/string_view",
         "streams/generators",
     ];
