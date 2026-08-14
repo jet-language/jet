@@ -4393,9 +4393,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // compile-time sema proof, never a runtime value.
         Expr::Tainted(inner, _, _) => lower_expr(inner, cx, env),
         // c109 Phase 8: `value(x)` → `Some(x)`. The result type is `T?` where `T` is
-        // the inner's resolved type (totality). Mirrors `Expr::Present`.
+        // the inner's resolved type (totality). The constructor owns its payload,
+        // so resource locals must transfer through `ResourceTake`, not dereference
+        // the cleanup guard. Mirrors `Expr::Present`.
         Expr::Present(inner, _) => {
-            let t = lower_expr(inner, cx, env);
+            let t = lower_owned_expr(inner, cx, env);
             TExpr {
                 ty: Type::Option(Box::new(t.ty.clone())),
                 kind: TExprKind::Present(Box::new(t)),
@@ -4441,7 +4443,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // the inner's; the err type is unresolved here (Rust infers it from the
         // function return context, exactly as the AST path's bare `Ok(x)` does).
         Expr::Ok(inner, _) => {
-            let mut t = lower_expr(inner, cx, env);
+            let mut t = lower_owned_expr(inner, cx, env);
             if let Some(Type::Result { ok, .. }) = &env.ret_ty {
                 t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
             }
@@ -4456,7 +4458,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 8: `Err(e)` → `Err(e)`. The err type is the inner's; the ok type
         // is unresolved here (inferred from the function return context).
         Expr::Err(inner, _) => {
-            let mut t = lower_expr(inner, cx, env);
+            let mut t = lower_owned_expr(inner, cx, env);
             if let Some(Type::Result { err, .. }) = &env.ret_ty {
                 t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
             }
