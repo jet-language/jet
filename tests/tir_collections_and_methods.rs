@@ -162,10 +162,12 @@ fn map_get_update_is_total_for_missing_key() {
 fn run() {
     counts := [String: Int].{}
     counts["missing"] = (counts.get("missing") ?? 0) + 1
+    counts["other"] = (counts.get("other") ?? 0) - 1
     print(counts["missing"])
+    print(counts["other"])
 }
 "#;
-    assert_tiers_agree("tir_map_get_update", src, "1\n");
+    assert_tiers_agree("tir_map_get_update", src, "1\n-1\n");
 }
 
 // --- c109 Phase 6: methods + clones -----------------------------------------
