@@ -2717,7 +2717,7 @@ impl<'a> EvalCtx<'a> {
     /// callable arena until the whole-program boundary drains it.
     pub(super) fn register_atexit_callback(
         &mut self,
-        callback: &TExpr,
+        callback: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let value = self.eval_expr(callback, scope)?;
