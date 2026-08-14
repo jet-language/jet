@@ -21,7 +21,7 @@ No semicolons. Comments start with `//`. Strings use double quotes and interpola
 ## Core source rules
 
 Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.
-Functions: `fn name(parameter: Type) => Return { ... }`; expression bodies use `= expression`.
+Functions: `fn name(parameter: Type) => Return { ... }`; expression bodies use `:: expression`.
 Visibility: declarations are private by default; prefix an item with `pub` for package use.
 Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ? E`.
 Errors: handle `T?` or `T ? E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.
@@ -62,15 +62,15 @@ fn show_values() {
 }
 
 // --- functions & generics ------------------------------------------------
-fn greet(who: String) => String = "hello, {who}"
+fn greet(who: String) => String :: "hello, {who}"
 
-fn id<T>(x: ^T) => T = x
+fn id<T>(x: ^T) => T :: x
 
 struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) => Float = self.x * self.x + self.y * self.y
+    fn dist_sq(self) => Float :: self.x * self.x + self.y * self.y
 
     fn origin() => Point {
         return Point.{x: 0.0, y: 0.0}
@@ -125,12 +125,12 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) => Float = self.side * self.side
+    fn area(self) => Float :: self.side * self.side
 }
 
 // --- inline module -------------------------------------------------------
 module math {
-    pub fn double(n: Int) => Int = n * 2
+    pub fn double(n: Int) => Int :: n * 2
 }
 
 // --- low-level: `Type.{ uninit }` sentinel --------------------------------
@@ -215,7 +215,7 @@ struct LinuxBackend {
 
 #Target(OS.Linux)
 impl LinuxBackend.Backend {
-    fn label(self) => String = "linux: {self.name}"
+    fn label(self) => String :: "linux: {self.name}"
 }
 
 // --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`
@@ -387,13 +387,14 @@ fn run() {
 - HashMap
 - BTreeMap
 - Map
-- Deque
+- Queue
 - Set
-- SortedSet
+- Rank
 - PriorityQueue
 - Cache
-- BitSet
-- ByteBuffer
+- Tally
+- Bits
+- Bytes
 - I8
 - I16
 - I32
@@ -446,7 +447,7 @@ active	Unsafe	marker Unsafe(reason: String, obligations: ObligationMode = .None,
 active	Grant	marker Grant(capabilities: ...Capability, @sites: [.Block, .Operation])
 active	Scrub	marker Scrub(tag: Ident, @sites: [.Function, .Method])
 retired	Pure	marker Pure(@sites: [.Function, .Method], @retired: "=[]=>")
-active	Memo	marker Memo(bound: MemoBound = .Default, @sites: [.Function])
+active	Memo	marker Memo(bound: MemoBound = .Default, @sites: [.Function, .Method, .Field])
 active	Pre	marker Pre(condition: Value, message: String, @sites: [.Function, .Method], @repeatable: true)
 active	Post	marker Post(condition: Value, message: String, @sites: [.Function, .Method], @repeatable: true)
 active	Kernel	marker Kernel(mode: KernelMode, @sites: [.Function])
@@ -560,8 +561,8 @@ core.math	sqrt, pow, abs, min, max, floor, ceil, round, pi, e, tau, infinity, na
 core.random	int, float, float_range, bool, normal, exponential, pick, weighted_pick, sample, shuffle, seed, rng, split, bytes
 core.time	now, sleep, nanoseconds, microseconds, milliseconds, seconds, minutes, hours, start, instant, now_utc, from_unix_ms, today, parse_rfc3339, datetime, local_time, time, parse_time, days_in_month, is_leap_year, period, period_days, period_months, period_years, zone, utc, zoned, zoned_local
 core.tasks	yield_now, current_task, channel, after, interval
-core.testing	snap, golden, fixture, temp_dir, corpus, fake_clock, fake_rng
-core.mem	Ptr, from_addr, volatile_read, volatile_write, address_of, pin, Pin, Arena, Bump, Pool, Fixed
+core.testing	snap, golden, fixture, temp_dir, corpus, fake_clock, fake_rng, test_suite, bench_suite
+core.mem	Ptr, from_addr, volatile_read, volatile_write, address_of, pin, Pin, Arena, Bump, Pool, Fixed, AllocError
 core.mem.alloc	Arena, Bump, Pool, Fixed
 core.solve	Solver
 core.data	csv, json, csv_reader, json_reader, DataLimits, DataLineOptions, DataError, DataErrorKind, DataStream, DataPivotCell, count, table, rows, series, values, schema, missing_count, lazy, lazy_filter, lazy_sort_by, collect, plan, filter, sort_by, inner_join, left_join, pivot_sum, sum, mean, min, max, median, quantile, rolling_mean, variance, stddev, describe, group_count, group_sum, group_mean, status, require_bridge, bar_text, bar_svg, line_text, line_svg
@@ -706,10 +707,11 @@ E0060	retired	parse	error	compile	teaching: retired C FFI marker spelling → `#
 E0062	retired	retired	error	compile	former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar	former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar	the registered retired rule applies here	follow the guidance for E0062	false	-
 E0063	active	parse	error	compile	teaching: applied rules use `#`, not the compile-time/fact-read prefix `@` (D-VERDICT-732-1, amended by D-ONCE-AT1=D)	teaching: applied rules use `#`, not the compile-time/fact-read prefix `@` (D-VERDICT-732-1, amended by D-ONCE-AT1=D)	the registered parse rule applies here	follow the guidance for E0063	false	-
 E0064	active	parse	error	compile	`#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1)	`#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1)	the registered parse rule applies here	follow the guidance for E0064	false	-
+E0065	retired	parse	error	compile	retired function body marker `=`; use `::` (D-ONELINE-BODY1=B)	This function uses the retired `=` body marker.	`::` separates a one-line function body; `=` fills a slot inside a definition.	Replace `=` with `::`; `jet fmt` applies this fix.	true	replace:==>::
 E0066	retired	parse	error	compile	retired function effect syntax; use exact `=[Effects]=>` or `=[]=>` (D-SHAPE8, D-ARROW-CONTROL1)	This function uses the retired effect-arrow spelling.	Callable results use `=>`. An explicit effect ceiling belongs inside that callable arrow.	Replace it with `=[Effects]=>`, or write `=[]=>` for an empty effect ceiling.	true	-
 E0067	reserved	lex	error	compile	source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_` (D-SHAPE-DUNDER2=A, D-NAME-SIGIL1=A)	source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_` (D-SHAPE-DUNDER2=A, D-NAME-SIGIL1=A)	the registered lex rule applies here	follow the guidance for E0067	false	-
 E0070	retired	parse	error	compile	a callable result uses retired `->`; use `=>` (D-ARROW-CONTROL1)	This callable result uses `->`.	`=>` defines callable results. `->` is reserved for selected or yielded control values.	Replace `->` with `=>`. For an effect ceiling, write `=[Effects]=>`.	true	-
-E0071	active	parse/sema	error	compile	an effect-only `if` or loop uses a result arrow (D-ARROW-CONTROL1)	This effect-only body uses a result arrow.	An arrow says that control selects or yields a value. A () body only performs work.	Remove `->`. Keep the body adjacent on one line, or use braces for several lines.	true	-
+E0071	retired	parse/sema	error	compile	retired effect-only result-arrow teaching (D-ONELINE-BODY1=B; was D-ARROW-CONTROL1)	This retired effect-only result-arrow diagnostic is no longer emitted.	Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope.	follow the current one-line body rule	false	-
 E0072	active	sema	error	compile	a non-finite collecting loop uses a collection arrow (D-LOOPEVAL1)	This collecting loop cannot return a List because it has no finite exhaustion edge.	A collecting loop must finish after a statically finite source or C-style condition. Bare infinite and condition-only loops do not provide that boundary.	Remove `->`, or iterate a finite source. Return one final value from an ordinary loop with `break value`.	true	-
 E0073	active	sema	error	compile	a collecting loop path produces no item or `()` (D-LOOPEVAL1)	This collecting loop path produces no item.	Every accepted iteration must contribute one non-unit value unless `next` explicitly omits it.	Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects.	true	-
 E0074	active	sema	error	compile	collecting loop item types do not agree (D-LOOPEVAL1, D-COMPREHENSION1)	This collecting loop produces incompatible item types.	One collecting loop builds one `[T]`, so every contributed item must have the same type.	Convert the items to one type, or split the operations into separate loops.	true	-
@@ -717,9 +719,10 @@ E0075	active	sema	error	compile	a collecting loop uses a break payload instead o
 E0076	active	sema	error	compile	ordinary-loop exits omit a result or use incompatible payload types (D-LOOPSTATE1)	This result loop has a missing or incompatible break payload.	An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type.	Add the missing payload and make every payload the same type, or target an inner effect-only loop.	true	-
 E0077	retired	parse	error	compile	a scoped grant uses the retired body-binding arrow (D-ARROW-CONTROL1)	This scoped grant uses the retired body binding.	The capability handle belongs in the grant header. `->` is reserved for selected or yielded values.	Write `#Grant(caps: FS, Net) { ... }`.	true	-
 E0078	active	sema	error	compile	a finite value loop is missing its exhaustion route, or uses bare immediate `?? next`/`?? break` (D-CHOOSE-FIND1)	This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route.	A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target.	Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`.	true	-
+E0079	active	sema	error	compile	effect-only loop uses a result exit (D-LOOPSTATE1)	This effect-only loop uses a result exit.	A break payload makes an effect-only loop a value expression.	Bind the loop with `::`, or remove the payload.	true	-
 E0984	retired	parse	error	compile	*retired by D-S14-PAUSE* (was: `when` teaching)	*retired by D-S14-PAUSE* (was: `when` teaching)	the registered parse rule applies here	follow the guidance for E0984	false	-
 E0985	retired	parse	error	compile	*retired by D-S14-PAUSE* (was: `val`/`var` binding teaching)	*retired by D-S14-PAUSE* (was: `val`/`var` binding teaching)	the registered parse rule applies here	follow the guidance for E0985	false	-
-E0986	active	parse	error	compile	callable `=>`, `=[Effects]=>`, `=`, or `{` split incorrectly from the declaration head (S6-R, D-ARROW-CONTROL1)	This callable marker is detached from its declaration head.	Layout must keep `=>`, `=[Effects]=>`, `=`, or the opening brace attached to the function head so the declaration boundary is unambiguous.	Move the marker or opening brace onto the same logical line as the closing `)`.	true	-
+E0986	active	parse	error	compile	callable `=>`, `=[Effects]=>`, `::`, or `{` split incorrectly from the declaration head (S6-R, D-ONELINE-BODY1=B)	This callable marker is detached from its declaration head.	Layout must keep `=>`, `=[Effects]=>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous.	Move the marker or opening brace onto the same logical line as the closing `)`.	true	-
 E0998	retired	parse	error	compile	teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4)	teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4)	the registered parse rule applies here	follow the guidance for E0998	false	-
 E0992	active	parse	error	compile	teaching: implicit dispatch — a multi-arm `if` needs a comparison between the subject and `{` (D-IF3 / D-IFDIST1)	teaching: implicit dispatch — a multi-arm `if` needs a comparison between the subject and `{` (D-IF3 / D-IFDIST1)	the registered parse rule applies here	follow the guidance for E0992	false	-
 E0993	retired	parse	error	compile	~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed	~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed	the registered parse rule applies here	follow the guidance for E0993	false	-
@@ -787,6 +790,7 @@ E0163	active	sema	error	compile	`++`/`--` can't target an indexed slot (D-INCR1)
 E0164	active	sema	error	compile	compound assignment can't target an indexed slot (S17)	compound assignment can't target an indexed slot.	a compound update reads an indexed slot before it writes; that read can panic when a map key is missing.	write a total update, such as `map[key] = (map.get(key) ?? 0) + 1`	true	-
 E0154	active	parse	error	compile	protocol line does not use sender form `client:` or `server:` (D-PROTO2, D-ARROW-CONTROL1)	A protocol line does not name `client:` or `server:` as its sender.	A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information.	Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends.	true	-
 E0155	active	sema	error	compile	typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation	a typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation	typed literal heads are checked before the program runs; URL and Path holes must stay inside components, and DateTime heads must be complete.	write a valid typed literal with holes only in URL or Path components, or parse a runtime String explicitly	true	-
+E0156	active	sema	error	compile	a knowledge plane would be loosened without its written gate	this operation would loosen {plane}	knowledge only tightens silently; loosening {plane} must be named with a written gate	write `{gate}(value)` at this boundary	true	-
 E0805	active	sema	error	compile	`yield` used outside a function declared `=> Stream<T>` (D-STREAMYIELD1)	`yield` used outside a function declared `=> Stream<T>` (D-STREAMYIELD1)	the registered sema rule applies here	follow the guidance for E0805	false	-
 E0806	active	sema	error	compile	a generator's `return` carries a value (D-STREAMYIELD1)	a generator's `return` carries a value (D-STREAMYIELD1)	the registered sema rule applies here	follow the guidance for E0806	false	-
 E0807	active	sema	error	compile	a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1)	a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1)	the registered sema rule applies here	follow the guidance for E0807	false	-
@@ -892,14 +896,14 @@ E0368	active	parse	error	compile	fence expansion has no entries (D-EACH1=C, D-VE
 E0369	active	parse	error	compile	one binding fence repeats a name (D-EACH1=C, D-VERDICT-1320-1)	`{name}` appears twice in this fence.	One binding fence must name each generated copy once.	Remove the second name or give it a different name.	true	-
 E0370	active	parse	error	compile	lock-step fences have different entry counts (D-EACH1=C, D-VERDICT-1320-1)	Fences on one statement have different entry counts.	Multiple fences expand in lock-step, so every fence needs one entry for each copy.	Give every fence the same number of entries.	true	-
 E0371	active	parse	error	compile	fence appears outside a binding target or expression statement, or a binding fence carries a non-name entry (D-EACH1=C, D-VERDICT-1320-1)	This fence is not in an allowed statement position, or one of its entries has the wrong shape (empty entry, trailing comma, non-name in a binding fence, malformed numbered range).	D-EACH1 expands complete binding or expression statements; a binding fence takes plain names or one ascending numbered-name range, an expression fence takes comma-separated expressions.	Move the fence to a binding target or a complete expression statement, or fix the entry.	true	-
-E0372	active	parse	error	compile	teaching: an effect `if`, `else`, or `loop` body needs braces (D-BRACE1=A)	This `{body}` body needs braces.	Braces make the body's boundary visible to readers, editors, and the compiler.	Wrap the body in `{ ... }`; `jet fmt` applies this fix.	true	-
+E0372	active	parse	error	compile	teaching: an adjacent effect `if`, `else`, or `loop` body needs braces (D-ONELINE-BODY1=B)	This `{body}` body needs braces.	Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler.	Write `-> statement` for one statement, or wrap the body in `{ ... }`; `jet fmt` applies this fix.	true	-
 E0373	active	parse	error	compile	teaching: loop header clauses use commas, not semicolons (D-LOOP-COMMA1=A)	This loop header uses a semicolon.	Commas separate loop clauses; semicolons separate statements.	Replace `;` with `,`; `jet fmt` applies this fix.	true	replace:;=>,
 E0374	retired	parse	error	compile	teaching: retired `comptime`; use implicit folding or `@` (D-VERDICT-1308-1)	`comptime` is retired.	Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane.	Remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build.	true	-
 E0375	retired	sema	error	compile	retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C)	`#Default` on a field is retired.	Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C).	Write `field: T = expr` instead of `#Default(expr)`.	true	-
 E0376	retired	parse	error	compile	teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D)	C-style counter loop headers are retired.	A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D).	Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state.	true	-
 E0377	retired	parse	error	compile	teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B)	`#Known` is retired.	Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention.	Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block.	true	-
 E0378	retired	parse	error	compile	teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B)	This alias declaration uses the retired `=` binding.	`::` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B).	Replace `=` with `::`.	true	replace:==>::
-E0381	active	parse	error	compile	`marker Name(...)` fact stated as an `on` clause or a second parameter list, not a `@`-marked named parameter (D-META-FORM1=A)	A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list.	D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not a second spelling.	Move the fact into the declaration's own parameter list as a `@`-marked named parameter, e.g. `@sites: [.Function, …]`, `@repeatable: true`.	true	-
+E0381	active	parse	error	compile	ordinary `marker Name(...)` fact stated as an `on` clause or a second parameter list, not a `@`-marked named parameter (D-META-FORM1=A)	A fact about an ordinary `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list.	Ordinary marker arguments and facts share one named-parameter list; checked text heads use the separate `marker Name on [.Text] { check … hole … }` form (D-BOUND-SINK1=A).	For an ordinary marker, use `@sites: […]` or `@repeatable: true`; for a checked text head, write `marker Name on [.Text] { check … hole … }`.	true	-
 L0301	active	sema	lint	compile	unreachable dispatch pattern arm (lint)	unreachable dispatch pattern arm (lint)	the registered sema rule applies here	follow the guidance for L0301	false	-
 L0302	active	sema	lint	compile	a closed-enum arm table would be clearer with a named subject (lint)	a closed-enum arm table would be clearer with a named subject (lint)	the registered sema rule applies here	follow the guidance for L0302	false	-
 E0401	active	sema	error	compile	fallible value used where plain `T` expected	fallible value used where plain `T` expected	the registered sema rule applies here	follow the guidance for E0401	false	-
@@ -949,6 +953,8 @@ L0504	active	sema	lint	compile	money-like name holds `Float` instead of `Decimal
 L0505	active	sema	lint	compile	heap growth in a loop after `use core.mem` — consider an arena (c26)	heap growth in a loop after `use core.mem` — consider an arena (c26)	the registered sema rule applies here	follow the guidance for L0505	false	-
 L0506	active	sema	lint	compile	hidden allocation inside `#Context` without an allocator (c26)	hidden allocation inside `#Context` without an allocator (c26)	the registered sema rule applies here	follow the guidance for L0506	false	-
 L0507	active	parse	lint	compile	prefer an ordered arm table for a multi-line braced branch or `else if` chain (S68, D-BRANCH-LINT1=A)	prefer an ordered arm table for this branch	one ordered arm table is Jet's normal form for multi-line and chained choices	write `if { condition -> body else -> body }`	true	-
+L0508	active	sema	lint	compile	arrow loop body computes and drops a non-unit value (D-LOOP-STMT-ARROW1=C)	This arrow loop body computes a value and drops it.	A statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source.	Bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place.	true	-
+L0509	reserved	jet	lint	compile	auto-derive refusal is a named package policy entry (D-ONCE-AUTODERIVE1)	auto-derive refusal is a named package policy entry	`auto_derive` is registered on the shared `policy.lints.deny` surface; the policy itself emits no warning.	write `policy: .{ lints: .{ deny: [auto_derive] } }` in `package.jet`	false	-
 L0510	active	sema	lint	compile	declaration replaces a readable Core prelude alias (D-NAME-ALIAS1)	declaration replaces a readable Core prelude alias (D-NAME-ALIAS1)	user declarations win over the compiler-opened alias, but the replacement is worth seeing	keep the declaration, or rename it to use the prelude alias	true	-
 L0511	active	sema	lint	compile	binding `err` shadows the fallback's ambient failure report	binding `err` shadows the fallback's ambient failure report	`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there	rename the binding, or use it outside a fallback	true	-
 L0520	active	sema	lint	compile	auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE)	`` `{type}` has no `Display` impl — bare `{}` will require one soon ``.	Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback.	Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value:Debug}` for debug output.	true	-
@@ -1094,6 +1100,7 @@ E1802	active	repl	error	compile	hard-rejected feature in the REPL (FFI, tasks, `
 E1803	active	repl	error	compile	a REPL Core effect lacks lexical or invocation authority, or its exact operation/resource was denied	`{Root}.{Operation}` for `{resource}` was denied.	REPL host effects require both an enclosing `#Grant` and runtime invocation authority; denied operations stop before touching host state.	Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins.	true	-
 E0801	active	sema	error	compile	lambda parameter type unknown	lambda parameter type unknown	the registered sema rule applies here	follow the guidance for E0801	false	-
 E0803	active	sema	error	compile	calling a value that isn't a function	calling a value that isn't a function	the registered sema rule applies here	follow the guidance for E0803	false	-
+E-CALL-VALUE	active	parse	error	compile	function values use `.call(…)`, not the retired adjacent-call spelling `)(` (D-CALLVALUE1=B)	a function value is invoked with the retired adjacent-call spelling	named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B)	write `callee.call(…)`	true	generated:call_value
 E0804	active	sema	error	compile	self-recursive lambda binding	self-recursive lambda binding	the registered sema rule applies here	follow the guidance for E0804	false	-
 E0850	active	sema	error	compile	D-CONF-GENSPELL1=A: module alias target not found in scope	D-CONF-GENSPELL1=A: module alias target not found in scope	the registered sema rule applies here	follow the guidance for E0850	false	-
 E0851	active	sema	error	compile	D-CONF-GENSPELL1=A: wrong number of type/value arguments to module alias	D-CONF-GENSPELL1=A: wrong number of type/value arguments to module alias	the registered sema rule applies here	follow the guidance for E0851	false	-
@@ -1133,7 +1140,7 @@ E0931	active	parse	error	compile	`!` is used on a marker other than the signed a
 E0938	active	sema	error	compile	`#Memo` requires a pure function (D-MEMO1=A)	`#Memo` requires a pure function (D-MEMO1=A)	the registered sema rule applies here	follow the guidance for E0938	false	-
 E0939	active	sema	error	compile	`#Memo` argument is not hashable (D-MEMO1=A)	`#Memo` argument is not hashable (D-MEMO1=A)	the registered sema rule applies here	follow the guidance for E0939	false	-
 E0940	active	sema	error	compile	`#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A)	`#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A)	the registered sema rule applies here	follow the guidance for E0940	false	-
-E0928	reserved	sema	error	compile	a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1)	a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1)	the registered sema rule applies here	follow the guidance for E0928	false	-
+E0928	reserved	sema	error	compile	a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C)	a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C)	the registered sema rule applies here	follow the guidance for E0928	false	-
 E0951	retired	sema	error	compile	**retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401	**retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401	the registered sema rule applies here	follow the guidance for E0951	false	-
 E0952	active	sema	error	compile	comptime budget exhausted (fuel)	comptime budget exhausted (fuel)	the registered sema rule applies here	follow the guidance for E0952	false	-
 E0953	active	sema	error	compile	@panic :: user-authored compile error (message verbatim)	@panic :: user-authored compile error (message verbatim)	the registered sema rule applies here	follow the guidance for E0953	false	-
@@ -1405,6 +1412,7 @@ E2605	active	compile	error	compile	`{name}` v{version} cannot be published from 
 E2606	active	compile	error	compile	`jet registry yank` requires a version argument.	`jet registry yank` requires a version argument.	A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank.	Run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`.	true	-
 E2607	active	compile	error	compile	`{source}` is malformed: `{detail}`.	`{source}` is malformed: `{detail}`.	Supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them.	Fix the malformed record and retry; use the parser contract in `spec.md` and UTF-8 text.	true	-
 E2711	active	compile	error	compile	Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local.	Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local.	A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract.	Define `derive T.{Trait}` or `{Type}` in the entry module.	true	-
+E2712	active	compile	error	compile	this checked text head rejected its body	this checked text head rejected its body	A library's checked text head evaluated its `check` expression and rejected the complete literal body (D-BOUND-SINK1=A).	Fix the head body so it satisfies the library's declared text grammar.	true	-
 E2714	retired	compile	error	compile	A user derive is written `derive T.{Trait}`.	A user derive is written `derive T.{Trait}`.	The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {Trait} for T` spelling was retired.	Write `derive T.{Trait} { … }`.	true	-
 E2801	active	compile	error	compile	{operation} on `{address}` failed: {detail}.	{operation} on `{address}` failed: {detail}.	A socket bind, listen, connect, or accept call returned an OS error. The address and operation are named so you can act on the specific failure.	Check that the address is reachable and the port is not already in use. For `bind`, try a different port. For `connect`, verify the server is running.	true	-
 E2802	active	compile	error	compile	TLS handshake with `{host}` failed: {detail}.	TLS handshake with `{host}` failed: {detail}.	The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store.	Verify the server's certificate, ensure the system trust store is up-to-date, or use `core.tls.insecure_skip_verify()` in a test environment only.	true	-
@@ -1437,4 +1445,8 @@ E0996	active	compile	error	compile	`members:` evaluated to something other than 
 E0997	active	compile	error	compile	`find("…")` in `members:` names a directory that doesn't exist.	`find("…")` in `members:` names a directory that doesn't exist.	`find` scans that directory for subdirectories containing `package.jet`; the directory must exist relative to `workspace.jet`.	Create the directory or correct the path in `members: find("…")`.	true	-
 E1112	active	sema	error	compile	a task combinator has no task branch (D-CONCSELECT1)	{method} needs at least one task branch	a task combinator must have a child to join or select	write {method} {{ work() }} with one or more branches	true	-
 E3004	active	runtime	error	compile	task cancelled at a cooperative wait point (D-CANCELMODEL1)	task cancelled at a cooperative wait point	the task control plane requested cancellation before this wait completed	Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait.	true	-
+E0382	active	sema	error	compile	`#Memo` requires a bare computed field (D-FIELDMEMO1=A)	`#Memo` cannot mark `{field}`.	A stored computed result needs a formula and its dependency set; field `#Memo` does not take cache arguments.	Write `#Memo` before `{field}: T => expr` without arguments.	true	-
+R0801	active	runtime	error	run	raw `{operation}` outside `{gate}`'s allocation provenance	Runtime fault [R0801]: raw `{operation}` outside `{gate}`'s storage	The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate; runtime evidence never replaces a required static obligation.	Bound the raw access before it reaches storage — obligation `{obligation}` was not met on this run.	true	-
+R0802	active	runtime	error	run	use of quarantined storage after release	Runtime fault [R0802]: use of freed storage in `{gate}`	The allocation was quarantined and poisoned before this raw `{operation}`; the gate's lifetime obligation was not met.	Do not use the pointer after release — obligation `{obligation}` was not met on this run.	true	-
+R0803	active	runtime	error	run	misaligned raw `{operation}`	Runtime fault [R0803]: misaligned raw `{operation}` in `{gate}`	The pointer alignment does not satisfy the allocation provenance for the active `#Unsafe` gate.	Align the raw access before it reaches storage — obligation `{obligation}` was not met on this run.	true	-
 ```

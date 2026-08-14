@@ -327,7 +327,7 @@ function generate() {
     ].join("\n")),
     section("Core source rules", [
       "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
-      "Functions: `fn name(parameter: Type) => Return { ... }`; expression bodies use `= expression`.",
+      "Functions: `fn name(parameter: Type) => Return { ... }`; expression bodies use `:: expression`.",
       "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
       "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ? E`.",
       "Errors: handle `T?` or `T ? E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
