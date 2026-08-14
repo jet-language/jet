@@ -654,6 +654,8 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         {
             true
         }
+        Type::Apply { name, .. }
+            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => true,
         Type::Apply { name, args }
             if name == jet_foundation::Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
         {

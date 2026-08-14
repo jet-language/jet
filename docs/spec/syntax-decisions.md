@@ -1114,6 +1114,13 @@ DateTime head cannot contain holes. Runtime strings keep the existing
 fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
 and D-CORE-PATH1; no compatibility spelling is retained.
 
+**D-BOUND-RAW1=A — typed head bodies own escapes** *(ratified 2026-08-13,
+card #1815)*: inside any `Type.{"…"}` body, backslash is literal text owned
+by that head's grammar. Quote, brace, multiline-closing, and interpolation
+rules do not change; Regex still rejects interpolation. Plain strings keep
+the ordinary escape table. The head body is the raw boundary, so a Regex
+grammar can receive `Regex.{"\d+"}` without a second backslash.
+
 **D-BOUND-LAW1=A — one crossing law** (ratified 2026-08-07, card #1813):
 nothing foreign becomes Jet silently. Every comptime, build, link, and runtime
 crossing names its schema and leaves its fact. Boundary planning uses the
@@ -6630,6 +6637,13 @@ declaration rules.
 boundary and grammar contract; the library supplies the domain content. This
 amends D-DSLBLOCK1 and retires the marker-only `STDLIB_DSL_BLOCK_MARKERS`
 mechanism.
+
+**D-BOUND-SINK1=A — libraries declare checked text heads** *(ratified
+2026-08-13, card #1816)*: a library may declare `marker Name on [.Text] {
+check …; hole … }`. The declaration names a checked text type: Jet runs `check`
+on the complete body at comptime and applies `hole` to each interpolation.
+Sinks accept the declared checked type; `.raw()` is the explicit audited
+escape. There is no sink registry or parallel sink mechanism.
 
 **D-META-EFFECT1=A — one effect model at both stages** *(ratified 2026-08-06,
 card #1543)*: Compile-time and runtime use the same effect syntax and checker.

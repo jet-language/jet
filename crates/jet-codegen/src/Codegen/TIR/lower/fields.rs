@@ -33,6 +33,9 @@ fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
             Item::Distinct(definition) => {
                 names.insert(definition.name.clone());
             }
+            Item::MarkerDecl(definition) if definition.text.is_some() => {
+                names.insert(definition.name.clone());
+            }
             _ => {}
         }
     }
@@ -48,6 +51,7 @@ fn module_has_nominal_type(items: &[Item], name: &str) -> bool {
             .distinct_defs()
             .iter()
             .any(|member| member.name == name),
+        Item::MarkerDecl(definition) => definition.text.is_some() && definition.name == name,
         _ => false,
     })
 }
@@ -269,6 +273,9 @@ pub(crate) fn register_imported_struct_shapes(
                     .map(|member| member.name.clone())
                     .collect(),
                 Item::Distinct(definition) => vec![definition.name.clone()],
+                Item::MarkerDecl(definition) if definition.text.is_some() => {
+                    vec![definition.name.clone()]
+                }
                 _ => Vec::new(),
             })
             .collect();

@@ -523,15 +523,20 @@ fn is_list_int(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }))
 }
 
+fn is_string_like(ty: &Type) -> bool {
+    matches!(ty, Type::String)
+        || matches!(ty, Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT)
+}
+
 fn is_list_string(ty: &Type) -> bool {
-    matches!(ty, Type::List(inner) if matches!(**inner, Type::String))
+    matches!(ty, Type::List(inner) if is_string_like(inner))
 }
 
 fn is_map_string_int(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Map { key, value, .. }
-            if matches!(**key, Type::String)
+            if is_string_like(key)
                 && matches!(**value, Type::Int)
     )
 }
@@ -547,10 +552,10 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc, bundle: &ProgramBundle) ->
     params_supported
         // D-JSBIND1: String / [Int] / [String] / [String: Int] params/returns
         // cross the export boundary as packed (ptr,len) u64 ownership transfers.
-        && f.return_type
+        && tir.ret
             .as_ref()
             .map(|ty| {
-                matches!(ty, Type::String)
+                is_string_like(ty)
                     || is_list_int(ty)
                     || is_list_string(ty)
                     || is_map_string_int(ty)
@@ -718,15 +723,15 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
             TIR::TStrPart::Lit(_) => true,
             TIR::TStrPart::Interp(value, _) => {
-                matches!(
+                (matches!(
                     value.ty,
                     Type::Int
                         | Type::IntN { .. }
                         | Type::Float
                         | Type::Float32
                         | Type::Bool
-                        | Type::String
-                ) && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
+                ) || is_string_like(&value.ty))
+                    && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
             }
         }),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
@@ -1456,9 +1461,12 @@ fn collect_module_funcs(
                     params: f
                         .params
                         .iter()
-                        .map(|p| (p.name.clone(), p.ty.clone()))
+                        .map(|p| (p.name.clone(), cx.expand_type_aliases(&p.ty)))
                         .collect(),
-                    return_type: f.return_type.clone(),
+                    return_type: f
+                        .return_type
+                        .as_ref()
+                        .map(|ty| cx.expand_type_aliases(ty)),
                     tir: TIR::lower_web_func(f, cx),
                     memo_fields: memo_fields.clone(),
                 });
@@ -1780,7 +1788,7 @@ fn js_abi_call_args(
     }
     match ty {
         Type::Int | Type::IntN { .. } => vec![format!("BigInt({name})")],
-        Type::String => {
+        ty if is_string_like(ty) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"string\", wasm);\n"
             ));
@@ -1792,7 +1800,7 @@ fn js_abi_call_args(
             ));
             vec![format!("_{name}")]
         }
-        Type::List(inner) if matches!(**inner, Type::String) => {
+        Type::List(inner) if is_string_like(inner) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"list-string\", wasm);\n"
             ));
@@ -2320,7 +2328,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
                 || flattened_web_params(&f.tir).iter().any(|(_, ty)| pred(ty))
         })
     };
-    if need_packed_abi(&|ty| matches!(ty, Type::String)) {
+    if need_packed_abi(&is_string_like) {
         // D-JSBIND1=A: UTF-8 ownership transfer — packed u64 (ptr<<32)|len.
         // Returns: Wasm owns → JS copies → jet_abi_string_free.
         // Params: JS TextEncoder → jet_abi_string_alloc → Wasm takes via jet_abi_string_arg.
@@ -2603,7 +2611,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
 }
 
 fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
-    let string_ret = matches!(f.return_type.as_ref(), Some(Type::String));
+    let string_ret = f.return_type.as_ref().is_some_and(is_string_like);
     let list_ret = f.return_type.as_ref().is_some_and(is_list_int);
     let list_string_ret = f.return_type.as_ref().is_some_and(is_list_string);
     let map_ret = f.return_type.as_ref().is_some_and(is_map_string_int);
@@ -2657,7 +2665,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
         }
         out.push_str("{\n    jet_wasm_call(|| {\n");
         for (name, ty) in &flat {
-            if matches!(ty, Type::String) {
+            if is_string_like(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_string_arg({name});\n"));
             } else if is_list_int(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_list_i64_arg({name});\n"));
@@ -2778,10 +2786,11 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
         Type::String => Some("String"),
+        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => Some("String"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("Vec<i64>"),
-        Type::List(inner) if matches!(**inner, Type::String) => Some("Vec<String>"),
+        Type::List(inner) if is_string_like(inner) => Some("Vec<String>"),
         Type::Map { key, value, .. }
-            if matches!(**key, Type::String) && matches!(**value, Type::Int) =>
+            if is_string_like(key) && matches!(**value, Type::Int) =>
         {
             Some("std::collections::BTreeMap<String, i64>")
         }
@@ -2798,6 +2807,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Float | Type::Float32 => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),
+        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
         Type::List(inner) => format!("Vec<{}>", wasm_storage_ty(inner)?),
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_storage_ty(elem)?)
@@ -2847,6 +2857,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
                 .unwrap_or_default();
             format!("fn({}){ret}", params.join(", "))
         }
+        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
         Type::Union(members) => mangle_path(&crate::AST::union_enum_name(members)),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
         Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
@@ -2871,6 +2882,12 @@ fn wasm_param_rust_ty(
         (AccessConvention::Read, Type::String) => Some("&String".to_string()),
         (AccessConvention::Write, Type::String) => Some("&mut String".to_string()),
         (AccessConvention::Move, Type::String) => Some("String".to_string()),
+        (AccessConvention::Read, Type::Apply { name, .. })
+            if name == Syntax::TYPE_CHECKED_TEXT => Some("&String".to_string()),
+        (AccessConvention::Write, Type::Apply { name, .. })
+            if name == Syntax::TYPE_CHECKED_TEXT => Some("&mut String".to_string()),
+        (AccessConvention::Move, Type::Apply { name, .. })
+            if name == Syntax::TYPE_CHECKED_TEXT => Some("String".to_string()),
         (AccessConvention::Read, Type::List(inner))
             if matches!(**inner, Type::Int | Type::IntN { .. }) =>
         {
@@ -2886,13 +2903,13 @@ fn wasm_param_rust_ty(
         {
             Some("Vec<i64>".to_string())
         }
-        (AccessConvention::Read, Type::List(inner)) if matches!(**inner, Type::String) => {
+        (AccessConvention::Read, Type::List(inner)) if is_string_like(inner) => {
             Some("&Vec<String>".to_string())
         }
-        (AccessConvention::Write, Type::List(inner)) if matches!(**inner, Type::String) => {
+        (AccessConvention::Write, Type::List(inner)) if is_string_like(inner) => {
             Some("&mut Vec<String>".to_string())
         }
-        (AccessConvention::Move, Type::List(inner)) if matches!(**inner, Type::String) => {
+        (AccessConvention::Move, Type::List(inner)) if is_string_like(inner) => {
             Some("Vec<String>".to_string())
         }
         (AccessConvention::Read, ty) if is_map_string_int(ty) => {
@@ -2916,15 +2933,19 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
     match (conv, ty) {
         (AccessConvention::Read, Type::String) => format!("&{name}"),
         (AccessConvention::Write, Type::String) => format!("&mut {name}"),
+        (AccessConvention::Read, Type::Apply { name: type_name, .. })
+            if type_name == Syntax::TYPE_CHECKED_TEXT => format!("&{name}"),
+        (AccessConvention::Write, Type::Apply { name: type_name, .. })
+            if type_name == Syntax::TYPE_CHECKED_TEXT => format!("&mut {name}"),
         (AccessConvention::Read, Type::List(inner))
             if matches!(**inner, Type::Int | Type::IntN { .. })
-                || matches!(**inner, Type::String) =>
+                || is_string_like(inner) =>
         {
             format!("&{name}")
         }
         (AccessConvention::Write, Type::List(inner))
             if matches!(**inner, Type::Int | Type::IntN { .. })
-                || matches!(**inner, Type::String) =>
+                || is_string_like(inner) =>
         {
             format!("&mut {name}")
         }
@@ -2940,7 +2961,8 @@ fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
         // Packed (ptr,len) u64 on the C ABI; internal jet_wasm_* still uses String / Vec.
         Type::String => Some("u64"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("u64"),
-        Type::List(inner) if matches!(**inner, Type::String) => Some("u64"),
+        Type::List(inner) if is_string_like(inner) => Some("u64"),
+        ty if is_string_like(ty) => Some("u64"),
         ty if is_map_string_int(ty) => Some("u64"),
         _ => wasm_ty(ty),
     }
@@ -4292,7 +4314,7 @@ fn emit_js_app(
             out.push_str("  const _edgeError = jetDom.takeWasmError(wasm);\n");
             out.push_str("  if (_edgeError) return jetDom.raiseRuntimeError(_edgeError);\n");
             let ret_kind = match f.return_type.as_ref() {
-                Some(Type::String) => "string",
+                Some(ty) if is_string_like(ty) => "string",
                 Some(ty) if is_list_int(ty) => "list-int",
                 Some(ty) if is_list_string(ty) => "list-string",
                 Some(ty) if is_map_string_int(ty) => "map-string-int",

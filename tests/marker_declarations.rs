@@ -212,9 +212,9 @@ fn every_fact_row_carries_its_law_columns() {
 #[test]
 fn source_rules_record_facts_and_add_checked_members() {
     let source = r#"
-marker Recorded($sites: [.Type])
+marker Recorded(@sites: [.Type])
 
-marker AddGreeting($sites: [.Type]) {
+marker AddGreeting(@sites: [.Type]) {
     tname :: target.name
     emit("""
 impl $tname {{
@@ -302,7 +302,7 @@ fn run() {
 #[test]
 fn source_rule_rejects_a_wrong_typed_argument() {
     let diagnostics = jet::compile(
-        "marker NeedsName(name: String, $sites: [.Type])\n#NeedsName(7)\nstruct Person { id: Int }\n",
+        "marker NeedsName(name: String, @sites: [.Type])\n#NeedsName(7)\nstruct Person { id: Int }\n",
     )
     .expect_err("a source rule must check its typed argument");
     assert!(
@@ -327,7 +327,7 @@ fn unknown_callable_rule_is_checked_against_the_bundle_registry() {
 #[test]
 fn source_rule_rejects_a_site_not_in_its_declared_facts() {
     let diagnostics = jet::compile(
-        "marker TypeOnly($sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n",
+        "marker TypeOnly(@sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n",
     )
     .expect_err("a source rule must enforce its declared legal sites");
     assert!(
@@ -341,7 +341,7 @@ fn source_rule_rejects_a_site_not_in_its_declared_facts() {
 #[test]
 fn source_rule_rejects_a_non_repeatable_duplicate() {
     let diagnostics = jet::compile(
-        "marker Once($sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n",
+        "marker Once(@sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n",
     )
     .expect_err("a non-repeatable source rule must reject a duplicate");
     let duplicate = diagnostics
@@ -359,7 +359,7 @@ fn source_rule_rejects_a_non_repeatable_duplicate() {
 fn source_rule_body_can_reject_a_function_target() {
     let diagnostics = jet::compile(
         r#"
-marker RejectsFunction($sites: [.Function]) {
+marker RejectsFunction(@sites: [.Function]) {
     reject(
         code: "E0927",
         what: "the function is not allowed",
@@ -393,7 +393,7 @@ fn run() {}
 fn source_rule_collision_names_generated_and_written_spans() {
     let diagnostics = jet::compile(
         r#"
-marker AddGreeting($sites: [.Type]) {
+marker AddGreeting(@sites: [.Type]) {
     tname :: target.name
     emit("""
 impl $tname {{
@@ -431,7 +431,7 @@ impl Person {
 fn source_rule_rejection_keeps_the_registered_cause() {
     let diagnostics = jet::compile(
         r#"
-marker Rejects($sites: [.Type]) {
+marker Rejects(@sites: [.Type]) {
     reject(
         code: "E0927",
         what: "the rule rejected this type",

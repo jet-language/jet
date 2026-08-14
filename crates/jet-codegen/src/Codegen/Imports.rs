@@ -191,6 +191,9 @@ pub(crate) fn selective_nominal_targets(
                     .distinct_defs()
                     .iter()
                     .any(|member| member.name == leaf),
+                Item::MarkerDecl(definition) => {
+                    definition.text.is_some() && definition.name == leaf
+                }
                 _ => false,
             });
             if is_nominal && bundle.name_ledger.visible(module_idx, target, leaf) {
@@ -286,6 +289,9 @@ pub(crate) fn foreign_type_map(
         module.items.iter().any(|item| match item {
             Item::Struct(structure) => structure.name == name,
             Item::Enum(enumeration) => enumeration.name == name,
+            Item::MarkerDecl(declaration) => {
+                declaration.text.is_some() && declaration.name == name
+            }
             _ => false,
         })
     };
@@ -313,6 +319,17 @@ pub(crate) fn foreign_type_map(
                     if bundle.name_ledger.visible(module_idx, target, &d.name) =>
                 {
                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::MarkerDecl(declaration)
+                    if declaration.text.is_some()
+                        && bundle.name_ledger.visible(module_idx, target, &declaration.name)
+                        && !is_local(&declaration.name) =>
+                {
+                    if let Some(identity) =
+                        bundle.name_ledger.nominal_identity(target, &declaration.name)
+                    {
                         map.insert(identity, rust_mod.clone());
                     }
                 }
@@ -380,6 +397,16 @@ pub(crate) fn foreign_type_map(
                     if bundle.name_ledger.visible(module_idx, target, &d.name) =>
                 {
                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
+                        map.insert(identity, rust_mod.clone());
+                    }
+                }
+                Item::MarkerDecl(declaration)
+                    if declaration.text.is_some()
+                        && bundle.name_ledger.visible(module_idx, target, &declaration.name) =>
+                {
+                    if let Some(identity) =
+                        bundle.name_ledger.nominal_identity(target, &declaration.name)
+                    {
                         map.insert(identity, rust_mod.clone());
                     }
                 }

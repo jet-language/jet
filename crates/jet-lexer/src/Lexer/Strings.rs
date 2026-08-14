@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
     /// Lex a string literal: escapes (S20), `{{`/`}}` literal braces (S20),
     /// and `{expr}` interpolation (S8). Interpolated expressions are lexed
     /// in place so their tokens carry real source spans.
-    pub(super) fn string(&mut self, start: usize) -> Option<Token> {
+    pub(super) fn string(&mut self, start: usize, raw_head: bool) -> Option<Token> {
         self.i += 1; // opening quote
         let mut parts: Vec<StrTokPart> = Vec::new();
         let mut lit = String::new();
@@ -62,19 +62,33 @@ impl<'a> Lexer<'a> {
                 }
                 '\n' => break,
                 '\\' => {
-                    let esc = self.at(self.i + 1);
-                    if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
-                        lit.push(decoded);
-                        self.i += 2;
+                    if raw_head {
+                        lit.push('\\');
+                        if self.at(self.i + 1) == '"' {
+                            // Keep the ordinary quote-delimiter rule: a quote
+                            // preceded by a slash is part of the body. RAW1
+                            // preserves both source characters instead of
+                            // decoding the pair.
+                            lit.push('"');
+                            self.i += 2;
+                        } else {
+                            self.i += 1;
+                        }
                     } else {
-                        self.diags.push(Diagnostic::error(
-                            "E0001",
-                            format!("`\\{}` isn't an escape Jet knows", esc),
-                            "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
-                            "write `\\\\` for a real backslash".to_string(),
-                            Some(Span::new(self.pos(self.i), self.pos(self.i + 2))),
-                        ));
-                        self.i += 2;
+                        let esc = self.at(self.i + 1);
+                        if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+                            lit.push(decoded);
+                            self.i += 2;
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0001",
+                                format!("`\\{}` isn't an escape Jet knows", esc),
+                                "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
+                                "write `\\\\` for a real backslash".to_string(),
+                                Some(Span::new(self.pos(self.i), self.pos(self.i + 2))),
+                            ));
+                            self.i += 2;
+                        }
                     }
                 }
                 '{' if self.at(self.i + 1) == '{' => {
@@ -211,7 +225,7 @@ impl<'a> Lexer<'a> {
     /// Escapes (S20) and `{interp}` (S8) stay active. The processed text is
     /// stored as ordinary [`StrTokPart`]s; `jet fmt` re-derives the triple-quoted
     /// shape from the span.
-    pub(super) fn triple_string(&mut self, start: usize) -> Option<Token> {
+    pub(super) fn triple_string(&mut self, start: usize, raw_head: bool) -> Option<Token> {
         let open_end = self.i + 3; // char index just past the opening `"""`
 
         // Pass 1: locate the closing `"""`, skipping `\`-escapes and the
@@ -241,7 +255,9 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             match c {
-                '\\' => j += 2,
+                '\\' if !raw_head => j += 2,
+                '\\' if self.at(j + 1) == '"' => j += 2,
+                '\\' => j += 1,
                 '{' if self.at(j + 1) != '{' => {
                     depth += 1;
                     j += 1;
@@ -325,19 +341,32 @@ impl<'a> Lexer<'a> {
                     at_line_start = true;
                 }
                 '\\' => {
-                    let esc = self.at(k + 1);
-                    if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
-                        lit.push(decoded);
+                    if raw_head {
+                        lit.push('\\');
+                        if self.at(k + 1) == '"' {
+                            // As in an ordinary triple string, a quoted
+                            // delimiter is not a closing delimiter. Preserve
+                            // the slash and quote as raw body text.
+                            lit.push('"');
+                            k += 2;
+                        } else {
+                            k += 1;
+                        }
                     } else {
-                        self.diags.push(Diagnostic::error(
-                            "E0001",
-                            format!("`\\{}` isn't an escape Jet knows", esc),
-                            "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
-                            "write `\\\\` for a real backslash".to_string(),
-                            Some(Span::new(self.pos(k), self.pos(k + 2))),
-                        ));
+                        let esc = self.at(k + 1);
+                        if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+                            lit.push(decoded);
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0001",
+                                format!("`\\{}` isn't an escape Jet knows", esc),
+                                "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
+                                "write `\\\\` for a real backslash".to_string(),
+                                Some(Span::new(self.pos(k), self.pos(k + 2))),
+                            ));
+                        }
+                        k += 2;
                     }
-                    k += 2;
                 }
                 '{' if self.at(k + 1) == '{' => {
                     lit.push('{');

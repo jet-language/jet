@@ -62,6 +62,11 @@ impl<'a> Checker<'a> {
                     globals.insert(name.clone(), value.clone());
                 }
             }
+            if let Some(context) = self.text_head_context {
+                for (name, value) in &context.globals {
+                    globals.insert(name.clone(), value.clone());
+                }
+            }
             globals
         }
 

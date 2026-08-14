@@ -498,9 +498,30 @@ impl<'a> Checker<'a> {
             // `HTML` here name the type, not a value (checked via `lookup` so a
             // shadowing local of that name still resolves normally below).
             if method == "raw" {
-                if let Expr::Ident(n, _) = receiver.as_ref() {
-                    if Syntax::is_typed_text_type(n) && self.lookup(n).is_none() {
-                        let type_name = n.clone();
+                let (type_name, shadowed) = match receiver.as_ref() {
+                    Expr::Ident(name, _) => (Some(name.clone()), self.lookup(name).is_some()),
+                    Expr::Field(base, member, _)
+                        if matches!(base.as_ref(), Expr::Ident(..)) =>
+                    {
+                        let Expr::Ident(alias, _) = base.as_ref() else {
+                            unreachable!("checked qualified type receiver")
+                        };
+                        (Some(format!("{alias}.{member}")), self.lookup(alias).is_some())
+                    }
+                    _ => (None, false),
+                };
+                if let (Some(type_name), false) = (type_name, shadowed) {
+                    let is_builtin = Syntax::typed_head_kind(&type_name)
+                        .is_some_and(|kind| kind.is_typed_text());
+                    let declared = self.text_head_contract(&type_name);
+                    let is_declared = declared.is_some();
+                    if is_builtin || is_declared {
+                        let result = if let Some((canonical, _)) = declared {
+                            crate::Sema::checked_text_type(&canonical)
+                        } else {
+                            Type::Named(type_name.clone())
+                        };
+                        *resolved_ret_out = Some(result.clone());
                         if args.len() != 1 {
                             self.diags.push(Diagnostic::error(
                                 "E0103",
@@ -510,13 +531,13 @@ impl<'a> Checker<'a> {
                                 format!("write `{}.raw(text)`", type_name),
                                 Some(span),
                             ));
-                            return Some(Type::Named(type_name));
+                            return Some(result);
                         }
                         let arg_ty = self.infer(&mut args[0].expr);
                         if let Some(t) = arg_ty {
                             self.check_type_assignable(&Type::String, &t, args[0].expr.span());
                         }
-                        return Some(Type::Named(type_name));
+                        return Some(result);
                     }
                 }
             }
@@ -643,7 +664,7 @@ impl<'a> Checker<'a> {
             // for real submodules (e.g. `core.encoding.json`), never plain field access.
             if let Expr::Field(base, leaf, _) = &**receiver {
                 if let Expr::Ident(alias, _) = &**base {
-                    if let Some(ns) = self.core_imports.get(alias).cloned() {
+                    if let Some(ns) = self.text_head_core_import(alias) {
                         if ns == "core.tls" && leaf == "ClientConfig" && method == "default" {
                             if !args.is_empty() {
                                 self.diags.push(wrong_core_arity("ClientConfig.default", 0, args.len(), span));
@@ -1074,7 +1095,7 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             if let Expr::Ident(alias, alias_span) = &**receiver {
-                if let Some(module) = self.core_imports.get(alias).cloned() {
+                if let Some(module) = self.text_head_core_import(alias) {
                     let ret = self.infer_core_call(&module, method, *alias_span, span, type_args, args);
                     // c109 Phase 20: write the resolved return type back onto the node
                     // for the polymorphic core specials whose type is arg-dependent and

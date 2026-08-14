@@ -111,6 +111,17 @@ pub struct MarkerDecl {
     /// D-META-USER1=A: absent means this rule only records its declaration
     /// facts; present means the body may reject or emit checked Jet items.
     pub body: Option<Vec<Stmt>>,
+    /// D-BOUND-SINK1=A: a library-owned checked text head. The declaration
+    /// uses `marker Name on [.Text] { check … hole … }` so the type and its
+    /// construction contract share the marker vocabulary.
+    pub text: Option<MarkerTextDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct MarkerTextDecl {
+    pub check: Expr,
+    pub hole: Expr,
     pub span: Span,
 }
 

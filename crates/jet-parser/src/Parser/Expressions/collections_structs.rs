@@ -273,6 +273,20 @@ impl<'a> Parser<'a> {
             type_name: String,
             start: usize,
         ) -> Result<Expr, Diagnostic> {
+            // D-BOUND-SINK1=A: imported library text heads use the same
+            // `alias.Name.{"…"}` literal surface as local heads. A field-led
+            // body remains the ordinary imported struct constructor.
+            if !brace_body_looks_like_fields(&self.toks, self.pos + 1) {
+                let head_name = format!("{alias}.{type_name}");
+                let head = Type::Named(head_name);
+                let body = self.typed_lit_body_for_head(&head)?;
+                let end = self.toks[self.pos.saturating_sub(1)].span.end;
+                return Ok(Expr::TypedLit {
+                    head: Some(head),
+                    body,
+                    span: Span::new(start, end),
+                });
+            }
             self.expect(TokKind::LBrace, "to open a struct literal")?;
             let fields = self.finish_struct_fields_already_open()?;
             let end = self.toks[self.pos.saturating_sub(1)].span.end;

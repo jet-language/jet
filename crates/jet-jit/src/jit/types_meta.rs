@@ -236,6 +236,9 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n) if n == "Unit") {
         return None;
     }
+    if matches!(&ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT) {
+        return Some(types::I64);
+    }
     // D-RANGE-VALUE1: Range uses a lossless three-value resident ABI
     // (`start: I64`, `end: I64`, `exclusive: I8`). It is deliberately not an
     // I64 arena handle, so callers must use the explicit Range ABI helpers.

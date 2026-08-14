@@ -1529,6 +1529,7 @@ fn check_func_body_bundle_scoped(
         module_idx,
         imports: &scoped_imports,
         core_imports: &scoped_core_imports,
+        text_head_context: None,
         code_modules: &st.code_modules,
         code_module_identities: &st.code_module_identities,
         unqualified: &scoped_unqualified,

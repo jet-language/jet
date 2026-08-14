@@ -98,6 +98,8 @@ pub(crate) fn deopt_marshallable(tir: &TFunc) -> bool {
 fn marshallable_ty(ty: &Type) -> bool {
     match ty {
         Type::Int | Type::IntN { .. } | Type::String | Type::Bool | Type::Char => true,
+        Type::Apply { name, .. }
+            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => true,
         Type::Named(n) if matches!(n.as_str(), "Int" | "String" | "Bool" | "Char" | "Unit") => {
             true
         }

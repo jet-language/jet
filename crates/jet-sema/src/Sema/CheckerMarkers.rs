@@ -976,7 +976,7 @@ fn declared_rule_arguments_match(
     let params: Vec<_> = declaration
         .params
         .iter()
-        .filter(|param| !param.name.starts_with('$'))
+        .filter(|param| !crate::Syntax::is_comptime_name(&param.name))
         .collect();
     let mut supplied = vec![false; params.len()];
     let mut next_positional = 0usize;
@@ -1023,7 +1023,7 @@ fn declared_rule_argument_shape_error(
     let expected = declaration
         .params
         .iter()
-        .filter(|parameter| !parameter.name.starts_with('$'))
+        .filter(|parameter| !crate::Syntax::is_comptime_name(&parameter.name))
         .map(|parameter| {
             let ty = parameter
                 .ty
@@ -1087,7 +1087,7 @@ fn declared_rule_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Polic
     declaration
         .params
         .iter()
-        .find(|param| param.name == "$sites")
+        .find(|param| param.name == "@sites")
         .and_then(|param| param.value.as_deref())
         .and_then(|value| match value {
             crate::AST::Expr::ListLit(values, _) => Some(values.as_slice()),
@@ -1116,7 +1116,7 @@ fn declared_rule_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
     declaration
         .params
         .iter()
-        .find(|param| param.name == "$repeatable")
+        .find(|param| param.name == "@repeatable")
         .and_then(|param| param.value.as_deref())
         .is_some_and(|value| matches!(value, crate::AST::Expr::Bool(true, _)))
 }

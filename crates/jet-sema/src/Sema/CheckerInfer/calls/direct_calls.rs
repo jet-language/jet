@@ -177,6 +177,28 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+            if call.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP {
+                let Some(Type::Named(type_name)) = call.type_args.first().cloned() else {
+                    return Some(None);
+                };
+                if call.args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        "the checked text constructor needs one encoded String".to_string(),
+                        "the compiler-internal checked text wrapper receives the head's complete encoded body".to_string(),
+                        "use a declared text head literal or its audited `.raw()` escape".to_string(),
+                        Some(call.name_span),
+                    ));
+                    return Some(None);
+                }
+                let arg_ty = self.infer(&mut call.args[0].expr);
+                if let Some(ty) = arg_ty {
+                    self.check_type_assignable(&Type::String, &ty, call.args[0].expr.span());
+                }
+                let result = crate::Sema::checked_text_type(type_name);
+                call.resolved_ret = Some(result.clone());
+                return Some(Some(result));
+            }
             if call.name == "apply"
                 && self.funcs.get(&call.name).is_none()
                 && self.lookup(&call.name).is_none()
@@ -890,7 +912,7 @@ impl<'a> Checker<'a> {
                 return Some(result);
             }
     
-            let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
+            let Some(mut sig) = self.text_head_function_sig(&call.name) else {
                 let mut fix = format!(
                     "define it first ({} {}() {{ ... }}), or call one that exists",
                     Syntax::KW_FN,
@@ -906,6 +928,11 @@ impl<'a> Checker<'a> {
                     .funcs
                     .keys()
                     .map(|s| s.as_str())
+                    .chain(
+                        self.text_head_context
+                            .into_iter()
+                            .flat_map(|context| context.sigs.keys().map(String::as_str)),
+                    )
                     .chain(prelude_cands.iter().copied())
                 {
                     let d = edit_distance(&call.name, cand);
@@ -1138,10 +1165,8 @@ impl<'a> Checker<'a> {
             }
     
             let fn_type_params = self
-                .trait_reg
-                .fn_params
-                .get(&call.name)
-                .cloned()
+                .text_head_function_params(&call.name)
+                .or_else(|| self.trait_reg.fn_params.get(&call.name).cloned())
                 .unwrap_or_default();
             let mut call_access = self.call_access_frame();
             let mut generic_subst = HashMap::new();

@@ -193,6 +193,51 @@ fn is_c_import_after_validation(import: &crate::AST::ImportDecl) -> bool {
     })
 }
 
+/// D-BOUND-SINK1=A: keep each declared text head's compile-time contract
+/// attached to the module that authored it. The first pass publishes every
+/// head name before module checking; the per-module refresh below captures
+/// comptime constants after they have been evaluated.
+fn register_text_head_contracts(
+    state: &mut crate::Sema::ModuleState,
+    module: &crate::AST::LoadedModule,
+    core_imports: &HashMap<String, String>,
+) {
+    let (funcs, _externs, globals) =
+        super::super::Registration::comptime_context_from_items(&module.items);
+    let sigs = funcs
+        .iter()
+        .map(|(name, function)| (name.clone(), super::super::func_to_sig(function)))
+        .collect();
+    let type_params = funcs
+        .iter()
+        .map(|(name, function)| (name.clone(), function.type_params.clone()))
+        .collect();
+    let base_dir = module
+        .path
+        .parent()
+        .map(|path| path.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    for declaration in module.items.iter().filter_map(|item| match item {
+        Item::MarkerDecl(declaration) => declaration.text.as_ref().map(|text| {
+            (
+                declaration.name.clone(),
+                crate::Sema::TextHeadContract {
+                    declaration: text.clone(),
+                    funcs: funcs.clone(),
+                    sigs: sigs.clone(),
+                    type_params: type_params.clone(),
+                    globals: globals.clone(),
+                    core_imports: core_imports.clone(),
+                    base_dir: base_dir.clone(),
+                },
+            )
+        }),
+        _ => None,
+    }) {
+        state.registry.register_text_head(declaration.0, declaration.1);
+    }
+}
+
 pub(super) fn check_bundle_opts_for_output(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
@@ -522,6 +567,12 @@ fn check_bundle_opts_for_output_inner(
             imports
         })
         .collect();
+    for (state, (module, core_imports)) in states
+        .iter_mut()
+        .zip(bundle.modules.iter().zip(&ct_core_imports))
+    {
+        register_text_head_contracts(state, module, core_imports);
+    }
     let mut top_level_embed_inputs = Vec::new();
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
@@ -555,6 +606,7 @@ fn check_bundle_opts_for_output_inner(
             &bundle.build_facts,
             Some(&mut top_level_embed_inputs),
         );
+        register_text_head_contracts(&mut states[idx], module, &ct_core_imports[idx]);
         super::super::Registration::resolve_comptime_declaration_values(
             &mut module.items,
             &base,
@@ -715,6 +767,7 @@ fn check_bundle_opts_for_output_inner(
                         }
                         TypeRegistry {
                             types,
+                            text_heads: st.registry.text_heads.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
                             computed_fields: st.registry.computed_fields.clone(),

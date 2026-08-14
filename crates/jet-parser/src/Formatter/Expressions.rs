@@ -1254,7 +1254,11 @@ impl<'a> Fmt<'a> {
                         if multiline {
                             self.emit_leading(expr.span().start);
                         }
-                        self.fmt_expr(expr, Prec::OrFallback);
+                        if let Expr::Str(parts, string_span) = expr.as_ref() {
+                            self.fmt_typed_head_str(parts, *string_span);
+                        } else {
+                            self.fmt_expr(expr, Prec::OrFallback);
+                        }
                         if multiline {
                             self.emit_trailing(expr.span().end);
                         }
@@ -2122,6 +2126,93 @@ impl<'a> Fmt<'a> {
         self.write("\"");
     }
 
+    /// D-BOUND-RAW1=A: typed head bodies preserve written backslashes, while
+    /// doubled braces remain the literal-brace spelling of the shared lexer.
+    fn fmt_typed_head_str(&mut self, parts: &[StrPart], span: crate::Diagnostics::Span) {
+        if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
+            self.fmt_typed_head_str_multiline(parts);
+        } else {
+            self.write("\"");
+            self.fmt_typed_head_str_parts(parts);
+            self.write("\"");
+        }
+    }
+
+    fn fmt_typed_head_str_parts(&mut self, parts: &[StrPart]) {
+        let mut i = 0;
+        while i < parts.len() {
+            if let (
+                Some(StrPart::Lit(_)),
+                Some(StrPart::Lit(sep)),
+                Some(StrPart::Interp(expr, fmt)),
+            ) = (parts.get(i), parts.get(i + 1), parts.get(i + 2))
+            {
+                if sep.as_str() == " = " {
+                    self.write("{");
+                    self.fmt_expr(expr, Prec::OrFallback);
+                    self.write("=");
+                    self.fmt_str_format(*fmt);
+                    self.write("}");
+                    i += 3;
+                    continue;
+                }
+            }
+            match &parts[i] {
+                StrPart::Lit(text) => self.write(&escape_typed_head_lit(text)),
+                StrPart::Interp(expr, fmt) => {
+                    self.write("{");
+                    self.fmt_expr(expr, Prec::OrFallback);
+                    self.fmt_str_format(*fmt);
+                    self.write("}");
+                }
+            }
+            i += 1;
+        }
+    }
+
+    fn fmt_typed_head_str_multiline(&mut self, parts: &[StrPart]) {
+        self.write("\"\"\"");
+        self.newline();
+        let mut i = 0;
+        while i < parts.len() {
+            if let (
+                Some(StrPart::Lit(_)),
+                Some(StrPart::Lit(sep)),
+                Some(StrPart::Interp(expr, fmt)),
+            ) = (parts.get(i), parts.get(i + 1), parts.get(i + 2))
+            {
+                if sep.as_str() == " = " {
+                    self.write("{");
+                    self.fmt_expr(expr, Prec::OrFallback);
+                    self.write("=");
+                    self.fmt_str_format(*fmt);
+                    self.write("}");
+                    i += 3;
+                    continue;
+                }
+            }
+            match &parts[i] {
+                StrPart::Lit(text) => {
+                    for (line_i, line) in text.split('\n').enumerate() {
+                        if line_i > 0 {
+                            self.newline();
+                        }
+                        self.write(&escape_typed_head_lit(line));
+                    }
+                }
+                StrPart::Interp(expr, fmt) => {
+                    self.write("{");
+                    self.fmt_expr(expr, Prec::OrFallback);
+                    self.fmt_str_format(*fmt);
+                    self.write("}");
+                }
+            }
+            i += 1;
+        }
+        self.newline();
+        self.write("\"\"\"");
+    }
+
     fn fmt_str_format(&mut self, fmt: crate::AST::StrFormat) {
         match fmt {
             crate::AST::StrFormat::Display => {}
@@ -2217,4 +2308,18 @@ impl<'a> Fmt<'a> {
         self.newline();
         self.write("\"\"\"");
     }
+}
+
+fn escape_typed_head_lit(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '{' | '}' => {
+                out.push(ch);
+                out.push(ch);
+            }
+            ch => out.push(ch),
+        }
+    }
+    out
 }

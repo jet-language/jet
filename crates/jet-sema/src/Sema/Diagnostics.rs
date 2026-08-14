@@ -186,8 +186,15 @@ mod polish_tests {
 /// when `want`/`got` isn't that shape — caller falls back to the generic
 /// mismatch diagnostic.
 pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option<Diagnostic> {
-    let Type::Named(tn) = want else {
-        return None;
+    let (tn, typed_text_name) = match want {
+        Type::Named(tn) => (tn.clone(), Syntax::typed_head_kind(tn).filter(|kind| kind.is_typed_text()).map(|_| tn.clone())),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_CHECKED_TEXT && args.len() == 1 =>
+        {
+            let name = args[0].name();
+            (name.clone(), Some(name))
+        }
+        _ => return None,
     };
     if tn == Syntax::TYPE_REGEX && *got == Type::String {
         return Some(Diagnostic::error(
@@ -200,7 +207,7 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
             Some(span),
         ));
     }
-    let Some(typed_text_name) = Syntax::typed_text_name(tn) else {
+    let Some(typed_text_name) = typed_text_name else {
         return None;
     };
     if *got != Type::String {
@@ -428,6 +435,7 @@ fn is_cloneable_rec(
         Type::Fn { .. } => false,
         Type::Named(name) if builtin_resource_type(name) => false,
         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
+        Type::Named(name) if registry.text_head(name).is_some() => true,
         Type::Named(name) => {
             if !visiting.insert(name.clone()) {
                 return true;
@@ -455,6 +463,9 @@ fn is_cloneable_rec(
                     }
                     None => false,
                 };
+            if registry.text_head(name).is_some() {
+                return true;
+            }
             visiting.remove(name);
             result
         }
@@ -546,6 +557,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::TraitObject(_) => true,
         Type::Named(name) if is_type_var_name(name) => false,
         Type::Named(name) if core_type_known(name) => false,
+        Type::Named(name) if registry.text_head(name).is_some() => true,
         Type::Named(name) => {
             if !visiting.insert(name.clone()) {
                 return false;
@@ -583,6 +595,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         // are typed by a type PARAMETER rather than a concrete arg; see S7
         // report). Errs toward flagging (a false positive under `no_alloc` is
         // cheaper than a silent miss of an actual allocation).
+        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => true,
         Type::Apply { name, args } if name == "Pool" => {
             let _ = args;
             true

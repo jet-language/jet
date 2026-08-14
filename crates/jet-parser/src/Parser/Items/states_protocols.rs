@@ -504,12 +504,13 @@ impl<'a> Parser<'a> {
             })
         }
 
-        /// D-META-NAME1=A: true when `marker Name(` is at the cursor (contextual,
-        /// like `state`/`protocol`).
+        /// D-META-NAME1=A / D-BOUND-SINK1=A: true when a marker declaration
+        /// (`marker Name(…)` or `marker Name on [.Text]`) is at the cursor.
         pub(super) fn at_marker_decl(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MARKER)
                 && matches!(&self.peek2().kind, TokKind::Ident(_))
-                && matches!(&self.peek3().kind, TokKind::LParen)
+                && (matches!(&self.peek3().kind, TokKind::LParen)
+                    || matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON))
         }
 
         /// D-FACTDECL1=A: `fact Name(params…)` uses the same named-parameter
@@ -520,14 +521,94 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek3().kind, TokKind::LParen)
         }
 
-        /// D-META-FORM1=A / D-META-USER1=A: parse `marker Name(params…)`
-        /// with an optional checked body. The rule's own arguments and facts
-        /// still share one named-parameter list, told apart by `@` marks.
+        /// D-META-FORM1=A / D-META-USER1=A / D-BOUND-SINK1=A: parse an
+        /// ordinary `marker Name(params…)` or a checked text head
+        /// `marker Name on [.Text] { check … hole … }`. The ordinary rule's
+        /// arguments and facts still share one named-parameter list, told
+        /// apart by `@` marks.
         pub(super) fn marker_decl(&mut self) -> Result<crate::AST::MarkerDecl, Diagnostic> {
             let start = self.peek().span;
             self.bump(); // consume `marker`
             let (name, name_span) =
                 self.expect_ident("the marker name in `marker Name(params…)`")?;
+            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON) {
+                self.bump();
+                let target = self.expr_no_struct_lit()?;
+                let valid_target = matches!(
+                    &target,
+                    crate::AST::Expr::ListLit(items, _)
+                        if items.len() == 1
+                            && matches!(&items[0], crate::AST::Expr::EnumLit {
+                                variant,
+                                leading_dot: true,
+                                args,
+                                ..
+                            } if variant == "Text" && args.is_empty())
+                );
+                if !valid_target {
+                    self.diags.push(Diagnostic::error(
+                        "E0381",
+                        "a checked text head must attach to `[.Text]`".to_string(),
+                        "D-BOUND-SINK1=A reserves the `Text` rule site for library-declared checked text heads".to_string(),
+                        "write `marker Name on [.Text] { check … hole … }`".to_string(),
+                        Some(target.span()),
+                    ));
+                }
+                self.expect(TokKind::LBrace, "to open a checked text head contract")?;
+                let (check_name, _) = self.expect_ident("`check` in a checked text head contract")?;
+                if check_name != Syntax::TEXT_HEAD_CHECK {
+                    return Err(Diagnostic::error(
+                        "E0381",
+                        "a checked text head contract needs `check` first".to_string(),
+                        "the check expression validates the literal body before construction".to_string(),
+                        "write `check validator.parse(@body)?`".to_string(),
+                        Some(self.toks[self.pos - 1].span),
+                    ));
+                }
+                let check = self.expr_no_struct_lit()?;
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                let (hole_name, _) = self.expect_ident("`hole` in a checked text head contract")?;
+                if hole_name != Syntax::TEXT_HEAD_HOLE {
+                    return Err(Diagnostic::error(
+                        "E0381",
+                        "a checked text head contract needs `hole` second".to_string(),
+                        "the hole expression encodes each interpolated value".to_string(),
+                        "write `hole encoder.escape(@value)`".to_string(),
+                        Some(self.toks[self.pos - 1].span),
+                    ));
+                }
+                let hole = self.expr_no_struct_lit()?;
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                self.expect(TokKind::RBrace, "to close a checked text head contract")?;
+                let end = self.toks[self.pos - 1].span.end;
+                let text = crate::AST::MarkerTextDecl {
+                    check,
+                    hole,
+                    span: Span::new(target.span().start, end),
+                };
+                let params = vec![crate::AST::MarkerDeclParam {
+                    name: "@sites".to_string(),
+                    name_span: target.span(),
+                    ty: None,
+                    value: Some(Box::new(target)),
+                    variadic: false,
+                }];
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                return Ok(crate::AST::MarkerDecl {
+                    name,
+                    name_span,
+                    params,
+                    body: None,
+                    text: Some(text),
+                    span: Span::new(start.start, end),
+                });
+            }
             self.expect(TokKind::LParen, "to open the marker's parameter list")?;
             let params = self.marker_decl_param_list()?;
             let mut end = self.toks[self.pos - 1].span.end;
@@ -551,6 +632,7 @@ impl<'a> Parser<'a> {
                 name_span,
                 params,
                 body,
+                text: None,
                 span: Span::new(start.start, end),
             })
         }
@@ -648,7 +730,7 @@ impl<'a> Parser<'a> {
         /// not a cascade of unrelated parse errors.
         fn reject_marker_decl_trailer(&mut self) -> Option<Diagnostic> {
             let (code, what, why, fix): (&str, &str, &str, String) = match &self.peek().kind {
-                TokKind::Ident(n) if n == "on" => (
+                TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON => (
                     "E0381",
                     "a trailing `on` clause isn't how a marker states a fact",
                     "D-META-FORM1=A: a fact about the rule (its legal sites, whether it repeats) is an ordinary named parameter in the same list, marked with the compile-time `@` sigil — not a clause after the list",
@@ -767,10 +849,36 @@ mod marker_decl_tests {
             .all(|param| param.ty.is_none() && param.value.is_some()));
     }
 
+    #[test]
+    fn checked_text_head_declaration_parses_its_contract() {
+        let source = r#"
+marker Selector on [.Text] {
+    check @body
+    hole @value
+}
+fn run() {}
+"#;
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("checked text head must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a MarkerDecl item");
+        assert_eq!(decl.name, "Selector");
+        assert!(decl.body.is_none());
+        assert!(decl.text.is_some());
+        assert_eq!(decl.params[0].name, "@sites");
+    }
+
     /// D-META-FORM1=A: `@repeatable` is a named parameter like every other
     /// fact about a rule, never a trailing word. A new fact about rules is a
     /// new named parameter, so the list stays open-ended and the grammar does
-    /// not grow. `@sites` takes `[Site]`, the eighteen-member menu published in
+    /// not grow. `@sites` takes `[Site]`, the nineteen-member menu published in
     /// `core.lang` (`Policy::SITE_VARIANTS`).
     #[test]
     fn a_fact_about_the_rule_is_one_more_named_parameter() {

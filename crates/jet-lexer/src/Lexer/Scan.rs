@@ -34,6 +34,24 @@ fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Toke
 }
 
 impl<'a> Lexer<'a> {
+    /// D-BOUND-RAW1=A: the quote immediately follows the opening `.{` of a
+    /// typed head body. Only that body changes the backslash rule; the
+    /// interpolation sublexer remains an ordinary Jet lexer.
+    fn starts_typed_head_body(toks: &[Token]) -> bool {
+        let significant = toks
+            .iter()
+            .filter(|token| {
+                !matches!(
+                    token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                )
+            })
+            .collect::<Vec<_>>();
+        significant.len() >= 2
+            && matches!(significant[significant.len() - 2].kind, TokKind::Dot)
+            && matches!(significant[significant.len() - 1].kind, TokKind::LBrace)
+    }
+
     fn starts_inline_foreign_body(toks: &[Token]) -> bool {
         if !matches!(toks.last().map(|t| &t.kind), Some(TokKind::LBrace)) {
             return false;
@@ -355,14 +373,15 @@ impl<'a> Lexer<'a> {
                 // D-UNIFYLIT1=A: `b"…"` retired — byte patterns use `[U8].{"…"}`.
                 // Bare `b` followed by `"` falls through to the identifier lexer.
                 '"' => {
+                    let raw_head = Self::starts_typed_head_body(&toks);
                     let tok = if next == '"' && next2 == '"' {
                         if Self::starts_inline_foreign_body(&toks) {
                             self.raw_foreign_string(start)
                         } else {
-                            self.triple_string(start)
+                            self.triple_string(start, raw_head)
                         }
                     } else {
-                        self.string(start)
+                        self.string(start, raw_head)
                     };
                     if let Some(tok) = tok {
                         toks.push(tok);
@@ -735,6 +754,37 @@ fn add(a: Int, b: Int) => Int {
             )),
             "{tokens:?}"
         );
+    }
+
+    #[test]
+    fn typed_head_bodies_keep_backslashes_but_plain_strings_decode_them() {
+        let source = r#"plain :: "\n"
+pattern :: Regex.{"\n"}
+multiline :: Path.{"""
+\logs\app
+"""}"#;
+        let (tokens, diagnostics) = lex_raw(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let strings = tokens
+            .iter()
+            .filter_map(|token| match &token.kind {
+                TokKind::Str(parts) => Some(parts),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(strings.len(), 3);
+        assert!(matches!(
+            strings[0].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\n"
+        ));
+        assert!(matches!(
+            strings[1].as_slice(),
+            [StrTokPart::Lit(text)] if text == r"\n"
+        ));
+        assert!(matches!(
+            strings[2].as_slice(),
+            [StrTokPart::Lit(text)] if text == "\\logs\\app"
+        ));
     }
 
     #[test]

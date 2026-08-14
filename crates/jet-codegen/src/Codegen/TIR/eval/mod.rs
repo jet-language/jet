@@ -3883,7 +3883,9 @@ fn eval_expr_hook(
         txn_stack: Vec::new(),
     };
     let mut scope = globals;
-    let result = ctx.eval_expr(&tir, &mut scope);
+    let result = ctx
+        .eval_expr(&tir, &mut scope)
+        .map(|value| ctx.pending_return.take().unwrap_or(value));
     if let (Some(target), Some(shared)) = (sink_target, ctx.sink.as_ref()) {
         *target = std::mem::take(&mut *shared.lock().expect("evaluator sink poisoned"));
     }

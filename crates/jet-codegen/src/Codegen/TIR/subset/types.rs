@@ -34,6 +34,12 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if let Type::Tagged { inner, .. } = &ty {
         return is_subset_param_ty(inner, cx);
     }
+    if matches!(&ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_CHECKED_TEXT) {
+        return true;
+    }
+    if matches!(&ty, Type::Named(name) if cx.checked_text_heads.contains(name)) {
+        return true;
+    }
     // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (prelude, not user-registry).
     // It is always cloneable and has scalar/Char payloads only — fully covered.
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {

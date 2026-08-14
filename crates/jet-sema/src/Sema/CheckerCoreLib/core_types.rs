@@ -195,7 +195,7 @@ pub(crate) fn phantom_fact_menu_diag(name: &str, span: Span) -> Option<Diagnosti
 }
 
 pub(crate) fn core_type_known(name: &str) -> bool {
-    if Syntax::is_typed_text_type(name) {
+    if Syntax::typed_head_kind(name).is_some_and(|kind| kind.is_typed_text()) {
         return true;
     }
     matches!(

@@ -21,7 +21,7 @@ use jet_foundation::Registry;
 fn site_is_source_renderable(site: RuleSite) -> bool {
     !matches!(
         site,
-        RuleSite::Package | RuleSite::Impl | RuleSite::Operation
+        RuleSite::Package | RuleSite::Impl | RuleSite::Operation | RuleSite::Text
     )
 }
 
@@ -166,7 +166,7 @@ fn program_at(marker: &str, site: RuleSite) -> Option<String> {
         RuleSite::Expression => format!("fn run() {{\n    value :: {marker}\n}}\n"),
         RuleSite::Test => format!("{marker} {{\n    print(\"ok\")\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Bench => format!("{marker} {{\n    print(\"ok\")\n}}\n\nfn run() {{\n}}\n"),
-        RuleSite::Package | RuleSite::Impl | RuleSite::Operation => return None,
+        RuleSite::Package | RuleSite::Impl | RuleSite::Operation | RuleSite::Text => return None,
     })
 }
 

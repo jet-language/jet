@@ -61,7 +61,7 @@ fn undeclared_checked_text_block_reports_one_registered_error() {
 #[test]
 fn declared_block_receives_the_whole_nested_region() {
     let source = r#"
-marker Check($sites: [.Block]) {
+marker Check(@sites: [.Block]) {
     if !target.contains("after") {
         reject(
             code: "E0927",
@@ -101,6 +101,48 @@ fn run() {
 }
 "#;
     jet::compile(source).expect("typed domain text should compile through one checked path");
+}
+
+#[test]
+fn declared_text_head_owns_validation_holes_and_raw_escape() {
+    let source = r#"
+use core.regex as re
+
+marker Pattern on [.Text] {
+    check re.is_match(@body.replace("{{}}", "x"), "")?
+    hole re.escape(@value)
+}
+
+fn take(pattern: Pattern) {}
+
+fn run() {
+    value :: "a.b"
+    pattern :: Pattern.{"a-{value}"}
+    take(pattern)
+    trusted :: Pattern.raw("already checked")
+    take(trusted)
+}
+"#;
+    jet::compile(source).expect("a declared text head should own its checked construction path");
+
+    let invalid = r#"
+marker Pattern on [.Text] {
+    check @body
+    hole @value
+}
+
+fn take(pattern: Pattern) {}
+
+fn run() {
+    raw :: "untrusted"
+    take(raw)
+}
+"#;
+    let diagnostics = jet::compile(invalid).expect_err("a bare String must not reach a text sink");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0149"),
+        "custom text sinks should use the checked-text mismatch: {diagnostics:?}"
+    );
 }
 
 #[test]

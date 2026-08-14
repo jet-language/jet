@@ -122,6 +122,48 @@ fn first_string_literal_arg(args: &[crate::AST::CallArg]) -> Option<String> {
     }
 }
 
+pub(crate) fn is_checked_text_head_static(
+    receiver: &Expr,
+    resolved_ret: Option<&Type>,
+    cx: &Cx,
+) -> bool {
+    let Some(Type::Apply { name, args }) = resolved_ret else {
+        return false;
+    };
+    if name != Syntax::TYPE_CHECKED_TEXT {
+        return false;
+    }
+    let Some(Type::Named(head)) = args.first() else {
+        return false;
+    };
+    let source_name = match receiver {
+        Expr::Ident(name, _) => name.clone(),
+        Expr::Field(base, member, _) => {
+            let Expr::Ident(prefix, _) = base.as_ref() else {
+                return false;
+            };
+            format!("{prefix}.{member}")
+        }
+        _ => return false,
+    };
+    let canonical = match receiver {
+        Expr::Ident(name, _) => cx.foreign_type_identity("", name),
+        Expr::Field(base, member, _) => {
+            let Expr::Ident(prefix, _) = base.as_ref() else {
+                return false;
+            };
+            cx.foreign_type_identity(prefix, member)
+        }
+        _ => None,
+    };
+    source_name == *head
+        || canonical.as_deref() == Some(head.as_str())
+        || cx
+            .reflect_paths
+            .get(&source_name)
+            .is_some_and(|path| path == head)
+}
+
 fn compute_transform_wrt(expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::ListLit(items, _) => items
@@ -1537,7 +1579,9 @@ fn lower_method_call_impl(
     // shape directly instead.
     if method == "raw" {
         if let Expr::Ident(n, _) = receiver {
-            if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH {
+            let is_builtin = Syntax::typed_head_kind(n)
+                .is_some_and(|kind| kind.is_typed_text());
+            if is_builtin {
                 let arg = lower_expr(&args[0].expr, cx, env);
                 let kind = if n == "SQL" {
                     crate::Codegen::TIR::TTypedTextForm::SQLRaw
@@ -1588,6 +1632,19 @@ fn lower_method_call_impl(
     // receiver-first builtin used by instance algebra, preserving the
     // concrete set type for chained dispatch.
     if recv_type.is_none() {
+        // D-BOUND-SINK1=A: sema has proved this is a declared head's
+        // qualified or local static `.raw(String)` escape. The result already
+        // carries the canonical checked-text carrier; pass the String through.
+        if method == "raw"
+            && args.len() == 1
+            && is_checked_text_head_static(receiver, resolved_ret, cx)
+        {
+            let arg = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::String,
+                kind: arg.kind,
+            };
+        }
         if let Expr::Ident(type_name, _) = receiver {
             if !env.locals.contains_key(type_name)
                 && matches!(type_name.as_str(), Syntax::TYPE_SET | Syntax::TYPE_SORTED_SET)

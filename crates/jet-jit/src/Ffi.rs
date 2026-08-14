@@ -80,6 +80,8 @@ fn param_abi(ty: &Type) -> Option<ParamAbi> {
         Type::Float | Type::Float32 => Some(ParamAbi::Float),
         Type::Bool => Some(ParamAbi::Bool),
         Type::String => Some(ParamAbi::String),
+        Type::Apply { name, .. }
+            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Some(ParamAbi::String),
         _ => None,
     }
 }
@@ -91,6 +93,8 @@ fn ret_abi(ty: Option<&Type>) -> Option<RetAbi> {
         Some(Type::Float) | Some(Type::Float32) => Some(RetAbi::Float),
         Some(Type::Bool) => Some(RetAbi::Bool),
         Some(Type::String) => Some(RetAbi::String),
+        Some(Type::Apply { name, .. })
+            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Some(RetAbi::String),
         _ => None,
     }
 }

@@ -47,7 +47,7 @@ impl<'a> Checker<'a> {
     
         pub(super) fn core_module_path_from_receiver(&self, receiver: &Expr) -> Option<(String, Span)> {
             match receiver {
-                Expr::Ident(alias, span) => self.core_imports.get(alias).cloned().map(|m| (m, *span)),
+                Expr::Ident(alias, span) => self.text_head_core_import(alias).map(|m| (m, *span)),
                 Expr::Field(base, leaf, _) => {
                     let (module, span) = self.core_module_path_from_receiver(base)?;
                     let submodule = format!("{module}.{leaf}");

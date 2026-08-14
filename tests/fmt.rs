@@ -2581,6 +2581,7 @@ fn run() {
     arg :: \"two words;*.jet\"
     expected :: Sh.{\"printf <%s> {arg}\"}
     audited_cmd :: Sh.raw(\"printf raw\")
+    pattern :: Regex.{\"(\\d+)-(\\d+)\"}
     endpoint :: URL.{\"https://api.example.com/v2/{name}\"}
     log_path :: Path.{\"/var/log/{name}.log\"}
     stamp :: DateTime.{\"2026-08-07T12:00:00Z\"}

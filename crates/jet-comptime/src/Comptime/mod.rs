@@ -1972,6 +1972,59 @@ fn expand_template_type(
     Ok(())
 }
 
+/// D-BOUND-SINK1=A: evaluate one library-declared checked text contract on
+/// the exact body text written in the head. A failed Result/Option journey is
+/// the contract's rejection; successful values are intentionally ignored.
+pub fn evaluate_text_head_check(
+    check: &crate::AST::Expr,
+    body: String,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+    base_dir: &Path,
+    core_imports: &HashMap<String, String>,
+) -> Result<(), Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: FUEL_BUDGET,
+        sink: None,
+        core_imports,
+        debugger: None,
+        depth: 0,
+        cur_func: "text_head_check".to_string(),
+        impure_depth: 0,
+        gates: jet_foundation::Policy::GateSet::default(),
+        repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
+        repl_interruptible: false,
+        embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
+        binding_types: HashMap::new(),
+        globals,
+        methods: empty_methods(),
+        structs: empty_structs(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
+        migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
+    };
+    let mut scope = HashMap::new();
+    scope.insert("@body".to_string(), CtValue::Str(body));
+    let value = interp.eval(check, &mut scope)?;
+    match value {
+        CtValue::Failed(_) => Err(Diagnostic::error(
+            "E2712",
+            "this checked text head rejected its body".to_string(),
+            "the library's check expression must accept the complete literal body".to_string(),
+            "fix the head body so it satisfies the declared text grammar".to_string(),
+            Some(check.span()),
+        )),
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod typed_head_tests {
     use super::{validate_datetime_literal, validate_url_literal};

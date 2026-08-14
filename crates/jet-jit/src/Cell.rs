@@ -78,6 +78,8 @@ impl CellSchema {
             Type::Bool => Ok(Self::Bool),
             Type::Char => Ok(Self::Char),
             Type::String => Ok(Self::String),
+            Type::Apply { name, .. }
+                if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Ok(Self::String),
             Type::Option(inner) => Ok(Self::Option(
                 Box::new(Self::from_type(inner, meta)?),
                 inner.as_ref().clone(),

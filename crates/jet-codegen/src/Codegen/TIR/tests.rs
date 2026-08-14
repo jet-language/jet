@@ -1015,7 +1015,7 @@ fn mk() {
             } = &mk(m)
             {
                 assert!(
-                    method_call_in_subset(receiver, method, args, recv_type, &cx, &locals),
+                    method_call_in_subset(receiver, method, args, recv_type, &None, &cx, &locals),
                     "user method `{m}` shadowing a builtin name should be covered"
                 );
             }
@@ -1031,7 +1031,7 @@ fn mk() {
         } = &mk("push")
         {
             assert!(
-                !method_call_in_subset(receiver, method, args, recv_type, &cx, &locals),
+                !method_call_in_subset(receiver, method, args, recv_type, &None, &cx, &locals),
                 "a builtin name with no user method must stay excluded"
             );
         }

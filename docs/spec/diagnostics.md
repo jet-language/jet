@@ -404,7 +404,7 @@ renumbered, and no new `W` code may be allocated.
 | E0376 | parse | teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D) |
 | E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B, D-ONCE-AT1=D) |
 | E0378 | parse | teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B) |
-| E0381 | parse | `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
+| E0381 | parse | ordinary `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1256,6 +1256,7 @@ all collapse to `OpenFailed`; backend prose and secret material never cross the
 projection. File-envelope cancellation remains internal task control and is not
 a public `FileCryptoError` variant. Handled errors are ordinary values.
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
+| E2712 | this checked text head rejected its body | A library's checked text head evaluated its `check` expression and rejected the complete literal body (D-BOUND-SINK1=A). | Fix the head body so it satisfies the library's declared text grammar. |
 | E2714 | A user derive is written `derive T.{Trait}`. | The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {Trait} for T` spelling was retired. | Write `derive T.{Trait} { … }`. |
 | L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
@@ -1536,7 +1537,7 @@ already-freed arena), these track the views themselves.
 | E0377 | `#Known` is retired. | Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention. | Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block. |
 | E0378 | This alias declaration uses the retired `=` binding. | `::` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B). | Replace `=` with `::`. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
-| E0381 | A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not a second spelling. | Move the fact into the declaration's own parameter list as an `@`-marked named parameter, e.g. `@sites: [.Function, …]`, `@repeatable: true`. |
+| E0381 | A fact about an ordinary `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | Ordinary marker arguments and facts share one named-parameter list; checked text heads use the separate `marker Name on [.Text] { check … hole … }` form (D-BOUND-SINK1=A). | For an ordinary marker, use `@sites: […]` or `@repeatable: true`; for a checked text head, write `marker Name on [.Text] { check … hole … }`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

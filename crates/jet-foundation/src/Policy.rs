@@ -734,10 +734,10 @@ pub fn explain<R: ExplainableResolution>(resolution: &R) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RuleSite { Package, File, Module, Function, Method, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Variant, Parameter, Test, Bench, Operation }
+pub enum RuleSite { Package, File, Module, Function, Method, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Variant, Parameter, Test, Bench, Operation, Text }
 
 impl RuleSite {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Package,
         Self::File,
         Self::Module,
@@ -756,6 +756,7 @@ impl RuleSite {
         Self::Test,
         Self::Bench,
         Self::Operation,
+        Self::Text,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -778,12 +779,13 @@ impl RuleSite {
             Self::Test => "Test",
             Self::Bench => "Bench",
             Self::Operation => "Operation",
+            Self::Text => "Text",
         }
     }
 }
 
 /// D-META-FORM1=A: `@sites` on a `marker` declaration takes `[Site]`, so the
-/// eighteen attachment points are published as an ordinary `core.lang` enum
+/// nineteen attachment points are published as an ordinary `core.lang` enum
 /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
 /// stays the one source; `site_variants_match_the_enum` proves this list is it.
 pub const SITE_VARIANTS: &[&str] = &[
@@ -805,6 +807,7 @@ pub const SITE_VARIANTS: &[&str] = &[
     "Test",
     "Bench",
     "Operation",
+    "Text",
 ];
 
 /// D-MARK-FORM1=A: one placement law. A marker, or one bracket group, is
@@ -1561,7 +1564,7 @@ mod tests {
     fn site_variants_match_the_enum() {
         use super::RuleSite;
 
-        assert_eq!(super::SITE_VARIANTS.len(), 18);
+        assert_eq!(super::SITE_VARIANTS.len(), 19);
         let published: Vec<&str> = RuleSite::ALL.iter().map(|site| site.name()).collect();
         assert_eq!(published, super::SITE_VARIANTS);
 

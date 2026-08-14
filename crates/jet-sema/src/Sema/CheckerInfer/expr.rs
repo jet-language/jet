@@ -455,6 +455,108 @@ impl<'a> Checker<'a> {
         Some(Type::Named(type_name))
     }
 
+    /// D-BOUND-SINK1=A: a declared text head owns both body validation and
+    /// interpolation encoding. The internal wrapper preserves its nominal
+    /// checked type until TIR erases the already-encoded String.
+    pub(crate) fn rewrite_declared_text_literal(
+        &mut self,
+        e: &mut Expr,
+        type_name: String,
+        contract: &'a crate::Sema::TextHeadContract,
+        span: Span,
+    ) -> Option<Type> {
+        let old = std::mem::replace(e, Expr::Absent(span));
+        let Expr::Str(mut parts, literal_span) = old else {
+            *e = old;
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`{type_name}.{{ … }}` needs a string recipe body"),
+                "a checked text head is constructed from a quoted template, not another expression shape".to_string(),
+                format!("write `{type_name}.{{\"…\"}}` with interpolation holes as needed"),
+                Some(span),
+            ));
+            return None;
+        };
+
+        let mut body = String::new();
+        for part in &parts {
+            match part {
+                StrPart::Lit(text) => body.push_str(text),
+                StrPart::Interp(..) => body.push_str("{}"),
+            }
+        }
+        let funcs = contract
+            .funcs
+            .iter()
+            .map(|(name, function)| (name.clone(), function))
+            .collect::<std::collections::HashMap<_, _>>();
+        if let Err(diagnostic) = crate::Comptime::evaluate_text_head_check(
+            &contract.declaration.check,
+            body,
+            &funcs,
+            &contract.globals,
+            &contract.base_dir,
+            &contract.core_imports,
+        ) {
+            self.diags.push(diagnostic);
+            *e = Expr::Str(parts, literal_span);
+            return None;
+        }
+        drop(funcs);
+
+        let previous_text_head_context = self.text_head_context.replace(contract);
+        let mut holes_valid = true;
+        for part in &mut parts {
+            let StrPart::Interp(inner, _) = part else {
+                continue;
+            };
+            let mut encoded = contract.declaration.hole.clone();
+            let value = (**inner).clone();
+            encoded.for_each_expr_mut(|node| {
+                if matches!(node, Expr::ComptimeName { name, .. } if name == "@value") {
+                    *node = value.clone();
+                }
+            });
+            let ty = self.infer(&mut encoded);
+            if ty != Some(Type::String) {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    "a checked text hole encoder must return String".to_string(),
+                    "every interpolation is passed through the declared head's encoder before it reaches a sink".to_string(),
+                    "make the `hole` expression return a String".to_string(),
+                    Some(encoded.span()),
+                ));
+                holes_valid = false;
+                continue;
+            }
+            *part = StrPart::Interp(Box::new(encoded), crate::AST::StrFormat::Display);
+        }
+        self.text_head_context = previous_text_head_context;
+        if !holes_valid {
+            *e = Expr::Str(parts, literal_span);
+            return None;
+        }
+
+        let result = crate::Sema::checked_text_type(&type_name);
+        *e = Expr::Call(Call {
+            name: Syntax::BUILTIN_CHECKED_TEXT_WRAP.to_string(),
+            name_span: span,
+            type_args: vec![Type::Named(type_name)],
+            args: vec![CallArg {
+                convention: AccessConvention::Read,
+                expr: Expr::Str(parts, literal_span),
+                span: literal_span,
+                flags: CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            resolved_ret: Some(result.clone()),
+            range_checked: false,
+            widen_approx: false,
+        });
+        Some(result)
+    }
+
     /// D-BOUND-HEAD1=A: URL/Path/DateTime heads validate their literal
     /// skeleton in sema, then reuse the same literal+hole rewrite as checked
     /// SQL/HTML/Sh. The returned URL type is the internal `Url` nominal; the
@@ -834,7 +936,7 @@ impl<'a> Checker<'a> {
         };
         match entry.target {
             Target::Core { module, item } => {
-                let Some(alias) = crate::Sema::Prelude::core_alias_for(self.core_imports, module)
+                let Some(alias) = self.text_head_core_alias(module)
                 else {
                     return;
                 };
@@ -1635,7 +1737,7 @@ impl<'a> Checker<'a> {
                         return self.infer_core_field(&module, &item, *span, *span);
                     }
                 }
-                if let Some(sig) = self.funcs.get(name).cloned() {
+                if let Some(sig) = self.text_head_function_sig(name) {
                     // D-METHODMACRO1=A: a bare top-level function name resolved here
                     // is read as a VALUE, not called (a direct call never reaches this
                     // arm — `check_call` short-circuits on a known global function
@@ -2735,7 +2837,7 @@ impl<'a> Checker<'a> {
         };
         let span = span;
         let head = match head.or_else(|| self.expected_type.clone()) {
-            Some(h) => h,
+            Some(h) => self.resolve_type(h),
             None => {
                 *e = Expr::TypedLit {
                     head: None,
@@ -2841,6 +2943,21 @@ impl<'a> Checker<'a> {
             {
                 *e = *inner;
                 return self.rewrite_typed_boundary_literal(e, type_name.clone(), span);
+            }
+            (Type::Apply { name, args }, TypedLitBody::Value(inner))
+                if name == Syntax::TYPE_CHECKED_TEXT
+                    && args.len() == 1
+                    && matches!(&args[0], Type::Named(_)) =>
+            {
+                let Type::Named(source_name) = &args[0] else {
+                    unreachable!("checked text carrier has one nominal argument")
+                };
+                let Some((canonical, contract)) = self.text_head_contract(source_name) else {
+                    *e = *inner;
+                    return None;
+                };
+                *e = *inner;
+                return self.rewrite_declared_text_literal(e, canonical, contract, span);
             }
             (_, TypedLitBody::Value(inner)) => {
                 *e = *inner;

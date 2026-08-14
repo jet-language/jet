@@ -233,6 +233,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && Syntax::typed_head_kind(&c.name)
                     .is_some_and(|kind| kind.is_interpolated_template())
                 && !cx.type_names.contains(&c.name);
+            let is_checked_text_wrap = c.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP;
             // D-REGEX-LIT1=D: sema rewrites a checked Regex typed literal to
             // this compiler-owned one-argument constructor.
             let is_regex_literal_ctor = !locals.contains(&c.name)
@@ -279,6 +280,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || is_math_ctor
                 || is_precise_ctor
                 || is_typed_text_ctor
+                || is_checked_text_wrap
                 || is_regex_literal_ctor
                 || is_extern
                 || is_unqual_inline
@@ -794,8 +796,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             method,
             args,
             recv_type,
+            resolved_ret,
             ..
-        } => method_call_in_subset(receiver, method, args, recv_type, cx, locals),
+        } => method_call_in_subset(receiver, method, args, recv_type, resolved_ret, cx, locals),
         // D-TAINT1: `#Tainted expr` — the tag is erased; in-subset iff the inner is.
         Expr::Tainted(inner, _, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: optional constructors `value(x)` / `null`. Covered when the

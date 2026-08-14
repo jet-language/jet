@@ -55,6 +55,7 @@ pub(crate) fn method_call_in_subset(
     method: &str,
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
+    resolved_ret: &Option<Type>,
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
@@ -155,6 +156,20 @@ pub(crate) fn method_call_in_subset(
             if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH {
                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
             }
+        }
+        // D-BOUND-SINK1=A: a source-declared checked text head has the same
+        // audited static `.raw(String)` escape as the built-ins. Sema admits
+        // this shape only for a declared head; no sink registry is consulted
+        // here. Keep the qualified import form (`lib.Pattern.raw`) on the
+        // same structural path.
+        if args.len() == 1
+            && crate::Codegen::TIR::is_checked_text_head_static(
+                receiver,
+                resolved_ret.as_ref(),
+                cx,
+            )
+        {
+            return expr_in_subset(&args[0].expr, cx, locals);
         }
     }
 

@@ -829,6 +829,7 @@ fn builtin_type_registry() -> TypeRegistry {
     });
     TypeRegistry {
         types,
+        text_heads: HashMap::new(),
         unit_types: HashSet::new(),
         unit_facts: HashMap::new(),
         computed_fields: HashMap::new(),
@@ -1245,6 +1246,19 @@ fn declare_item_names_scoped(
                 "protocol",
                 protocol.name_span,
                 visibility,
+            );
+        }
+        Item::MarkerDecl(declaration) if declaration.text.is_some() => {
+            // D-BOUND-SINK1=A: a checked text head is a public nominal library
+            // type even though ordinary marker declarations are not types.
+            declare_name(
+                ledger,
+                module,
+                scoped_name(name_prefix, &declaration.name),
+                scoped_path(path_prefix, &declaration.name),
+                "checked_text_head",
+                declaration.name_span,
+                NameVisibility::Public,
             );
         }
         _ => {}

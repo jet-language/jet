@@ -543,6 +543,10 @@ fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnost
         Type::String => Ok(CtValue::Str(
             rt.heap.clone_string(bits).unwrap_or_default(),
         )),
+        Type::Apply { name, .. }
+            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Ok(CtValue::Str(
+                rt.heap.clone_string(bits).unwrap_or_default(),
+            )),
         Type::Named(n) if n == "Int" => Ok(CtValue::Int(bits)),
         Type::Named(n) if n == "Bool" => Ok(CtValue::Bool(bits != 0)),
         Type::Named(n) if n == "Char" => {

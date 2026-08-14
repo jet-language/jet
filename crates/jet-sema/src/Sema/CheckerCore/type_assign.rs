@@ -147,6 +147,12 @@ impl<'a> Checker<'a> {
                 self.diags.push(e0909(&chain, span));
             }
             match ty {
+                Type::Apply { name, args }
+                    if name == Syntax::TYPE_CHECKED_TEXT && args.len() == 1 =>
+                {
+                    self.check_declared_type_rules(&args[0], span);
+                    return;
+                }
                 Type::Named(n) => {
                     if n == "Any" {
                         self.diags.push(no_any_type(span));
