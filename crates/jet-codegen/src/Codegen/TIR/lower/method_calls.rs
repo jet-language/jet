@@ -5004,12 +5004,12 @@ fn lower_method_call_impl(
                     .unwrap_or_else(unit_type),
                 THandleOp::AllocTryAlloc => resolved_ret.cloned().unwrap_or_else(|| {
                     Type::Result {
-                        ok: Box::new(
+                        ok: Box::new(Type::allocator_view(
                             targs
                                 .first()
                                 .map(|a| a.ty.clone())
                                 .unwrap_or_else(unit_type),
-                        ),
+                        )),
                         err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
                     }
                 }),

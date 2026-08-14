@@ -232,6 +232,7 @@ pub(super) fn eval_builtin(
             let key = CtKey::from_value(it.next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("Map.try_insert key", span))?;
             let value = it.next().unwrap_or(CtValue::Unit);
+            let value_ty = value.jet_type();
             let CtValue::Map(map) = recv else {
                 return Err(unsupported("Map.try_insert receiver", span));
             };
@@ -239,7 +240,7 @@ pub(super) fn eval_builtin(
                 Ok(Some(previous)) => Ok(CtValue::Present(Box::new(CtValue::Present(
                     Box::new(previous),
                 )))),
-                Ok(None) => Ok(CtValue::Present(Box::new(CtValue::absent(Type::Int)))),
+                Ok(None) => Ok(CtValue::Present(Box::new(CtValue::absent(value_ty)))),
                 Err(error) => Ok(alloc_failure(error)),
             }
         }

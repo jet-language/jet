@@ -3529,7 +3529,9 @@ impl<'a> Checker<'a> {
                             let inferred = self.infer(&mut arg.expr);
                             if method == "try_alloc" {
                                 let resolved = result_ty(
-                                    inferred.clone().unwrap_or(Type::Int),
+                                    Type::allocator_view(
+                                        inferred.clone().unwrap_or(Type::Int),
+                                    ),
                                     Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string()),
                                 );
                                 *resolved_ret_out = Some(resolved.clone());

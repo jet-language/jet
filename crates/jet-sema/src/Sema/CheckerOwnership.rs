@@ -2777,6 +2777,26 @@ impl<'a> Checker<'a> {
             }
             return sources;
         }
+        // D-ALLOCFAIL1=A: the Ok payload of `allocator.try_alloc(value)` is
+        // the same exclusive allocator view as plain `alloc(value)`. Keep the
+        // owner fact on the result carrier so `Ok(value)`, `?`, and returns all
+        // use the one provenance graph.
+        if let Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } = init
+        {
+            if method == Syntax::MEM_ALLOC_TRY_ALLOC
+                && matches!(receiver.as_ref().without_parens(), Expr::Ident(name, _)
+                    if self.lookup(name).is_some_and(|info| is_allocator_type(&info.ty)))
+            {
+                return self
+                    .place_from_expr(receiver)
+                    .map(|place| vec![(Vec::new(), place, ViewKind::Arena, ViewAccess::Write)])
+                    .unwrap_or_default();
+            }
+        }
         if let Expr::MethodCall {
             receiver,
             method,
@@ -3157,6 +3177,12 @@ impl<'a> Checker<'a> {
                 .lookup(&name)
                 .map(|info| info.def_span)
                 .unwrap_or(span);
+            let binding_has_view = self
+                .lookup(&name)
+                .is_some_and(|info| self.type_contains_view_boundary(&info.ty));
+            if !binding_has_view {
+                continue;
+            }
             let mut matched = false;
             for (path, place, kind, access) in &sources {
                 if !path.starts_with(&source_prefix) {
@@ -3236,6 +3262,15 @@ impl<'a> Checker<'a> {
                             ViewAccess::Write
                         },
                     ));
+                }
+                Type::Tagged { marker, .. }
+                    if matches!(
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::AllocatorView
+                        )
+                    ) => {
+                    out.push((path.clone(), ViewAccess::Write));
                 }
                 Type::List(inner) | Type::FixedList { elem: inner, .. } => {
                     path.push("[]".to_string());
@@ -3479,6 +3514,13 @@ impl<'a> Checker<'a> {
                 {
                     true
                 }
+                Type::Tagged { marker, .. }
+                    if matches!(
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::AllocatorView
+                        )
+                    ) => true,
                 Type::Named(name) => named_contains(registry, name, seen),
                 Type::Apply { name, args } => {
                     args.iter().any(|arg| contains(registry, arg, seen))

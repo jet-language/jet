@@ -61,7 +61,7 @@ pub(crate) fn alloc_method_return(
             // We return a sentinel; actual type inference is done in the caller.
             if method == "try_alloc" {
                 Some(Some(result_ty(
-                    Type::Named("__alloc_infer__".to_string()),
+                    Type::allocator_view(Type::Named("__alloc_infer__".to_string())),
                     Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string()),
                 )))
             } else {

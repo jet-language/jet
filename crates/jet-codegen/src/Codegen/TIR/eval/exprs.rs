@@ -2002,12 +2002,10 @@ impl<'a> EvalCtx<'a> {
         }
 
         match self.eval_allocator_alloc(recv, value.clone()) {
-            Ok(view) => {
-                let value = self
-                    .materialize_allocator_view(&view)?
-                    .ok_or_else(|| unsupported("allocator view", self.span()))?;
-                Ok(CtValue::Present(Box::new(value)))
-            }
+            // D-ALLOCFAIL1=A: the successful try result is the same live view
+            // carrier as plain `alloc`; materialize only when a later deref
+            // reads the bound view.
+            Ok(view) => Ok(CtValue::Present(Box::new(view))),
             Err(_) => {
                 let error = jet_foundation::Outcome::jet_alloc_error(requested, &allocator);
                 Ok(CtValue::failed(Box::new(CtValue::Struct {

@@ -496,7 +496,7 @@ extern "C" fn jet_jit_allocator_try_alloc(
 ) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
-        let (allocator, result) = {
+        let (allocator, generation, result) = {
             let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
                 rt.set_trap("allocator handle is closed or invalid");
                 return 0;
@@ -511,10 +511,23 @@ extern "C" fn jet_jit_allocator_try_alloc(
                 requested,
                 crate::fault_injection::jet_fault_should_fail_allocation(),
             );
-            (state.allocator, result)
+            (state.allocator, state.generation, result)
         };
         match result {
-            Ok(_) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+            // D-ALLOCFAIL1=A: a successful try result carries the live
+            // allocator view, not a copied scalar payload.
+            Ok(index) => {
+                let slot = pack_id(index, generation);
+                let Some(view) = pack_allocator_view(rt.allocator_views.len()) else {
+                    rt.set_trap("allocator view table exhausted");
+                    return 0;
+                };
+                rt.allocator_views.push(AllocatorView {
+                    allocator: handle,
+                    slot,
+                });
+                crate::runtime_host::alloc_jit_result(rt, true, view as u64)
+            }
             Err(error) => {
                 let record = rt.heap.alloc_record(2);
                 let allocator = rt.heap.alloc_string(allocator);

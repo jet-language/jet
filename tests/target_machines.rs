@@ -117,6 +117,29 @@ fn no_os_allocator_and_core_limits_are_data_errors() {
 }
 
 #[test]
+fn no_os_core_mem_try_allocation_compiles_with_fixed_allocator() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_target_machine_try_allocation_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("try_allocation.jet");
+    std::fs::write(
+        &file,
+        include_str!("../examples/features/memory/try_allocation.jet"),
+    )
+    .unwrap();
+    jet::Driver::compile_bundle_path_with_target_machine(
+        &file.to_string_lossy(),
+        jet::Sema::CompileMode::Run,
+        &sensor_machine(),
+    )
+    .expect("no-os core.mem fallible allocation should compile before codegen");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn linker_override_requires_hashed_provenance() {
     let mut machine = sensor_machine();
     machine.linker = LinkerInput::File {

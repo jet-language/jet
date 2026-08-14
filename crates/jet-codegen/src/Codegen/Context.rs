@@ -1265,6 +1265,13 @@ impl Cx {
                         .any(|arg| contains(cx, arg, seen, mutable_only))
                         || named_contains(cx, name, seen, mutable_only)
                 }
+                Type::Tagged { marker, .. }
+                    if matches!(
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::AllocatorView
+                        )
+                    ) => true,
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
@@ -1420,6 +1427,13 @@ impl Cx {
                 {
                     add_reference_lifetime(base(ty))
                 }
+                Type::Tagged { marker, .. }
+                    if matches!(
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::AllocatorView
+                        )
+                    ) => add_reference_lifetime(base(ty)),
                 Type::List(inner) if cx.type_contains_view(inner) => {
                     format!("Vec<{}>", render(cx, inner, base))
                 }
@@ -2614,6 +2628,11 @@ impl Cx {
             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
             Type::FixedList { elem, len, .. } => format!("[{}; {}]", self.rust_type(elem), len),
             // D-QUAL4=A: tagged types are transparent to codegen.
+            Type::Tagged { marker, inner }
+                if matches!(
+                    marker,
+                    crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
+                ) => format!("&mut {}", self.rust_type(inner)),
             Type::Tagged { inner, .. } => self.rust_type(inner),
             // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
             Type::Union(members) => {

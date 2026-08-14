@@ -3906,15 +3906,16 @@ impl LowerCtx<'_, '_> {
                         return Ok(());
                     }
                 }
-                let allocator_view = matches!(
+                let direct_allocator_view = matches!(
                     &init.kind,
                     TExprKind::HandleMethod {
                         op: THandleOp::AllocAlloc,
                         ..
                     }
                 );
+                let allocator_view = direct_allocator_view || init.ty.is_allocator_view();
                 let prior_allocator_view = self.preserve_allocator_view;
-                self.preserve_allocator_view = allocator_view;
+                self.preserve_allocator_view = direct_allocator_view;
                 let lowered = self.lower_expr(init);
                 self.preserve_allocator_view = prior_allocator_view;
                 let mut val = lowered?;
@@ -18515,6 +18516,8 @@ impl LowerCtx<'_, '_> {
             self.b.seal_block(then_block);
             let arm_resource_mark = self.compute_resources.len();
             let mut bound_place = None;
+            let mut bound_allocator_view = false;
+            let mut prior_allocator_view = false;
             if binding != "_" {
                 let payload = self.result_payload(handle, &payload_ty)?;
                 let place = TIR::local_place(binding);
@@ -18522,8 +18525,15 @@ impl LowerCtx<'_, '_> {
                 let var = self.fresh_var(clif);
                 self.b.def_var(var, payload);
                 self.track_compute_value(payload, &payload_ty)?;
+                bound_allocator_view = payload_ty.is_allocator_view();
+                prior_allocator_view = self.allocator_view_names.contains(&place);
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place.clone(), payload_ty);
+                if bound_allocator_view {
+                    self.allocator_view_names.insert(place.clone());
+                } else {
+                    self.allocator_view_names.remove(&place);
+                }
                 bound_place = Some(place);
             }
             self.lower_stmts_scoped_with_names_from(
@@ -18534,6 +18544,10 @@ impl LowerCtx<'_, '_> {
             if let Some(place) = bound_place {
                 self.vars.remove(&place);
                 self.var_tys.remove(&place);
+                self.allocator_view_names.remove(&place);
+                if prior_allocator_view {
+                    self.allocator_view_names.insert(place);
+                }
             }
             if !self.dead {
                 self.b.ins().jump(merge, &[]);
@@ -26474,10 +26488,14 @@ impl LowerCtx<'_, '_> {
         let clif = self.b.func.dfg.value_type(payload);
         let old_var = self.vars.remove(&place);
         let old_ty = self.var_tys.remove(&place);
+        let old_allocator_view = self.allocator_view_names.remove(&place);
         let var = self.fresh_var(clif);
         self.b.def_var(var, payload);
         self.vars.insert(place.clone(), var);
         self.var_tys.insert(place.clone(), payload_ty);
+        if self.var_tys.get(&place).is_some_and(Type::is_allocator_view) {
+            self.allocator_view_names.insert(place.clone());
+        }
 
         self.lower_stmts_scoped(then_body)?;
         let mut then_reaches_merge = !self.dead;
@@ -26495,11 +26513,16 @@ impl LowerCtx<'_, '_> {
         }
         self.vars.remove(&place);
         self.var_tys.remove(&place);
+        self.allocator_view_names.remove(&place);
         if let Some(var) = old_var {
             self.vars.insert(place.clone(), var);
         }
         if let Some(ty) = old_ty {
-            self.var_tys.insert(place, ty);
+            let old_is_allocator_view = ty.is_allocator_view();
+            self.var_tys.insert(place.clone(), ty);
+            if old_allocator_view || old_is_allocator_view {
+                self.allocator_view_names.insert(place);
+            }
         }
 
         self.b.switch_to_block(else_block);

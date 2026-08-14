@@ -2283,17 +2283,25 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             }
             let mut init =
                 moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
+            // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
+            // even though the source surface names only `T ? AllocError`.
+            // Keep that internal carrier through TIR so every tier returns and
+            // binds the same reference, rather than materializing a copy.
+            let allocator_carrier = init.ty.is_allocator_view() || init.ty.is_allocator_result();
             // No declared `b.ty`? A typed list head (`[Shape].{ Circle.{…}, … }`)
             // still carries its own resolved element type on `init.ty` — reuse it
             // self-referentially so trait-object elements still get boxed
             // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
             // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
             // binding got, and rustc rejected the un-boxed struct literals (I2).
-            let want = b
-                .ty
-                .as_ref()
-                .map(|ty| ty.without_user_tags().clone())
-                .unwrap_or_else(|| init.ty.clone());
+            let want = if allocator_carrier {
+                init.ty.clone()
+            } else {
+                b.ty
+                    .as_ref()
+                    .map(|ty| ty.without_user_tags().clone())
+                    .unwrap_or_else(|| init.ty.clone())
+            };
             init = preserve_typed_list_shape(init, &want, cx);
             // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
             // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
@@ -2373,7 +2381,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // owner/range for the shared Prelude window setter. It must stay
             // inferred; the source-facing ViewMut spelling is a sema type,
             // not the generated Rust carrier.
-            let ty = if init.ty.is_compute_view_mut() {
+            let ty = if allocator_carrier || init.ty.is_compute_view_mut() {
                 init.ty.clone()
             } else {
                 b.ty
@@ -2453,7 +2461,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
             // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
             // inferred binding.
-            let let_ty = if ty.is_compute_view_mut() {
+            let let_ty = if allocator_carrier {
+                crate::Codegen::TIR::TLetTy::plain(ty.clone())
+            } else if ty.is_compute_view_mut() {
                 TLetTy::Inferred
             } else if send_fn {
                 TLetTy::SendFn(ty.clone())
@@ -2472,6 +2482,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 b.name.clone()
             };
             let slot = if is_resource {
+                TLocal::user(&binding_name).through_ref()
+            } else if ty.is_allocator_view() {
                 TLocal::user(&binding_name).through_ref()
             } else if kw == "let mut" {
                 TLocal::user(&binding_name).as_mutable()

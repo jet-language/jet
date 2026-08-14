@@ -776,7 +776,11 @@ fn lower_if_cond_atom(
                 _ => unreachable!("checked above"),
             };
             let (name, ty) = binding;
-            let place = TLocal::user(&name);
+            let place = if ty.as_ref().is_some_and(Type::is_allocator_view) {
+                TLocal::user(&name).through_ref()
+            } else {
+                TLocal::user(&name)
+            };
             let pattern = if matches!(&subj.ty, Type::Option(_)) {
                 TPattern::option_binding(pattern.clone())
             } else {

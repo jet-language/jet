@@ -656,6 +656,10 @@ pub enum InternalTag {
     /// keeps the source-level callback shape while telling the backend it is
     /// already a raw C function pointer, not a boxed Jet closure.
     CppCallbackAbi,
+    /// D-ALLOCFAIL1=A: the compiler-only mutable reference carrier returned by
+    /// `mem.*.try_alloc`. It stays transparent to Jet's `T ? AllocError`
+    /// identity while preserving the allocator slot through every tier.
+    AllocatorView,
 }
 
 impl InternalTag {
@@ -669,6 +673,7 @@ impl InternalTag {
             InternalTag::SharedGuardEdit => "shared_guard.edit",
             InternalTag::TerminalFactSet => "terminal.fact_set",
             InternalTag::CppCallbackAbi => "cpp.callback_abi",
+            InternalTag::AllocatorView => "allocator.view",
         }
     }
 }
@@ -1047,6 +1052,35 @@ impl Type {
             ty = inner.as_ref();
         }
         ty
+    }
+
+    /// D-ALLOCFAIL1=A: retain the live allocator slot behind a fallible
+    /// allocation result without exposing a second source-level type.
+    pub fn allocator_view(inner: Type) -> Type {
+        Type::Tagged {
+            marker: TagMarker::Internal(InternalTag::AllocatorView),
+            inner: Box::new(inner),
+        }
+    }
+
+    /// True for the compiler-only mutable reference carrier used by
+    /// `try_alloc`'s success branch.
+    pub fn is_allocator_view(&self) -> bool {
+        matches!(
+            self,
+            Type::Tagged {
+                marker: TagMarker::Internal(InternalTag::AllocatorView),
+                ..
+            }
+        )
+    }
+
+    /// True for `Result<allocator_view<T>, AllocError>`.
+    pub fn is_allocator_result(&self) -> bool {
+        matches!(
+            self,
+            Type::Result { ok, .. } if ok.is_allocator_view()
+        )
     }
 
     /// Visit matched pairs under the shared composite carriers.

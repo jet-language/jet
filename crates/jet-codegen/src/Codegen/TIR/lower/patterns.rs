@@ -424,7 +424,12 @@ pub(crate) fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, su
         // `null` (Absent) binds nothing.
         _ => return,
     };
-    env.bind(&binding, TLocal::user(&binding), ty);
+    let slot = if ty.as_ref().is_some_and(Type::is_allocator_view) {
+        TLocal::user(&binding).through_ref()
+    } else {
+        TLocal::user(&binding)
+    };
+    env.bind(&binding, slot, ty);
 }
 
 pub(crate) fn lower_enum_match<'a>(
