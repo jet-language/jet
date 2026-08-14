@@ -81,10 +81,10 @@ pub enum JetVal {
     /// String-keyed map; values are packed i64 (ints or heap handles).
     Map(BTreeMap<String, i64>),
     Record(Vec<JetVal>),
-    // D-INTBIG1: exact integer carrier. Reuses `CtBigInt` (jet-foundation)
+    // D-INTBIG1: exact Int spill carrier. Reuses `CtBigInt` (jet-foundation)
     // limb-for-limb so a JIT-computed spilled Int prints byte-identical to the
     // AOT and comptime exact integer paths (R12 parity).
-    BigInt(jet_foundation::Numeric::CtBigInt),
+    ExactInt(jet_foundation::Numeric::CtBigInt),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -698,73 +698,10 @@ impl JetArena {
         Some(self.alloc_string(value))
     }
 
-    // ── D-INTBIG1: exact integer carrier handles ────────────────────────────
-
-    pub fn alloc_bigint_from_int(&mut self, n: i64) -> i64 {
-        let id = self.values.len() as i64;
-        self.values
-            .push(JetVal::BigInt(jet_foundation::Numeric::CtBigInt::from_int(n)));
-        id
-    }
-
-    /// `Err` on a malformed literal (mirrors AOT's exact-carrier parse trap
-    /// panic path — the caller traps instead of unwinding a Rust panic through the
-    /// JIT frame, I1).
-    /// parity: guard tests/comptime_diff.rs::comptime_bigint_matches_runtime
-    pub fn alloc_bigint_from_str(&mut self, s: &str) -> Result<i64, String> {
-        let v = jet_foundation::Numeric::CtBigInt::from_str(s)?;
-        let id = self.values.len() as i64;
-        self.values.push(JetVal::BigInt(v));
-        Ok(id)
-    }
-
-    fn get_bigint(&self, id: i64) -> Option<&jet_foundation::Numeric::CtBigInt> {
-        match self.values.get(id as usize) {
-            Some(JetVal::BigInt(v)) => Some(v),
-            _ => None,
-        }
-    }
-
-    pub fn bigint_eq(&self, a: i64, b: i64) -> Option<bool> {
-        Some(self.get_bigint(a)? == self.get_bigint(b)?)
-    }
-
-    pub fn bigint_add(&mut self, a: i64, b: i64) -> Option<i64> {
-        let result = self.get_bigint(a)?.add(self.get_bigint(b)?);
-        let id = self.values.len() as i64;
-        self.values.push(JetVal::BigInt(result));
-        Some(id)
-    }
-
-    pub fn bigint_sub(&mut self, a: i64, b: i64) -> Option<i64> {
-        let result = self.get_bigint(a)?.sub(self.get_bigint(b)?);
-        let id = self.values.len() as i64;
-        self.values.push(JetVal::BigInt(result));
-        Some(id)
-    }
-
-    pub fn bigint_mul(&mut self, a: i64, b: i64) -> Option<i64> {
-        let result = self.get_bigint(a)?.mul(self.get_bigint(b)?);
-        let id = self.values.len() as i64;
-        self.values.push(JetVal::BigInt(result));
-        Some(id)
-    }
-
-    pub fn bigint_neg(&mut self, a: i64) -> Option<i64> {
-        let result = self.get_bigint(a)?.neg();
-        let id = self.values.len() as i64;
-        self.values.push(JetVal::BigInt(result));
-        Some(id)
-    }
-
-    pub fn bigint_to_string(&self, a: i64) -> Option<String> {
-        Some(self.get_bigint(a)?.to_string_rep())
-    }
-
     // ── D-INTBIG1: packed default `Int` ───────────────────────────────────
     // A resident signed 63-bit payload is its own value. Larger values use
-    // the same arena and CtBigInt limbs as the legacy precise-number carrier;
-    // the public language type is still only `Int`.
+    // the same arena and CtBigInt limbs as the spill carrier; the public
+    // language type is still only `Int`.
     const INT_SMALL_MIN: i64 = -(1i64 << 62);
     const INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
     const INT_BIG_TAG: i64 = i64::MIN;
@@ -779,7 +716,7 @@ impl JetArena {
         }
         let id = value.wrapping_sub(Self::INT_BIG_TAG) as usize;
         match self.values.get(id) {
-            Some(JetVal::BigInt(value)) => Some(value.clone()),
+            Some(JetVal::ExactInt(value)) => Some(value.clone()),
             _ => None,
         }
     }
@@ -796,7 +733,7 @@ impl JetArena {
             }
         }
         let id = self.values.len() as i64;
-        self.values.push(JetVal::BigInt(value));
+        self.values.push(JetVal::ExactInt(value));
         Self::INT_BIG_TAG.wrapping_add(id)
     }
 

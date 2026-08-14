@@ -4941,7 +4941,7 @@ pub enum THandleOp {
     /// D-TYPE2-TIME1=A: dimensional algebra reads canonical Time in seconds;
     /// the stored carrier remains i64 nanoseconds.
     DurationSecondsValue,
-    /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
+    /// D-INTBIG1 / D-DECIMAL1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,
         method: String,

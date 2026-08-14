@@ -22003,7 +22003,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::DurationSecondsValue => {
                 Ok(self.call_host(self.host.duration_seconds_value, &[recv_val]))
             }
-            // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
+            // D-INTBIG1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
                 if type_name == "Decimal" || type_name == "Fraction" =>
             {

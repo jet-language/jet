@@ -1037,7 +1037,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     return format!("[{}]", parts.join(", "));
                 }
             }
-            let baked = value.clone().serialize();
+            // D-INTBIG1: `CtValue::serialize` predates nested generated
+            // modules and has no codegen context, so its exact-Int constructor
+            // is root-relative only. Add the module prefix at the emission
+            // seam; runtime arithmetic still goes through Prelude `jet_int_*`.
+            let baked = match value {
+                crate::AST::CtValue::BigInt(big) => format!(
+                    "{}jet_std::jet_int_from_str({:?}).unwrap()",
+                    cx.root_prefix,
+                    big.to_string_rep()
+                ),
+                _ => value.clone().serialize(),
+            };
             // #1537 / I2: some folded values spell a generic constructor that
             // pins none of its parameters — the carrier's `Ok(6i64)` says
             // nothing about the report type, and an empty collection says

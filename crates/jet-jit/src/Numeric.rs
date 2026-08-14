@@ -1,5 +1,6 @@
-//! D-BIGINT1 / D-DECIMAL1 / D-NUMTYPE1: precise numeric host shims for Cranelift JIT.
-//! Spilled exact `Int` values are opaque i64 handles into the shared `JetArena` heap.
+//! D-INTBIG1 / D-DECIMAL1 / D-NUMTYPE1: precise numeric host shims for Cranelift JIT.
+//! Exact `Int` values use the packed `JetArena` carrier; spilled values are
+//! opaque i64 handles into that same carrier.
 //! `Decimal` / `Fraction` values are opaque i64 handles into side tables on
 //! `JitRuntime`. All reuse foundation algorithms (`CtBigInt` / `CtDecimal` /
 //! `CtFraction`) — same semantics AOT Prelude calls, not a third policy copy.
@@ -68,69 +69,6 @@ fn with_complex<R>(handle: i64, f: impl FnOnce(&JetComplex) -> R) -> Option<R> {
             .get(idx)
             .and_then(|value| value.as_ref())
             .map(f)
-    })
-}
-
-extern "C" fn jet_jit_bigint_from_int(n: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_bigint_from_int(n))
-}
-
-extern "C" fn jet_jit_bigint_from_str(str_id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let s = rt.heap.clone_string(str_id).unwrap_or_default();
-        match rt.heap.alloc_bigint_from_str(&s) {
-            Ok(id) => id,
-            Err(_) => {
-                rt.set_trap("invalid exact Int string");
-                0
-            }
-        }
-    })
-}
-
-extern "C" fn jet_jit_bigint_add(a: i64, b: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .bigint_add(a, b)
-            .expect("jit bigint add: bad handle")
-    })
-}
-
-extern "C" fn jet_jit_bigint_sub(a: i64, b: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .bigint_sub(a, b)
-            .expect("jit bigint sub: bad handle")
-    })
-}
-
-extern "C" fn jet_jit_bigint_mul(a: i64, b: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .bigint_mul(a, b)
-            .expect("jit bigint mul: bad handle")
-    })
-}
-
-extern "C" fn jet_jit_bigint_eq(a: i64, b: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .bigint_eq(a, b)
-            .expect("jit bigint eq: bad handle") as i8
-    })
-}
-
-extern "C" fn jet_jit_bigint_neg(a: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.bigint_neg(a).expect("jit bigint neg: bad handle"))
-}
-
-extern "C" fn jet_jit_bigint_to_string(a: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let text = rt
-            .heap
-            .bigint_to_string(a)
-            .expect("jit bigint to_string: bad handle");
-        rt.heap.alloc_string(text)
     })
 }
 
@@ -669,14 +607,6 @@ host_fns! {
 
 
     }
-    bigint_from_int: "jet_jit_bigint_from_int" => jet_jit_bigint_from_int: sig_unary;
-    bigint_from_str: "jet_jit_bigint_from_str" => jet_jit_bigint_from_str: sig_unary;
-    bigint_add: "jet_jit_bigint_add" => jet_jit_bigint_add: sig_binary;
-    bigint_sub: "jet_jit_bigint_sub" => jet_jit_bigint_sub: sig_binary;
-    bigint_mul: "jet_jit_bigint_mul" => jet_jit_bigint_mul: sig_binary;
-    bigint_eq: "jet_jit_bigint_eq" => jet_jit_bigint_eq: sig_compare;
-    bigint_neg: "jet_jit_bigint_neg" => jet_jit_bigint_neg: sig_unary;
-    bigint_to_string: "jet_jit_bigint_to_string" => jet_jit_bigint_to_string: sig_unary;
     int_from_int: "jet_jit_int_from_int" => jet_jit_int_from_int: sig_unary;
     int_from_u64: "jet_jit_int_from_u64" => jet_jit_int_from_u64: sig_unary;
     int_from_str: "jet_jit_int_from_str" => jet_jit_int_from_str: sig_unary;

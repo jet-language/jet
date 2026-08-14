@@ -1225,11 +1225,11 @@ const TRUTH_ROWS: &[RegistryRow] = &[
         "D-ONCE-LAW1",
     ),
     truth_row(
-        "BigIntSnip",
+        "ExactIntSnip",
         "crates/jet-foundation/src/Numeric.rs",
         &["compile-time evaluation", "JIT encoding", "the Prelude"],
         Guard {
-            test: "comptime_bigint_matches_runtime",
+            test: "comptime_exact_int_matches_runtime",
             file: "tests/comptime_diff.rs",
             proof: GuardProof::DiffsBehavior,
         },
