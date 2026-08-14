@@ -40,6 +40,7 @@ fn placeholder(ty: RuleArgType, source_type: &str) -> String {
         RuleArgType::DurationOrString => "1s".to_string(),
         RuleArgType::Ident => "x".to_string(),
         RuleArgType::Any => "1".to_string(),
+        RuleArgType::EffectRoots => "[Fs.Write]".to_string(),
     }
 }
 
