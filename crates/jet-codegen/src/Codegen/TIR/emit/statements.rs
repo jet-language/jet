@@ -130,11 +130,19 @@ fn emit_sparse_branch_tree(
         }
         return;
     };
-    out.push_str(&jet_format!("{pad}if *{jet_prefix}switch_subject == {pivot} {{\n"));
+    let (equals, _) = coverage_condition(
+        jet_format!("*{jet_prefix}switch_subject == {pivot}"),
+        cx,
+    );
+    out.push_str(&jet_format!("{pad}if {equals} {{\n"));
     emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
     let middle = arms.len() / 2;
     if middle > 0 {
-        out.push_str(&jet_format!("{pad}}} else if *{jet_prefix}switch_subject < {pivot} {{\n"));
+        let (less_than, _) = coverage_condition(
+            jet_format!("*{jet_prefix}switch_subject < {pivot}"),
+            cx,
+        );
+        out.push_str(&jet_format!("{pad}}} else if {less_than} {{\n"));
         emit_sparse_branch_tree(
             &arms[..middle],
             else_body,
@@ -1219,6 +1227,7 @@ fn emit_tir_stmt(
                 let pattern = emit_tir_pattern(&arm.pattern, cx);
                 match tir_range_guard(&arm.pattern.pattern) {
                     Some(guard) => {
+                        let (guard, _) = coverage_condition(guard, cx);
                         out.push_str(&format!("{}    {} if {} => {{\n", pad, pattern, guard))
                     }
                     None => out.push_str(&format!("{}    {} => {{\n", pad, pattern)),
@@ -1273,9 +1282,13 @@ fn emit_tir_stmt(
             ));
             for (i, (lo, hi, body)) in arms.iter().enumerate() {
                 let kw = if i == 0 { "if" } else { "} else if" };
+                let (condition, _) = coverage_condition(
+                    format!("({} >= {} && {} <= {})", subject_str, lo, subject_str, hi),
+                    cx,
+                );
                 out.push_str(&format!(
-                    "{}{} ({} >= {} && {} <= {}) {{\n",
-                    inner_pad, kw, subject_str, lo, subject_str, hi
+                    "{}{} {} {{\n",
+                    inner_pad, kw, condition
                 ));
                 emit_tir_stmts_nested(
                     body,
@@ -2079,7 +2092,11 @@ fn emit_tir_stmt(
                     .find(|(cond, _)| !branch_bool_literal(cond))
                     .map(|(_, body)| body.as_slice())
                     .expect("classified bool branch has false arm");
-                out.push_str(&jet_format!("{}if *{jet_prefix}switch_subject {{\n", inner_pad));
+                let (condition, _) = coverage_condition(
+                    jet_format!("*{jet_prefix}switch_subject"),
+                    cx,
+                );
+                out.push_str(&jet_format!("{}if {condition} {{\n", inner_pad));
                 emit_tir_stmts_nested(
                     true_body,
                     cx,
@@ -2101,6 +2118,48 @@ fn emit_tir_stmt(
             }
             if matches!(class, crate::Codegen::TIR::BranchClass::DenseInt) {
                 out.push_str(&format!("{}// jet:branch dense-table\n", inner_pad));
+                if cx.coverage {
+                    for (i, (cond, body)) in arms.iter().enumerate() {
+                        let literal = match &cond.kind {
+                            crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => {
+                                match &rhs.kind {
+                                    crate::Codegen::TIR::TExprKind::IntLit(value, _) => value.to_string(),
+                                    crate::Codegen::TIR::TExprKind::BoolLit(value) => value.to_string(),
+                                    _ => unreachable!("classified literal branch"),
+                                }
+                            }
+                            _ => unreachable!("classified literal branch"),
+                        };
+                        let (condition, _) = coverage_condition(
+                            jet_format!("*{jet_prefix}switch_subject == {}", literal),
+                            cx,
+                        );
+                        let kw = if i == 0 { "if" } else { "} else if" };
+                        out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, condition));
+                        emit_tir_stmts_nested(
+                            body,
+                            cx,
+                            out,
+                            indent + 2,
+                            active_deferred_closes,
+                        );
+                    }
+                    match else_body {
+                        Some(body) => {
+                            out.push_str(&format!("{}}} else {{\n", inner_pad));
+                            emit_tir_stmts_nested(
+                                body,
+                                cx,
+                                out,
+                                indent + 2,
+                                active_deferred_closes,
+                            );
+                        }
+                        None => out.push_str(&format!("{}}}\n", inner_pad)),
+                    }
+                    out.push_str(&format!("{}}}\n", pad));
+                    return;
+                }
                 out.push_str(&jet_format!("{}match *{jet_prefix}switch_subject {{\n", inner_pad));
                 for (cond, body) in arms {
                     let literal = match &cond.kind {
@@ -2165,11 +2224,15 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}// jet:branch {shape}\n", inner_pad));
             for (i, (cond, body)) in arms.iter().enumerate() {
                 let kw = if i == 0 { "if" } else { "} else if" };
+                let (condition, _) = coverage_condition(
+                    emit_expr_with_cleanups(cond, cx, active_deferred_closes),
+                    cx,
+                );
                 out.push_str(&format!(
                     "{}{} {} {{\n",
                     inner_pad,
                     kw,
-                    emit_expr_with_cleanups(cond, cx, active_deferred_closes)
+                    condition
                 ));
                 emit_tir_stmts_nested(
                     body,

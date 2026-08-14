@@ -786,6 +786,10 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
     for row in text_golden.lines().filter(|line| !line.trim().is_empty()) {
         assert!(text.contains(&compact(row)), "text golden row missing: {row}\n{text}");
     }
+    assert!(
+        text.contains("1/2 branches covered (50%)"),
+        "missing branch coverage summary:\n{text}"
+    );
 
     let json_output = run(true);
     assert!(
@@ -800,6 +804,7 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
     );
     let json_golden = fs::read_to_string(root.join("tests/fixtures/coverage.json.golden"))
         .expect("coverage.json.golden");
+    assert!(json.contains("\"schema_version\":1"), "missing coverage schema:\n{json}");
     for row in json_golden.lines().filter(|line| !line.trim().is_empty()) {
         assert!(json.contains(row.trim()), "JSON golden row missing: {row}\n{json}");
     }

@@ -618,14 +618,56 @@ fn coverage_if_value_block(block: &str, id: Option<&str>, taken: bool, cx: &Cx) 
     )
 }
 
-fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
-    if let TIfCond::And { left, right } = cond {
-        let right = emit_tir_if_expr(right, then_block, else_block, cx);
-        return emit_tir_if_expr(left, &format!("{{ {right} }}"), else_block, cx);
+fn collect_if_expr_branch_ids(cond: &TIfCond, cx: &Cx, ids: &mut Vec<String>) {
+    match cond {
+        TIfCond::And { left, right } => {
+            collect_if_expr_branch_ids(left, cx, ids);
+            collect_if_expr_branch_ids(right, cx, ids);
+        }
+        _ if cx.coverage => ids.push(cx.register_coverage_branch()),
+        _ => {}
     }
-    let branch_id = cx.coverage.then(|| cx.register_coverage_branch());
-    let then_block = coverage_if_value_block(then_block, branch_id.as_deref(), true, cx);
-    let else_block = coverage_if_value_block(else_block, branch_id.as_deref(), false, cx);
+}
+
+fn if_expr_branch_count(cond: &TIfCond) -> usize {
+    match cond {
+        TIfCond::And { left, right } => {
+            if_expr_branch_count(left) + if_expr_branch_count(right)
+        }
+        _ => 1,
+    }
+}
+
+fn emit_tir_if_expr_at(
+    cond: &TIfCond,
+    then_block: &str,
+    else_block: &str,
+    ids: &[String],
+    id_index: usize,
+    cx: &Cx,
+) -> String {
+    if let TIfCond::And { left, right } = cond {
+        let left_count = if_expr_branch_count(left);
+        let right = emit_tir_if_expr_at(
+            right,
+            then_block,
+            else_block,
+            ids,
+            id_index + left_count,
+            cx,
+        );
+        return emit_tir_if_expr_at(
+            left,
+            &format!("{{ {right} }}"),
+            else_block,
+            ids,
+            id_index,
+            cx,
+        );
+    }
+    let branch_id = ids.get(id_index).map(String::as_str);
+    let then_block = coverage_if_value_block(then_block, branch_id, true, cx);
+    let else_block = coverage_if_value_block(else_block, branch_id, false, cx);
     match cond {
         TIfCond::Plain(cond) => format!(
             "if {} {} else {}",
@@ -724,6 +766,12 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
              \"value doesn't fit in {dst_spelling}\".to_string()) }} }}"
         ),
     }
+}
+
+fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
+    let mut ids = Vec::new();
+    collect_if_expr_branch_ids(cond, cx, &mut ids);
+    emit_tir_if_expr_at(cond, then_block, else_block, &ids, 0, cx)
 }
 
 fn zip_integer_signed(ty: &Type) -> Option<bool> {

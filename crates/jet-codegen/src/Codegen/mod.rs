@@ -3924,6 +3924,7 @@ fn emit_bundle_tests_cov_inner(
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.coverage = coverage;
+    cx.coverage_entry = coverage;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
     TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);

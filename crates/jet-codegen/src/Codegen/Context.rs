@@ -193,6 +193,9 @@ pub(crate) struct Cx {
     /// dump. Never set in normal builds, so codegen output is byte-identical
     /// (golden tests never touch this path).
     pub(crate) coverage: bool,
+    /// D-COV1: the test harness emits the entry module at crate root. Keep its
+    /// coverage namespace stable as `main`, independent of the input filename.
+    pub(crate) coverage_entry: bool,
     pub(crate) coverage_branches: std::cell::RefCell<Vec<CoverageBranch>>,
     pub(crate) coverage_branch_numbers: std::cell::RefCell<HashMap<String, usize>>,
     /// Import alias -> Rust module name (`__jet_scoring`).
@@ -780,7 +783,7 @@ impl Cx {
             *next += 1;
             *next
         };
-        let module = if self.module_alias.is_empty() {
+        let module = if self.coverage_entry || self.module_alias.is_empty() {
             "main"
         } else {
             self.module_alias.as_str()
@@ -3651,6 +3654,7 @@ pub(crate) fn build_cx_items(
         core_archive_source: false,
         test_mode: false,
         coverage: false,
+        coverage_entry: false,
         coverage_branches: std::cell::RefCell::new(Vec::new()),
         coverage_branch_numbers: std::cell::RefCell::new(HashMap::new()),
         debug_linemap: false,
