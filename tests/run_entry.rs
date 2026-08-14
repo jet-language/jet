@@ -100,6 +100,25 @@ fn odd(n: Int) => Bool {
 }
 
 #[test]
+fn script_bindings_are_ordered_locals_not_file_wide_declarations() {
+    let before_binding = "print(later)\nlater :: 1\n";
+    let diagnostics = jet::compile(before_binding)
+        .expect_err("a loose binding must not be visible before its statement");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        "expected an unknown-name diagnostic before the binding, got {diagnostics:?}"
+    );
+
+    let inside_declaration = "later :: 1\nfn helper() => Int { return later }\n";
+    let diagnostics = jet::compile(inside_declaration)
+        .expect_err("a loose binding must stay local to the implicit run body");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        "expected an unknown-name diagnostic inside the helper, got {diagnostics:?}"
+    );
+}
+
+#[test]
 fn unannotated_run_is_fallible_by_default_and_reports_at_the_edge() {
     let source = r#"
 fn step() => Int ? {
@@ -211,6 +230,36 @@ fn script_entry_matches_default_jit_and_forced_interpreter() {
         assert!(stderr.is_empty(), "{tier} stderr: {stderr}");
         assert_eq!(exit_code, 0, "{tier} exit code");
     }
+}
+
+#[test]
+fn script_dev_verb_uses_the_single_file_implicit_run_entry() {
+    let dir = common::unique_tmp("jet_script_dev_verb");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("main.jet"),
+        "print(helper())\nfn helper() => String { return \"dev script\" }\n",
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["dev", "main.jet", "--watch=off"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("jet dev should run a single script file");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        output.status.success(),
+        "jet dev rejected the script:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "dev script\n",
+        "jet dev must execute the implicit run body exactly once"
+    );
 }
 
 #[test]

@@ -69,6 +69,10 @@ mod generic_module_tests {
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let program = Parser::parse(&tokens).expect("script should parse");
         assert_eq!(program.script_body.len(), 2);
+        assert!(
+            program.script_body[0].span().start < program.script_body[1].span().start,
+            "loose statements must retain authored source order"
+        );
         assert!(program.items.iter().any(|item| matches!(
             item,
             Item::Func(function) if function.name == "helper"
