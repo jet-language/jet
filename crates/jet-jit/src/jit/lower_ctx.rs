@@ -12366,7 +12366,15 @@ impl LowerCtx<'_, '_> {
                 {
                     return self.lower_compute_transform_call(method, args);
                 }
-                if jet_foundation::Syntax::core_call(module, method).is_some() {
+                // D-INTBIG1: the generic Core row is the fixed-width fallback
+                // for core.math. Let the exact Int path below select the
+                // packed-int host first, as AOT does.
+                if !(module == "core.math"
+                    && args
+                        .first()
+                        .is_some_and(|arg| matches!(&arg.ty, Type::Int)))
+                    && jet_foundation::Syntax::core_call(module, method).is_some()
+                {
                     let row = jet_foundation::Syntax::core_call_projection(
                         module,
                         method,
