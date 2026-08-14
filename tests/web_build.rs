@@ -2,6 +2,9 @@
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -1585,6 +1588,9 @@ fn web_edge_preserves_one_error_wire_across_js_and_wasm() {
     let expected = include_str!("../examples/features/expected/errors/default_err_edge.err.out").trim_end();
     let expected_frame_line = format!("frame={expected:?}");
     let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
 const { jet_main } = await import("./app.js");
 try {
   await jet_main();
@@ -1603,6 +1609,9 @@ try {
 "#;
 
     let wasm_harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
 const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
 const wasm = await instantiateWasm("./app.wasm");
 const status = wasm.jet_export_run();
@@ -1652,7 +1661,7 @@ try {
     assert!(wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"), "{wasm}");
     assert!(wasm.contains("jet_wasm_error_len"), "{wasm}");
     assert!(wasm.contains("jet.err/v1"), "{wasm}");
-    assert!(wasm.contains("\"tag\":\"Err\""), "{wasm}");
+    assert!(wasm.contains("\\\"tag\\\":\\\"Err\\\""), "{wasm}");
     assert!(wasm.contains("Ok(value) =>"), "{wasm}");
     assert!(wasm.contains("jet_wasm_store_ok("), "{wasm}");
     assert!(!wasm.contains("jet_wasm_store_ok();"), "{wasm}");
@@ -1690,6 +1699,36 @@ try {
     assert!(
         wasm_stdout.lines().any(|line| line == expected_frame_line.as_str()),
         "{wasm_stdout}"
+    );
+
+    let wasm_ok_source = r#"#Target(Web)
+fn run() => Int ? {
+    return Ok(42)
+}
+"#;
+    let wasm_ok_dir = build_web_fixture(
+        "failure_edge_wasm_ok",
+        wasm_ok_source,
+        "tests/fixtures/failure_edge_wasm_ok.jet",
+    );
+    let wasm_ok_harness = r#"
+process.on("unhandledRejection", (error) => { throw error; });
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const wasm = await instantiateWasm("./app.wasm");
+const status = wasm.jet_export_run();
+const raw = takeWasmError(wasm);
+if (status !== 0) throw new Error("fallible Wasm success returned failure status");
+if (JSON.stringify(raw) !== '{"tag":"Ok","value":42}') throw new Error("raw Wasm Ok edge changed: " + JSON.stringify(raw));
+const { jet_main } = await import("./app.js");
+const bridge = await jet_main();
+if (bridge !== 42) throw new Error("JS Wasm bridge changed: " + bridge);
+console.log(JSON.stringify({ raw, bridge }));
+"#;
+    assert_eq!(
+        run_node_harness(&wasm_ok_dir, "failure_edge_wasm_ok_harness.mjs", wasm_ok_harness),
+        r#"{"raw":{"tag":"Ok","value":42},"bridge":42}
+"#,
+        "fallible Wasm success edge changed"
     );
 
     let js_source = format!("#Target(JS)\n{source}");
@@ -1792,6 +1831,7 @@ try {
     );
 
     let _ = fs::remove_dir_all(wasm_dir);
+    let _ = fs::remove_dir_all(wasm_ok_dir);
     let _ = fs::remove_dir_all(js_dir);
     let _ = fs::remove_dir_all(cli_dir);
 }
@@ -1942,6 +1982,125 @@ try {
     assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
     assert!(String::from_utf8_lossy(&node.stderr).contains("Error [TRYFAIL]: try failed"));
     let _ = fs::remove_dir_all(dir);
+}
+
+fn normalize_journey_paths(journey: &str, shown: &str) -> String {
+    let trailing_newline = journey.ends_with('\n');
+    let normalized = journey
+        .lines()
+        .map(|line| {
+            let Some(open) = line.find(" (") else {
+                return line.to_string();
+            };
+            let Some(close) = line.find(") via ?") else {
+                return line.to_string();
+            };
+            let Some(colon) = line[..close].rfind(':') else {
+                return line.to_string();
+            };
+            format!("{} ({shown}{}", &line[..open], &line[colon..])
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if trailing_newline {
+        format!("{normalized}\n")
+    } else {
+        normalized
+    }
+}
+
+fn harness_journey(stdout: &str) -> String {
+    let start = stdout.find("JOURNEY_BEGIN\n").expect("journey start marker");
+    let start = start + "JOURNEY_BEGIN\n".len();
+    let end = stdout[start..]
+        .find("\nJOURNEY_END")
+        .map(|offset| start + offset)
+        .expect("journey end marker");
+    stdout[start..end].to_string()
+}
+
+#[test]
+fn web_two_hop_journey_matches_all_execution_tiers() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web two-hop journey parity test (need rustc + node)");
+        return;
+    }
+    let source = r#"fn load() => Int ? {
+    return Err("two-hop", code: "TWOHOP")
+}
+
+fn read() => Int ? {
+    value :: load()? "reading source"
+    return Ok(value)
+}
+
+fn run() ? {
+    value :: read()?
+    print(value)
+}
+"#;
+    let shown = "tests/fixtures/web_two_hop_journey.jet";
+    let expected = format!(
+        "error propagated from: read ({shown}:6) via ?: reading source\n\
+error propagated from: run ({shown}:11) via ?\n\
+Error [TWOHOP]: two-hop"
+    );
+
+    let native_runs = [
+        (
+            "AOT",
+            tir_support::build_and_run_full("jet_web_two_hop_aot", "web_two_hop_journey", source),
+        ),
+        ("default JIT", tir_support::jit_run("web_two_hop_journey", source)),
+        (
+            "interpreter",
+            tir_support::interpreter_run("web_two_hop_journey", source),
+        ),
+    ];
+    for (tier, (code, stdout, stderr)) in native_runs {
+        assert_eq!(code, 1, "{tier} two-hop run must return an error");
+        assert!(stdout.is_empty(), "{tier} two-hop run printed stdout: {stdout:?}");
+        assert_eq!(
+            normalize_journey_paths(stderr.trim_end(), shown),
+            expected,
+            "{tier} journey changed"
+        );
+    }
+
+    let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  throw new Error("unexpected success");
+} catch (error) {
+  console.log("JOURNEY_BEGIN");
+  console.log(error.journey);
+  console.log("JOURNEY_END");
+}
+"#;
+    let js_dir = build_web_fixture(
+        "two_hop_journey_js",
+        &format!("#Target(JS)\n{source}"),
+        shown,
+    );
+    assert_eq!(
+        harness_journey(&run_node_harness(&js_dir, "two_hop_journey_harness.mjs", harness)),
+        expected,
+        "JS journey changed"
+    );
+
+    let wasm_dir = build_web_fixture("two_hop_journey_wasm", source, shown);
+    assert_eq!(
+        harness_journey(&run_node_harness(&wasm_dir, "two_hop_journey_harness.mjs", harness)),
+        expected,
+        "Wasm journey changed"
+    );
+
+    let _ = fs::remove_dir_all(js_dir);
+    let _ = fs::remove_dir_all(wasm_dir);
 }
 
 #[test]

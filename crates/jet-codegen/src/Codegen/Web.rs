@@ -337,7 +337,7 @@ fn emit_app_shell(bundle: &ProgramBundle) -> WebArtifacts {
           try { return undefined; }\n\
           catch (error) { jetDom.raiseRuntimeError(error); }\n\
         }\n\
-        void jet_main().catch((error) => { jetDom.showRuntimeError(error); });\n"
+        void jet_main().catch((error) => { jetDom.raiseRuntimeError(error); });\n"
         .to_string();
     WebArtifacts {
         manifest_json: emit_manifest(bundle, &[], &[], js_source_map),
@@ -5346,7 +5346,7 @@ fn emit_js_app(
             out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
             out.push_str("}\n\n");
             if auto_start {
-                out.push_str("void jet_main().catch((error) => { jetDom.showRuntimeError(error); });\n");
+                out.push_str("void jet_main().catch((error) => { jetDom.raiseRuntimeError(error); });\n");
             }
         } else if bundle.modules[bundle.entry].html_path.is_some() {
             // An explicit host page owns startup. A native-only `run` is not a
@@ -5362,7 +5362,7 @@ fn emit_js_app(
             out.push_str("  return raw;\n");
             out.push_str("}\n");
             if auto_start {
-                out.push_str("void jet_main().catch((error) => { jetDom.showRuntimeError(error); });\n");
+                out.push_str("void jet_main().catch((error) => { jetDom.raiseRuntimeError(error); });\n");
             }
         }
     } else {
