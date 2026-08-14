@@ -2777,7 +2777,10 @@ fn run() {
 | `mat.group_start(n)` / `mat.group_end(n)` | `Int?` | byte span of a capture |
 
 Note: `{N}` quantifiers must be written `{{N}}` in Jet source — single braces
-are string interpolation (S8). Write `\\d{{4}}` for "four digits".
+are string interpolation (S8). Typed regex heads own backslashes, so write
+`Regex.{"\d{{4}}"}` in Markdown source for the Jet pattern `\d{4}`.
+Plain strings passed to runtime compilation keep the ordinary escape table and
+use `"\\d{{4}}"`.
 
 `core.regex` has no external dependency and does not create a hidden FFI bridge.
 

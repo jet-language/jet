@@ -189,6 +189,23 @@ fn run() {
 }
 
 #[test]
+fn regex_typed_head_owns_backslashes_but_rejects_holes() {
+    let diagnostics = jet::compile(
+        r#"
+fn run() {
+    name :: "id"
+    pattern :: Regex.{"\d+{name}"}
+}
+"#,
+    )
+    .expect_err("Regex heads must reject interpolation after receiving raw text");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0152"),
+        "Regex interpolation should use E0152: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn sql_row_header_is_a_real_declared_type_position() {
     let error = jet::compile("fn run() { #SQL(MissingRow) {} }\n").unwrap_err();
     assert!(

@@ -84,10 +84,10 @@ fn run() {
 
     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
     // single braces are string interpolation (S8).
-    print(re.is_match(pattern: .{"\\d{{4}}"}, text: text))
+    print(re.is_match(pattern: .{"\d{{4}}"}, text: text))
 
     // match + capture groups: whole + each group
-    m :: re.match(.{"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
+    m :: re.match(.{"(\d{{4}})-(\d{{2}})-(\d{{2}})"}, text)
     if m == Val(mat) {
         print(mat.group(0) ?? "x")
         print(mat.group(1) ?? "x")
@@ -104,14 +104,14 @@ fn run() {
     }
 
     // find / find_all
-    first :: re.find(.{"\\d+"}, text)
+    first :: re.find(.{"\d+"}, text)
     print(first ?? "none")
-    nums :: re.find_all(.{"\\d+"}, text)
+    nums :: re.find_all(.{"\d+"}, text)
     print(nums.len())
 
     // replace / replace_all (with group reference)
     print(re.replace(.{"ok"}, text, "done"))
-    print(re.replace_all(.{"\\d"}, text, "#"))
+    print(re.replace_all(.{"\d"}, text, "#"))
 
     // split
     parts :: re.split(.{"-"}, "a-b-c")
@@ -166,9 +166,9 @@ fn inferred_and_explicit_regex_literals_are_direct_values() {
 use core.regex as re
 
 fn run() {
-    print(re.find(.{"\\d+"}, "id=42") ?? "none")
+    print(re.find(.{"\d+"}, "id=42") ?? "none")
     print(re.find(pattern: .{"[a-z]+"}, text: "123jet") ?? "none")
-    digits :: Regex.{"\\d+"}
+    digits :: Regex.{"\d+"}
     print(digits.is_match("room 7"))
     runtime_pattern :: "\\w+"
     runtime :: re.compile(runtime_pattern)

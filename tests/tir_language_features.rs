@@ -38,6 +38,22 @@ fn run() {
     );
 }
 
+/// D-BOUND-RAW1=A: the lexer gives a typed head's body to the head grammar,
+/// while an ordinary string still owns the four-entry escape table.
+#[test]
+fn typed_head_raw_escape_keeps_plain_string_cooked_across_tiers() {
+    let src = r#"
+use core.regex as re
+
+fn run() {
+    plain :: "\n"
+    print(plain.len())
+    print(re.is_match(.{"\d+"}, "id=42"))
+}
+"#;
+    tir_support::assert_tiers_agree("typed_head_raw_escape", src, "1\ntrue\n");
+}
+
 /// D-SHAPE3a=A: inferred fresh construction rewrites to the ordinary static
 /// method call before TIR lowering. Expected types flow through bindings,
 /// returns, fields, and call arguments; explicit `Type.new` remains valid.
@@ -754,7 +770,7 @@ fn regex_match_group() {
 use core.regex as re
 fn run() {
     text :: \"order 42 shipped\"
-    m :: re.match(.{\"(\\\\d+) shipped\"}, text)
+    m :: re.match(.{\"(\\d+) shipped\"}, text)
     if m == .Val(mat) {
         whole :: mat.group(0) ?? \"none\"
         print(whole)

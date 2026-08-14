@@ -445,12 +445,12 @@ fn reusable_regex_matches_across_comptime_tir_and_runtime() {
         34_000,
         "typed Regex methods and canonical grammar",
         r#"
-@ct_regex :: Regex.{"(?<word>\\p{{Alphabetic}}+)_(\\d{{2,4}})"}
+@ct_regex :: Regex.{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
 @ct_match :: @ct_regex.match("xx Jet_2026 yy") ?? panic("missing comptime match")
 @comptime_value :: "{@ct_match.group(2) ?? "none"}|{@ct_match.name("word") ?? "none"}|{@ct_match.start()}|{@ct_match.end()}|{@ct_match.group_start(1) ?? -1}|{@ct_match.group_end(1) ?? -1}|{@ct_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{@ct_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
 
 fn run() {
-    rt_regex :: Regex.{"(?<word>\\p{{Alphabetic}}+)_(\\d{{2,4}})"}
+    rt_regex :: Regex.{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
     rt_match :: rt_regex.match("xx Jet_2026 yy") ?? panic("missing runtime match")
     runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
     print("{@comptime_value}")

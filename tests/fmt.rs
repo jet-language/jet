@@ -1119,6 +1119,7 @@ fn fmt_preserves_take_pattern_literal() {
     c :: Cursor.over("inc-4411 sev 3: disk full")
     c.skip_ws()
     m :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("no match")
+    raw :: c.take_pattern(String.{"inc-\d-{id:Int} "}) ?? panic("no match")
     rest :: c.take_pattern("disk ") ?? panic("no match")
     print("{m.id} {m.sev}")
 }
@@ -1135,7 +1136,7 @@ fn fmt_preserves_bin_take_pattern_literal() {
     let src = r#"fn run() {
     header :: [69, 0, 0, 40]
     r :: Reader.over(header)
-    parsed :: r.take_pattern([U8].{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("no match")
+    parsed :: r.take_pattern([U8].{"prefix-{{literal}}-{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("no match")
     print("{parsed.version} {parsed.ihl} {parsed.tos} {parsed.len}")
 }
 "#;

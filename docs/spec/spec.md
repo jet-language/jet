@@ -29,6 +29,10 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   and interpolation. The newline right after the opening `"""` and the one right
   before the closing `"""` are dropped, and the closing `"""`'s indentation is
   stripped from every line (Swift-style). An unterminated `"""` is E0002.
+- Typed head bodies (D-BOUND-RAW1=A) are the raw boundary: in
+  `Type.{"…"}` and inferred `.{"…"}` bodies, backslashes stay
+  literal for the head's grammar. Quote, brace, closing-delimiter, and hole
+  rules stay unchanged. Plain strings keep the four-entry escape table.
 - Typed text (D-TYPEDTEXT1/2, D-FFI-SH1, D-UNIFYLIT1=A): `SQL.{"…"}`,
   `HTML.{"…"}`, and `Sh.{"…"}` use one checked interpolation engine. For `Sh`,
   literal words become argv items and each `{hole}` becomes exactly one argv

@@ -35,8 +35,9 @@ fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Toke
 
 impl<'a> Lexer<'a> {
     /// D-BOUND-RAW1=A: the quote immediately follows the opening `.{` of a
-    /// typed head body. Only that body changes the backslash rule; the
-    /// interpolation sublexer remains an ordinary Jet lexer.
+    /// typed head body. Only that body's literal substream changes the
+    /// backslash rule; brace lexing and interpolation substreams remain
+    /// ordinary Jet lexer input.
     fn starts_typed_head_body(toks: &[Token]) -> bool {
         let significant = toks
             .iter()
@@ -757,9 +758,9 @@ fn add(a: Int, b: Int) => Int {
     }
 
     #[test]
-    fn typed_head_bodies_keep_backslashes_but_plain_strings_decode_them() {
+    fn typed_head_bodies_keep_backslashes_and_shared_holes_but_plain_strings_decode_them() {
         let source = r#"plain :: "\n"
-pattern :: Regex.{"\n"}
+pattern :: Regex.{"\n{{literal}}-{value}"}
 multiline :: Path.{"""
 \logs\app
 """}"#;
@@ -779,7 +780,7 @@ multiline :: Path.{"""
         ));
         assert!(matches!(
             strings[1].as_slice(),
-            [StrTokPart::Lit(text)] if text == r"\n"
+            [StrTokPart::Lit(text), StrTokPart::Interp(_)] if text == "\\n{literal}-"
         ));
         assert!(matches!(
             strings[2].as_slice(),

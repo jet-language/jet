@@ -679,8 +679,8 @@ impl<'a> Fmt<'a> {
             }
             // D-SHIFT1 (c7shift): `cursor.take_pattern("…")`'s pattern-literal
             // argument — same rendering as a `Pattern::StrMatch` (D-PARSESTR1).
-            Expr::StrMatchLit(parts, _) => {
-                self.fmt_str_match_parts(parts);
+            Expr::StrMatchLit(parts, span) => {
+                self.fmt_str_match_parts(parts, self.is_typed_head_body(*span));
             }
             // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")`'s
             // pattern-literal argument — same rendering as a
@@ -1864,8 +1864,8 @@ impl<'a> Fmt<'a> {
             // formats identically to the same text as a format literal, plus
             // a `:Type` suffix on typed holes (which format literals never
             // have).
-            Pattern::StrMatch { parts, .. } => {
-                self.fmt_str_match_parts(parts);
+            Pattern::StrMatch { parts, span } => {
+                self.fmt_str_match_parts(parts, self.is_typed_head_body(*span));
             }
             // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern.
             Pattern::BinMatch { parts, .. } => {
@@ -1881,7 +1881,7 @@ impl<'a> Fmt<'a> {
         for part in parts {
             match part {
                 BinMatchPart::Lit(bytes) => {
-                    self.write(&String::from_utf8_lossy(bytes));
+                    self.write(&escape_typed_head_lit(&String::from_utf8_lossy(bytes)));
                 }
                 BinMatchPart::Hole { name, spec, .. } => {
                     self.write("{");
@@ -1908,11 +1908,24 @@ impl<'a> Fmt<'a> {
     /// D-PARSESTR1 (shared with `Expr::StrMatchLit` — D-SHIFT1's
     /// `take_pattern` argument): render a `StrMatchPart` list the same way a
     /// format literal renders, plus a `:Type` suffix on typed holes.
-    pub(super) fn fmt_str_match_parts(&mut self, parts: &[crate::AST::StrMatchPart]) {
+    pub(super) fn fmt_str_match_parts(
+        &mut self,
+        parts: &[crate::AST::StrMatchPart],
+        raw_head: bool,
+    ) {
+        if raw_head {
+            self.write("String.{");
+        }
         self.write("\"");
         for part in parts {
             match part {
-                crate::AST::StrMatchPart::Lit(s) => self.write(&escape_str_lit(s)),
+                crate::AST::StrMatchPart::Lit(s) => {
+                    if raw_head {
+                        self.write(&escape_typed_head_lit(s));
+                    } else {
+                        self.write(&escape_str_lit(s));
+                    }
+                }
                 crate::AST::StrMatchPart::Hole { name, ty, .. } => {
                     self.write("{");
                     self.write(name);
@@ -1925,6 +1938,17 @@ impl<'a> Fmt<'a> {
             }
         }
         self.write("\"");
+        if raw_head {
+            self.write("}");
+        }
+    }
+
+    /// D-BOUND-RAW1=A: only an explicit `String.{"…"}` pattern body owns
+    /// backslashes. Bare text patterns keep the ordinary string escape table.
+    fn is_typed_head_body(&self, span: crate::Diagnostics::Span) -> bool {
+        self.src
+            .get(span.start..span.end)
+            .is_some_and(|source| source.starts_with("String"))
     }
 
     fn fmt_call(&mut self, c: &Call) {

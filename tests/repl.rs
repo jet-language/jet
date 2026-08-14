@@ -1255,7 +1255,7 @@ fn repl_core_path_join_inline() {
 fn repl_core_regex_is_match_inline() {
     let inputs = &[
         "use core.regex as re",
-        "re.is_match(.{\"\\\\d+\"}, \"order 42\")",
+        "re.is_match(.{\"\\d+\"}, \"order 42\")",
     ];
     let out = run_transcript(inputs, None);
     assert!(

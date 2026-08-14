@@ -1,5 +1,7 @@
-//! String-literal scanning: single-quote (`"…"`) and triple-quote (`"""…"""`)
-//! literals, with escapes (S20) and `{expr}` interpolation (S8).
+//! String-literal scanning: plain single-quote (`"…"`) and triple-quote
+//! (`"""…"""`) literals own the ordinary escapes (S20) and `{expr}`
+//! interpolation (S8); typed-head bodies hand backslashes to their head grammar
+//! (D-BOUND-RAW1).
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
@@ -43,9 +45,11 @@ impl<'a> Lexer<'a> {
         })
     }
 
-    /// Lex a string literal: escapes (S20), `{{`/`}}` literal braces (S20),
-    /// and `{expr}` interpolation (S8). Interpolated expressions are lexed
-    /// in place so their tokens carry real source spans.
+    /// Lex a string literal. Plain strings own the four-entry escape table
+    /// (S20); a typed-head body leaves backslashes for its head grammar
+    /// (D-BOUND-RAW1). Both forms keep literal braces and `{expr}`
+    /// interpolation (S8). Interpolated expressions are lexed in place so
+    /// their tokens carry real source spans.
     pub(super) fn string(&mut self, start: usize, raw_head: bool) -> Option<Token> {
         self.i += 1; // opening quote
         let mut parts: Vec<StrTokPart> = Vec::new();
@@ -222,9 +226,10 @@ impl<'a> Lexer<'a> {
     /// S70 (D-SG5): `"""…"""` multi-line string. The line break right after the
     /// opening `"""` is dropped, the line break before the closing `"""` is
     /// dropped, and the closing `"""`'s indentation is stripped from every line.
-    /// Escapes (S20) and `{interp}` (S8) stay active. The processed text is
-    /// stored as ordinary [`StrTokPart`]s; `jet fmt` re-derives the triple-quoted
-    /// shape from the span.
+    /// Plain-string escapes (S20) and `{interp}` (S8) stay active. A typed-head
+    /// body leaves backslashes literal for its head grammar (D-BOUND-RAW1).
+    /// The processed text is stored as ordinary [`StrTokPart`]s;
+    /// `jet fmt` re-derives the triple-quoted shape from the span.
     pub(super) fn triple_string(&mut self, start: usize, raw_head: bool) -> Option<Token> {
         let open_end = self.i + 3; // char index just past the opening `"""`
 
