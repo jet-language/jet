@@ -239,7 +239,7 @@ fn fold_switch(
         return empty_stmt(span);
     };
 
-    let mut selected: Option<Vec<Stmt>> = None;
+    let mut arm_matches = Vec::new();
     for arm in &arms {
         let Some(matches) = setting_arm_matches(&arm.cond, &subject, &setting.value) else {
             diags.push(Diagnostic::error(
@@ -251,13 +251,23 @@ fn fold_switch(
             ));
             return empty_stmt(span);
         };
-        if matches && selected.is_none() {
-            selected = Some(arm.body.clone());
-        }
+        arm_matches.push((matches, arm.body.clone(), arm.span));
     }
-    Stmt::ComptimeBlock {
-        body: selected.or(else_body).unwrap_or_default(),
-        span,
+    let mut tail = else_body;
+    for (matches, body, arm_span) in arm_matches.into_iter().rev() {
+        let node = Stmt::ComptimeIf {
+            cond: Expr::Bool(matches, arm_span),
+            cond_span: arm_span,
+            then_body: body,
+            else_body: tail,
+            span: arm_span,
+            selected_then: None,
+        };
+        tail = Some(vec![node]);
+    }
+    match tail.and_then(|mut body| body.pop()) {
+        Some(node) => node,
+        None => empty_stmt(span),
     }
 }
 

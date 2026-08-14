@@ -201,7 +201,7 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
         "typed settings AOT build failed:\n{}",
         String::from_utf8_lossy(&build.stderr)
     );
-    let binary = build_dir.join("main");
+    let binary = build_dir.join("run");
     let aot = Command::new(&binary)
         .output()
         .expect("typed settings AOT binary should execute");
