@@ -1113,6 +1113,14 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_txn");
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");
+    let mut s = strip_mod(&s, "jet_term_mode");
+    loop {
+        let next = strip_mod(&s, "jet_term_mode");
+        if next == s {
+            break;
+        }
+        s = next;
+    }
     let s = strip_mod(&s, "jet_process_pty");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
@@ -1209,6 +1217,24 @@ fn user() { unsafe { user_pointer() } }
 "##;
     let stripped = strip_vetted_prelude_modules(generated);
     assert!(!stripped.contains("ffi()"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn term_mode_stripping_removes_all_platform_variants_without_hiding_user_unsafe() {
+    let generated = r#"
+#[cfg(unix)]
+mod jet_term_mode { unsafe { unix_ffi() } }
+#[cfg(windows)]
+mod jet_term_mode { unsafe { windows_ffi() } }
+#[cfg(not(any(unix, windows)))]
+mod jet_term_mode { unsafe { other_ffi() } }
+unsafe { user_pointer() }
+"#;
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("unix_ffi()"));
+    assert!(!stripped.contains("windows_ffi()"));
+    assert!(!stripped.contains("other_ffi()"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
 }
 
