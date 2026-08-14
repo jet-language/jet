@@ -16,6 +16,11 @@ mod stmts;
 mod stream;
 mod webapp;
 
+#[allow(dead_code)]
+mod gc_runtime {
+    include!("../../../../jet-rt/src/__gc.rs");
+}
+
 mod contract_semantics {
     include!("../../../Prelude/Core/Contracts.rs");
 }
@@ -959,6 +964,7 @@ pub(super) struct EvalCtx<'a> {
     pub(super) repl_grants: Vec<String>,
     pub(super) repl_authorizer: Option<&'a mut dyn Comptime::ReplAuthorizer>,
     pub(super) pending_return: Option<CtValue>,
+    pub(super) preserve_allocator_view: bool,
     /// `defer close(^…)` exprs scheduled in the current eval frame (LIFO).
     pub(super) deferred_closes: Vec<&'a TExpr>,
     /// Control emitted by an inline loop expression that targets an enclosing
@@ -1142,7 +1148,19 @@ struct EvalRuntime<'a> {
     /// keeps only the key/result values; bound, LRU order, and counters live in
     /// the shared Memo substrate.
     memos: MemoState,
+    allocators: HashMap<usize, EvalAllocator>,
+    gc_roots: Vec<gc_runtime::AutomaticRoot<CtValue>>,
     completion_order: AtomicU64,
+}
+
+struct EvalAllocator {
+    generation: u32,
+    used: usize,
+    capacity: usize,
+    allocator: String,
+    fixed: bool,
+    slots: Vec<CtValue>,
+    closed: bool,
 }
 
 struct EvalSharedState {
@@ -1346,6 +1364,8 @@ impl EvalRuntime<'_> {
             tasks: Vec::new(),
             apps: Vec::new(),
             memos,
+            allocators: HashMap::new(),
+            gc_roots: Vec::new(),
             completion_order: AtomicU64::new(0),
         }
     }
@@ -1587,6 +1607,7 @@ impl<'a> EvalCtx<'a> {
             repl_grants: config.repl_grants,
             repl_authorizer: None,
             pending_return: None,
+            preserve_allocator_view: false,
             deferred_closes: Vec::new(),
             pending_flow: None,
             collecting_items: Vec::new(),
@@ -3607,6 +3628,7 @@ fn run_program_with_structs_on_stack(
         repl_grants: Vec::new(),
         repl_authorizer: None,
         pending_return: None,
+        preserve_allocator_view: false,
         deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
@@ -3713,6 +3735,7 @@ pub fn run_named_func_with_memos(
         repl_grants: Vec::new(),
         repl_authorizer: None,
         pending_return: None,
+        preserve_allocator_view: false,
         deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
@@ -3945,6 +3968,7 @@ fn eval_expr_hook(
         repl_grants,
         repl_authorizer,
         pending_return: None,
+        preserve_allocator_view: false,
         deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
@@ -4075,6 +4099,7 @@ fn eval_block_hook(
         repl_grants,
         repl_authorizer,
         pending_return: None,
+        preserve_allocator_view: false,
         deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),

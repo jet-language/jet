@@ -118,6 +118,9 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         bit_sets: Vec::new(),
         byte_buffers: Vec::new(),
         allocators: Vec::new(),
+        allocator_views: Vec::new(),
+        gc_roots: Vec::new(),
+        gc_edges: Vec::new(),
         pools: Vec::new(),
         shareds: Vec::new(),
         conditions: Vec::new(),
@@ -216,6 +219,9 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.bit_sets.clear();
     rt.byte_buffers.clear();
     rt.allocators.clear();
+    rt.allocator_views.clear();
+    rt.gc_roots.clear();
+    rt.gc_edges.clear();
     rt.pools.clear();
     rt.shared_guard_states.clear();
     rt.shareds.clear();

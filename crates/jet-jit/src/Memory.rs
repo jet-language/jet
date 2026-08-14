@@ -23,11 +23,25 @@ struct SharedTransaction {
 type SharedTransactionCallback = unsafe extern "C" fn(i64, i64) -> i64;
 
 pub(crate) struct AllocatorState {
-    generation: u64,
+    generation: u32,
     used: usize,
     capacity: usize,
     allocator: &'static str,
     fixed: bool,
+    slots: Vec<AllocatorSlot>,
+    closed: bool,
+}
+
+#[derive(Clone, Copy)]
+struct AllocatorSlot {
+    generation: u32,
+    value: i64,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct AllocatorView {
+    pub(crate) allocator: i64,
+    slot: i64,
 }
 
 impl Default for AllocatorState {
@@ -35,9 +49,11 @@ impl Default for AllocatorState {
         Self {
             generation: 0,
             used: 0,
-            capacity: usize::MAX,
+            capacity: 4096,
             allocator: "Arena",
             fixed: false,
+            slots: Vec::new(),
+            closed: false,
         }
     }
 }
@@ -232,6 +248,107 @@ fn unpack_id(id: i64) -> Option<(usize, u32)> {
     (low != 0).then_some(((low - 1) as usize, (id as u64 >> 32) as u32))
 }
 
+const ALLOCATOR_VIEW_TAG: i64 = i64::MIN;
+
+fn pack_allocator_view(index: usize) -> Option<i64> {
+    (index <= i64::MAX as usize).then_some(ALLOCATOR_VIEW_TAG | index as i64)
+}
+
+fn unpack_allocator_view(value: i64) -> Option<usize> {
+    (value & ALLOCATOR_VIEW_TAG != 0).then_some((value & i64::MAX) as usize)
+}
+
+fn allocator_state_mut(
+    rt: &mut crate::JitRuntime,
+    handle: i64,
+) -> Result<&mut AllocatorState, String> {
+    let state = rt
+        .allocators
+        .get_mut((handle as usize).wrapping_sub(1))
+        .ok_or_else(|| "allocator handle is closed or invalid".to_string())?;
+    if state.closed {
+        return Err("allocator handle is closed or invalid".to_string());
+    }
+    Ok(state)
+}
+
+fn allocator_store(
+    rt: &mut crate::JitRuntime,
+    handle: i64,
+    value: i64,
+    requested_bytes: i64,
+) -> Result<i64, String> {
+    let state = allocator_state_mut(rt, handle)?;
+    let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
+    let overhead = if state.fixed {
+        3 * std::mem::size_of::<usize>()
+    } else {
+        0
+    };
+    if state.allocator == "Arena" {
+        let needed = state
+            .used
+            .saturating_add(requested.saturating_add(overhead));
+        while state.capacity < needed {
+            let next = state.capacity.saturating_mul(2).max(needed);
+            if next == state.capacity {
+                break;
+            }
+            state.capacity = next;
+        }
+    }
+    let (_, next_used) = jet_foundation::Outcome::jet_try_alloc_value(
+        value,
+        state.used,
+        state.capacity,
+        requested,
+        state.allocator,
+        overhead,
+    )
+    .map_err(|error| {
+        format!(
+            "{} allocation failed for {} bytes",
+            error.allocator, error.requested_bytes
+        )
+    })?;
+    let index = state.slots.len();
+    state.slots.push(AllocatorSlot {
+        generation: state.generation,
+        value,
+    });
+    state.used = next_used;
+    Ok(pack_id(index, state.generation))
+}
+
+fn allocator_view(rt: &crate::JitRuntime, view: i64) -> Result<AllocatorView, String> {
+    let index = unpack_allocator_view(view)
+        .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+    rt.allocator_views
+        .get(index)
+        .copied()
+        .ok_or_else(|| "allocator view is invalid or no longer live".to_string())
+}
+
+fn allocator_slot(
+    rt: &crate::JitRuntime,
+    view: i64,
+) -> Result<(i64, AllocatorSlot), String> {
+    let view = allocator_view(rt, view)?;
+    let state = rt
+        .allocators
+        .get((view.allocator as usize).wrapping_sub(1))
+        .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+    let (index, generation) = unpack_id(view.slot)
+        .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+    let slot = state
+        .slots
+        .get(index)
+        .copied()
+        .filter(|slot| slot.generation == generation && generation == state.generation)
+        .ok_or_else(|| "allocator view is invalid or no longer live".to_string())?;
+    Ok((view.allocator, slot))
+}
+
 extern "C" fn jet_jit_allocator_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.allocators.push(AllocatorState::default());
@@ -245,40 +362,109 @@ extern "C" fn jet_jit_allocator_new_named(kind: i64) -> i64 {
         2 => "Pool",
         _ => "Arena",
     };
+    let capacity = match allocator {
+        "Bump" => 64 * 1024,
+        "Pool" => usize::MAX,
+        _ => 4096,
+    };
     Concurrency::with_runtime_mut(|rt| {
         rt.allocators.push(AllocatorState {
             generation: 0,
             used: 0,
-            capacity: usize::MAX,
+            capacity,
             allocator,
             fixed: false,
+            slots: Vec::new(),
+            closed: false,
         });
         rt.allocators.len() as i64
     })
 }
 
 extern "C" fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
+    let (allocator, is_fixed) = match fixed {
+        1 => ("Fixed", true),
+        2 => ("Bump", false),
+        3 => ("Pool", false),
+        _ => ("Arena", false),
+    };
     Concurrency::with_runtime_mut(|rt| {
         rt.allocators.push(AllocatorState {
             generation: 0,
             used: 0,
             capacity: capacity.max(1) as usize,
-            allocator: if fixed != 0 { "Fixed" } else { "Allocator" },
-            fixed: fixed != 0,
+            allocator,
+            fixed: is_fixed,
+            slots: Vec::new(),
+            closed: false,
         });
         rt.allocators.len() as i64
     })
 }
 
-extern "C" fn jet_jit_allocator_alloc(handle: i64, value: i64) -> i64 {
+extern "C" fn jet_jit_allocator_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
-            rt.set_trap("allocator handle is closed or invalid");
+        let slot = match allocator_store(rt, handle, value, requested_bytes) {
+            Ok(slot) => slot,
+            Err(message) => {
+                rt.set_trap(&message);
+                return 0;
+            }
+        };
+        let Some(view) = pack_allocator_view(rt.allocator_views.len()) else {
+            rt.set_trap("allocator view table exhausted");
             return 0;
         };
-        let _ = state.generation;
-        value
+        rt.allocator_views.push(AllocatorView {
+            allocator: handle,
+            slot,
+        });
+        view
     })
+}
+
+extern "C" fn jet_jit_allocator_view_read(view: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match allocator_slot(rt, view) {
+        Ok((_, slot)) => slot.value,
+        Err(message) => {
+            rt.set_trap(&message);
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_allocator_view_write(view: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let view = match allocator_view(rt, view) {
+            Ok(view) => view,
+            Err(message) => {
+                rt.set_trap(&message);
+                return;
+            }
+        };
+        let Some(state) = rt
+            .allocators
+            .get_mut((view.allocator as usize).wrapping_sub(1))
+        else {
+            rt.set_trap("allocator view is invalid or no longer live");
+            return;
+        };
+        let closed = state.closed;
+        let current_generation = state.generation;
+        let Some((index, generation)) = unpack_id(view.slot) else {
+            rt.set_trap("allocator view is invalid or no longer live");
+            return;
+        };
+        let Some(slot) = state.slots.get_mut(index) else {
+            rt.set_trap("allocator view is invalid or no longer live");
+            return;
+        };
+        if closed || generation != current_generation || slot.generation != generation {
+            rt.set_trap("allocator view is invalid or no longer live");
+            return;
+        }
+        slot.value = value;
+    });
 }
 
 extern "C" fn jet_jit_allocator_try_alloc(
@@ -293,11 +479,27 @@ extern "C" fn jet_jit_allocator_try_alloc(
                 rt.set_trap("allocator handle is closed or invalid");
                 return 0;
             };
+            if state.closed {
+                rt.set_trap("allocator handle is closed or invalid");
+                return 0;
+            }
             let overhead = if state.fixed {
                 3 * std::mem::size_of::<usize>()
             } else {
                 0
             };
+            if state.allocator == "Arena" {
+                let needed = state
+                    .used
+                    .saturating_add(requested.saturating_add(overhead));
+                while state.capacity < needed {
+                    let next = state.capacity.saturating_mul(2).max(needed);
+                    if next == state.capacity {
+                        break;
+                    }
+                    state.capacity = next;
+                }
+            }
             let result = jet_foundation::Outcome::jet_try_alloc_value(
                 value,
                 state.used,
@@ -307,6 +509,10 @@ extern "C" fn jet_jit_allocator_try_alloc(
                 overhead,
             );
             if let Ok((_, next_used)) = &result {
+                state.slots.push(AllocatorSlot {
+                    generation: state.generation,
+                    value,
+                });
                 state.used = *next_used;
             }
             (state.allocator, result)
@@ -332,6 +538,135 @@ extern "C" fn jet_jit_allocator_reset(handle: i64) {
         };
         state.generation = state.generation.wrapping_add(1);
         state.used = 0;
+        state.slots.clear();
+    });
+}
+
+extern "C" fn jet_jit_allocator_close(handle: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
+            rt.set_trap("allocator handle is closed or invalid");
+            return;
+        };
+        if state.closed {
+            rt.set_trap("allocator handle is closed or invalid");
+            return;
+        }
+        state.closed = true;
+        state.slots.clear();
+        state.used = 0;
+    });
+}
+
+const JIT_GC_SITE: jet_rt::__gc::PromotionSite = jet_rt::__gc::PromotionSite {
+    source: "<jit>",
+    span_start: 0,
+    span_end: 0,
+    scope: "#Policy(gc)",
+    policy_provenance: "hosted",
+    reason: "automatic promotion",
+    type_name: "<jit-value>",
+    bytes: 0,
+};
+
+extern "C" fn jet_jit_gc_promote(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let root = match jet_rt::__gc::AutomaticRoot::promote(value, JIT_GC_SITE) {
+            Ok(root) => root,
+            Err(fault) => {
+                rt.set_trap(&fault.to_string());
+                return 0;
+            }
+        };
+        rt.gc_roots.push(root);
+        rt.gc_edges.push(Vec::new());
+        rt.gc_roots.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_gc_read(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = match rt.gc_roots.get((handle as usize).wrapping_sub(1)) {
+            Some(root) => root.read(|value| *value).map_err(|fault| fault.to_string()),
+            None => Err("automatic GC root is invalid or closed".to_string()),
+        };
+        match result {
+            Ok(value) => value,
+            Err(message) => {
+                rt.set_trap(&message);
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_gc_edit(handle: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let result = match rt.gc_roots.get((handle as usize).wrapping_sub(1)) {
+            Some(root) => root
+                .edit(|slot| *slot = value)
+                .map(|_| ())
+                .map_err(|fault| fault.to_string()),
+            None => Err("automatic GC root is invalid or closed".to_string()),
+        };
+        if let Err(message) = result {
+            rt.set_trap(&message);
+        }
+    });
+}
+
+extern "C" fn jet_jit_gc_clear_edges(handle: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let index = (handle as usize).wrapping_sub(1);
+        let result = match (rt.gc_edges.get_mut(index), rt.gc_roots.get(index)) {
+            (Some(edges), Some(root)) => {
+                edges.clear();
+                root.replace_edge_slot("jit", &[])
+                    .map_err(|fault| fault.to_string())
+            }
+            _ => Err("automatic GC root is invalid or closed".to_string()),
+        };
+        if let Err(message) = result {
+            rt.set_trap(&message);
+        }
+    });
+}
+
+extern "C" fn jet_jit_gc_add_edge(handle: i64, child: i64, edge_slot: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let root_index = (handle as usize).wrapping_sub(1);
+        let child_id = rt
+            .gc_roots
+            .get((child as usize).wrapping_sub(1))
+            .map(|root| root.id());
+        let result = match (child_id, rt.gc_edges.get_mut(root_index)) {
+            (Some(child_id), Some(edges)) if edge_slot >= 0 => {
+                let slot = edge_slot as usize;
+                let edge_result = if slot == edges.len() {
+                    edges.push(child_id);
+                    Ok(())
+                } else if slot < edges.len() {
+                    edges[slot] = child_id;
+                    Ok(())
+                } else {
+                    Err("automatic GC edge slots must be contiguous".to_string())
+                };
+                match edge_result {
+                    Ok(()) => match rt.gc_roots.get(root_index) {
+                        Some(root) => root
+                            .replace_edge_slot("jit", edges)
+                            .map_err(|fault| fault.to_string()),
+                        None => Err("automatic GC root is invalid or closed".to_string()),
+                    },
+                    Err(message) => Err(message),
+                }
+            }
+            (Some(_), Some(_)) => Err("automatic GC edge slot is invalid".to_string()),
+            _ => Err("automatic GC root is invalid or closed".to_string()),
+        };
+        if let Err(message) = result {
+            rt.set_trap(&message);
+        }
     });
 }
 
@@ -1154,6 +1489,8 @@ host_fns! {
         unary_void.params.push(AbiParam::new(types::I64));
         let mut binary_void = unary_void.clone();
         binary_void.params.push(AbiParam::new(types::I64));
+        let mut ternary_void = binary_void.clone();
+        ternary_void.params.push(AbiParam::new(types::I64));
         let mut binary_f64_void = Signature::new(cc);
         binary_f64_void.params.push(AbiParam::new(types::I64));
         binary_f64_void.params.push(AbiParam::new(types::F64));
@@ -1178,9 +1515,17 @@ host_fns! {
     allocator_new: "jet_jit_allocator_new" => jet_jit_allocator_new: noarg_i64;
     allocator_new_named: "jet_jit_allocator_new_named" => jet_jit_allocator_new_named: unary;
     allocator_new_capacity: "jet_jit_allocator_new_capacity" => jet_jit_allocator_new_capacity: binary;
-    allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: binary;
+    allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: ternary;
+    allocator_view_read: "jet_jit_allocator_view_read" => jet_jit_allocator_view_read: unary;
+    allocator_view_write: "jet_jit_allocator_view_write" => jet_jit_allocator_view_write: binary_void;
     allocator_try_alloc: "jet_jit_allocator_try_alloc" => jet_jit_allocator_try_alloc: ternary;
     allocator_reset: "jet_jit_allocator_reset" => jet_jit_allocator_reset: unary_void;
+    allocator_close: "jet_jit_allocator_close" => jet_jit_allocator_close: unary_void;
+    gc_promote: "jet_jit_gc_promote" => jet_jit_gc_promote: unary;
+    gc_read: "jet_jit_gc_read" => jet_jit_gc_read: unary;
+    gc_edit: "jet_jit_gc_edit" => jet_jit_gc_edit: binary_void;
+    gc_clear_edges: "jet_jit_gc_clear_edges" => jet_jit_gc_clear_edges: unary_void;
+    gc_add_edge: "jet_jit_gc_add_edge" => jet_jit_gc_add_edge: ternary_void;
     pool_new: "jet_jit_pool_new" => jet_jit_pool_new: noarg_i64;
     pool_add: "jet_jit_pool_add" => jet_jit_pool_add: binary;
     pool_get: "jet_jit_pool_get" => jet_jit_pool_get: binary;

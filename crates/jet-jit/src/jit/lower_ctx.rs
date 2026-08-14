@@ -87,6 +87,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// legacy value-plus-one representation.
     pub(crate) result_option_vars: HashSet<String>,
     pub(crate) raw_slots: HashMap<String, StackSlot>,
+    pub(crate) allocator_view_names: HashSet<String>,
+    pub(crate) preserve_allocator_view: bool,
     /// Pointer values minted from real local stack slots; synthetic place
     /// identities are deliberately absent so volatile access declines them.
     pub(crate) real_address_values: HashSet<Value>,
@@ -3766,7 +3768,13 @@ impl LowerCtx<'_, '_> {
                     self.contract_posts.pop();
                 }
             }
-            TStmt::Let { name, init, .. } => {
+            TStmt::Let {
+                name,
+                init,
+                gc_promotion,
+                gc_transferred: _,
+                ..
+            } => {
                 let result_option_abi = self.uses_result_option_abi(init);
                 if Self::is_range_ty(&init.ty) {
                     let values = self.lower_range_expr(init)?;
@@ -3811,13 +3819,34 @@ impl LowerCtx<'_, '_> {
                         return Ok(());
                     }
                 }
-                let val = self.lower_expr(init)?;
+                let allocator_view = matches!(
+                    &init.kind,
+                    TExprKind::HandleMethod {
+                        op: THandleOp::AllocAlloc,
+                        ..
+                    }
+                );
+                let prior_allocator_view = self.preserve_allocator_view;
+                self.preserve_allocator_view = allocator_view;
+                let lowered = self.lower_expr(init);
+                self.preserve_allocator_view = prior_allocator_view;
+                let mut val = lowered?;
                 if self.dead {
                     return Ok(());
                 }
+                if let Some(promotion) = gc_promotion {
+                    if self.b.func.dfg.value_type(val) != types::I64 {
+                        return Err("jit GC promotion payload must use the i64 ABI".to_string());
+                    }
+                    val = self.call_host(self.host.memory.gc_promote, &[val]);
+                    self.emit_trap_check()?;
+                    self.lower_gc_promotion_edges(val, promotion)?;
+                }
                 // TIR often stamps `Unit` on void calls and some handle results;
                 // prefer the Cranelift value's real ABI over guessing I8 vs I64.
-                let ty = if matches!(&init.ty, Type::Named(n) if n == "Unit") {
+                let ty = if allocator_view {
+                    types::I64
+                } else if matches!(&init.ty, Type::Named(n) if n == "Unit") {
                     self.b.func.dfg.value_type(val)
                 } else {
                     init_clif_ty(init, self.meta)?
@@ -3847,6 +3876,11 @@ impl LowerCtx<'_, '_> {
                     self.result_option_vars.insert(place);
                 } else {
                     self.result_option_vars.remove(&place);
+                }
+                if allocator_view {
+                    self.allocator_view_names.insert(TIR::local_place(name));
+                } else {
+                    self.allocator_view_names.remove(&TIR::local_place(name));
                 }
                 if Self::is_shared_guard_ty(&init.ty) {
                     self.deferred_shared_guards.push(name.clone());
@@ -4230,6 +4264,31 @@ impl LowerCtx<'_, '_> {
                     .get(&key)
                     .copied()
                     .ok_or_else(|| format!("jit assign to unknown place `{}`", local.name))?;
+                if self.allocator_view_names.contains(&key) {
+                    if !local.deref {
+                        return Err("jit allocator view is not reassignable".to_string());
+                    }
+                    let view = self.b.use_var(var);
+                    let ty = self
+                        .var_tys
+                        .get(&key)
+                        .cloned()
+                        .ok_or("jit allocator view type")?;
+                    let rhs = self.lower_assignment_value(value, *clone_value)?;
+                    let assigned = if let Some(op) = op {
+                        let current = self.read_allocator_view(view, &ty)?;
+                        self.apply_binop_to_var(current, *op, rhs, &ty, *assign_line)?
+                    } else {
+                        rhs
+                    };
+                    let bits = self.allocator_value_bits(assigned, &ty)?;
+                    let write = self
+                        .module
+                        .declare_func_in_func(self.host.memory.allocator_view_write, self.b.func);
+                    self.b.ins().call(write, &[view, bits]);
+                    self.emit_trap_check()?;
+                    return Ok(());
+                }
                 // D-MUTSELF1: `(*self) = New{…}` must write through the receiver
                 // handle, not replace the local SSA pointer (AOT: `(*self) = …`).
                 // ViewMut / field-mut places use the same deref bit for element/
@@ -5733,15 +5792,12 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::GcEdit {
                 root,
+                edges,
                 replace_all,
                 index_temp,
                 stmt,
                 ..
             } => {
-                // D-OPTGC1: AOT wraps the assign in AutomaticRoot::edit_*; JIT
-                // stores the same payload handle in the root Variable. Edge-slot
-                // bookkeeping is collector-only — print/value semantics use the
-                // finite snapshots already packed in the enum/list payload.
                 if let Some((temp, value)) = index_temp {
                     let v = self.lower_expr(value)?;
                     let ty = self.b.func.dfg.value_type(v);
@@ -5763,6 +5819,7 @@ impl LowerCtx<'_, '_> {
                 if !*replace_all && !resident_string_field_compound {
                     return Err("jit automatic GC slot edit unsupported".to_string());
                 }
+                let root_handle = self.gc_root_value(root)?;
                 match stmt.as_ref() {
                     TStmt::Assign {
                         op: None,
@@ -5771,27 +5828,33 @@ impl LowerCtx<'_, '_> {
                         ..
                     } => {
                         let val = self.lower_assignment_value(value, *clone_value)?;
-                        let root_var = self.vars.get(root).copied().ok_or_else(|| {
-                            format!("jit GcEdit unknown root `{root}`")
-                        })?;
-                        self.b.def_var(root_var, val);
+                        let edit = self
+                            .module
+                            .declare_func_in_func(self.host.memory.gc_edit, self.b.func);
+                        self.b.ins().call(edit, &[root_handle, val]);
+                        self.emit_trap_check()?;
+                        self.lower_gc_edges(root_handle, edges)?;
                     }
                     _ => {
-                        let root_var = self.vars.get(root).copied().ok_or_else(|| {
-                            format!("jit GcEdit unknown root `{root}`")
-                        })?;
-                        let cur = self.b.use_var(root_var);
+                        let cur = self.call_host(self.host.memory.gc_read, &[root_handle]);
+                        self.emit_trap_check()?;
                         let jv = self.fresh_var(types::I64);
                         self.b.def_var(jv, cur);
                         self.vars
                             .insert(jet_foundation::Names::mangle_generated("value"), jv);
+                        let root_key = Self::gc_place_key(root);
                         self.var_tys.insert(
                             jet_foundation::Names::mangle_generated("value"),
-                            self.var_tys.get(root).cloned().unwrap_or(Type::Int),
+                            self.var_tys.get(&root_key).cloned().unwrap_or(Type::Int),
                         );
                         self.lower_gc_edit_body(stmt)?;
                         let new_val = self.b.use_var(jv);
-                        self.b.def_var(root_var, new_val);
+                        let edit = self
+                            .module
+                            .declare_func_in_func(self.host.memory.gc_edit, self.b.func);
+                        self.b.ins().call(edit, &[root_handle, new_val]);
+                        self.emit_trap_check()?;
+                        self.lower_gc_edges(root_handle, edges)?;
                     }
                 }
             }
@@ -7786,17 +7849,16 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             THostCall::GcRead { root } => {
-                let var = self
-                    .vars
-                    .get(root)
-                    .copied()
-                    .ok_or_else(|| format!("jit GcRead unknown root `{root}`"))?;
-                Ok(self.b.use_var(var))
+                let root = self.gc_root_value(root)?;
+                let value = self.call_host(self.host.memory.gc_read, &[root]);
+                self.emit_trap_check()?;
+                Ok(value)
             }
             THostCall::GcEdit {
                 root,
                 edit,
                 index_temp,
+                edges,
                 ..
             } => {
                 if let Some((temp, value)) = index_temp {
@@ -7807,23 +7869,26 @@ impl LowerCtx<'_, '_> {
                     self.vars.insert(temp.clone(), var);
                     self.var_tys.insert(temp.clone(), value.ty.clone());
                 }
-                let root_var = self
-                    .vars
-                    .get(root)
-                    .copied()
-                    .ok_or_else(|| format!("jit GcEdit unknown root `{root}`"))?;
-                let cur = self.b.use_var(root_var);
+                let root_handle = self.gc_root_value(root)?;
+                let cur = self.call_host(self.host.memory.gc_read, &[root_handle]);
+                self.emit_trap_check()?;
                 let jv = self.fresh_var(types::I64);
                 self.b.def_var(jv, cur);
                 self.vars
                     .insert(jet_foundation::Names::mangle_generated("value"), jv);
+                let root_key = Self::gc_place_key(root);
                 self.var_tys.insert(
                     jet_foundation::Names::mangle_generated("value"),
-                    self.var_tys.get(root).cloned().unwrap_or(Type::Int),
+                    self.var_tys.get(&root_key).cloned().unwrap_or(Type::Int),
                 );
                 let result = self.lower_expr(edit)?;
                 let new_val = self.b.use_var(jv);
-                self.b.def_var(root_var, new_val);
+                let edit_ref = self
+                    .module
+                    .declare_func_in_func(self.host.memory.gc_edit, self.b.func);
+                self.b.ins().call(edit_ref, &[root_handle, new_val]);
+                self.emit_trap_check()?;
+                self.lower_gc_edges(root_handle, edges)?;
                 let _ = ty;
                 Ok(result)
             }
@@ -9997,6 +10062,112 @@ impl LowerCtx<'_, '_> {
         Ok((structure, idx))
     }
 
+    fn allocator_value_bits(&mut self, value: Value, ty: &Type) -> Result<Value, String> {
+        match self.meta.clif_ty(ty) {
+            Some(clif) if clif == types::F64 => Ok(self.b.ins().bitcast(
+                types::I64,
+                Self::scalar_bitcast_memflags(),
+                value,
+            )),
+            Some(clif) if clif == types::I8 || clif == types::I32 => {
+                Ok(self.b.ins().uextend(types::I64, value))
+            }
+            Some(clif) if clif == types::I64 => Ok(value),
+            other => Err(format!("jit allocator payload unsupported: {ty:?} ({other:?})")),
+        }
+    }
+
+    fn allocator_value_from_bits(&mut self, bits: Value, ty: &Type) -> Result<Value, String> {
+        match self.meta.clif_ty(ty) {
+            Some(clif) if clif == types::F64 => Ok(self.b.ins().bitcast(
+                types::F64,
+                Self::scalar_bitcast_memflags(),
+                bits,
+            )),
+            Some(clif) if clif == types::I8 => Ok(self.b.ins().ireduce(types::I8, bits)),
+            Some(clif) if clif == types::I32 => Ok(self.b.ins().ireduce(types::I32, bits)),
+            Some(clif) if clif == types::I64 => Ok(bits),
+            other => Err(format!("jit allocator payload unsupported: {ty:?} ({other:?})")),
+        }
+    }
+
+    fn gc_place_key(place: &str) -> String {
+        let place = place.trim();
+        place
+            .strip_prefix("(*")
+            .and_then(|place| place.strip_suffix(')'))
+            .unwrap_or(place)
+            .to_string()
+    }
+
+    fn gc_edge_key(edge: &str) -> String {
+        let edge = edge.trim().strip_suffix(".id()").unwrap_or(edge.trim());
+        Self::gc_place_key(edge)
+    }
+
+    fn gc_root_value(&mut self, place: &str) -> Result<Value, String> {
+        let place = Self::gc_place_key(place);
+        let key = if self.vars.contains_key(&place) {
+            place
+        } else {
+            TIR::local_place(&place)
+        };
+        let var = self
+            .vars
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("jit automatic GC root unknown place `{place}`"))?;
+        Ok(self.b.use_var(var))
+    }
+
+    fn lower_gc_edges(&mut self, root: Value, edges: &[String]) -> Result<(), String> {
+        let clear = self
+            .module
+            .declare_func_in_func(self.host.memory.gc_clear_edges, self.b.func);
+        self.b.ins().call(clear, &[root]);
+        self.emit_trap_check()?;
+        for (index, edge) in edges.iter().enumerate() {
+            let key = Self::gc_edge_key(edge);
+            let key = if self.vars.contains_key(&key) {
+                key
+            } else {
+                TIR::local_place(&key)
+            };
+            let var = self
+                .vars
+                .get(&key)
+                .copied()
+                .ok_or_else(|| format!("jit automatic GC edge unknown place `{edge}`"))?;
+            let child = self.b.use_var(var);
+            let slot = self.b.ins().iconst(types::I64, index as i64);
+            let add = self
+                .module
+                .declare_func_in_func(self.host.memory.gc_add_edge, self.b.func);
+            self.b.ins().call(add, &[root, child, slot]);
+            self.emit_trap_check()?;
+        }
+        Ok(())
+    }
+
+    fn lower_gc_promotion_edges(
+        &mut self,
+        root: Value,
+        promotion: &crate::AST::GcPromotion,
+    ) -> Result<(), String> {
+        let edges = promotion
+            .edges
+            .iter()
+            .map(|edge| format!("{}.id()", TIR::local_place(&edge.binding)))
+            .collect::<Vec<_>>();
+        self.lower_gc_edges(root, &edges)
+    }
+
+    fn read_allocator_view(&mut self, view: Value, ty: &Type) -> Result<Value, String> {
+        let bits = self.call_host(self.host.memory.allocator_view_read, &[view]);
+        self.emit_trap_check()?;
+        self.allocator_value_from_bits(bits, ty)
+    }
+
     fn load_local(&mut self, local: &TLocal) -> Result<Value, String> {
         let key = Self::local_key(local);
         let var = self
@@ -10004,7 +10175,9 @@ impl LowerCtx<'_, '_> {
             .get(&key)
             .copied()
             .ok_or_else(|| format!("jit unknown local `{}`", local.name))?;
-        let raw = if let Some(slot) = self.raw_slots.get(&key).copied() {
+        let raw = if self.allocator_view_names.contains(&key) {
+            self.b.use_var(var)
+        } else if let Some(slot) = self.raw_slots.get(&key).copied() {
             let ty = self
                 .var_tys
                 .get(&key)
@@ -10014,6 +10187,14 @@ impl LowerCtx<'_, '_> {
         } else {
             self.b.use_var(var)
         };
+        if local.deref && self.allocator_view_names.contains(&key) {
+            let ty = self
+                .var_tys
+                .get(&key)
+                .cloned()
+                .ok_or("jit allocator view type")?;
+            return self.read_allocator_view(raw, &ty);
+        }
         if !local.deref {
             return Ok(raw);
         }
@@ -17041,6 +17222,28 @@ impl LowerCtx<'_, '_> {
                         self.host.memory.allocator_new_capacity,
                         &[bytes, fixed],
                     ))
+                } else if let Some(capacity) = ["with_capacity(", "with_slots("]
+                    .iter()
+                    .find_map(|marker| {
+                        ctor.split_once(marker)
+                            .and_then(|(_, tail)| tail.split_once(')'))
+                            .and_then(|(value, _)| value.split_whitespace().next())
+                            .and_then(|value| value.parse::<i64>().ok())
+                    })
+                {
+                    let kind = if ctor.contains("JetBump") {
+                        2
+                    } else if ctor.contains("JetPool") {
+                        3
+                    } else {
+                        0
+                    };
+                    let capacity = self.b.ins().iconst(types::I64, capacity);
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    Ok(self.call_host(
+                        self.host.memory.allocator_new_capacity,
+                        &[capacity, kind],
+                    ))
                 } else {
                     let kind = if ctor.contains("JetBump") {
                         1
@@ -17643,6 +17846,9 @@ impl LowerCtx<'_, '_> {
             TExprKind::Close(inner) => {
                 let handle = self.lower_expr(inner)?;
                 let host = match &inner.ty {
+                    Type::Named(n) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed") => {
+                        Some(self.host.memory.allocator_close)
+                    }
                     Type::Named(n) if n == "FileWriter" => Some(self.host.io.file_writer_close),
                     Type::Named(n) if n == "FileReader" => Some(self.host.io.file_reader_close),
                     Type::Apply { name, args } if name == "Resource" && args.len() == 1 => {
@@ -21516,15 +21722,11 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::AllocAlloc if args.len() == 1 => {
                 let value = self.lower_expr(&args[0])?;
-                let bits = match self.meta.clif_ty(&args[0].ty) {
-                    Some(ty) if ty == types::F64 => self.b.ins().bitcast(
-                        types::I64,
-                        Self::scalar_bitcast_memflags(),
-                        value,
-                    ),
-                    Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, value),
-                    Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, value),
-                    Some(ty) if ty == types::I64 => value,
+                let bits = self.allocator_value_bits(value, &args[0].ty)?;
+                let requested = match self.meta.clif_ty(&args[0].ty) {
+                    Some(ty) if ty == types::F64 || ty == types::I64 => 8,
+                    Some(ty) if ty == types::I8 => 1,
+                    Some(ty) if ty == types::I32 => 4,
                     other => {
                         return Err(format!(
                             "jit allocator payload unsupported: {:?} ({other:?})",
@@ -21532,17 +21734,16 @@ impl LowerCtx<'_, '_> {
                         ))
                     }
                 };
-                let bits = self.call_host(self.host.memory.allocator_alloc, &[recv_val, bits]);
+                let requested = self.b.ins().iconst(types::I64, requested);
+                let view = self.call_host(
+                    self.host.memory.allocator_alloc,
+                    &[recv_val, bits, requested],
+                );
                 self.emit_trap_check()?;
-                match self.meta.clif_ty(&args[0].ty) {
-                    Some(ty) if ty == types::F64 => Ok(self.b.ins().bitcast(
-                        types::F64,
-                        Self::scalar_bitcast_memflags(),
-                        bits,
-                    )),
-                    Some(ty) if ty == types::I8 => Ok(self.b.ins().ireduce(types::I8, bits)),
-                    Some(ty) if ty == types::I32 => Ok(self.b.ins().ireduce(types::I32, bits)),
-                    _ => Ok(bits),
+                if self.preserve_allocator_view {
+                    Ok(view)
+                } else {
+                    self.read_allocator_view(view, &args[0].ty)
                 }
             }
             THandleOp::AllocTryAlloc if args.len() == 1 => {

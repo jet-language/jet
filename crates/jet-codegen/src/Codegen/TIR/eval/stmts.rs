@@ -485,7 +485,13 @@ impl<'a> EvalCtx<'a> {
                 checked?;
                 Ok(flow)
             }
-            TStmt::Let { name, init, .. } => {
+            TStmt::Let {
+                name,
+                init,
+                gc_promotion,
+                gc_transferred,
+                ..
+            } => {
                 // D-MEM1 S9 / D-PIN1=A: a whole-place write window (`p :: &node`,
                 // `pinned :: mem.pin(&node)`) is an alias in AOT and Cranelift,
                 // so bind an alias handle here instead of a copy — otherwise
@@ -503,9 +509,25 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                 }
-                let v = self.eval_expr(init, scope)?;
+                let preserve_allocator_view = matches!(
+                    &init.kind,
+                    TExprKind::HandleMethod {
+                        op: crate::Codegen::TIR::THandleOp::AllocAlloc,
+                        ..
+                    }
+                );
+                let prior_allocator_view = self.preserve_allocator_view;
+                self.preserve_allocator_view = preserve_allocator_view;
+                let evaluated = self.eval_expr(init);
+                self.preserve_allocator_view = prior_allocator_view;
+                let mut v = evaluated?;
                 if let Some(ret) = self.pending_return.take() {
                     return Ok(Flow::Return(ret));
+                }
+                if let Some(promotion) = gc_promotion {
+                    v = self.promote_gc_value(v, promotion, scope)?;
+                } else if *gc_transferred && Self::gc_root_index(&v).is_none() {
+                    return Err(unsupported("transferred automatic GC root", self.span()));
                 }
                 scope.insert(name.clone(), v);
                 Ok(Flow::Normal)
@@ -533,6 +555,26 @@ impl<'a> EvalCtx<'a> {
                 match place {
                     TPlace::Local(local) => {
                         let key = local.name.clone();
+                        if local.deref {
+                            if let Some(view) = scope.get(&key).cloned() {
+                                if Self::allocator_view_parts(&view).is_some() {
+                                    let mut assigned = rhs;
+                                    if let Some(binop) = op {
+                                        let current = self
+                                            .materialize_allocator_view(&view)?
+                                            .ok_or_else(|| unsupported("allocator view", self.span()))?;
+                                        assigned = self.eval_runtime_binop(
+                                            *binop,
+                                            current,
+                                            assigned,
+                                            self.span(),
+                                        )?;
+                                    }
+                                    self.write_allocator_view(&view, assigned)?;
+                                    return Ok(Flow::Normal);
+                                }
+                            }
+                        }
                         if let Some(CtValue::Struct {
                             type_name,
                             fields,
@@ -1677,23 +1719,23 @@ impl<'a> EvalCtx<'a> {
             TStmt::MathSwizzleAssign { .. } => Err(unsupported("math swizzle assign", self.span())),
             TStmt::GcEdit {
                 root,
+                slot,
+                edges,
+                replace_all,
                 index_temp,
                 stmt,
                 ..
             } => {
-                // AOT and Cranelift perform the collector mutation and edge
-                // bookkeeping. TIR keeps the same observable value by
-                // marshalling the source root through the generated edit slot;
-                // policy and edge meaning remain in the shared collector path.
                 let root_key = if scope.contains_key(root) {
                     root.clone()
                 } else {
                     strip_user(root)
                 };
-                let current = scope
+                let root_value = scope
                     .get(&root_key)
                     .cloned()
                     .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                let current = self.gc_read_root(&root_value)?;
                 let value_key = mangle_generated("value");
                 let prior_value = scope.insert(value_key.clone(), current);
                 let prior_index = index_temp.as_ref().map(|(temp, _)| {
@@ -1708,6 +1750,12 @@ impl<'a> EvalCtx<'a> {
                     self.exec_stmt(stmt, scope)
                 })();
                 let updated = scope.get(&value_key).cloned();
+                let collection_index = index_temp.as_ref().and_then(|(temp, _)| {
+                    scope.get(temp).and_then(|value| match value {
+                        CtValue::Int(index) if *index >= 0 => usize::try_from(*index).ok(),
+                        _ => None,
+                    })
+                });
                 if let Some((temp, prior)) = prior_index {
                     if let Some(prior) = prior {
                         scope.insert(temp, prior);
@@ -1721,10 +1769,17 @@ impl<'a> EvalCtx<'a> {
                     scope.remove(&value_key);
                 }
                 let edited = edited?;
-                scope.insert(
-                    root_key,
-                    updated.ok_or_else(|| unsupported("GC edit lost its root value", self.span()))?,
-                );
+                let updated = updated
+                    .ok_or_else(|| unsupported("GC edit lost its root value", self.span()))?;
+                self.gc_edit_root(&root_value, updated)?;
+                self.gc_update_edges(
+                    &root_value,
+                    edges,
+                    *replace_all,
+                    slot,
+                    collection_index,
+                    scope,
+                )?;
                 Ok(edited)
             }
             TStmt::SplitViews {

@@ -90,6 +90,7 @@ use core.mem
 fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
+    x = 43
     y :: arena.alloc(100)
     print(x)
     print(y)
@@ -101,8 +102,9 @@ fn run() {
     let errors = error_codes(src);
     assert!(errors.is_empty(), "alloc-and-use should compile clean, got {errors:?}");
     if let Some(out) = build_and_run("ok", src) {
-        assert_eq!(out, "42\n100\n7\n");
+        assert_eq!(out, "43\n100\n7\n");
     }
+    tir_support::assert_tiers_agree("arena_view_write", src, "43\n100\n7\n");
     tir_support::assert_example_cli_tiers_agree(
         "memory/arena",
         include_str!("../examples/features/expected/memory/arena.out"),

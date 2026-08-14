@@ -2099,8 +2099,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::AmbientInput { prompt } => {
             prompt.as_ref().is_none_or(|p| resident_safe_expr(p, callees))
         }
-        // D-OPTGC1: GcRead/GcEdit lower to Variable load/store of the payload
-        // handle — same value snapshots AOT clones out of AutomaticRoot.
+        // D-OPTGC1: GcRead/GcEdit marshal through the collector-backed root
+        // host calls; the lowering carries only the checked root handle.
         TExprKind::HostCall(host) => match host.as_ref() {
             THostCall::GcRead { .. } => true,
             THostCall::GcEdit {
@@ -3589,9 +3589,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         }
         TStmt::LineMarker(_) | TStmt::SourceSpan(_) => true,
         TStmt::Let { init, gc_promotion: _, gc_transferred: _, .. } => {
-            // Promotion/transfer only wraps the same payload handle for the
-            // collector; JIT stores the finite snapshot directly (D-OPTGC1).
-            // `gc_transferred` is a call result that is already a root handle.
+            // Promotion/transfer crosses the collector-backed root ABI. The
+            // host owns root identity; this tier only lowers the checked value.
             resident_safe_expr(init, callees)
         }
         // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` — the one
@@ -4082,8 +4081,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .as_ref()
                     .is_none_or(|o| resident_safe_expr(o, callees))
         }
-        // Whole-value GC assign (`replace_all`): nested stmt is a plain assign
-        // of a finite payload snapshot into the root Variable.
+        // Whole-value GC assign (`replace_all`): nested stmt computes the new
+        // payload, then the collector-backed host edits the root.
         TStmt::GcEdit {
             replace_all,
             index_temp,

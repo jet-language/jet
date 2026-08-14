@@ -1769,6 +1769,492 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
+    pub(super) fn allocator_view_parts(value: &CtValue) -> Option<(usize, u32, usize)> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirAllocatorView" {
+            return None;
+        }
+        let field = |name: &str| {
+            fields
+                .iter()
+                .find_map(|(field, value)| (field == name).then_some(value))
+        };
+        let owner = match field("owner") {
+            Some(CtValue::Int(owner)) if *owner > 0 => usize::try_from(*owner).ok()?,
+            _ => return None,
+        };
+        let generation = match field("generation") {
+            Some(CtValue::Int(generation)) if *generation >= 0 => u32::try_from(*generation).ok()?,
+            _ => return None,
+        };
+        let slot = match field("slot") {
+            Some(CtValue::Int(slot)) if *slot >= 0 => usize::try_from(*slot).ok()?,
+            _ => return None,
+        };
+        Some((owner, generation, slot))
+    }
+
+    pub(super) fn materialize_allocator_view(&self, value: &CtValue) -> Result<Option<CtValue>, Diagnostic> {
+        let Some((owner, generation, slot)) = Self::allocator_view_parts(value) else {
+            return Ok(None);
+        };
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let state = runtime
+            .allocators
+            .get(&owner)
+            .ok_or_else(|| unsupported("allocator view", self.span()))?;
+        if state.closed || state.generation != generation {
+            return Err(unsupported("allocator view after reset or close", self.span()));
+        }
+        state
+            .slots
+            .get(slot)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| unsupported("allocator view", self.span()))
+    }
+
+    pub(super) fn write_allocator_view(
+        &self,
+        view: &CtValue,
+        value: CtValue,
+    ) -> Result<(), Diagnostic> {
+        let Some((owner, generation, slot)) = Self::allocator_view_parts(view) else {
+            return Err(unsupported("allocator view", self.span()));
+        };
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let state = runtime
+            .allocators
+            .get_mut(&owner)
+            .ok_or_else(|| unsupported("allocator view", self.span()))?;
+        if state.closed || state.generation != generation {
+            return Err(unsupported("allocator view after reset or close", self.span()));
+        }
+        let target = state
+            .slots
+            .get_mut(slot)
+            .ok_or_else(|| unsupported("allocator view", self.span()))?;
+        *target = value;
+        Ok(())
+    }
+
+    fn allocator_requested_bytes(value: &CtValue) -> usize {
+        match value {
+            CtValue::Bool(_) => 1,
+            CtValue::Char(_) => 4,
+            CtValue::Str(text) => text.len().max(1),
+            _ => 8,
+        }
+    }
+
+    fn allocator_from_ctor(ctor: &str) -> (String, usize, bool) {
+        if let Some(bytes) = ctor
+            .strip_prefix("__JET_FIXED_INLINE:")
+            .and_then(|bytes| bytes.parse::<usize>().ok())
+        {
+            return ("Fixed".to_string(), bytes.max(1), true);
+        }
+        let allocator = if ctor.contains("JetBump") {
+            "Bump"
+        } else if ctor.contains("JetPool") {
+            "Pool"
+        } else {
+            "Arena"
+        };
+        let capacity = ["with_capacity(", "with_slots("]
+            .iter()
+            .find_map(|marker| {
+                ctor.split_once(marker)
+                    .and_then(|(_, tail)| tail.split_once(')'))
+                    .and_then(|(value, _)| value.split_whitespace().next())
+                    .and_then(|value| value.parse::<usize>().ok())
+            })
+            .unwrap_or(match allocator {
+                "Bump" => 64 * 1024,
+                "Pool" => usize::MAX,
+                _ => 4096,
+            });
+        (allocator.to_string(), capacity, false)
+    }
+
+    fn allocator_owner(value: &CtValue) -> Option<usize> {
+        sentry_allocator_owner(value)
+    }
+
+    fn eval_allocator_alloc(
+        &mut self,
+        recv: &mut CtValue,
+        value: CtValue,
+    ) -> Result<CtValue, Diagnostic> {
+        let owner = Self::allocator_owner(recv)
+            .ok_or_else(|| unsupported("allocator receiver", self.span()))?;
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let state = runtime
+            .allocators
+            .get_mut(&owner)
+            .ok_or_else(|| unsupported("allocator receiver", self.span()))?;
+        if state.closed {
+            return Err(unsupported("allocator handle is closed", self.span()));
+        }
+        let requested = Self::allocator_requested_bytes(&value);
+        let overhead = if state.fixed {
+            3 * std::mem::size_of::<usize>()
+        } else {
+            0
+        };
+        if state.allocator == "Arena" {
+            let needed = state
+                .used
+                .saturating_add(requested.saturating_add(overhead));
+            while state.capacity < needed {
+                let next = state.capacity.saturating_mul(2).max(needed);
+                if next == state.capacity {
+                    break;
+                }
+                state.capacity = next;
+            }
+        }
+        let (stored, next_used) = jet_foundation::Outcome::jet_try_alloc_value(
+            value,
+            state.used,
+            state.capacity,
+            requested,
+            state.allocator.as_str(),
+            overhead,
+        )
+        .map_err(|error| unsupported(&format!("{} allocation failed", error.allocator), self.span()))?;
+        let slot = state.slots.len();
+        state.slots.push(stored);
+        state.used = next_used;
+        let generation = state.generation;
+        if let CtValue::Struct { fields, .. } = recv {
+            for (name, field) in fields.iter_mut() {
+                match name.as_str() {
+                    "used" => *field = CtValue::Int(next_used.min(i64::MAX as usize) as i64),
+                    "allocations" => {
+                        let count = match field {
+                            CtValue::Int(count) => count.saturating_add(1),
+                            _ => 1,
+                        };
+                        *field = CtValue::Int(count);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(CtValue::Struct {
+            type_name: "__JetTirAllocatorView".to_string(),
+            fields: vec![
+                ("owner".to_string(), CtValue::Int(owner as i64)),
+                ("generation".to_string(), CtValue::Int(generation as i64)),
+                ("slot".to_string(), CtValue::Int(slot as i64)),
+            ],
+        })
+    }
+
+    fn eval_allocator_try_alloc(
+        &mut self,
+        recv: &mut CtValue,
+        value: CtValue,
+    ) -> Result<CtValue, Diagnostic> {
+        match self.eval_allocator_alloc(recv, value.clone()) {
+            Ok(view) => {
+                let value = self
+                    .materialize_allocator_view(&view)?
+                    .ok_or_else(|| unsupported("allocator view", self.span()))?;
+                Ok(CtValue::Present(Box::new(value)))
+            }
+            Err(_) => {
+                let allocator = match recv {
+                    CtValue::Struct { fields, .. } => fields.iter().find_map(|(name, value)| {
+                        (name == "ctor").then(|| match value {
+                            CtValue::Str(ctor) => Self::allocator_from_ctor(ctor).0,
+                            _ => "Arena".to_string(),
+                        })
+                    }),
+                    _ => None,
+                }
+                .unwrap_or_else(|| "Arena".to_string());
+                Ok(CtValue::failed(Box::new(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_ALLOC_ERROR.to_string(),
+                    fields: vec![
+                        (
+                            "requested_bytes".to_string(),
+                            CtValue::Int(Self::allocator_requested_bytes(&value) as i64),
+                        ),
+                        ("allocator".to_string(), CtValue::Str(allocator)),
+                    ],
+                })))
+            }
+        }
+    }
+
+    fn reset_allocator(&mut self, recv: &mut CtValue) -> Result<(), Diagnostic> {
+        let owner = Self::allocator_owner(recv)
+            .ok_or_else(|| unsupported("allocator receiver", self.span()))?;
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let state = runtime
+            .allocators
+            .get_mut(&owner)
+            .ok_or_else(|| unsupported("allocator receiver", self.span()))?;
+        if state.closed {
+            return Err(unsupported("allocator handle is closed", self.span()));
+        }
+        state.generation = state.generation.wrapping_add(1);
+        state.used = 0;
+        state.slots.clear();
+        jet_foundation::MemSentry::jet_sentry_quarantine_owner(owner);
+        if let CtValue::Struct { fields, .. } = recv {
+            for (name, field) in fields.iter_mut() {
+                if matches!(name.as_str(), "used" | "allocations") {
+                    *field = CtValue::Int(0);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn close_allocator(&mut self, value: &CtValue) -> Result<(), Diagnostic> {
+        let Some(owner) = Self::allocator_owner(value) else {
+            return Ok(());
+        };
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let state = runtime
+            .allocators
+            .get_mut(&owner)
+            .ok_or_else(|| unsupported("allocator receiver", self.span()))?;
+        state.closed = true;
+        state.slots.clear();
+        state.used = 0;
+        jet_foundation::MemSentry::jet_sentry_quarantine_owner(owner);
+        Ok(())
+    }
+
+    pub(super) fn gc_root_index(value: &CtValue) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirGcRoot" {
+            return None;
+        }
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) if *index > 0 => usize::try_from(*index - 1).ok(),
+            _ => None,
+        })
+    }
+
+    fn gc_root_carrier(index: usize) -> CtValue {
+        CtValue::Struct {
+            type_name: "__JetTirGcRoot".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index as i64 + 1))],
+        }
+    }
+
+    pub(super) fn gc_read_root(&self, root: &CtValue) -> Result<CtValue, Diagnostic> {
+        let index = Self::gc_root_index(root)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let root = runtime
+            .gc_roots
+            .get(index)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        root.read(|value| value.clone())
+            .map_err(|fault| unsupported(&fault.to_string(), self.span()))
+    }
+
+    pub(super) fn gc_edit_root(&self, root: &CtValue, value: CtValue) -> Result<(), Diagnostic> {
+        let index = Self::gc_root_index(root)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let root = runtime
+            .gc_roots
+            .get(index)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        root.edit(|slot| *slot = value)
+            .map(|_| ())
+            .map_err(|fault| unsupported(&fault.to_string(), self.span()))
+    }
+
+    fn gc_edge_key(edge: &str) -> String {
+        let edge = edge.trim().strip_suffix(".id()").unwrap_or(edge.trim());
+        let edge = edge.trim();
+        let edge = edge
+            .strip_prefix("(*")
+            .and_then(|edge| edge.strip_suffix(')'))
+            .unwrap_or(edge);
+        edge.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(edge)
+            .to_string()
+    }
+
+    pub(super) fn gc_update_edges(
+        &self,
+        root: &CtValue,
+        edges: &[String],
+        replace_all: bool,
+        slot: &str,
+        collection_index: Option<usize>,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let root_index = Self::gc_root_index(root)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        let child_indices = edges
+            .iter()
+            .map(|edge| {
+                let key = Self::gc_edge_key(edge);
+                let value = scope
+                    .get(&key)
+                    .or_else(|| self.globals.get(&key))
+                    .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))?;
+                Self::gc_root_index(value)
+                    .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let root = runtime
+            .gc_roots
+            .get(root_index)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        let ids = child_indices
+            .iter()
+            .map(|index| {
+                runtime
+                    .gc_roots
+                    .get(*index)
+                    .map(|root| root.id())
+                    .ok_or_else(|| unsupported("automatic GC edge", self.span()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if replace_all {
+            let grouped = ids
+                .iter()
+                .map(|id| ("value", 0, *id))
+                .collect::<Vec<_>>();
+            root.replace_edge_slots(&grouped, None)
+                .map_err(|fault| unsupported(&fault.to_string(), self.span()))
+        } else if let Some(index) = collection_index {
+            root.edit_edge_slot_index("collection", index, &ids, |_| ())
+                .map(|_| ())
+                .map_err(|fault| unsupported(&fault.to_string(), self.span()))
+        } else {
+            root.edit_edge_slot(slot, &ids, |_| ())
+                .map(|_| ())
+                .map_err(|fault| unsupported(&fault.to_string(), self.span()))
+        }
+    }
+
+    pub(super) fn gc_update_method_edges(
+        &self,
+        root: &CtValue,
+        edges: &[String],
+        kind: crate::Codegen::TIR::TGcEditKind,
+        method_span_start: usize,
+        collection_index: Option<usize>,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let root_index = Self::gc_root_index(root)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        let child_indices = edges
+            .iter()
+            .map(|edge| {
+                let key = Self::gc_edge_key(edge);
+                let value = scope
+                    .get(&key)
+                    .or_else(|| self.globals.get(&key))
+                    .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))?;
+                Self::gc_root_index(value)
+                    .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let root = runtime
+            .gc_roots
+            .get(root_index)
+            .ok_or_else(|| unsupported("automatic GC root", self.span()))?;
+        let ids = child_indices
+            .iter()
+            .map(|index| {
+                runtime
+                    .gc_roots
+                    .get(*index)
+                    .map(|root| root.id())
+                    .ok_or_else(|| unsupported("automatic GC edge", self.span()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = match kind {
+            crate::Codegen::TIR::TGcEditKind::Clear => {
+                root.edit_clearing_edges(|_| ()).map(|_| ())
+            }
+            crate::Codegen::TIR::TGcEditKind::Pop => {
+                root.edit_edge_slot_pop("collection", |_| ()).map(|_| ())
+            }
+            crate::Codegen::TIR::TGcEditKind::RemoveIndex => {
+                let index = collection_index
+                    .ok_or_else(|| unsupported("automatic GC collection index", self.span()))?;
+                root.edit_edge_slot_remove("collection", index, |_| ())
+                    .map(|_| ())
+            }
+            crate::Codegen::TIR::TGcEditKind::InsertIndex => {
+                let index = collection_index
+                    .ok_or_else(|| unsupported("automatic GC collection index", self.span()))?;
+                root.edit_edge_slot_insert("collection", index, &ids, |_| ())
+                    .map(|_| ())
+            }
+            crate::Codegen::TIR::TGcEditKind::Prepend => root
+                .edit_edge_slot_prepend("collection", &ids, |_| ())
+                .map(|_| ()),
+            crate::Codegen::TIR::TGcEditKind::Additive => root
+                .edit_edge_slot_additive("collection", &ids, |_| ())
+                .map(|_| ()),
+            crate::Codegen::TIR::TGcEditKind::Plain => root.edit(|_| ()).map(|_| ()),
+            crate::Codegen::TIR::TGcEditKind::EdgeSlot => {
+                let slot = format!("method:{method_span_start}");
+                root.edit_edge_slot(&slot, &ids, |_| ()).map(|_| ())
+            }
+        };
+        result.map_err(|fault| unsupported(&fault.to_string(), self.span()))
+    }
+
+    pub(super) fn promote_gc_value(
+        &mut self,
+        value: CtValue,
+        promotion: &crate::AST::GcPromotion,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let site = gc_runtime::PromotionSite {
+            source: "<tir>",
+            span_start: 0,
+            span_end: 0,
+            scope: "#Policy(gc)",
+            policy_provenance: "interpreter",
+            reason: "automatic promotion",
+            type_name: "<tir-value>",
+            bytes: 0,
+        };
+        let root = gc_runtime::AutomaticRoot::promote(value, site)
+            .map_err(|fault| unsupported(&fault.to_string(), self.span()))?;
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let index = runtime.gc_roots.len();
+        runtime.gc_roots.push(root);
+        let edges = promotion
+            .edges
+            .iter()
+            .filter_map(|edge| {
+                let child = scope.get(&edge.binding).and_then(Self::gc_root_index)?;
+                let id = runtime.gc_roots.get(child)?.id();
+                Some((edge.slot.as_str(), edge.group, id))
+            })
+            .collect::<Vec<_>>();
+        if !edges.is_empty() || promotion.collection_len.is_some() {
+            runtime.gc_roots[index]
+                .replace_edge_slots(&edges, promotion.collection_len)
+                .map_err(|fault| unsupported(&fault.to_string(), self.span()))?;
+        }
+        Ok(Self::gc_root_carrier(index))
+    }
+
     fn invalidate_memo_fields(
         &self,
         owner: &str,
@@ -4691,6 +5177,11 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| {
                         unsupported(&format!("unbound `{}`", local.name), self.span())
                     })?;
+                if local.deref {
+                    if let Some(value) = self.materialize_allocator_view(&value)? {
+                        return Ok(value);
+                    }
+                }
                 // D-MEM1 S9 / D-PIN1=A: a whole-place window local reads the
                 // owner's current storage, never the value it held at binding.
                 if let Some(read) = super::read_place_mut(&value, scope, self.span()) {
@@ -4873,6 +5364,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Close(inner) => {
                 let value = self.eval_expr_child(inner, scope)?;
+                self.close_allocator(&value)?;
                 let type_name = match &inner.ty {
                     Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
                     _ => return Ok(CtValue::Unit),
@@ -5267,6 +5759,42 @@ impl<'a> EvalCtx<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr_child(a, scope)?);
+                }
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::AllocAlloc
+                        | crate::Codegen::TIR::THandleOp::AllocTryAlloc
+                        | crate::Codegen::TIR::THandleOp::AllocReset
+                ) {
+                    let result = match op {
+                        crate::Codegen::TIR::THandleOp::AllocAlloc => {
+                            let value = argv
+                                .first()
+                                .cloned()
+                                .ok_or_else(|| unsupported("allocator value", self.span()))?;
+                            let view = self.eval_allocator_alloc(&mut r, value)?;
+                            if self.preserve_allocator_view {
+                                view
+                            } else {
+                                self.materialize_allocator_view(&view)?
+                                    .ok_or_else(|| unsupported("allocator view", self.span()))?
+                            }
+                        }
+                        crate::Codegen::TIR::THandleOp::AllocTryAlloc => {
+                            let value = argv
+                                .first()
+                                .cloned()
+                                .ok_or_else(|| unsupported("allocator value", self.span()))?;
+                            self.eval_allocator_try_alloc(&mut r, value)?
+                        }
+                        crate::Codegen::TIR::THandleOp::AllocReset => {
+                            self.reset_allocator(&mut r)?;
+                            CtValue::Unit
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.write_back_place(recv, r, scope)?;
+                    return Ok(result);
                 }
                 if matches!(op, crate::Codegen::TIR::THandleOp::ReflectValueDisplay) {
                     let CtValue::Struct { type_name, fields } = &r else {
@@ -6638,25 +7166,24 @@ impl<'a> EvalCtx<'a> {
                     let source_root = root
                         .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
                         .unwrap_or(root.as_str());
-                    scope
+                    let root = scope
                         .get(root)
                         .cloned()
                         .or_else(|| scope.get(source_root).cloned())
                         .or_else(|| self.globals.get(root).cloned())
                         .or_else(|| self.globals.get(source_root).cloned())
-                        .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))
+                        .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                    self.gc_read_root(&root)
                 }
                 crate::Codegen::TIR::THostCall::GcEdit {
                     root,
+                    method_span_start,
                     edit,
                     index_temp,
+                    edges,
+                    kind,
                     ..
                 } => {
-                    // AOT and Cranelift use the collector's root/edit API. The
-                    // interpreter has no collector object in its CtValue model,
-                    // so it marshals the same value through the generated root
-                    // alias and writes the edited snapshot back to the source
-                    // root. It does not choose policy or edge meaning here.
                     let root_key = if scope.contains_key(root) {
                         root.clone()
                     } else {
@@ -6664,12 +7191,13 @@ impl<'a> EvalCtx<'a> {
                             .unwrap_or(root.as_str())
                             .to_string()
                     };
-                    let current = scope
+                    let root_value = scope
                         .get(&root_key)
                         .cloned()
                         .or_else(|| self.globals.get(root).cloned())
                         .or_else(|| self.globals.get(&root_key).cloned())
                         .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                    let current = self.gc_read_root(&root_value)?;
                     let value_key = mangle_generated("value");
                     let prior_value = scope.insert(value_key.clone(), current);
                     let prior_index = index_temp.as_ref().map(|(temp, _)| {
@@ -6684,6 +7212,12 @@ impl<'a> EvalCtx<'a> {
                         self.eval_expr_child(edit, scope)
                     })();
                     let updated = scope.get(&value_key).cloned();
+                    let collection_index = index_temp.as_ref().and_then(|(temp, _)| {
+                        scope.get(temp).and_then(|value| match value {
+                            CtValue::Int(index) if *index >= 0 => usize::try_from(*index).ok(),
+                            _ => None,
+                        })
+                    });
                     if let Some((temp, prior)) = prior_index {
                         if let Some(prior) = prior {
                             scope.insert(temp, prior);
@@ -6697,10 +7231,17 @@ impl<'a> EvalCtx<'a> {
                         scope.remove(&value_key);
                     }
                     let edited = edited?;
-                    scope.insert(
-                        root_key,
-                        updated.ok_or_else(|| unsupported("GC edit lost its root value", self.span()))?,
-                    );
+                    let updated = updated
+                        .ok_or_else(|| unsupported("GC edit lost its root value", self.span()))?;
+                    self.gc_edit_root(&root_value, updated)?;
+                    self.gc_update_method_edges(
+                        &root_value,
+                        edges,
+                        *kind,
+                        *method_span_start,
+                        collection_index,
+                        scope,
+                    )?;
                     Ok(edited)
                 }
                 crate::Codegen::TIR::THostCall::CellGuardProject {
@@ -7428,11 +7969,29 @@ impl<'a> EvalCtx<'a> {
             TExprKind::AllocNew { ctor } => {
                 let owner = self.next_sentry_allocator;
                 self.next_sentry_allocator = self.next_sentry_allocator.saturating_add(1);
+                let (allocator, capacity, fixed) = Self::allocator_from_ctor(ctor);
+                self.runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .allocators
+                    .insert(
+                        owner,
+                        super::EvalAllocator {
+                            generation: 0,
+                            used: 0,
+                            capacity,
+                            allocator,
+                            fixed,
+                            slots: Vec::new(),
+                            closed: false,
+                        },
+                    );
                 Ok(CtValue::Struct {
                     type_name: "__JetTirAllocator".to_string(),
                     fields: vec![
                         ("ctor".to_string(), CtValue::Str(ctor.clone())),
                         ("sentry_id".to_string(), CtValue::Int(owner as i64)),
+                        ("generation".to_string(), CtValue::Int(0)),
                         ("used".to_string(), CtValue::Int(0)),
                         ("allocations".to_string(), CtValue::Int(0)),
                     ],
