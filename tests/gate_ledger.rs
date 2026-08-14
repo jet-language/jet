@@ -54,10 +54,11 @@ fn write_source_gate_kinds(root: &Path) {
 }
 tag Input { deny: [IO] }
 #Scrub(Input) fn scrub(raw: #Input String) => String { return ~raw }
+#MustUse fn discardable() => Int { return 1 }
 
 fn run() {
     #Grant(caps: IO) {}
-    maybe().drop("intentional result discard")
+    discardable().drop("intentional result discard")
     detached :: task 42
     detached.detach()
     approx(1)
