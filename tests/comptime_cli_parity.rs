@@ -2,7 +2,7 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 const COMPTIME_STEMS: [&str; 4] = [
     "comptime/embed",
@@ -38,6 +38,34 @@ fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String 
             .unwrap_or_else(|error| panic!("copy `{relative}` for `{stem}`: {error}"));
     }
     format!("{file_name}.jet")
+}
+
+fn copy_build_stamp_fixture(root: &Path, destination: &Path) {
+    fs::copy(
+        root.join("examples/features/comptime/build_stamp.jet"),
+        destination.join("build_stamp.jet"),
+    )
+    .expect("copy build stamp example");
+    let lock_dir = destination.join(".jet");
+    fs::create_dir_all(&lock_dir).expect("create build stamp lock directory");
+    fs::copy(
+        root.join("tests/fixtures/build_stamp.lock"),
+        lock_dir.join("lock"),
+    )
+    .expect("copy build stamp lock fixture");
+}
+
+fn run_jet(args: &[&str], project: &Path, cache: &Path) -> Output {
+    fs::create_dir_all(cache).expect("create isolated Jet cache");
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(args)
+        .current_dir(project)
+        .env("JET_CACHE_DIR", cache.join("build"))
+        .env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("JET_RUNTIME_CACHE_DIR", cache.join("runtime"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap_or_else(|error| panic!("spawn `{}`: {error}", args.join(" ")))
 }
 
 #[test]
@@ -571,4 +599,86 @@ fn build(b: BuildContext) => BuildPlan ? {
     assert_eq!(default.status.code(), aot.status.code());
     assert_eq!(dev.status.code(), aot.status.code());
     assert_eq!(interpreted.status.code(), aot.status.code());
+}
+
+#[test]
+fn build_stamp_release_rebuilds_have_identical_binary_bytes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("build_stamp_reproducibility");
+    let project = scratch.join("project");
+    fs::create_dir_all(&project).expect("create build stamp project");
+    copy_build_stamp_fixture(&root, &project);
+    let lock_path = project.join(".jet/lock");
+    let lock_bytes = fs::read(&lock_path).expect("read build stamp lock fixture");
+
+    let build_clean = |cache: &Path| {
+        let output = run_jet(
+            &["build", "--release", "--locked", "build_stamp.jet"],
+            &project,
+            cache,
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "clean release build failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let binary = fs::read(project.join("build/build_stamp"))
+            .expect("clean release build must publish build/build_stamp");
+        assert_eq!(
+            fs::read(&lock_path).expect("read lock after clean release build"),
+            lock_bytes,
+            "locked release build changed the checked-in lock bytes"
+        );
+        fs::remove_dir_all(project.join("build")).expect("remove first clean build output");
+        binary
+    };
+
+    let first = build_clean(&scratch.join("cache/first"));
+    let second = build_clean(&scratch.join("cache/second"));
+    assert_eq!(first, second, "clean release rebuild binary bytes differ");
+}
+
+#[test]
+fn build_stamp_example_matches_release_jit_and_interpreter_tiers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("build_stamp_tier_parity");
+    copy_build_stamp_fixture(&root, &scratch.path);
+    let expected = fs::read(root.join("examples/features/expected/comptime/build_stamp.out"))
+        .expect("read build stamp golden");
+
+    let release = run_jet(
+        &["run", "--release", "build_stamp.jet"],
+        &scratch.path,
+        &scratch.join("cache/release"),
+    );
+    let default = run_jet(
+        &["run", "build_stamp.jet"],
+        &scratch.path,
+        &scratch.join("cache/default"),
+    );
+    let interpreter = run_jet(
+        &["dev", "build_stamp.jet", "--interpret", "--watch=off"],
+        &scratch.path,
+        &scratch.join("cache/interpreter"),
+    );
+
+    for (tier, output) in [
+        ("AOT release", &release),
+        ("default JIT", &default),
+        ("interpreter", &interpreter),
+    ] {
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{tier} build stamp run failed:\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout, expected,
+            "{tier} build stamp stdout differs from the committed golden"
+        );
+    }
+    assert_eq!(release.status.code(), default.status.code());
+    assert_eq!(release.status.code(), interpreter.status.code());
 }
