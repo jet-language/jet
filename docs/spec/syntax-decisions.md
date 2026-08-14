@@ -6693,8 +6693,11 @@ constant-evaluation law.
 entries accept the runtime effect row syntax. The foundation `Effects` table
 and shared `PurityStage` walker decide both stages; Tier 2 uses
 `--gate impure=allow`. `#Impure` reasons remain the recording point in the AST
-and sema gate handler until the shared gate ledger from #1571 lands. Fixed-list
-lengths and enum discriminants retain their source expressions and use the
+and sema gate handler; the landed shared `GateLedger` records `GateKind` entries
+with the exact kinds `unsafe`, `impure`, `dependency_grant`, `build_flag`,
+`session_flag`, `trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`,
+`precision_demotion`, and `nondeterministic`. Fixed-list lengths and enum
+discriminants retain their source expressions and use the
 ordinary comptime evaluator before type registration; E0963 and E0035 report
 unknown, noninteger, and range failures.
 
