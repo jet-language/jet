@@ -100,7 +100,7 @@ fn spelling(row: &AppliedRule) -> String {
 }
 
 /// The smallest whole program that puts `marker` at `site`.
-fn program_at(marker: &str, site: RuleSite) -> Option<String> {
+fn program_at(marker: &str, row: &AppliedRule, site: RuleSite) -> Option<String> {
     Some(match site {
         RuleSite::File if marker.starts_with("#NoPrelude") => format!(
             "#NoPrelude\nuse core.term as io\nfn run() {{\n    io.print(\"ok\")\n}}\n"
@@ -124,6 +124,9 @@ fn program_at(marker: &str, site: RuleSite) -> Option<String> {
         ),
         RuleSite::Function if marker.starts_with("#FFI") => format!(
             "#[Unsafe(\"coverage\"), FFI(c)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"
+        ),
+        RuleSite::Function if row.name == jet::Syntax::MARKER_MEMO => format!(
+            "{marker}\nfn helper() =[]=> {{\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function => format!("{marker}\nfn helper() {{\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Method => format!(
@@ -250,7 +253,7 @@ fn every_active_row_is_reachable_at_a_declared_site() {
         let mut rejections = Vec::new();
         let mut reached = false;
         for site in renderable {
-            let Some(source) = program_at(&marker, site) else {
+            let Some(source) = program_at(&marker, row, site) else {
                 continue;
             };
             let rejected = rejected_the_marker(&source);
@@ -296,7 +299,7 @@ fn every_active_row_walks_parse_validate_format_highlight_reflect() {
             .copied()
             .filter(|site| site_is_source_renderable(*site))
             .find_map(|site| {
-                let source = program_at(&marker, site)?;
+                let source = program_at(&marker, row, site)?;
                 let (_, lex_diagnostics) = if source.contains("#Bindgen") {
                     jet::Lexer::lex_generated(&source)
                 } else {

@@ -106,7 +106,7 @@ mod generic_module_tests {
         let marker = function
             .markers
             .iter()
-            .find(|marker| marker.name == "Policy")
+            .find(|marker| marker.name == Syntax::MARKER_POLICY)
             .expect("policy marker");
         assert!(matches!(&marker.args[0], AST::Expr::Call(call) if call.name == "retry"));
         assert!(matches!(&marker.args[1], AST::Expr::Call(call) if call.name == "trace"));
