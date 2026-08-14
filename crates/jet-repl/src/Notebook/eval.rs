@@ -64,16 +64,6 @@ pub struct EvalResult {
     pub value: Option<CtValue>,
 }
 
-/// Run one Jet input against `session` (shared by every notebook client).
-pub fn evaluate_step(
-    session: &mut Session,
-    input: &str,
-    base_dir: &Path,
-    authorizer: &mut dyn Comptime::ReplAuthorizer,
-) -> EvalResult {
-    evaluate_step_with_items(session, input, base_dir, authorizer, false)
-}
-
 /// Run one input after the notebook has supplied its complete declaration set.
 pub(crate) fn evaluate_step_with_items(
     session: &mut Session,
