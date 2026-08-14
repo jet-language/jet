@@ -31,7 +31,7 @@ repeating the distinction.
 
 Jet uses one code grammar with two valid shapes:
 
-- numeric: `E` or `L` followed by four digits, such as `E0102` or `L0201`;
+- numeric: `E` or `L` followed by four digits, such as `E0102` or `L0202`;
 - word-shaped: `E-<WORD>-<WORD>` with two or more uppercase words separated by
   `-`, such as `E-WEB-ABI-TYPE`.
 
@@ -331,7 +331,6 @@ renumbered, and no new `W` code may be allocated.
 | E0219 | sema  | a pinned place is moved, replaced, or resized while a pin is still live (D-PIN1=A) |
 | E0220 | sema  | a place is read through its owner while an exclusive write window / pin into it is still live (card #1361, I2) |
 | E0221 | sema  | a struct field’s strong `Shared` edge can form a reference cycle (D-SHARED-CYCLE1=C) |
-| L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (D-JPK-SCRIPTDEP1) |
 | L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |
@@ -566,7 +565,6 @@ renumbered, and no new `W` code may be allocated.
 | E3110 | sema  | invalid swizzle lane on vector/SIMD type (D-SWIZZLE1) |
 | E3111 | sema  | overlapping write swizzle repeats a lane (D-SWIZZLE1) |
 | E3112 | parse/sema | `#Unsafe` block/function missing its required reason argument (D-UNSAFE2, D-UNSAFE-REASON1=A) |
-| L3101 | retired | bare `#Unsafe` is now hard error E3112 (D-UNSAFE-REASON1=A) |
 | L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
@@ -757,7 +755,6 @@ renumbered, and no new `W` code may be allocated.
 | E2304 | sema  | *retired for raw references by D-MEM1/S3* (named slice-view returns follow D-MEM-VIEWRET1 and use E2305 when invalid) |
 | E2305 | sema  | a declared `View<T>` would outlive its owner, or the compiler cannot infer, prove, and stabilize its public owner provenance (D-MEM-VIEWRET1/D-MEM-COPYSEM1) |
 | E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a raw-reference `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
-| L2301 | sema  | *retired for raw references by D-MEM1/S3* (public named-view provenance is queryable and semver-pinned under D-MEM-VIEWRET1) |
 | E2307 | sema  | a declared string view would outlive its owning `String`, or the compiler cannot infer, prove, and stabilize its public owner provenance (D-MEM-VIEWRET1/D-MEM-COPYSEM1) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
@@ -1299,7 +1296,6 @@ server built on top. E28xx is the block for M10.
 | E2807 | Route `{path}` is registered both by `{a}` and `{b}`. | Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1). | Remove one registration, or rename the convention file. |
 | E2810 | `{kind}` `{name}` is not a statically known handler. | D-WEBAPP1 records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge. | Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees. |
 | E-APP-TARGET-CAPABILITY | App capability `.{capability}` needs target `{required}`, but the resolved target is `{target}`. | App is one type across targets, but each capability must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9). | Choose a build target that supports `.{capability}` (for example `#Target(JS)` for browser capabilities or a native target for server capabilities), or remove that capability. |
-| L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `task { … }` so each connection runs in its own task. |
 
 ## Testing and tooling diagnostics (E2-M11)
 
@@ -1486,7 +1482,6 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3108 | Invalid unsafe option or obligation assertion. | Unsafe proof vocabulary is closed and site-bound. | Use only `obligations: .Track`/`.Skip` and `valid_ptr`, `aligned`, `no_alias` inside `#Unsafe`. |
 | E3109 | Configured organization gate policy cannot be used. | Admin policy never fails open when its explicit input is unreadable or malformed. | Fix `JET_ORG_UNSAFE_POLICY` and its manifest-shaped `policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` file, or remove the variable. |
 | E3112 | This `#Unsafe` block/function has no reason. | Every gated region/function must record why it cannot break memory safety; the audit sentence is mandatory. | Add the reason: `#Unsafe("why this is safe") { … }` or `#Unsafe("why this is safe") fn ...`. |
-| L3101 | Retired by D-UNSAFE-REASON1=A. | A missing unsafe reason is now hard error E3112. | Follow E3112. |
 | L3102 | This `#Impure` block has no reason. | Every comptime effect gate records, in one line, why ambient I/O is needed. | Add the reason: `#Impure("reading build config") { … }`. |
 
 ## Comptime effect tiers (D-CTEFFECT1)
