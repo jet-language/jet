@@ -234,7 +234,7 @@ pub fn run_clean_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) 
     run_command_in_mode(env, cmd_args, cwd, true, false)
 }
 
-/// Run a clean-shell command without letting task stdout corrupt a generated
+/// Run a clean-shell command without letting job stdout corrupt a generated
 /// activation script.
 pub fn run_clean_command_in_silent(
     env: &Env,

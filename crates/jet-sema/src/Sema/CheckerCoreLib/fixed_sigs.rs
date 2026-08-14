@@ -3133,7 +3133,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named("Auth".to_string()))],
             Some(Type::String),
         )),
-        ("app" | "core.web", "sync_over" | "sync") => Some((
+        ("app" | "core.web", "sync") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::String),
         )),

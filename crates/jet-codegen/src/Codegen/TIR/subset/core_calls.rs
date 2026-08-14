@@ -180,7 +180,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-SYNC1: the application sync publisher is a typed, deterministic
     // Prelude call. Its return is String and its named `over:` label is
     // already checked by sema; no closure or host policy remains for TIR.
-    if matches!(module, "app" | "core.web") && matches!(method, "sync" | "sync_over") {
+    if matches!(module, "app" | "core.web") && method == "sync" {
         return true;
     }
     // D-TIMEDEPTH1=A: civil-time constructors. NOT in `core_fixed_sig`.

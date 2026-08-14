@@ -2134,7 +2134,8 @@ effects do not run twice. Irreversible-effect checks remain unchanged.
 **D-CONC-SCHED1=A — typed schedule data and one job word** *(ratified
 2026-08-06, card #1505)*: the value behind the unchanged schedule marker is
 typed `Duration` or wall-clock time on the D-TYPE2-TIME1 rail. `jet dev`,
-services, and jetos timers read that value. A job is a task the runtime starts.
+services, and jetos timers read that value. A scheduled `#Job` is the lifecycle
+unit the runtime starts; a `task` remains the structured-concurrency construct.
 The service plane uses supervisor tasks, groups, and restart data. This amends
 the value grammar of D-SCHEDULE1=A, aligns D-TAG-SURFACE1 and D-TASK-META1,
 and does not change schedule placement rules.
@@ -3852,12 +3853,14 @@ connection parameter.
 `DB.Read`/`DB.Write` leaf inference above, the `=[DB.Read]=>` qualification
 proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
 and `DBConnection`/`DBError` nameability, with a runnable example
-(`examples/features/io/db_read_footprint.jet`). The remaining `app.live`
-legs — the `app` namespace / app graph (D-WEBAPP1, card #438), the
-`core.ws` push transport (D-WS1; a native std-only WebSocket, I6 forbids a
-crate), the client `Signal<T>` binding, and the `#Transact` write-set
-publication + invalidation scheduler — ride unbuilt infrastructure owned
-by cards #438 and #134 and are not yet implemented.
+(`examples/features/io/db_read_footprint.jet`). The #1158 reconciliation now
+ships the local production seam: `DBScope.live` registers a policy-aware
+rerunner, AOT binds results to the canonical `JetSignal<T>`, the ambient/JIT
+adapter calls the same Prelude, and matching write-set invalidations publish
+through the existing serialized `core.ws` writer, with latest-topic replay when
+a connection registers. The general app/query graph, connection-scoped
+authorization, browser-side wire binding, and remote authenticated reconnect
+remain owned by the unbuilt app-graph and remote-transport slices.
 
 **Web target** *(D-WEBKIND1, D-DOMGEN1, D-WEBBACKEND1, D-OSTARGET1,
 D-WEBDEFAULT1, D-HTMLPAIR1)*: browser target is `wasm32-unknown-unknown` +
@@ -5643,7 +5646,8 @@ existing named-function entry convention.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
-(D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1);
+(D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1); the
+shared duration plane also accepts `2h` and `1d`;
 `#Every("03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
 due jobs in the dev loop, the service runtime (D-SERVICE1) schedules
@@ -5666,7 +5670,9 @@ args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps
 the selected function's source name, so a sibling's plain-call dependency
 (ballot: dependency = plain function call) does not die with E0102.
 D-SERVICE1 still has no typed builder/worker/group to carry a schedule into a
-service runtime — that remains a future card, not a corner cut here.
+service runtime, and D-TYPE2-TIME1 has not yet supplied the ordinary typed
+`Duration`/wall-clock carrier. Those remain future cards; the service path must
+not reinterpret raw extras as `#Every` or add a second scheduler.
 
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the

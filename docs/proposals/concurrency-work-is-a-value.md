@@ -404,7 +404,7 @@ records the amendment.
 | D-CONC-OUTCOME1 | A, retired by FAIL1=A | The typed outcome/status surface was ratified, then retired. Separate status and trace accessors do not ship. |
 | D-CONC-CROSS1 | A | Crossing safety is one registered fact plane with one error family. Existing task, adapter, kernel, cell, and fixed-backing semantics stay unchanged. |
 | D-CONC-STM1 | A | A transaction body runs once. The commit takes locks in fixed order. Contention waits; it does not retry. |
-| D-CONC-SCHED1 | A | Schedule values use the typed time rail. A job is a task the runtime starts. Services use supervisor tasks and groups. |
+| D-CONC-SCHED1 | A | Schedule values use the typed time rail. A scheduled `#Job` is the lifecycle unit the runtime starts; `task` remains the structured-concurrency construct. Services use supervisor tasks and groups. |
 | D-CONC-STREAM1 | A | A stream is a task. Dropping its iterator cancels its producer at the next wait point, with normal cleanup. |
 | D-CONC-CHAN1 | A, spelling amended by CHAN2=D | `channel<T>()` is builtin. `loop value, receiver` drains it. The readiness wait uses the arm-table shape on plain endpoints. |
 | D-CONC-SHARE1 | A | `shared` values use plain field access. Each statement is one atomic step. Several steps use `#Transact`; expert guards stay. |

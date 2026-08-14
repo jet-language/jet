@@ -54,6 +54,8 @@ enum JetWsRole {
 
 struct JetWsConn {
     stream: std::cell::RefCell<std::net::TcpStream>,
+    live_writer: std::sync::Arc<std::sync::Mutex<std::net::TcpStream>>,
+    live_transport_id: u64,
     role: JetWsRole,
     closed: std::cell::Cell<bool>,
     max_message: usize,
@@ -72,13 +74,33 @@ impl JetWsConn {
             .map_err(|_| JetWsError::IO {
                 operation: "set write timeout".to_string(),
             })?;
-        Ok(Self {
+        let live_writer = stream.try_clone().map_err(|_| JetWsError::IO {
+            operation: "clone websocket live writer".to_string(),
+        })?;
+        let mut conn = Self {
             stream: std::cell::RefCell::new(stream),
+            live_writer: std::sync::Arc::new(std::sync::Mutex::new(live_writer)),
+            live_transport_id: 0,
             role,
             closed: std::cell::Cell::new(false),
             max_message: JET_WS_MAX_MESSAGE,
             pending: std::cell::RefCell::new(None),
-        })
+        };
+        let writer = conn.live_writer.clone();
+        let masked = matches!(conn.role, JetWsRole::Client);
+        conn.live_transport_id = jet_app_ws_register(std::sync::Arc::new(move |payload| {
+            let Ok(mut stream) = writer.lock() else {
+                return;
+            };
+            let _ = jet_ws_write_frame(&mut stream, 0x1, payload.as_bytes(), masked);
+        }));
+        Ok(conn)
+    }
+}
+
+impl Drop for JetWsConn {
+    fn drop(&mut self) {
+        jet_app_ws_unregister(self.live_transport_id);
     }
 }
 
@@ -389,7 +411,12 @@ fn jet_ws_send_message(conn: &JetWsConn, opcode: u8, payload: &[u8]) -> Result<(
         }
     }
     let masked = matches!(conn.role, JetWsRole::Client);
-    jet_ws_write_frame(&mut *conn.stream.borrow_mut(), opcode, payload, masked)
+    let Ok(mut stream) = conn.live_writer.lock() else {
+        return Err(JetWsError::IO {
+            operation: "lock websocket writer".to_string(),
+        });
+    };
+    jet_ws_write_frame(&mut stream, opcode, payload, masked)
 }
 
 fn jet_ws_send_text(conn: &JetWsConn, text: &String) -> Result<(), JetWsError> {
@@ -478,23 +505,13 @@ fn jet_ws_recv(conn: &JetWsConn) -> Result<JetWsMessage, JetWsError> {
                 } else {
                     (1000, String::new())
                 };
+                let _ = jet_ws_send_message(conn, 0x8, &payload);
                 conn.closed.set(true);
-                let _ = jet_ws_write_frame(
-                    &mut *conn.stream.borrow_mut(),
-                    0x8,
-                    &payload,
-                    matches!(conn.role, JetWsRole::Client),
-                );
                 let _ = conn.stream.borrow_mut().shutdown(std::net::Shutdown::Both);
                 return Ok(JetWsMessage::Close { code, reason });
             }
             0x9 => {
-                jet_ws_write_frame(
-                    &mut *conn.stream.borrow_mut(),
-                    0xA,
-                    &payload,
-                    matches!(conn.role, JetWsRole::Client),
-                )?;
+                jet_ws_send_message(conn, 0xA, &payload)?;
             }
             0xA => {}
             _ => return Err(JetWsError::Protocol),

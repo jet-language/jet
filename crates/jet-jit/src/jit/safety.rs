@@ -1481,7 +1481,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     "map_merge" | "list_merge" => args.len() == 2,
                     "policy_new" => args.len() == 2,
                     "policy_allows" => args.len() == 3,
-                    "sync_over" | "sync" => args.len() == 2,
+                    "sync" => args.len() == 2,
                     _ => false,
                 };
                 return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
@@ -1494,7 +1494,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return false;
             }
             if (module == "app" || module == "core.web")
-                && matches!(method.as_str(), "sync_over" | "sync")
+                && method == "sync"
             {
                 return args.len() == 2
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));

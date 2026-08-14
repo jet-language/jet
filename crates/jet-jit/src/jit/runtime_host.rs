@@ -1862,7 +1862,7 @@ mod service_adapter {
                 "policy_allows" if index == 0 => Some(ArgKind::Slot),
                 "policy_allows" if index > 0 => Some(ArgKind::String),
                 "policy_show" if index == 0 => Some(ArgKind::Slot),
-                "sync_over" | "sync" if index < 2 => Some(ArgKind::String),
+                "sync" if index < 2 => Some(ArgKind::String),
                 "map_new" | "list_new" => None,
                 _ => None,
             },

@@ -39,6 +39,10 @@ mod jet_std {
     include!("Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
+// WsClient registers one canonical live-query transport sink. Keep the
+// BrowserHost inclusion order identical to generated AOT: the transport
+// adapter sees the shared Prelude registry, not a browser-only duplicate.
+include!("Prelude/CoreLib/Top/LiveQuery.rs");
 include!("Prelude/CoreLib/Top/WsClient.rs");
 include!("Prelude/CoreLib/Top/Browser.rs");
 

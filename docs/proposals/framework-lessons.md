@@ -31,10 +31,14 @@ an implementation boundary; it does not keep that behavior as an option.
   identity, and consume rechecks that identity. Durable DB-backed app routes,
   provider network calls, and actual email delivery are unshipped.
 - D-SYNC1 defines typed CRDT carriers, deterministic merge, and
-  `app.sync(doc, over: session)`. The shipped child slice proves the CRDT
-  algebra and typed canonical session receipts. The session registry is
-  process-local. Vector-clock access, remote authenticated reconnect, transport,
-  and merge protocol are unshipped.
+  `app.sync(doc, over: session)`. The shared Prelude now turns malformed or
+  overflowing carriers into an absorbing invalid state instead of truncating
+  replica data. Typed carrier operations retain their identity metadata. The
+  fixed `app.sync` String seam merges canonical map/list/counter displays,
+  preserves duplicate idempotence, and publishes the latest receipt through
+  the bounded local live transport for replay on reconnect. Vector-clock
+  access, auth-scoped routing, remote reconnect, and a network merge protocol
+  are unshipped.
 - D-DBPOLICY1 defines typed per-row rules that apply below app code on every
   query, mutation, and live-query path. The shipped boundary accepts only the
   compiled `true` and `owner == user` forms and rejects other expressions.
@@ -44,16 +48,19 @@ an implementation boundary; it does not keep that behavior as an option.
   resource facts. Payloads and process memory remain outside the schema.
 - D-LIVEQUERY1 defines effect-qualified queries, read-footprint tracking,
   write-set invalidation, query rerun, and `Signal<T>` delivery over
-  `core.ws`. The shipped boundary stores normalized footprints in a bounded
-  registry, reports invalid or evicted handles, and marks matching records
-  dirty. The typed query runner and rerun callback, `Signal<T>` binding,
-  `core.ws` transport, and remote reconnect are unshipped.
+  `core.ws`. The bounded shared registry stores normalized footprints, a typed
+  rerunner, and the canonical signal sink. Matching invalidations rerun outside
+  the lock, reject stale generations, and publish through the existing
+  serialized WebSocket writer. The general app-query graph, browser protocol,
+  and remote authenticated reconnect remain unshipped. A bounded local
+  transport replay exists for the latest event on each live/sync topic.
 - D-SCHEDULE1, as amended by D-CONC-SCHED1, defines one typed schedule value
-  on the D-TYPE2-TIME1 rail. A job is a task the runtime starts. The shipped
-  boundary checks the legacy `ns`/`us`/`ms`/`s`/`min` table and lets `jet dev`
-  read the checked result. The typed `Duration` and wall-clock values,
-  including `2h` and `1d`, service and jetos consumers, and one Job/task
-  vocabulary in docs, diagnostics, and the CLI are unshipped.
+  on the D-TYPE2-TIME1 rail. A scheduled job is the lifecycle unit the runtime
+  starts; `task` remains the separate structured-concurrency construct. The
+  shared duration resolver now accepts `2h` and `1d` alongside the existing
+  units, and `jet dev` reads the same checked result. The ordinary typed
+  `Duration` and wall-clock values plus service and jetos consumers are
+  unshipped.
 - D-VALIDATE1 has in-body accumulation and `Type.validate`. Derived struct
   decode now runs the same validator after shape decoding. Hand codecs still
   opt in explicitly. D-VALIDATE-DECODE1 settles the sole
@@ -63,6 +70,7 @@ an implementation boundary; it does not keep that behavior as an option.
 ## Verification checkpoint
 
 Child cards #1157 and #1160 record focused implementation evidence for their
-shipped boundaries. This docs-only reconciliation ran no test, build, or
-formatter command. The unshipped ratified behaviors above remain named
-boundaries; this file makes no implementation claim for them.
+shipped boundaries. This implementation pass ran no test, build, formatter,
+linter, or devtool command; the orchestrator owns verification. The unshipped
+ratified behaviors above remain named boundaries; this file does not claim
+those broader slices.

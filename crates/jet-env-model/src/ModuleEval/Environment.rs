@@ -98,7 +98,7 @@ pub struct EnvironmentIntegration {
     pub options: BTreeMap<String, String>,
     pub packages: Vec<String>,
     pub files: Vec<ManagedFile>,
-    /// Existing lifecycle/task facts selected by the preset. These are names
+    /// Existing lifecycle/job facts selected by the preset. These are names
     /// only; activation still belongs to the ordinary environment lifecycle.
     pub tasks: Vec<String>,
     /// Provider authorities used by package and host facts. This is metadata,
@@ -2268,7 +2268,7 @@ fn hooks_from_value(prefix: &str, value: &CtValue) -> Result<Vec<HookSpec>, Stri
             if let Some(command) = string_value(value) {
                 if !valid_task_name(&command) {
                     return Err(format!(
-                        "{prefix}[{index}] must name a declared #Job task; arbitrary commands need a trusted hook record"
+                        "{prefix}[{index}] must name a declared #Job; arbitrary commands need a trusted hook record"
                     ));
                 }
                 return Ok(HookSpec {

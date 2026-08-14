@@ -11,13 +11,13 @@ evidence, not proof that every broader law shipped.
 
 | Decision | status | production path | evidence path | successor/owner | boundary |
 |----------|--------|-----------------|---------------|-----------------|----------|
-| D-LIVEQUERY1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs`; `crates/jet-comptime/src/Comptime/AppLite.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs` | `examples/features/tooling/app_live.jet`; `examples/features/expected/tooling/app_live.out`; `tests/ui/db_read_query_hidden_write.jet` | `#1158` closeout; remote transport/app graph owners | Process-global mutex registry stores typed normalized footprints, returns explicit errors, and evicts the oldest entry at its 1024-query bound. Write-set invalidation marks matching queries dirty; evicted or unavailable handles report errors. `signal_push` commits a local receipt. The typed query rerun, `Signal<T>` binding, remote reconnect, and actual `core.ws` transport are unshipped. |
-| D-SCHEDULE1 | unshipped-law | `crates/jet-parser/src/Parser/Items/markers_contracts.rs`; `crates/jet-sema/src/Sema/CheckerSchedule.rs` | `examples/features/devloop/schedule_every.jet`; `tests/dev.rs`; `tests/ui/schedule_*` | `#1157` verified child; `#1158` closeout | Parser/sema checks and the shared `EveryArg::resolve` law ship. The D-CONC-SCHED1 typed `Duration`/wall-clock value, `2h` and `1d`, service-runtime and jetos timer consumers, and one Job/task vocabulary are unshipped. |
+| D-LIVEQUERY1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs`; `crates/jet-comptime/src/Comptime/AppLite.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs` | `examples/features/tooling/app_live.jet`; `examples/features/expected/tooling/app_live.out`; `tests/ui/db_read_query_hidden_write.jet` | `#1158` closeout; remote reconnect/app graph owners | The bounded registry stores a typed rerunner and canonical signal sink. Matching invalidations rerun outside the lock, commit only the newest generation, update `JetSignal<T>`, and publish through the existing `core.ws` writer with serialized frames. The transport replays the latest bounded event per topic on reconnect. Connection-scoped authentication/routing, browser protocol binding, and general app-query graph discovery remain unshipped. |
+| D-SCHEDULE1 | unshipped-law | `crates/jet-parser/src/Parser/Items/markers_contracts.rs`; `crates/jet-foundation/src/Syntax/math_layout.rs`; `crates/jet-foundation/src/AST/items.rs`; `crates/jet-sema/src/Sema/CheckerSchedule.rs` | `examples/features/devloop/schedule_every.jet`; `tests/dev.rs`; `tests/ui/schedule_*` | `#1157` verified child; `#1158` closeout; D-TYPE2-TIME1 substrate | The shared duration plane now accepts `2h` and `1d`, and one resolver feeds sema/dev. Scheduled lifecycle units use `#Job`; `task` remains the separate concurrency construct. The typed D-TYPE2-TIME1 `Duration`/wall-clock carrier and service-runtime/jetos timer consumers remain unshipped. |
 | D-LINTPOLICY1 | shipped | `crates/jet-pkg-model/src/LintPolicy.rs`; `Source/CmdCompile.rs`; `crates/jet-semindex/src/Build.rs`; `crates/jet-semindex/src/Types.rs`; `crates/jet-semindex/src/JSON.rs` | `tests/pkg.rs`; `tests/semindex.rs`; `docs/spec/diagnostics.md` | `#1158` closeout | Warnings stay non-blocking by default. Explicit `package.jet` `policy.lints.deny` removes matching findings from the warning stream and emits one E1293 per site. Memory/type safety has no override. |
 | D-BINPAT1 | shipped | `crates/jet-parser/src/Parser/Expressions/patterns.rs`; `crates/jet-sema/src/Sema/CheckerInfer/binary.rs`; `crates/jet-parser/src/Formatter/Expressions.rs` | `examples/features/parsing/binary_pattern.jet`; `examples/features/parsing/binary-reader.jet`; `tests/ui/binpat_*`; `tests/fmt.rs` | `#506` slice; no owner gate recorded | `[U8].{"…"}` is byte-mode in one pattern engine. Bit widths and endian rules are checked; retired `b"…"` spelling stays retired. |
 | D-STM1 | shipped | `crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs`; `crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs`; `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs` | `examples/features/memory/shared_transact.jet`; `tests/dev.rs` | `#1161` | D-CONC-STM1 amends the old retry text. The body runs once; the commit takes touched locks in fixed order, applies buffered edits, and waits on contention. Rollback drops buffered edits before commit. |
 | D-AUTH1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/Auth.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs`; `crates/jet-comptime/src/Comptime/AuthLite.rs` | `examples/features/crypto/auth_sessions.jet`; `examples/features/crypto/auth_tokens.jet`; `tests/taint.rs`; `tests/dev.rs` | `#1161` | Token verification and session helpers use a process-global typed store, checked expiry, single-use state, and OS cryptographic entropy. Magic links require a registered user with a syntactically valid delivery identity, and consume rechecks that identity. Durable DB-backed app routes, provider network, actual email delivery, and remote auth reconnect are unshipped. |
-| D-SYNC1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs`; `crates/jet-comptime/src/Comptime/SyncLite.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs` | `examples/features/tooling/sync_crdt.jet`; `tests/sync_crdt.rs`; `docs/reference/core-library.md` | `#1159` verified child; `#1161` | Typed CRDT carriers/codecs and typed bounded session receipts exist. `JET_SYNC_SESSIONS` is process-local and duplicate publishes are idempotent. Remote authenticated reconnect, transport, and merge protocol are unshipped. |
+| D-SYNC1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs`; `crates/jet-comptime/src/Comptime/SyncLite.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs` | `examples/features/tooling/sync_crdt.jet`; `tests/sync_crdt.rs`; `docs/reference/core-library.md` | `#1159` verified child; `#1161` | Typed CRDT carriers/codecs now carry an absorbing invalid state: merge overflow or malformed identity denies without truncation, and the ambient codec preserves that denial. The bounded session registry merges canonical map/list/counter displays deterministically, keeps duplicate delivery idempotent, and publishes the latest receipt through the local live transport for reconnect replay. `JET_SYNC_SESSIONS` is still process-local; authenticated routing and network transport remain unshipped. |
 | D-VALIDATE1 | unshipped-law | `crates/jet-sema/src/Sema/CheckerValidate.rs`; `crates/jet-sema/src/Sema/Registration/Serde.rs`; `crates/jet-codegen/src/Codegen/Context.rs`; `crates/jet-parser/src/Parser/Items/states_protocols.rs` | `examples/features/serde/validate.jet`; `tests/ui/validate_*`; `docs/spec/spec.md` | `#1161` | In-body `validate {}` and `Type.validate` ship. Derived struct decoders now run their synthesized validator automatically, and every typed Decode codec uses the canonical `[FieldError]` result contract. Hand-written codecs opt in explicitly. `Validate.over` is unshipped. Rule vocabulary is `check(...)` only. |
 | D-VALIDATE-DECODE1 | shipped | `crates/jet-sema/src/Sema/Registration/Serde.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/functions.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs` | `tests/corelib.rs`; `examples/features/serde/hand_codec.jet`; `docs/spec/syntax-decisions.md` | `#1161` | Every generated, hand-written, and format adapter Decode path returns `Result<T, [FieldError]>`. The retired codec `DecodeError` envelope has no alias or second decoder API. `AuthError::DecodeError` is a token-JSON error variant, not a codec result contract. |
 | D-DBPOLICY1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs`; `crates/jet-jit/src/DB.rs` | `tests/db_policy.rs`; `examples/features/io/db_policy.jet`; `docs/reference/core-library.md` | `#1160` verified child; `#1161` | Bounded `DBScope` carries policy and user through query, mutation, transaction, and live paths. Policy expressions are only `true` and `owner == user`; the general typed closure compiler and generated per-path proof/filter are unshipped. |
@@ -28,27 +28,21 @@ evidence, not proof that every broader law shipped.
 
 ### D-LIVEQUERY1
 
-The unshipped D-LIVEQUERY1 behavior is an integration seam, not another
-registry feature. `LiveQuery.rs` has no typed query runner or `JetSignal<T>` binding:
-`jet_app_invalidate` can mark a record dirty, but it cannot rerun the query or
-deliver its typed result. The existing `JetSignal<T>` in
-`crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs` is the
-canonical signal runtime and must remain the delivery target.
+The remaining D-LIVEQUERY1 gap is the app/query graph and remote lifecycle, not
+the local rerun seam. `LiveQuery.rs` stores a typed rerunner and sink in the
+shared Prelude registry. `DBScope.live` registers a policy-aware query rerun;
+the AOT emitter binds its result to the canonical `JetSignal<T>`, and the
+ambient/JIT adapter calls the same Prelude. Invalidation releases the registry
+lock before rerunning, rejects stale generations, and sends successful values
+through the existing `core.ws` writer. The transport replays the latest
+bounded event for each topic when a connection registers. No local callback
+queue, second signal, or browser-only protocol was added.
 
-The emitter owner must connect the typed app/query graph to that runtime at
-`crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs`, then make the
-transaction write set call the registered rerunner and publish the new result
-through the same signal. `Codegen/mod.rs` currently includes the live registry
-for `app.live`, but does not include the existing `core.ws` fragments for that
-path; the transport adapter must use those existing WebSocket mechanisms or an
-already-owned equivalent. `AppLite.rs` must marshal the same contract for
-interpreter/comptime parity. Do not add a local callback queue, a second
-signal implementation, or a local-only browser protocol.
-
-The precise unshipped items are typed query identity and rerun callback,
-result-to-`JetSignal<T>` binding, `core.ws` inclusion and connection lifecycle,
-and the matching `AppLite` adapter. The bounded dirty registry is the shipped
-boundary. Rerun, transport, or remote Signal delivery is not implemented.
+The remaining items are general typed app/query graph discovery, connection-
+scoped authentication/routing, and a client-side protocol that maps wire events
+to the browser's `Signal<T>`. Those require the still-unbuilt app graph and
+remote-transport substrate; the local production paths now close their
+truthful seam and replay the latest bounded topic event on reconnect.
 
 ### D-SCHEDULE1
 
@@ -60,10 +54,12 @@ has service-process metadata, `ServicePlan` captures only `enable` plus untyped
 `timer`/`schedule` extras. None carries a project `#Job` identity and its
 resolved `EverySchedule`.
 
-The unshipped D-CONC-SCHED1 items are typed `Duration` and wall-clock values on
-the D-TYPE2-TIME1 rail, including `2h` and `1d`, plus the service/jetos path
-that carries `(task, EverySchedule)` into one runtime. The current path must
-not reinterpret a raw service extra as `#Every` or add a second scheduler.
+The shared literal plane now resolves `2h` and `1d` with the same nanosecond
+arithmetic as other duration surfaces. The unshipped D-CONC-SCHED1 items are
+the ordinary typed `Duration` and wall-clock values on the D-TYPE2-TIME1 rail,
+plus the service/jetos path that carries `(#Job, EverySchedule)` into one
+runtime. The current path must not reinterpret a raw service extra as
+`#Every` or add a second scheduler.
 
 ## Non-goals / honesty
 
@@ -73,12 +69,15 @@ not reinterpret a raw service extra as `#Every` or add a second scheduler.
   with exact SQL target validation. It is not a general user-supplied policy
   closure compiler.
 - CRDT values preserve replica contributions and converge under their declared
-  laws, but the current session registry is process-local. It is not a remote
-  authenticated reconnect implementation.
-- The live path is a bounded typed registry with explicit errors and dirty
-  marking. It counts `ws_pushes` as a local signal receipt after an explicit
-  payload commit. It is not a browser `core.ws` wire protocol, query rerun
-  graph, or remote Signal transport.
+  laws, and the current process-local session publishes a bounded latest-state
+  event for local reconnect replay. The fixed String session seam does not carry
+  typed atom/LWW metadata or vector clocks. It is not an authenticated remote
+  routing or network merge implementation.
+- The live path is a bounded typed registry with explicit errors, generation
+  checks, query rerun, canonical signal delivery, serialized native `core.ws`
+  publication, and latest-topic replay on reconnect. It is not the browser
+  protocol, connection-scoped authorization, general app-query graph, or
+  remote authenticated reconnect implementation.
 
 ## Implementation checkpoint
 
@@ -88,5 +87,6 @@ oldest-entry eviction and explicit closed-handle errors, requires a registered
 delivery-capable identity for magic links, makes STM buffering an explicit
 typed guard, validates live-inspect JSON through the shared JSON parser, and
 rejects malformed row-policy tables and non-canonical sync documents. Child
-cards #1157 and #1160 carry their focused evidence. This docs-only
-reconciliation ran no test, build, or formatter command.
+cards #1157 and #1160 carry their focused evidence. This implementation pass
+ran no test, build, formatter, linter, or devtool command; the orchestrator
+owns that verification.

@@ -1013,14 +1013,14 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "on", "value", "storage", "app", "page", "App", "Page", "Context", "Mount",
             "live", "subscribe", "invalidate", "transact_invalidate", "signal_push",
             "live_get", "live_show", "live_stats",
-            "auth", "auth_oauth", "auth_routes", "auth_show", "sync_over", "sync",
+            "auth", "auth_oauth", "auth_routes", "auth_show", "sync",
             "LiveQuery", "Auth", "Session",
         ],
         // D-LIVEQUERY1=A / D-AUTH1=A: application live-query + auth surface.
         "app" => &[
             "live", "subscribe", "invalidate", "transact_invalidate", "signal_push",
             "live_get", "live_show", "live_stats",
-            "auth", "auth_oauth", "auth_routes", "auth_show", "sync_over", "sync",
+            "auth", "auth_oauth", "auth_routes", "auth_show", "sync",
             "LiveQuery", "Auth", "Session",
         ],
         "core.web.storage" => &["local", "session"],

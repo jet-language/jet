@@ -1,6 +1,6 @@
 // D-SYNC1=A / D-DBPOLICY1=A (#1159/#1160): CRDT values + typed row policies.
 
-use super::{__jet_Decode, __jet_Encode, JetShow};
+use super::{__jet_Decode, __jet_Encode, JetShow, jet_live_publish_transport};
 use super::jet_std;
 
 pub(crate) const MAX_SYNC_TEXT: usize = 1024 * 1024;
@@ -22,6 +22,7 @@ pub(crate) const MAX_SYNC_DOCUMENT: usize = 4 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct JetSyncText {
     pub atoms: Vec<JetSyncTextAtom>,
+    pub(crate) valid: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,11 +38,13 @@ pub struct JetSyncTextAtom {
 #[derive(Clone, Debug)]
 pub struct JetSyncCounter {
     pub counts: Vec<(String, u64, u64)>, // replica_id, positive, negative
+    pub(crate) valid: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct JetSyncMap {
     pub entries: Vec<(String, String, u64, String)>, // key, value, clock, writer
+    pub(crate) valid: bool,
 }
 
 /// D-SYNC1: the typed map carrier.  The legacy `JetSyncMap` above remains the
@@ -51,6 +54,7 @@ pub struct JetSyncMap {
 #[derive(Clone, Debug)]
 pub struct JetSyncMapGeneric<K, V> {
     pub entries: Vec<(K, V, u64, String)>, // key, value, logical clock, writer
+    pub(crate) valid: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +83,7 @@ pub struct JetDbScope {
 #[derive(Clone, Debug)]
 pub struct JetSyncList {
     pub items: Vec<(String, String)>, // replica_id, serialized item
+    pub(crate) valid: bool,
 }
 
 /// D-SYNC1: the typed list carrier.  List membership is an add-only CRDT;
@@ -86,6 +91,7 @@ pub struct JetSyncList {
 #[derive(Clone, Debug)]
 pub struct JetSyncListGeneric<T> {
     pub items: Vec<(String, T)>, // replica_id, item
+    pub(crate) valid: bool,
 }
 
 /// Reading order (RGA).  Atoms sharing an anchor are ordered by descending
@@ -184,8 +190,12 @@ fn jet_sync_text_insert_after(
 }
 
 pub(crate) fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
-    let mut doc = JetSyncText { atoms: Vec::new() };
+    let mut doc = JetSyncText {
+        atoms: Vec::new(),
+        valid: true,
+    };
     if !jet_sync_token_is_valid(&replica) || text.chars().count() > MAX_SYNC_TEXT {
+        doc.valid = false;
         return doc;
     }
     jet_sync_text_insert_after(&mut doc, &replica, None, &text);
@@ -197,7 +207,8 @@ pub(crate) fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
 /// never saw them still converges here after a merge.
 pub(crate) fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> JetSyncText {
     let inserted = text.chars().count();
-    if !jet_sync_token_is_valid(&replica)
+    if !doc.valid
+        || !jet_sync_token_is_valid(&replica)
         || inserted > MAX_SYNC_TEXT
         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
         || jet_sync_text_clock_exhausted(&doc, inserted)
@@ -222,7 +233,8 @@ pub(crate) fn jet_sync_text_edit(
     insert: String,
 ) -> JetSyncText {
     let inserted = insert.chars().count();
-    if !jet_sync_token_is_valid(&replica)
+    if !doc.valid
+        || !jet_sync_token_is_valid(&replica)
         || index < 0
         || delete_count < 0
         || inserted > MAX_SYNC_TEXT
@@ -254,11 +266,25 @@ pub(crate) fn jet_sync_text_edit(
 /// to stay under a limit would lose a replica's writing.  A deletion is
 /// monotone, so once either side has seen it the merged atom stays deleted.
 pub(crate) fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
+    if !a.valid || !b.valid {
+        return JetSyncText {
+            atoms: Vec::new(),
+            valid: false,
+        };
+    }
     let mut merged: std::collections::BTreeMap<(String, u64), JetSyncTextAtom> =
         std::collections::BTreeMap::new();
     for atom in a.atoms.iter().chain(&b.atoms) {
-        if !jet_sync_token_is_valid(&atom.replica) {
-            continue;
+        if !jet_sync_token_is_valid(&atom.replica)
+            || atom.counter == 0
+            || atom.after.as_ref().is_some_and(|(replica, counter)| {
+                !jet_sync_token_is_valid(replica) || *counter == 0
+            })
+        {
+            return JetSyncText {
+                atoms: Vec::new(),
+                valid: false,
+            };
         }
         let key = (atom.replica.clone(), atom.counter);
         match merged.get_mut(&key) {
@@ -281,12 +307,31 @@ pub(crate) fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncTe
             }
         }
     }
-    JetSyncText {
-        atoms: merged.into_values().collect(),
+    if merged.len() > MAX_SYNC_ATOMS {
+        return JetSyncText {
+            atoms: Vec::new(),
+            valid: false,
+        };
     }
+    let merged = JetSyncText {
+        atoms: merged.into_values().collect(),
+        valid: true,
+    };
+    // Merging an identity collision can change an atom's anchor. Refuse a
+    // cycle or an orphan rather than letting `show` silently drop the atom.
+    if jet_sync_text_order(&merged).len() != merged.atoms.len() {
+        return JetSyncText {
+            atoms: Vec::new(),
+            valid: false,
+        };
+    }
+    merged
 }
 
 pub(crate) fn jet_sync_text_show(doc: &JetSyncText) -> String {
+    if !doc.valid {
+        return "SyncError(invalid SyncText)".to_string();
+    }
     format!("SyncText({})", jet_sync_text_read(doc))
 }
 
@@ -294,6 +339,9 @@ pub(crate) fn jet_sync_text_show(doc: &JetSyncText) -> String {
 /// This is not a vector clock: a Lamport counter records when a replica wrote,
 /// never what it had seen, so it orders edits but cannot decide causality.
 pub(crate) fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
+    if !doc.valid {
+        return "SyncError(invalid SyncText)".to_string();
+    }
     let mut clocks: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
     for atom in &doc.atoms {
         let slot = clocks.entry(atom.replica.as_str()).or_insert(0);
@@ -311,7 +359,10 @@ pub(crate) fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
 
 pub(crate) fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounter {
     if !jet_sync_token_is_valid(&replica) {
-        return JetSyncCounter { counts: Vec::new() };
+        return JetSyncCounter {
+            counts: Vec::new(),
+            valid: false,
+        };
     }
     JetSyncCounter {
         counts: vec![(
@@ -319,11 +370,19 @@ pub(crate) fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounte
             if value >= 0 { value as u64 } else { 0 },
             if value < 0 { value.unsigned_abs() } else { 0 },
         )],
+        valid: true,
+    }
+}
+
+fn jet_sync_counter_invalid() -> JetSyncCounter {
+    JetSyncCounter {
+        counts: Vec::new(),
+        valid: false,
     }
 }
 
 pub(crate) fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String, delta: i64) -> JetSyncCounter {
-    if !jet_sync_token_is_valid(&replica) {
+    if !counter.valid || !jet_sync_token_is_valid(&replica) {
         return counter;
     }
     if let Some((_, positive, negative)) = counter
@@ -332,13 +391,19 @@ pub(crate) fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String,
         .find(|(r, _, _)| r == &replica)
     {
         if delta >= 0 {
-            *positive = positive.saturating_add(delta as u64);
+            let Some(next) = positive.checked_add(delta as u64) else {
+                return jet_sync_counter_invalid();
+            };
+            *positive = next;
         } else {
-            *negative = negative.saturating_add(delta.unsigned_abs());
+            let Some(next) = negative.checked_add(delta.unsigned_abs()) else {
+                return jet_sync_counter_invalid();
+            };
+            *negative = next;
         }
     } else {
         if counter.counts.len() >= MAX_SYNC_REPLICAS {
-            return counter;
+            return jet_sync_counter_invalid();
         }
         counter.counts.push((
             replica,
@@ -347,47 +412,68 @@ pub(crate) fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String,
         ));
     }
     counter.counts.sort_by(|left, right| left.0.cmp(&right.0));
+    if jet_sync_counter_total(&counter.counts).is_none() {
+        return jet_sync_counter_invalid();
+    }
     counter
 }
 
+fn jet_sync_counter_total(counts: &[(String, u64, u64)]) -> Option<i64> {
+    let mut total = 0i128;
+    for (_, positive, negative) in counts {
+        total = total
+            .checked_add(i128::from(*positive))?
+            .checked_sub(i128::from(*negative))?;
+    }
+    i64::try_from(total).ok()
+}
+
 pub(crate) fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> JetSyncCounter {
+    if !a.valid || !b.valid {
+        return JetSyncCounter {
+            counts: Vec::new(),
+            valid: false,
+        };
+    }
     let mut merged = std::collections::BTreeMap::<String, (u64, u64)>::new();
     for (replica, positive, negative) in a.counts.iter().chain(&b.counts) {
         if !jet_sync_token_is_valid(replica) {
-            continue;
+            return JetSyncCounter {
+                counts: Vec::new(),
+                valid: false,
+            };
         }
         let entry = merged.entry(replica.clone()).or_insert((0, 0));
         entry.0 = entry.0.max(*positive);
         entry.1 = entry.1.max(*negative);
     }
-    JetSyncCounter {
-        counts: merged
-            .into_iter()
-            .take(MAX_SYNC_REPLICAS)
-            .map(|(replica, (positive, negative))| (replica, positive, negative))
-            .collect(),
+    if merged.len() > MAX_SYNC_REPLICAS {
+        return JetSyncCounter {
+            counts: Vec::new(),
+            valid: false,
+        };
     }
+    let counts = merged
+            .into_iter()
+            .map(|(replica, (positive, negative))| (replica, positive, negative))
+            .collect::<Vec<_>>();
+    if jet_sync_counter_total(&counts).is_none() {
+        return jet_sync_counter_invalid();
+    }
+    JetSyncCounter { counts, valid: true }
 }
 
 pub(crate) fn jet_sync_counter_value(counter: &JetSyncCounter) -> i64 {
-    counter.counts.iter().fold(0i64, |sum, (_, positive, negative)| {
-        let value = if positive >= negative {
-            i64::try_from(positive - negative).unwrap_or(i64::MAX)
-        } else {
-            let magnitude = negative - positive;
-            if magnitude > (i64::MAX as u64) + 1 {
-                i64::MIN
-            } else if magnitude == (i64::MAX as u64) + 1 {
-                i64::MIN
-            } else {
-                -(magnitude as i64)
-            }
-        };
-        sum.saturating_add(value)
-    })
+    if !counter.valid {
+        return 0;
+    }
+    jet_sync_counter_total(&counter.counts).unwrap_or(0)
 }
 
 fn jet_sync_counter_metadata(counter: &JetSyncCounter) -> String {
+    if !counter.valid {
+        return "SyncError(invalid SyncCounter)".to_string();
+    }
     let parts = counter
         .counts
         .iter()
@@ -400,6 +486,7 @@ fn jet_sync_counter_metadata(counter: &JetSyncCounter) -> String {
 pub(crate) fn jet_sync_map_new() -> JetSyncMap {
     JetSyncMap {
         entries: Vec::new(),
+        valid: true,
     }
 }
 
@@ -409,27 +496,36 @@ fn jet_sync_map_set_replica(
     key: String,
     value: String,
 ) -> JetSyncMap {
-    if !jet_sync_token_is_valid(&replica)
+    if !map.valid
+        || !jet_sync_token_is_valid(&replica)
         || !jet_sync_token_is_valid(&key)
         || value.len() > MAX_SYNC_TEXT
     {
         return map;
     }
-    let next_clock = map
+    let Some(next_clock) = map
         .entries
         .iter()
         .filter(|(_, _, _, writer)| writer == &replica)
         .map(|(_, _, clock, _)| *clock)
         .max()
         .unwrap_or(0)
-        .saturating_add(1);
+        .checked_add(1) else {
+        return JetSyncMap {
+            entries: Vec::new(),
+            valid: false,
+        };
+    };
     if let Some((_, v, clock, writer)) = map.entries.iter_mut().find(|(k, _, _, _)| k == &key) {
         *v = value;
         *clock = next_clock;
         *writer = replica;
     } else {
         if map.entries.len() >= MAX_SYNC_ENTRIES {
-            return map;
+            return JetSyncMap {
+                entries: Vec::new(),
+                valid: false,
+            };
         }
         map.entries.push((key, value, next_clock, replica));
     }
@@ -452,13 +548,23 @@ pub(crate) fn jet_sync_map_get(map: &JetSyncMap, key: &String) -> Option<String>
 }
 
 pub(crate) fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
+    if !a.valid || !b.valid {
+        return JetSyncMap {
+            entries: Vec::new(),
+            valid: false,
+        };
+    }
     let mut merged = std::collections::BTreeMap::<String, (String, u64, String)>::new();
     for (key, value, clock, writer) in a.entries.iter().chain(&b.entries) {
         if !jet_sync_token_is_valid(key)
             || !jet_sync_token_is_valid(writer)
+            || *clock == 0
             || value.len() > MAX_SYNC_TEXT
         {
-            continue;
+            return JetSyncMap {
+                entries: Vec::new(),
+                valid: false,
+            };
         }
         let replace = merged.get(key).map_or(true, |(existing, existing_clock, existing_writer)| {
             *clock > *existing_clock
@@ -470,30 +576,54 @@ pub(crate) fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
             merged.insert(key.clone(), (value.clone(), *clock, writer.clone()));
         }
     }
+    if merged.len() > MAX_SYNC_ENTRIES {
+        return JetSyncMap {
+            entries: Vec::new(),
+            valid: false,
+        };
+    }
     JetSyncMap {
         entries: merged
             .into_iter()
-            .take(MAX_SYNC_ENTRIES)
             .map(|(key, (value, clock, writer))| (key, value, clock, writer))
             .collect(),
+        valid: true,
     }
 }
 
 pub(crate) fn jet_sync_map_show(map: &JetSyncMap) -> String {
+    if !map.valid {
+        return "SyncError(invalid SyncMap)".to_string();
+    }
     let parts = map
         .entries
         .iter()
-        .map(|(k, v, _, _)| format!("{k}={v}"))
+        .map(|(k, v, _, _)| {
+            format!(
+                "{}={}",
+                jet_sync_escape_display(k),
+                jet_sync_escape_display(v)
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     format!("SyncMap({parts})")
 }
 
 fn jet_sync_map_metadata(map: &JetSyncMap) -> String {
+    if !map.valid {
+        return "SyncError(invalid SyncMap)".to_string();
+    }
     let parts = map
         .entries
         .iter()
-        .map(|(key, _, clock, writer)| format!("{key}@{writer}={clock}"))
+        .map(|(key, _, clock, writer)| {
+            format!(
+                "{}@{}={clock}",
+                jet_sync_escape_display(key),
+                jet_sync_escape_display(writer)
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     format!("LWWMap({parts})")
@@ -511,7 +641,10 @@ fn jet_sync_value_show<T: __jet_Encode>(value: &T) -> String {
 }
 
 fn jet_sync_map_new_generic<K, V>() -> JetSyncMapGeneric<K, V> {
-    JetSyncMapGeneric { entries: Vec::new() }
+    JetSyncMapGeneric {
+        entries: Vec::new(),
+        valid: true,
+    }
 }
 
 fn jet_sync_map_set_generic<K, V>(
@@ -524,18 +657,26 @@ where
     K: __jet_Encode,
     V: __jet_Encode,
 {
-    if !jet_sync_token_is_valid(&replica) {
+    if !map.valid || !jet_sync_token_is_valid(&replica) {
         return map;
     }
     let key_id = jet_sync_value_id(&key);
-    let next_clock = map
+    if key_id.len() > MAX_SYNC_TEXT || jet_sync_value_id(&value).len() > MAX_SYNC_TEXT {
+        return map;
+    }
+    let Some(next_clock) = map
         .entries
         .iter()
         .filter(|(_, _, _, writer)| writer == &replica)
         .map(|(_, _, clock, _)| *clock)
         .max()
         .unwrap_or(0)
-        .saturating_add(1);
+        .checked_add(1) else {
+        return JetSyncMapGeneric {
+            entries: Vec::new(),
+            valid: false,
+        };
+    };
     if let Some((existing_key, existing_value, clock, writer)) = map
         .entries
         .iter_mut()
@@ -547,6 +688,11 @@ where
         *writer = replica;
     } else if map.entries.len() < MAX_SYNC_ENTRIES {
         map.entries.push((key, value, next_clock, replica));
+    } else {
+        return JetSyncMapGeneric {
+            entries: Vec::new(),
+            valid: false,
+        };
     }
     map.entries.sort_by(|left, right| {
         let left_id = jet_sync_value_id(&left.0);
@@ -576,8 +722,24 @@ where
     K: Clone + __jet_Encode,
     V: Clone + __jet_Encode,
 {
+    if !a.valid || !b.valid {
+        return JetSyncMapGeneric {
+            entries: Vec::new(),
+            valid: false,
+        };
+    }
     let mut merged = std::collections::BTreeMap::<String, (K, V, u64, String)>::new();
     for (key, value, clock, writer) in a.entries.iter().chain(&b.entries) {
+        if !jet_sync_token_is_valid(writer)
+            || *clock == 0
+            || jet_sync_value_id(key).len() > MAX_SYNC_TEXT
+            || jet_sync_value_id(value).len() > MAX_SYNC_TEXT
+        {
+            return JetSyncMapGeneric {
+                entries: Vec::new(),
+                valid: false,
+            };
+        }
         let key_id = jet_sync_value_id(key);
         let value_id = jet_sync_value_id(value);
         let replace = merged.get(&key_id).map_or(true, |(_, existing, existing_clock, existing_writer)| {
@@ -590,11 +752,15 @@ where
             merged.insert(key_id, (key.clone(), value.clone(), *clock, writer.clone()));
         }
     }
+    if merged.len() > MAX_SYNC_ENTRIES {
+        return JetSyncMapGeneric {
+            entries: Vec::new(),
+            valid: false,
+        };
+    }
     JetSyncMapGeneric {
-        entries: merged
-            .into_values()
-            .take(MAX_SYNC_ENTRIES)
-            .collect(),
+        entries: merged.into_values().collect(),
+        valid: true,
     }
 }
 
@@ -603,11 +769,18 @@ where
     K: __jet_Encode,
     V: __jet_Encode,
 {
+    if !map.valid {
+        return "SyncError(invalid SyncMap)".to_string();
+    }
     let parts = map
         .entries
         .iter()
         .map(|(key, value, _, _)| {
-            format!("{}={}", jet_sync_value_show(key), jet_sync_value_show(value))
+            format!(
+                "{}={}",
+                jet_sync_escape_display(&jet_sync_value_show(key)),
+                jet_sync_escape_display(&jet_sync_value_show(value))
+            )
         })
         .collect::<Vec<_>>()
         .join(",");
@@ -618,11 +791,18 @@ fn jet_sync_map_metadata_generic<K, V>(map: &JetSyncMapGeneric<K, V>) -> String
 where
     K: __jet_Encode,
 {
+    if !map.valid {
+        return "SyncError(invalid SyncMap)".to_string();
+    }
     let parts = map
         .entries
         .iter()
         .map(|(key, _, clock, writer)| {
-            format!("{}@{writer}={clock}", jet_sync_value_id(key))
+            format!(
+                "{}@{}={clock}",
+                jet_sync_escape_display(&jet_sync_value_id(key)),
+                jet_sync_escape_display(writer)
+            )
         })
         .collect::<Vec<_>>()
         .join(",");
@@ -675,21 +855,39 @@ pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_own
     }
 }
 
+/// Return the expression selected by the typed policy constructor. Callers do
+/// not re-read the public source spelling, so a scope cannot replace the
+/// compiled policy between validation and execution.
+pub(crate) fn jet_db_policy_expression(policy: &JetRowPolicy) -> &'static str {
+    match &policy.compiled {
+        JetRowPolicyExpr::OwnerEqualsUser => "owner == user",
+        JetRowPolicyExpr::AllowAll => "true",
+    }
+}
+
 pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
     format!("RowPolicy(table={}, expr={})", policy.table, policy.expression)
 }
 
 pub(crate) fn jet_sync_list_new() -> JetSyncList {
-    JetSyncList { items: Vec::new() }
+    JetSyncList {
+        items: Vec::new(),
+        valid: true,
+    }
 }
 
 pub(crate) fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: String) -> JetSyncList {
-    if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
+    if !list.valid || !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
         return list;
     }
     if !list.items.iter().any(|(r, i)| r == &replica && i == &item) {
         if list.items.len() < MAX_SYNC_ENTRIES {
             list.items.push((replica, item));
+        } else {
+            return JetSyncList {
+                items: Vec::new(),
+                valid: false,
+            };
         }
     }
     list.items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
@@ -697,6 +895,12 @@ pub(crate) fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: S
 }
 
 pub(crate) fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncList {
+    if !a.valid || !b.valid {
+        return JetSyncList {
+            items: Vec::new(),
+            valid: false,
+        };
+    }
     let mut out = a.clone();
     for (replica, item) in &b.items {
         if !out
@@ -707,11 +911,21 @@ pub(crate) fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncLi
             out.items.push((replica.clone(), item.clone()));
         }
     }
-    out.items.retain(|(replica, item)| {
-        jet_sync_token_is_valid(replica) && item.len() <= MAX_SYNC_TEXT
-    });
+    if out.items.iter().any(|(replica, item)| {
+        !jet_sync_token_is_valid(replica) || item.len() > MAX_SYNC_TEXT
+    }) {
+        return JetSyncList {
+            items: Vec::new(),
+            valid: false,
+        };
+    }
     out.items.sort_by(|l, r| (&l.0, &l.1).cmp(&(&r.0, &r.1)));
-    out.items.truncate(MAX_SYNC_ENTRIES);
+    if out.items.len() > MAX_SYNC_ENTRIES {
+        return JetSyncList {
+            items: Vec::new(),
+            valid: false,
+        };
+    }
     out
 }
 
@@ -722,21 +936,36 @@ pub(crate) fn jet_sync_token_is_valid(value: &str) -> bool {
 }
 
 pub(crate) fn jet_sync_list_show(list: &JetSyncList) -> String {
+    if !list.valid {
+        return "SyncError(invalid SyncList)".to_string();
+    }
     let parts = list
         .items
         .iter()
-        .map(|(r, i)| format!("{r}:{i}"))
+        .map(|(r, i)| {
+            format!(
+                "{}:{}",
+                jet_sync_escape_display(r),
+                jet_sync_escape_display(i)
+            )
+        })
         .collect::<Vec<_>>()
         .join("|");
     format!("SyncList({parts})")
 }
 
 fn jet_sync_list_metadata(list: &JetSyncList) -> String {
+    if !list.valid {
+        return "SyncError(invalid SyncList)".to_string();
+    }
     format!("GSet(items={})", list.items.len())
 }
 
 fn jet_sync_list_new_generic<T>() -> JetSyncListGeneric<T> {
-    JetSyncListGeneric { items: Vec::new() }
+    JetSyncListGeneric {
+        items: Vec::new(),
+        valid: true,
+    }
 }
 
 fn jet_sync_list_push_generic<T>(
@@ -747,10 +976,13 @@ fn jet_sync_list_push_generic<T>(
 where
     T: __jet_Encode,
 {
-    if !jet_sync_token_is_valid(&replica) {
+    if !list.valid || !jet_sync_token_is_valid(&replica) {
         return list;
     }
     let item_id = jet_sync_value_id(&item);
+    if item_id.len() > MAX_SYNC_TEXT {
+        return list;
+    }
     if !list
         .items
         .iter()
@@ -760,6 +992,13 @@ where
         && list.items.len() < MAX_SYNC_ENTRIES
     {
         list.items.push((replica, item));
+    } else if !list.items.iter().any(|(existing_replica, existing_item)| {
+        existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
+    }) {
+        return JetSyncListGeneric {
+            items: Vec::new(),
+            valid: false,
+        };
     }
     list.items.sort_by(|left, right| {
         let left_id = jet_sync_value_id(&left.1);
@@ -776,14 +1015,32 @@ fn jet_sync_list_merge_generic<T>(
 where
     T: Clone + __jet_Encode,
 {
+    if !a.valid || !b.valid {
+        return JetSyncListGeneric {
+            items: Vec::new(),
+            valid: false,
+        };
+    }
     let mut out = a.clone();
     for (replica, item) in &b.items {
+        if !jet_sync_token_is_valid(replica) || jet_sync_value_id(item).len() > MAX_SYNC_TEXT {
+            return JetSyncListGeneric {
+                items: Vec::new(),
+                valid: false,
+            };
+        }
         let item_id = jet_sync_value_id(item);
         if !out.items.iter().any(|(existing_replica, existing_item)| {
             existing_replica == replica && jet_sync_value_id(existing_item) == item_id
-        }) && out.items.len() < MAX_SYNC_ENTRIES {
+        }) {
             out.items.push((replica.clone(), item.clone()));
         }
+    }
+    if out.items.len() > MAX_SYNC_ENTRIES {
+        return JetSyncListGeneric {
+            items: Vec::new(),
+            valid: false,
+        };
     }
     out.items.sort_by(|left, right| {
         let left_id = jet_sync_value_id(&left.1);
@@ -797,16 +1054,28 @@ fn jet_sync_list_show_generic<T>(list: &JetSyncListGeneric<T>) -> String
 where
     T: __jet_Encode,
 {
+    if !list.valid {
+        return "SyncError(invalid SyncList)".to_string();
+    }
     let parts = list
         .items
         .iter()
-        .map(|(replica, item)| format!("{replica}:{}", jet_sync_value_show(item)))
+        .map(|(replica, item)| {
+            format!(
+                "{}:{}",
+                jet_sync_escape_display(replica),
+                jet_sync_escape_display(&jet_sync_value_show(item))
+            )
+        })
         .collect::<Vec<_>>()
         .join("|");
     format!("SyncList({parts})")
 }
 
 fn jet_sync_list_metadata_generic<T>(list: &JetSyncListGeneric<T>) -> String {
+    if !list.valid {
+        return "SyncError(invalid SyncList)".to_string();
+    }
     format!("GSet(items={})", list.items.len())
 }
 
@@ -815,7 +1084,12 @@ impl JetShow for JetSyncText {
 }
 
 impl JetShow for JetSyncCounter {
-    fn jet_show(&self) -> String { format!("{}={}", jet_sync_counter_metadata(self), jet_sync_counter_value(self)) }
+    fn jet_show(&self) -> String {
+        if !self.valid {
+            return "SyncError(invalid SyncCounter)".to_string();
+        }
+        format!("{}={}", jet_sync_counter_metadata(self), jet_sync_counter_value(self))
+    }
 }
 
 impl JetShow for JetSyncMap {
@@ -953,6 +1227,12 @@ fn jet_sync_frame_entry(
 
 impl __jet_Encode for JetSyncText {
     fn jet_encode(&self) -> jet_std::DataTree {
+        if !self.valid {
+            return jet_std::DataTree::Object(vec![(
+                "invalid".to_string(),
+                jet_std::DataTree::Bool(true),
+            )]);
+        }
         jet_std::DataTree::Object(vec![(
             "atoms".to_string(),
             jet_std::DataTree::Array(
@@ -1112,6 +1392,7 @@ impl __jet_Decode for JetSyncText {
         // it does not visit.
         let decoded = JetSyncText {
             atoms: std::mem::take(&mut atoms),
+            valid: true,
         };
         if jet_sync_text_order(&decoded).len() != decoded.atoms.len() {
             return Err(jet_sync_decode_error(
@@ -1124,12 +1405,21 @@ impl __jet_Decode for JetSyncText {
                 .cmp(&right.replica)
                 .then_with(|| left.counter.cmp(&right.counter))
         });
-        Ok(JetSyncText { atoms })
+        Ok(JetSyncText {
+            atoms,
+            valid: true,
+        })
     }
 }
 
 impl __jet_Encode for JetSyncCounter {
     fn jet_encode(&self) -> jet_std::DataTree {
+        if !self.valid {
+            return jet_std::DataTree::Object(vec![(
+                "invalid".to_string(),
+                jet_std::DataTree::Bool(true),
+            )]);
+        }
         jet_std::DataTree::Object(vec![
             (
                 "counts".to_string(),
@@ -1216,12 +1506,26 @@ impl __jet_Decode for JetSyncCounter {
             return Err(errors);
         }
         counts.sort_by(|left, right| left.0.cmp(&right.0));
-        Ok(JetSyncCounter { counts })
+        if jet_sync_counter_total(&counts).is_none() {
+            return Err(jet_sync_decode_error(
+                "SyncCounter value exceeds the signed integer range",
+            ));
+        }
+        Ok(JetSyncCounter {
+            counts,
+            valid: true,
+        })
     }
 }
 
 impl __jet_Encode for JetSyncMap {
     fn jet_encode(&self) -> jet_std::DataTree {
+        if !self.valid {
+            return jet_std::DataTree::Object(vec![(
+                "invalid".to_string(),
+                jet_std::DataTree::Bool(true),
+            )]);
+        }
         jet_std::DataTree::Object(vec![
             (
                 "entries".to_string(),
@@ -1321,12 +1625,21 @@ impl __jet_Decode for JetSyncMap {
             return Err(errors);
         }
         entries.sort_by(|left, right| left.0.cmp(&right.0));
-        Ok(JetSyncMap { entries })
+        Ok(JetSyncMap {
+            entries,
+            valid: true,
+        })
     }
 }
 
 impl __jet_Encode for JetSyncList {
     fn jet_encode(&self) -> jet_std::DataTree {
+        if !self.valid {
+            return jet_std::DataTree::Object(vec![(
+                "invalid".to_string(),
+                jet_std::DataTree::Bool(true),
+            )]);
+        }
         jet_std::DataTree::Object(vec![
             (
                 "items".to_string(),
@@ -1400,7 +1713,10 @@ impl __jet_Decode for JetSyncList {
             return Err(errors);
         }
         items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
-        Ok(JetSyncList { items })
+        Ok(JetSyncList {
+            items,
+            valid: true,
+        })
     }
 }
 
@@ -1410,6 +1726,12 @@ where
     V: __jet_Encode,
 {
     fn jet_encode(&self) -> jet_std::DataTree {
+        if !self.valid {
+            return jet_std::DataTree::Object(vec![(
+                "invalid".to_string(),
+                jet_std::DataTree::Bool(true),
+            )]);
+        }
         jet_std::DataTree::Object(vec![
             (
                 "entries".to_string(),
@@ -1517,7 +1839,10 @@ where
         entries.sort_by(|left, right| {
             jet_sync_value_id(&left.0).cmp(&jet_sync_value_id(&right.0))
         });
-        Ok(JetSyncMapGeneric { entries })
+        Ok(JetSyncMapGeneric {
+            entries,
+            valid: true,
+        })
     }
 }
 
@@ -1526,6 +1851,12 @@ where
     T: __jet_Encode,
 {
     fn jet_encode(&self) -> jet_std::DataTree {
+        if !self.valid {
+            return jet_std::DataTree::Object(vec![(
+                "invalid".to_string(),
+                jet_std::DataTree::Bool(true),
+            )]);
+        }
         jet_std::DataTree::Object(vec![
             (
                 "items".to_string(),
@@ -1611,7 +1942,10 @@ where
             let right_id = jet_sync_value_id(&right.1);
             (left.0.as_str(), left_id).cmp(&(right.0.as_str(), right_id))
         });
-        Ok(JetSyncListGeneric { items })
+        Ok(JetSyncListGeneric {
+            items,
+            valid: true,
+        })
     }
 }
 
@@ -1620,10 +1954,177 @@ struct JetSyncDocument {
     representation: String,
 }
 
+fn jet_sync_escape_display(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | ',' | '=' | '|' | ':' | '/') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn jet_sync_unescape_display(value: &str) -> Option<String> {
+    let mut unescaped = String::with_capacity(value.len());
+    let mut escaped = false;
+    for ch in value.chars() {
+        if escaped {
+            if !matches!(ch, '\\' | ',' | '=' | '|' | ':' | '/') {
+                return None;
+            }
+            unescaped.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if matches!(ch, ',' | '=' | '|' | ':' | '/') {
+            return None;
+        } else {
+            unescaped.push(ch);
+        }
+    }
+    (!escaped).then_some(unescaped)
+}
+
+fn jet_sync_split_display(value: &str, separator: char) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut escaped = false;
+    for ch in value.chars() {
+        if escaped {
+            current.push('\\');
+            current.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            current.push(ch);
+            escaped = true;
+        } else if ch == separator {
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(ch);
+        }
+    }
+    if escaped {
+        return None;
+    }
+    parts.push(current);
+    Some(parts)
+}
+
+fn jet_sync_split_display_once(value: &str, separator: char) -> Option<(String, String)> {
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == separator {
+            return Some((value[..index].to_string(), value[index + ch.len_utf8()..].to_string()));
+        }
+    }
+    None
+}
+
+fn jet_sync_document_body<'a>(representation: &'a str, prefix: &str) -> Option<&'a str> {
+    representation
+        .strip_prefix(prefix)
+        .and_then(|value| value.strip_suffix(')'))
+}
+
+fn jet_sync_document_key_valid(value: &str, forbidden: &[char]) -> bool {
+    jet_sync_token_is_valid(value) && !value.chars().any(|ch| forbidden.contains(&ch))
+}
+
+fn jet_sync_document_map_entries(
+    representation: &str,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let body = jet_sync_document_body(representation, "SyncMap(")?;
+    let mut entries = std::collections::BTreeMap::new();
+    if body.is_empty() {
+        return Some(entries);
+    }
+    for entry in jet_sync_split_display(body, ',')? {
+        let (raw_key, raw_value) = jet_sync_split_display_once(&entry, '=')?;
+        let key = jet_sync_unescape_display(&raw_key)?;
+        let value = jet_sync_unescape_display(&raw_value)?;
+        if !jet_sync_document_key_valid(&key, &[])
+            || value.len() > MAX_SYNC_TEXT
+        {
+            return None;
+        }
+        if entries.insert(key, value).is_some() {
+            return None;
+        }
+    }
+    Some(entries)
+}
+
+fn jet_sync_document_list_items(
+    representation: &str,
+) -> Option<std::collections::BTreeSet<(String, String)>> {
+    let body = jet_sync_document_body(representation, "SyncList(")?;
+    let mut items = std::collections::BTreeSet::new();
+    if body.is_empty() {
+        return Some(items);
+    }
+    for item in jet_sync_split_display(body, '|')? {
+        let (raw_replica, raw_value) = jet_sync_split_display_once(&item, ':')?;
+        let replica = jet_sync_unescape_display(&raw_replica)?;
+        let value = jet_sync_unescape_display(&raw_value)?;
+        if !jet_sync_document_key_valid(&replica, &[])
+            || value.len() > MAX_SYNC_TEXT
+        {
+            return None;
+        }
+        if !items.insert((replica, value)) {
+            return None;
+        }
+    }
+    (items.len() <= MAX_SYNC_ENTRIES).then_some(items)
+}
+
+fn jet_sync_document_counter_entries(
+    representation: &str,
+) -> Option<std::collections::BTreeMap<String, (u64, u64)>> {
+    let body = jet_sync_document_body(representation, "PNCounter(")?;
+    let mut counts = std::collections::BTreeMap::new();
+    if body.is_empty() {
+        return Some(counts);
+    }
+    for entry in jet_sync_split_display(body, ',')? {
+        let (raw_replica, raw_value) = jet_sync_split_display_once(&entry, '=')?;
+        let replica = jet_sync_unescape_display(&raw_replica)?;
+        let (raw_positive, raw_negative) = jet_sync_split_display_once(&raw_value, '/')?;
+        let positive = jet_sync_unescape_display(&raw_positive)?
+            .strip_prefix('+')?
+            .parse::<u64>()
+            .ok()?;
+        let negative = jet_sync_unescape_display(&raw_negative)?
+            .strip_prefix('-')?
+            .parse::<u64>()
+            .ok()?;
+        if !jet_sync_document_key_valid(&replica, &[])
+            || counts.insert(replica, (positive, negative)).is_some()
+        {
+            return None;
+        }
+    }
+    if counts.len() > MAX_SYNC_REPLICAS {
+        return None;
+    }
+    let total = counts
+        .iter()
+        .map(|(replica, (positive, negative))| (replica.clone(), *positive, *negative))
+        .collect::<Vec<_>>();
+    jet_sync_counter_total(&total)?;
+    Some(counts)
+}
+
 impl JetSyncDocument {
     fn parse(value: String) -> Option<Self> {
         let representation = value.trim().to_string();
         if representation.is_empty()
+            || representation != value
             || representation.len() > MAX_SYNC_DOCUMENT
             || representation.chars().any(char::is_control)
             || ![
@@ -1631,15 +2132,123 @@ impl JetSyncDocument {
                 "SyncMap(",
                 "SyncList(",
                 "PNCounter(",
-                "LWWMap(",
-                "GSet(",
             ]
             .iter()
             .any(|prefix| representation.starts_with(prefix))
         {
             return None;
         }
+        if !representation.ends_with(')') {
+            return None;
+        }
+        if representation.starts_with("SyncMap(") {
+            jet_sync_document_map_entries(&representation)?;
+        } else if representation.starts_with("SyncList(") {
+            jet_sync_document_list_items(&representation)?;
+        } else if representation.starts_with("PNCounter(") {
+            jet_sync_document_counter_entries(&representation)?;
+        }
         Some(Self { representation })
+    }
+
+    /// The typed CRDT carriers merge by identity above this String boundary.
+    /// `app.sync` still receives their canonical display, so preserve the
+    /// same commutative/idempotent session law for the display forms: maps
+    /// union keys, lists union members, counters take per-replica maxima, and
+    /// opaque displays use a deterministic winner. A malformed display is a
+    /// denied publish, never a replacement that bypasses the typed law.
+    fn merge(&self, other: &Self) -> Option<Self> {
+        if self.representation == other.representation {
+            return Some(self.clone());
+        }
+        let merged = if self.representation.starts_with("SyncMap(")
+            && other.representation.starts_with("SyncMap(")
+        {
+            let mut entries = jet_sync_document_map_entries(&self.representation)?;
+            for (key, value) in jet_sync_document_map_entries(&other.representation)? {
+                entries
+                    .entry(key)
+                    .and_modify(|existing| {
+                        if value.as_str() > existing.as_str() {
+                            *existing = value.clone();
+                        }
+                    })
+                    .or_insert(value);
+            }
+            if entries.len() > MAX_SYNC_ENTRIES {
+                return None;
+            }
+            format!(
+                "SyncMap({})",
+                entries
+                    .into_iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "{}={}",
+                            jet_sync_escape_display(&key),
+                            jet_sync_escape_display(&value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        } else if self.representation.starts_with("SyncList(")
+            && other.representation.starts_with("SyncList(")
+        {
+            let mut items = jet_sync_document_list_items(&self.representation)?;
+            items.extend(jet_sync_document_list_items(&other.representation)?);
+            if items.len() > MAX_SYNC_ENTRIES {
+                return None;
+            }
+            format!(
+                "SyncList({})",
+                items
+                    .into_iter()
+                    .map(|(replica, value)| {
+                        format!(
+                            "{}:{}",
+                            jet_sync_escape_display(&replica),
+                            jet_sync_escape_display(&value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|")
+            )
+        } else if self.representation.starts_with("PNCounter(")
+            && other.representation.starts_with("PNCounter(")
+        {
+            let mut counts = jet_sync_document_counter_entries(&self.representation)?;
+            for (replica, (positive, negative)) in
+                jet_sync_document_counter_entries(&other.representation)?
+            {
+                let slot = counts.entry(replica).or_default();
+                slot.0 = slot.0.max(positive);
+                slot.1 = slot.1.max(negative);
+            }
+            if counts.len() > MAX_SYNC_REPLICAS {
+                return None;
+            }
+            format!(
+                "PNCounter({})",
+                counts
+                    .into_iter()
+                    .map(|(replica, (positive, negative))| {
+                        format!(
+                            "{}=+{positive}/-{negative}",
+                            jet_sync_escape_display(&replica)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        } else if self.representation.starts_with("SyncText(")
+            && other.representation.starts_with("SyncText(")
+        {
+            std::cmp::max(self.representation.clone(), other.representation.clone())
+        } else {
+            return None;
+        };
+        Self::parse(merged)
     }
 }
 
@@ -1702,27 +2311,47 @@ fn jet_sync_publish(session_id: String, doc_show: String) -> String {
             generation: 0,
             document: document.clone(),
         });
+    let mut changed = false;
     if state.document != document {
-        state.generation = state.generation.saturating_add(1);
-        state.document = document;
+        let Some(merged) = state.document.merge(&document) else {
+            return "SyncError(document merge denied)".to_string();
+        };
+        if state.document != merged {
+            let Some(generation) = state.generation.checked_add(1) else {
+                return "SyncError(session generation exhausted)".to_string();
+            };
+            state.generation = generation;
+            state.document = merged;
+            changed = true;
+        }
     } else if state.generation == 0 {
         state.generation = 1;
+        changed = true;
     }
-    JetSyncReceipt {
+    let receipt = JetSyncReceipt {
         session_id,
         generation: state.generation,
         document: state.document.clone(),
+    };
+    let shown = receipt.show();
+    let transport = if changed {
+        Some(format!(
+            "sync:{}:{}:{}",
+            receipt.session_id, receipt.generation, receipt.document.representation
+        ))
+    } else {
+        None
+    };
+    drop(sessions);
+    if let Some(transport) = transport {
+        jet_live_publish_transport(format!("sync:{}", receipt.session_id), transport);
     }
-    .show()
-}
-
-pub(crate) fn jet_app_sync_over(session_id: String, doc_show: String) -> String {
-    jet_sync_publish(session_id, doc_show)
+    shown
 }
 
 /// D-SYNC1: the ratified surface puts the document first and names the
-/// session with `over:`. Keep the legacy `sync_over(session, doc)` adapter for
-/// compatibility, but give the canonical spelling its own typed entry point.
+/// session with `over:`. The fixed Core boundary carries the canonical display
+/// while the session registry applies the typed merge law before publishing.
 pub(crate) fn jet_app_sync(doc_show: String, session_id: String) -> String {
-    jet_app_sync_over(session_id, doc_show)
+    jet_sync_publish(session_id, doc_show)
 }

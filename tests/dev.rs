@@ -9955,7 +9955,12 @@ fn schedule_every_dev_loop_consumer() {
     let names: Vec<&str> = tasks.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,
-        vec!["nightly_backup", "prune_sessions"],
+        vec![
+            "compact_archive",
+            "nightly_backup",
+            "prune_sessions",
+            "refresh_indexes",
+        ],
         "scheduled_tasks must list every #Job fn carrying #Every(…), and skip the \
          #Every(…)-less `manual_only` job"
     );
@@ -9972,6 +9977,20 @@ fn schedule_every_dev_loop_consumer() {
         *schedules["nightly_backup"],
         jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
         "`#Every(\"03:00\")` must resolve to 03:00 daily"
+    );
+    assert_eq!(
+        *schedules["refresh_indexes"],
+        jet::AST::EverySchedule::Interval {
+            nanos: 2 * 60 * 60 * 1_000_000_000
+        },
+        "`#Every(2h)` must resolve through the shared Duration plane"
+    );
+    assert_eq!(
+        *schedules["compact_archive"],
+        jet::AST::EverySchedule::Interval {
+            nanos: 24 * 60 * 60 * 1_000_000_000
+        },
+        "`#Every(1d)` must resolve through the shared Duration plane"
     );
 
     // Actually invoking a named job runs it like an ordinary call.

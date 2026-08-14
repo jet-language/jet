@@ -1,9 +1,9 @@
 // D-SCHEDULE1 (ratified 2026-07-11, card #505) — schedule-as-code.
 // `#Every(…)` is a directive marker on a `#Job fn` (D-JPK-TASKRUN1): one
 // declaration feeds `jet dev` (runs due jobs in the dev loop), the service
-// runtime (D-SERVICE1), and a jetos timer projection. `#Every(5min)` takes a
-// duration literal (D-UNITLIT1: `ns`/`us`/`ms`/`s`/`min`); `#Every("03:00")`
-// takes a daily wall-clock time. A `#Job fn` with no `#Every(…)` is a plain
+// runtime (D-SERVICE1), and a jetos timer projection. `#Every(2h)` takes a
+// duration literal from the shared duration plane (`ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`min`/`h`/`d`);
+// `#Every("03:00")` takes a daily wall-clock time. A `#Job fn` with no `#Every(…)` is a plain
 // manually-invoked job (`jet run <this-file> -- manual_only`).
 //
 // Calling a `#Job fn` directly — as `run()` does below — behaves exactly
@@ -13,6 +13,14 @@
 // convention for dev-loop-only behavior — see devloop/persist.jet).
 #[Job(.Dev), Every(5min)] fn prune_sessions() {
     print("pruning sessions")
+}
+
+#[Job(.Dev), Every(2h)] fn refresh_indexes() {
+    print("refreshing indexes")
+}
+
+#[Job(.Dev), Every(1d)] fn compact_archive() {
+    print("compacting archive")
 }
 
 #[Job(.Dev), Every("03:00")] fn nightly_backup() {
@@ -25,6 +33,8 @@
 
 fn run() {
     prune_sessions()
+    refresh_indexes()
+    compact_archive()
     nightly_backup()
     manual_only()
 }

@@ -1,12 +1,23 @@
 // D-LIVEQUERY1=A (#505): app.live / subscribe / invalidate.
 // Engines marshal only; semantics live here (I9).
 
-use std::collections::{BTreeMap as JetLiveBTreeMap, BTreeSet as JetLiveBTreeSet};
-use std::sync::{Mutex as JetLiveMutex, OnceLock as JetLiveOnceLock};
+use std::collections::{
+    BTreeMap as JetLiveBTreeMap,
+    BTreeSet as JetLiveBTreeSet,
+    VecDeque as JetLiveVecDeque,
+};
+use std::sync::{Arc as JetLiveArc, Mutex as JetLiveMutex, OnceLock as JetLiveOnceLock};
 
 const JET_LIVE_MAX_QUERIES: usize = 1024;
+const JET_LIVE_MAX_WS_SINKS: usize = 1024;
+const JET_LIVE_MAX_PAYLOAD: usize = 4 * 1024 * 1024;
+const JET_LIVE_MAX_TRANSPORT_EVENTS: usize = 2048;
+const JET_LIVE_MAX_TRANSPORT_EVENT: usize = 1024 * 1024;
 const JET_LIVE_ERR_INVALID_INPUT: i64 = -1;
 const JET_LIVE_ERR_UNAVAILABLE: i64 = -2;
+
+type JetLiveRerun = JetLiveArc<dyn Fn() -> Result<String, String> + Send + Sync + 'static>;
+type JetLiveSink = JetLiveArc<dyn Fn(String) + Send + Sync + 'static>;
 
 /// A normalized read/write footprint. The public Core API still accepts the
 /// source spelling as a String, but the runtime never compares raw labels:
@@ -57,7 +68,7 @@ impl JetLiveFootprint {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct JetLiveQuery {
     id: u64,
     footprint: JetLiveFootprint,
@@ -66,9 +77,25 @@ struct JetLiveQuery {
     active: bool,
     dirty: bool,
     error: String,
+    rerun: Option<JetLiveRerun>,
+    sink: Option<JetLiveSink>,
 }
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for JetLiveQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JetLiveQuery")
+            .field("id", &self.id)
+            .field("footprint", &self.footprint)
+            .field("value", &self.value)
+            .field("generation", &self.generation)
+            .field("active", &self.active)
+            .field("dirty", &self.dirty)
+            .field("error", &self.error)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 struct JetLiveRecord {
     footprint: JetLiveFootprint,
     value: String,
@@ -76,6 +103,8 @@ struct JetLiveRecord {
     active: bool,
     dirty: bool,
     error: String,
+    rerun: Option<JetLiveRerun>,
+    sink: Option<JetLiveSink>,
 }
 
 #[derive(Default)]
@@ -85,6 +114,10 @@ struct JetLiveRegistry {
     invalidations: u64,
     ws_pushes: u64,
     evictions: u64,
+    ws_sinks: JetLiveBTreeMap<u64, JetLiveSink>,
+    next_ws_sink_id: u64,
+    transport_events: JetLiveBTreeMap<String, String>,
+    transport_order: JetLiveVecDeque<String>,
 }
 
 static JET_LIVE_REGISTRY: JetLiveOnceLock<JetLiveMutex<JetLiveRegistry>> = JetLiveOnceLock::new();
@@ -106,6 +139,8 @@ fn jet_live_error_query(
         active: false,
         dirty: false,
         error: error.to_string(),
+        rerun: None,
+        sink: None,
     }
 }
 
@@ -118,12 +153,33 @@ fn jet_live_query(id: u64, record: &JetLiveRecord) -> JetLiveQuery {
         active: record.active,
         dirty: record.dirty,
         error: record.error.clone(),
+        rerun: record.rerun.clone(),
+        sink: record.sink.clone(),
     }
 }
 
-fn jet_app_live(footprint: String, initial: String) -> JetLiveQuery {
+fn jet_live_payload(value: String) -> Result<String, String> {
+    if value.len() > JET_LIVE_MAX_PAYLOAD {
+        Err(format!(
+            "live query payload exceeds {} bytes",
+            JET_LIVE_MAX_PAYLOAD
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn jet_app_live_with(
+    footprint: String,
+    initial: String,
+    rerun: Option<JetLiveRerun>,
+    sink: Option<JetLiveSink>,
+) -> JetLiveQuery {
     let Some(footprint) = JetLiveFootprint::parse(&footprint) else {
         return jet_live_error_query(0, JetLiveFootprint { paths: Vec::new() }, "invalid live footprint");
+    };
+    let Ok(initial) = jet_live_payload(initial) else {
+        return jet_live_error_query(0, footprint, "live query payload is too large");
     };
     let Ok(mut state) = jet_live_registry().lock() else {
         return jet_live_error_query(0, footprint, "live registry unavailable");
@@ -147,10 +203,149 @@ fn jet_app_live(footprint: String, initial: String) -> JetLiveQuery {
         active: true,
         dirty: false,
         error: String::new(),
+        rerun,
+        sink,
     };
     let query = jet_live_query(id, &record);
     state.queries.insert(id, record);
     query
+}
+
+fn jet_app_live(footprint: String, initial: String) -> JetLiveQuery {
+    jet_app_live_with(footprint, initial, None, None)
+}
+
+/// D-LIVEQUERY1: the typed query runner is an engine-independent callback.
+/// The callback is installed in the shared registry; invalidation calls it
+/// outside the registry lock and publishes only the newest successful result.
+fn jet_app_live_query<F>(footprint: String, initial: String, rerun: F) -> JetLiveQuery
+where
+    F: Fn() -> Result<String, String> + Send + Sync + 'static,
+{
+    let query = jet_app_live_with(footprint, initial, Some(JetLiveArc::new(rerun)), None);
+    if query.id != 0 && query.error.is_empty() {
+        // Seed the bounded transport with the current value. A connection
+        // opened after the query is created must receive the same snapshot as
+        // a connection that was already present.
+        jet_live_publish_ws(query.id, query.generation, &query.footprint, query.value.clone());
+    }
+    query
+}
+
+/// Bind a result sink to the canonical reactive delivery path. AOT uses this
+/// with `jet_std::JetSignal`; the interpreter uses the same Prelude callback
+/// without inventing a second signal carrier.
+fn jet_app_live_bind_signal<F>(query: &JetLiveQuery, sink: F) -> JetLiveQuery
+where
+    F: Fn(String) + Send + Sync + 'static,
+{
+    jet_app_live_bind_sink(query, JetLiveArc::new(sink))
+}
+
+fn jet_app_live_bind_sink(query: &JetLiveQuery, sink: JetLiveSink) -> JetLiveQuery {
+    let Ok(mut state) = jet_live_registry().lock() else {
+        return jet_live_error_query(
+            query.id,
+            query.footprint.clone(),
+            "live registry unavailable",
+        );
+    };
+    let Some(record) = state.queries.get_mut(&query.id) else {
+        return jet_live_error_query(query.id, query.footprint.clone(), "live query is closed");
+    };
+    if !record.active || !record.error.is_empty() {
+        return jet_live_error_query(query.id, record.footprint.clone(), "live query is closed");
+    }
+    record.sink = Some(sink);
+    jet_live_query(query.id, record)
+}
+
+/// Register one core.ws connection as a live transport. WebSocket writes are
+/// supplied by the existing connection adapter; the live runtime owns only
+/// bounded registration and event fan-out.
+fn jet_app_ws_register(sink: JetLiveSink) -> u64 {
+    let (id, replay) = {
+        let Ok(mut state) = jet_live_registry().lock() else {
+            return 0;
+        };
+        if state.ws_sinks.len() >= JET_LIVE_MAX_WS_SINKS {
+            return 0;
+        }
+        let Some(id) = state.next_ws_sink_id.checked_add(1) else {
+            return 0;
+        };
+        state.next_ws_sink_id = id;
+        state.ws_sinks.insert(id, sink.clone());
+        let replay = state
+            .transport_order
+            .iter()
+            .filter_map(|topic| state.transport_events.get(topic).cloned())
+            .collect::<Vec<_>>();
+        (id, replay)
+    };
+    // Replay the last bounded event for each topic after releasing the
+    // registry lock. This makes a reconnect converge to the current transport
+    // state without retaining an unbounded operation log.
+    for event in replay {
+        sink(event);
+    }
+    id
+}
+
+fn jet_app_ws_unregister(id: u64) {
+    if id == 0 {
+        return;
+    }
+    if let Ok(mut state) = jet_live_registry().lock() {
+        state.ws_sinks.remove(&id);
+    }
+}
+
+pub(crate) fn jet_live_publish_transport(topic: String, event: String) {
+    if topic.is_empty()
+        || topic.len() > 512
+        || event.is_empty()
+        || event.len() > JET_LIVE_MAX_TRANSPORT_EVENT
+    {
+        return;
+    }
+    let sinks = {
+        let Ok(mut state) = jet_live_registry().lock() else {
+            return;
+        };
+        state.transport_events.insert(topic.clone(), event.clone());
+        state.transport_order.retain(|existing| existing != &topic);
+        state.transport_order.push_back(topic);
+        while state.transport_order.len() > JET_LIVE_MAX_TRANSPORT_EVENTS {
+            let Some(oldest) = state.transport_order.pop_front() else {
+                break;
+            };
+            state.transport_events.remove(&oldest);
+        }
+        state.ws_pushes = state.ws_pushes.saturating_add(1);
+        state.ws_sinks.values().cloned().collect::<Vec<_>>()
+    };
+    for sink in sinks {
+        sink(event.clone());
+    }
+}
+
+fn jet_live_publish_ws(
+    id: u64,
+    generation: u64,
+    footprint: &JetLiveFootprint,
+    value: String,
+) {
+    jet_live_publish_transport(
+        format!("live:{id}"),
+        format!(
+            "live:{}:{}:{}:{}",
+            id,
+            generation,
+            footprint.display(),
+            value
+        ),
+    );
 }
 
 fn jet_app_subscribe(source: String) -> JetLiveQuery {
@@ -167,21 +362,85 @@ fn jet_app_invalidate(footprint: String) -> i64 {
     let Ok(mut state) = jet_live_registry().lock() else {
         return JET_LIVE_ERR_UNAVAILABLE;
     };
+    let mut reruns = Vec::new();
     let mut hit = 0u64;
-    for query in state.queries.values_mut() {
+    for (id, query) in state.queries.iter_mut() {
         if query.active && query.error.is_empty() && query.footprint.intersects(&footprint) {
             query.generation = query.generation.saturating_add(1);
             query.dirty = true;
             hit = hit.saturating_add(1);
+            if let Some(rerun) = query.rerun.clone() {
+                reruns.push((*id, query.generation, query.footprint.clone(), rerun, query.sink.clone()));
+            }
         }
     }
     state.invalidations = state.invalidations.saturating_add(hit);
+    drop(state);
+
+    // A query body may itself touch the live registry. Never execute user
+    // callbacks while holding the registry mutex.
+    for (id, generation, footprint, rerun, sink) in reruns {
+        match rerun() {
+            Ok(value) => match jet_live_payload(value) {
+                Ok(value) => {
+                    let mut publish = None;
+                    if let Ok(mut state) = jet_live_registry().lock() {
+                        let updated = match state.queries.get_mut(&id) {
+                            Some(query)
+                                if query.active
+                                    && query.error.is_empty()
+                                    && query.generation == generation =>
+                            {
+                                query.value = value.clone();
+                                query.dirty = false;
+                                Some(jet_live_query(id, query))
+                            }
+                            _ => None,
+                        };
+                        publish = updated;
+                    }
+                    if let Some(updated) = publish {
+                        if let Some(sink) = sink {
+                            sink(value.clone());
+                        }
+                        jet_live_publish_ws(
+                            updated.id,
+                            updated.generation,
+                            &updated.footprint,
+                            value,
+                        );
+                    }
+                }
+                Err(error) => {
+                    if let Ok(mut state) = jet_live_registry().lock() {
+                        if let Some(query) = state.queries.get_mut(&id) {
+                            if query.active && query.generation == generation {
+                                query.error = error;
+                                query.dirty = true;
+                            }
+                        }
+                    }
+                }
+            },
+            Err(error) => {
+                if let Ok(mut state) = jet_live_registry().lock() {
+                    if let Some(query) = state.queries.get_mut(&id) {
+                        if query.active && query.generation == generation {
+                            query.error = error;
+                            query.dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
     hit.min(i64::MAX as u64) as i64
 }
 
 /// D-LIVEQUERY1: `#Transact` write-set → invalidate matching live footprints.
-/// Invalidation never fabricates a result. A real rerun/push transport remains
-/// an explicit core.ws/application-graph owner seam.
+/// Invalidation never fabricates a result. Registered typed rerunners execute
+/// outside the registry lock; successful results update the canonical query,
+/// signal sink, and existing core.ws transport.
 fn jet_app_transact_invalidate(write_set: String) -> i64 {
     if write_set.trim().is_empty() {
         return JET_LIVE_ERR_INVALID_INPUT;
@@ -204,6 +463,9 @@ fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
     if !query.error.is_empty() {
         return query.clone();
     }
+    let Ok(payload) = jet_live_payload(payload) else {
+        return jet_live_error_query(query.id, query.footprint.clone(), "live query payload is too large");
+    };
     let Ok(mut state) = jet_live_registry().lock() else {
         return jet_live_error_query(query.id, query.footprint.clone(), "live registry unavailable");
     };
@@ -214,10 +476,15 @@ fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
         return jet_live_error_query(query.id, updated.footprint.clone(), "live query is closed");
     }
     updated.generation = updated.generation.saturating_add(1);
-    updated.value = payload;
+    updated.value = payload.clone();
     updated.dirty = false;
     let result = jet_live_query(query.id, updated);
-    state.ws_pushes = state.ws_pushes.saturating_add(1);
+    let sink = result.sink.clone();
+    drop(state);
+    if let Some(sink) = sink {
+        sink(payload.clone());
+    }
+    jet_live_publish_ws(result.id, result.generation, &result.footprint, payload);
     result
 }
 

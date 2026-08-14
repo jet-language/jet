@@ -1335,8 +1335,8 @@ pub struct StateTransition {
 #[derive(Debug, Clone)]
 pub enum EveryArg {
     /// `#Every(5min)` — same raw pieces as `Expr::UnitLit`, minus the
-    /// `#UnitFamily` scoping (a schedule duration is a fixed, closed
-    /// vocabulary — `Syntax::schedule_duration_suffix_nanos`).
+    /// `#UnitFamily` scoping. The literal resolves through the shared
+    /// `Syntax::duration_suffix_nanos` duration plane.
     Duration {
         int: Option<i64>,
         float: Option<f64>,
@@ -1364,7 +1364,7 @@ pub struct EveryMarker {
 /// projection) derives from the same `EveryArg` instead of re-parsing it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EverySchedule {
-    /// Re-run every `nanos` nanoseconds since the task last ran.
+    /// Re-run every `nanos` nanoseconds since the job last ran.
     Interval { nanos: u128 },
     /// Re-run once daily at this local 24h wall-clock time.
     DailyAt { hour: u8, minute: u8 },
@@ -1374,8 +1374,8 @@ pub enum EverySchedule {
 /// turns each into the matching E0926 What/Why/Fix row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EveryScheduleError {
-    /// The duration suffix isn't in the closed schedule vocabulary
-    /// (`ns`/`us`/`ms`/`s`/`min`).
+    /// The duration suffix isn't in the shared duration vocabulary
+    /// (`ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`min`/`h`/`d`).
     UnknownDurationUnit,
     /// The duration is zero or negative — a schedule must advance time.
     NonPositiveDuration,
@@ -1399,7 +1399,7 @@ impl EveryArg {
     pub fn resolve(&self) -> Result<EverySchedule, EveryScheduleError> {
         match self {
             EveryArg::Duration { int, float, suffix, .. } => {
-                let Some(unit_nanos) = crate::Syntax::schedule_duration_suffix_nanos(suffix)
+                let Some(unit_nanos) = crate::Syntax::duration_suffix_nanos(suffix)
                 else {
                     return Err(EveryScheduleError::UnknownDurationUnit);
                 };

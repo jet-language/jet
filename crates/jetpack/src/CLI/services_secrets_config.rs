@@ -145,9 +145,9 @@ fn run_before_start_tasks(
         );
         if code != 0 {
             theme.error(
-                &format!("service `{}` prerequisite task `{task}` failed", service.name),
-                "the service was not started because its declared finite task did not complete.",
-                "fix the task, then run the service again.",
+                &format!("service `{}` prerequisite job `{task}` failed", service.name),
+                "the service was not started because its declared finite job did not complete.",
+                "fix the job, then run the service again.",
             );
             return Err(());
         }
@@ -173,7 +173,7 @@ pub(super) fn run_lifecycle_hooks(
     )
 }
 
-/// Run lifecycle tasks for shell activation without allowing task stdout to
+/// Run lifecycle jobs for shell activation without allowing job stdout to
 /// corrupt the generated export script.
 pub(super) fn run_lifecycle_hooks_silent(
     theme: &Theme,
@@ -240,9 +240,9 @@ fn run_lifecycle_hooks_with_mode(
             );
             if code != 0 {
                 theme.error(
-                    &format!("lifecycle {phase} task `{task}` failed"),
-                    &format!("the task returned exit code {code}"),
-                    "fix the task or remove it from the environment lifecycle.",
+                    &format!("lifecycle {phase} job `{task}` failed"),
+                    &format!("the job returned exit code {code}"),
+                    "fix the job or remove it from the environment lifecycle.",
                 );
                 return Err(code);
             }
@@ -324,7 +324,7 @@ fn run_lifecycle_hooks_with_mode(
             }
         };
         let ModuleEval::HookAction::Command(command) = &hook.action else {
-            unreachable!("task lifecycle actions return above");
+            unreachable!("job lifecycle actions return above");
         };
         let mut command = crate::Platform::shell_command(command);
         command

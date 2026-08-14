@@ -156,7 +156,7 @@ module env.dev {
 
 ## Lifecycle and managed files
 
-Lifecycle facts include dotenv allowlists, unset names, enter and check tasks,
+Lifecycle facts include dotenv allowlists, unset names, enter and check jobs,
 and reload policy. Secret values never enter the plan or information output.
 
 Managed files use project-relative destinations. `Symlink` points to an
@@ -176,31 +176,31 @@ module env.dev {
 }
 ```
 
-Lifecycle tasks run only after the environment is composed. Bare names resolve
-to declared `#Job fn`s and use the normal task metadata, trust, and clean-shell
+Lifecycle jobs run only after the environment is composed. Bare names resolve
+to declared `#Job fn`s and use the normal job metadata, trust, and clean-shell
 path. The explicit record form remains the one expert hook escape:
 `command`, `cwd`, and `trusted: true` are required after review. `jet env test`
-runs enter tasks, checks, and any explicit hook in a clean declared environment
+runs enter jobs, checks, and any explicit hook in a clean declared environment
 and rejects an untrusted hook with `E1329`. Hook working directories must stay
 inside the project, including after symlink resolution. A changed hook or
 lifecycle policy changes the environment trust identity, so the next entry
 needs a new trust decision.
 
-Task metadata stays on the `#Job` marker. Bare tasks use the current project
-directory and remain uncached. Typed fields can add task-local packages, a
+Job metadata stays on the `#Job` marker. Bare jobs use the current project
+directory and remain uncached. Typed fields can add job-local packages, a
 project-relative `cwd`, declared `inputs` and `outputs`, a typed skip reason,
 cache policy, authority, and limits. Platform skips use `Linux`, `MacOS`,
-`Windows`, or `FreeBSD` and report why the task did not run. Direct task runs
+`Windows`, or `FreeBSD` and report why the job did not run. Direct job runs
 and scheduled `jet dev` runs apply the same skip rule.
 
-Cached tasks require declared inputs and outputs. Their identity includes task
+Cached jobs require declared inputs and outputs. Their identity includes job
 arguments, locked package facts, policy, platform, compiler bytes, declared
 project inputs, and the composed values of allowed non-secret environment
 variables. `.env` files and secret-bearing paths are never cache inputs.
 Strict cached runs trace project file access and refuse to record a cache
-result when the task reads an undeclared project path. Tasks with declared
+result when the job reads an undeclared project path. Jobs with declared
 secrets or secret-bearing environment variables fail closed; use
-`cache: .Uncached` when the task is intentionally dynamic.
+`cache: .Uncached` when the job is intentionally dynamic.
 
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
@@ -338,7 +338,7 @@ module env.dev {
 `after` names a declared service dependency. It is the only dependency spelling;
 the retired `depends_on` spelling is rejected. Jetpack validates names, disabled
 dependencies, and cycles before spawning a process, starts dependencies before
-dependents, and stops the selected graph in reverse order. A failed task,
+dependents, and stops the selected graph in reverse order. A failed job,
 startup, readiness gate, or dependency stops the affected graph without
 leaving a dependent alive against a failed prerequisite.
 

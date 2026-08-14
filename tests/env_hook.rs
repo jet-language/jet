@@ -321,8 +321,8 @@ fn enter_runs_a_trusted_lifecycle_hook_before_the_child() {
 }
 
 #[test]
-fn enter_resolves_a_bare_lifecycle_name_to_a_typed_task() {
-    let scratch = Scratch::new("typed-lifecycle-task");
+fn enter_resolves_a_bare_lifecycle_name_to_a_typed_job() {
+    let scratch = Scratch::new("typed-lifecycle-job");
     fs::write(
         scratch.path.join("env.jet"),
         r#"module env.dev {
@@ -335,7 +335,7 @@ fn enter_resolves_a_bare_lifecycle_name_to_a_typed_task() {
         scratch.path.join("main.jet"),
         r#"#Job
 fn seed_config() {
-    print("typed lifecycle task")
+        print("typed lifecycle job")
 }
 fn run() {}
 "#,
@@ -358,19 +358,19 @@ fn run() {}
         .unwrap();
     assert!(
         out.status.success(),
-        "typed lifecycle task must run through the task path: {}",
+        "typed lifecycle job must run through the job path: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&out.stdout).contains("typed lifecycle task"),
+        String::from_utf8_lossy(&out.stdout).contains("typed lifecycle job"),
         "task output missing: {}",
         String::from_utf8_lossy(&out.stdout)
     );
 }
 
 #[test]
-fn enter_rejects_an_undeclared_lifecycle_task_before_launch() {
-    let scratch = Scratch::new("undeclared-lifecycle-task");
+fn enter_rejects_an_undeclared_lifecycle_job_before_launch() {
+    let scratch = Scratch::new("undeclared-lifecycle-job");
     fs::write(
         scratch.path.join("env.jet"),
         "module env.dev {\n  on_enter: [missing_task]\n}\n",
@@ -385,16 +385,16 @@ fn enter_rejects_an_undeclared_lifecycle_task_before_launch() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1294"), "missing lifecycle task diagnostic:\n{stderr}");
+    assert!(stderr.contains("E1294"), "missing lifecycle job diagnostic:\n{stderr}");
     assert!(stderr.contains("missing_task"), "missing task name:\n{stderr}");
     assert!(
-        !stderr.contains("running task missing_task"),
-        "undeclared lifecycle task must be rejected before child launch:\n{stderr}"
+        !stderr.contains("running job missing_task"),
+        "undeclared lifecycle job must be rejected before child launch:\n{stderr}"
     );
 }
 
 #[test]
-fn export_runs_typed_lifecycle_tasks_without_stdout_pollution() {
+fn export_runs_typed_lifecycle_jobs_without_stdout_pollution() {
     let scratch = Scratch::new("typed-lifecycle-export");
     let home = Scratch::new("typed-lifecycle-export-home");
     fs::write(
@@ -404,7 +404,7 @@ fn export_runs_typed_lifecycle_tasks_without_stdout_pollution() {
     .unwrap();
     fs::write(
         scratch.path.join("main.jet"),
-        "#Job\nfn seed_config() { print(\"typed lifecycle task\") }\nfn run() {}\n",
+        "#Job\nfn seed_config() { print(\"typed lifecycle job\") }\nfn run() {}\n",
     )
     .unwrap();
     let selector = format!("env:{}", scratch.path.display());
@@ -438,7 +438,7 @@ fn export_runs_typed_lifecycle_tasks_without_stdout_pollution() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        !stdout.contains("typed lifecycle task"),
+        !stdout.contains("typed lifecycle job"),
         "task output must not corrupt shell activation:\n{stdout}"
     );
 }

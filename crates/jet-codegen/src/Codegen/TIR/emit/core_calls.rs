@@ -2978,12 +2978,6 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("app" | "core.web", "sync_over") => format!(
-            "{}jet_app_sync_over(({}).clone(), ({}).clone())",
-            cx.root_prefix,
-            arg(0),
-            arg(1)
-        ),
         ("app" | "core.web", "sync") => format!(
             "{}jet_app_sync(({}).clone(), ({}).clone())",
             cx.root_prefix,

@@ -64,10 +64,22 @@ fn run() {
     public :: sync.policy_new("public", "true") ?? panic("public policy")
     print("public_allowed:{sync.policy_allows(public, "alice", "bob")}")
 
+    invalid_text :: sync.text_new("", "x")
+    print("invalid_text:{sync.text_show(invalid_text)}")
+
     first :: app.sync(lr, over: "sync-laws")
     second :: app.sync(rl, over: "sync-laws")
     print(first)
     print(second)
+
+    merge_first :: app.sync("SyncMap(a=1)", over: "sync-merge-laws")
+    merge_second :: app.sync("SyncMap(b=2)", over: "sync-merge-laws")
+    merge_duplicate :: app.sync("SyncMap(a=1)", over: "sync-merge-laws")
+    malformed :: app.sync("SyncMap(a=1", over: "sync-merge-laws")
+    print(merge_first)
+    print(merge_second)
+    print(merge_duplicate)
+    print(malformed)
 }
 "#;
 
@@ -80,7 +92,7 @@ fn sync_laws_hold_on_aot_path() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\n"
+        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\n"
     );
 }
 
@@ -90,6 +102,6 @@ fn sync_laws_hold_on_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\n"
+        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\n"
     );
 }

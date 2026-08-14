@@ -2443,7 +2443,6 @@ pub fn apply_core_call_with_type(
                     | "auth_oauth"
                     | "auth_routes"
                     | "auth_show"
-                    | "sync_over"
                     | "sync"
             ) =>
         {
@@ -2452,7 +2451,7 @@ pub fn apply_core_call_with_type(
                 "auth" | "auth_oauth" | "auth_routes" | "auth_show"
             ) {
                 super::super::AuthLite::apply(method, &args, span)
-            } else if matches!(method, "sync_over" | "sync") {
+            } else if method == "sync" {
                 super::super::SyncLite::apply(method, &args, span)
             } else {
                 super::super::AppLite::apply(method, &args, span)

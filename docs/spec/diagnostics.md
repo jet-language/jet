@@ -646,7 +646,7 @@ renumbered, and no new `W` code may be allocated.
 | E0922 | sema | body-level `derive Debug;` remains retired; use the signed type marker or a hand implementation (D-AUTODERIVE-SYNTAX1=D) |
 | E0929 | parse | body-level `derive X;` is retired; request the capability with `#X` and reserve `derive` for provider definitions (D-ONCE-DERIVE1=A) |
 | E0925 | parse | `#Job`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Job` (card #505) |
-| E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
+| E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad shared duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0938 | sema | `#Memo` requires a pure function (D-MEMO1=A) |
@@ -2187,7 +2187,7 @@ recognizable shape whose *value* isn't a real schedule.
 
 | What | Why | Fix |
 |------|-----|-----|
-| this duration's unit isn't a recognized schedule cadence. | a schedule interval is one of a closed set of time units — `ns`/`us`/`ms`/`s`/`min` — not an arbitrary `#UnitFamily` member. | Use `ns`, `us`, `ms`, `s`, or `min` (e.g. `#Every(5min)`). |
+| this duration's unit isn't a recognized schedule cadence. | a schedule interval uses the shared duration plane — `ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member. | Use a shared duration unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`). |
 | a schedule interval must be a positive duration. | `#Every(0ms)` or a negative duration never becomes due. | Write a duration greater than zero, e.g. `#Every(5min)`. |
 | this daily schedule isn't a plain `"HH:MM"` time. | a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone. | Write a fixed daily time like `#Every("03:00")`. |
 | this daily schedule's hour/minute is out of range. | 24h hours run `00`..=`23`, minutes run `00`..=`59`. | Write an hour between `00` and `23` and a minute between `00` and `59`. |

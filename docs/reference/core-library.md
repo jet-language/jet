@@ -930,7 +930,9 @@ policy_new(table, expression) => RowPolicy ? String
 policy_allows(policy, user, row_owner) => Bool
 ```
 
-Merges are deterministic and keep every replica's edits. `SyncText` is a
+Merges are deterministic and keep every replica's edits. A malformed carrier
+or a merge that would exceed a bound becomes an explicit invalid value; no
+replica, map key, or list member is silently truncated. `SyncText` is a
 sequence CRDT: `text_edit(doc, replica, at, delete_count, insert)` writes at a
 character position, and two replicas that edit while apart reach one document.
 A replica name must own one line of edits; editing two copies of a document
@@ -938,9 +940,15 @@ under one name is not a concurrent edit and does not merge. `text_metadata`
 reports the highest counter each replica has written, which orders edits but
 does not decide causality. Beginner
 row policies use `owner == user`; expert policies may use `true`. `app.sync(doc,
-over: session)` publishes the typed CRDT representation through a bounded
-session registry and returns a monotonic delivery receipt. Database row-policy
-enforcement uses the explicit `DBScope` selected by `D-DBPOLICY-BIND1`.
+  over: session)` publishes a canonical CRDT display through a bounded session
+  registry, merges duplicate/reordered map/list/counter displays
+  deterministically, publishes the latest receipt through the local live
+  transport, and returns a monotonic delivery receipt. Typed `core.sync`
+  carriers retain atom and LWW metadata before this fixed String seam; the
+  session receipt does not replace that typed metadata or provide vector clocks.
+  The registry is process-local; authenticated remote reconnect is not a
+  transport promise. Database row-policy enforcement uses the explicit
+  `DBScope` selected by `D-DBPOLICY-BIND1`.
 
 Example: `examples/features/tooling/sync_crdt.jet`.
 
@@ -3513,7 +3521,7 @@ the capability. Cleanup stays on `Close` via `close(...)`.
 | `scoped.execute(sql, params)` | `Int ? DBError` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
 | `scoped.query(sql, params)` | `[Row] ? DBError` | `Row` is `Map<String, DBValue>`; returned rows are scoped |
 | `scoped.query_one(sql, params)` | `Row? ? DBError` | First allowed row, if any |
-| `scoped.live(sql, params)` | `LiveQuery ? DBError` | The same policy is applied to the live-query read |
+| `scoped.live(sql, params)` | `LiveQuery ? DBError` | The same policy is applied to the live-query read; matching write-set invalidation reruns it and updates the canonical signal/transport seam |
 | `scoped.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control through the same scope |
 | `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T ? String` | Typed column read with missing/type errors |
 | `db.transaction(scoped, label, statements)` | `Int ? DBError` | Runs scoped statements in one transaction, rollback on first error |

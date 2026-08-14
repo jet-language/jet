@@ -73,7 +73,23 @@ fn ct_to_live(v: &CtValue, span: Span) -> Result<JetLiveQuery, Diagnostic> {
         active,
         dirty: false,
         error,
+        rerun: None,
+        sink: None,
     })
+}
+
+/// JIT/interpreter adapter for a typed live query. The callback remains in
+/// the shared Prelude registry; the CtValue is only the ordinary structural
+/// handle crossing the engine boundary.
+pub fn live_query_with<F>(
+    footprint: String,
+    initial: String,
+    rerun: F,
+) -> CtValue
+where
+    F: Fn() -> Result<String, String> + Send + Sync + 'static,
+{
+    live_to_ct(&jet_app_live_query(footprint, initial, rerun))
 }
 
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {

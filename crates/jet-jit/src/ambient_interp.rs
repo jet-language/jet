@@ -2515,6 +2515,21 @@ pub fn ambient_core_call(
         }
     }
     if module == "app" || module == "core.web" {
+        // I9: live-query control and delivery use the same Prelude registry as
+        // AOT. This branch only marshals CtValue arguments at the ambient tier.
+        if matches!(
+            method,
+            "live"
+                | "subscribe"
+                | "invalidate"
+                | "transact_invalidate"
+                | "signal_push"
+                | "live_get"
+                | "live_show"
+                | "live_stats"
+        ) {
+            return Some(jet_codegen::Comptime::AppLite::apply(method, &args, span));
+        }
         if let Some(result) = ambient_app_auth_call(method, &args, span) {
             return Some(result);
         }
@@ -3947,11 +3962,11 @@ pub fn ambient_handle(
             }))
         }
         "DBLive" => {
-            let sql = match args.first() {
+            let raw_sql = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
                 _ => return Some(Err(unsupported("DBScope.live sql", span))),
             };
-            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
+            let raw_values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
                 Ok(values) => values,
                 Err(error) => return Some(Err(error)),
             };
@@ -3964,7 +3979,11 @@ pub fn ambient_handle(
                 }
             };
             let (sql, values) = match wire::jet_db_apply_policy(
-                &sql, &values, &table, &expression, &user,
+                &raw_sql,
+                &raw_values,
+                &table,
+                &expression,
+                &user,
             ) {
                 Ok(value) => value,
                 Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
@@ -3972,16 +3991,40 @@ pub fn ambient_handle(
             let out = DB::runtime_query(handle, &sql, &wire::jet_db_encode_params(&values));
             Some(Ok(match wire::jet_db_decode_query_result(&out) {
                 Ok(rows) => {
-                    let footprint = format!("db:{table}:{sql}");
+                    // SQL text is not a footprint token: spaces and operators
+                    // are deliberately rejected by the shared footprint parser.
+                    // Table scope is conservative and reruns every live query
+                    // on that table until the app graph supplies columns.
+                    let footprint = table.clone();
                     let initial = format!("{rows:?}");
-                    match jet_codegen::Comptime::AppLite::apply(
-                        "live",
-                        &[CtValue::Str(footprint), CtValue::Str(initial)],
-                        span,
-                    ) {
-                        Ok(query) => CtValue::Present(Box::new(query)),
-                        Err(error) => return Some(Err(error)),
-                    }
+                    let rerun_table = table.clone();
+                    let rerun_expression = expression.clone();
+                    let rerun_user = user.clone();
+                    let rerun_sql = raw_sql.clone();
+                    let rerun_values = raw_values.clone();
+                    let query = jet_codegen::Comptime::AppLite::live_query_with(
+                        footprint,
+                        initial,
+                        move || {
+                            let (sql, values) = wire::jet_db_apply_policy(
+                                &rerun_sql,
+                                &rerun_values,
+                                &rerun_table,
+                                &rerun_expression,
+                                &rerun_user,
+                            )
+                            .map_err(|error| error.message)?;
+                            let out = DB::runtime_query(
+                                handle,
+                                &sql,
+                                &wire::jet_db_encode_params(&values),
+                            );
+                            wire::jet_db_decode_query_result(&out)
+                                .map(|rows| format!("{rows:?}"))
+                                .map_err(|error| error.message)
+                        },
+                    );
+                    CtValue::Present(Box::new(query))
                 }
                 Err(error) => CtValue::failed(Box::new(db_err(error.message))),
             }))

@@ -11908,7 +11908,7 @@ impl LowerCtx<'_, '_> {
             ("core.sync", "policy_new") => Some(2),
             ("core.sync", "policy_allows") => Some(3),
             ("core.sync", "policy_show") => Some(1),
-            ("core.sync" | "app" | "core.web", "sync_over" | "sync") => Some(2),
+            ("core.sync" | "app" | "core.web", "sync") => Some(2),
             _ => None,
         }
     }
@@ -12322,7 +12322,7 @@ impl LowerCtx<'_, '_> {
                 if module == "core.services"
                     || module == "core.sync"
                     || ((module == "app" || module == "core.web")
-                        && matches!(method.as_str(), "sync_over" | "sync"))
+                        && method == "sync")
                 {
                     return self.lower_service_core_call(module, method, args, &expr.ty);
                 }

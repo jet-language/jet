@@ -693,16 +693,21 @@ pub const SCOPE_TEST_MEASURE: &str = "measure";
 pub const SCOPE_TEST_CASES: &str = "cases";
 
 /// D-DOTSCOPE1: recognized duration suffixes for `.timeout(<dur>)` and their
-/// nanosecond multiplier. `.timeout` reads a bare unit literal directly, so its
-/// accepted units are fixed here rather than resolved through a `#UnitFamily`
-/// (D-UNITLIT1). Returns `None` for any other suffix. `u128` so the multiply
-/// can't overflow before codegen narrows to `u64` nanos.
+/// nanosecond multiplier. `.timeout` and `#Every` read a bare unit literal
+/// directly, so their accepted units are fixed here rather than resolved
+/// through a `#UnitFamily` (D-UNITLIT1). This is the one duration-unit plane:
+/// a unit accepted by one duration surface has the same nanosecond meaning on
+/// every other surface. Returns `None` for any other suffix. `u128` keeps the
+/// multiply from overflowing before a consumer narrows to its runtime carrier.
 pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
     match suffix {
         "ns" => Some(1),
         "us" | "µs" => Some(1_000),
         "ms" => Some(1_000_000),
         "s" | "sec" | "secs" => Some(1_000_000_000),
+        "min" => Some(60_000_000_000),
+        "h" => Some(3_600_000_000_000),
+        "d" => Some(86_400_000_000_000),
         _ => None,
     }
 }
@@ -757,22 +762,6 @@ pub const JOB_RESERVED_CLI: &[&str] = &[
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
 /// Legal only alongside `#Job` (E0925 otherwise).
 pub const MARKER_EVERY: &str = "Every";
-
-/// D-SCHEDULE1: recognized duration suffixes for `#Every(<dur>)` — extends
-/// `duration_suffix_nanos` (`ns`/`us`/`ms`/`s`) with `min`, the ratified
-/// example spelling (`#Every(5min)`); a schedule finer than a second is
-/// never realistic, so `min` is added here rather than widening the shared
-/// `.timeout` table. `u128` nanoseconds, same overflow-safety reasoning as
-/// `duration_suffix_nanos`.
-pub fn schedule_duration_suffix_nanos(suffix: &str) -> Option<u128> {
-    if let Some(nanos) = duration_suffix_nanos(suffix) {
-        return Some(nanos);
-    }
-    match suffix {
-        "min" => Some(60_000_000_000),
-        _ => None,
-    }
-}
 
 /// D-DOTSCOPE1: the scope-member vocabulary an applied-rule block declares, or
 /// `None` if the marker declares no members. Each marker that grows a member
