@@ -67,7 +67,7 @@ fn llm_digest() -> String {
         "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
     );
     let core_body = format!(
-        "Use a module alias, then call an indexed item: `use core.term as term`; `term.eprint(\"hi\")`.\n\n```text\n{core_text}\n```"
+        "Use a module alias, then call an indexed item: `use core.term as term`; `term.print(\"hi\")`.\n\n```text\n{core_text}\n```"
     );
     let diagnostic_body = format!(
         "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked retired or reserved are not current syntax.\n\n```text\n{diagnostic_text}\n```"
