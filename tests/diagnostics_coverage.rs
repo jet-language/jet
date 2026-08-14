@@ -185,6 +185,57 @@ fn is_retired(code: &str, _diag_md: &str) -> bool {
     })
 }
 
+fn staged_card_number(reason: &str) -> Option<u32> {
+    let card = reason.strip_prefix("staged #")?;
+    if card.is_empty() || !card.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    card.parse().ok().filter(|card| *card > 0)
+}
+
+fn allowlist_reason_errors(entries: &[(&str, &str)]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|(code, reason)| {
+            if *reason == "retired" && is_retired(code, "") {
+                None
+            } else if staged_card_number(reason).is_some() {
+                None
+            } else {
+                Some(format!(
+                    "{code}: reason must be `retired` or `staged #<card>`"
+                ))
+            }
+        })
+        .collect()
+}
+
+fn now_emitted_codes<'a>(
+    entries: impl IntoIterator<Item = &'a str>,
+    emitted: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut now_emitted: Vec<String> = entries
+        .into_iter()
+        .filter(|code| emitted.contains(*code))
+        .map(str::to_string)
+        .collect();
+    now_emitted.sort();
+    now_emitted
+}
+
+fn stale_allowlist_failure<'a>(
+    entries: impl IntoIterator<Item = &'a str>,
+    emitted: &BTreeSet<String>,
+) -> Option<String> {
+    let now_emitted = now_emitted_codes(entries, emitted);
+    (!now_emitted.is_empty()).then(|| {
+        format!(
+            "EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  {}",
+            now_emitted.join("\n  ")
+        )
+    })
+}
+
 /// All [EL]NNNN codes that appear in snapshot files or legacy test assertions.
 /// Required rendered-snapshot codes are excluded from the legacy fallback.
 fn snapshot_codes() -> BTreeSet<String> {
@@ -827,97 +878,88 @@ fn every_registered_code_has_explain_page() {
 // ---------------------------------------------------------------------------
 // Audit: typed rows but NOT emitted (spec ahead of impl)
 //
-// This is NOT a failure — it's an informational audit. Codes may be
-// registered before their feature lands. We print a note if running with
-// RUST_LOG=info or similar, but don't fail the test.
+// This allowlist is shrink-only. Retired rows stay listed for explain-page
+// coverage. Staged rows name the owning Tower card.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn registered_unimplemented_codes_are_expected() {
-    // These codes are in the typed source but not yet emitted in Source/.
-    // They are INTENTIONALLY registered ahead of their feature milestone.
-    // If a new code appears here that is NOT in this list, it is unexpected
-    // and should be investigated.
-    const EXPECTED_SPEC_AHEAD_OF_IMPL: &[&str] = &[
-        "E0004", // retired
-        "E0005", // retired
-        "E0006", // retired
-        "E0062", // retired by D-SHAPE2: legacy applied-rule wrong-sigil diagnostic
-        "E0063", // retired by D-SHAPE2: former two-plane wrong-sigil diagnostic
-        "E0010", // retired by D-S14-PAUSE: was `set` teaching
-        "E0011", // retired
-        "E0020", // retired by D-SHAPE3b: foreign Optional/Result spellings use current errors
-        "E0058", // retired (D-MEM1/S3): was `view` return keyword teaching; `-> &T` gone
-        "E0206", // retired (D-MEM1/S3): was `view` return escape check; `-> &T` gone
-        "E0207", // retired (D-MEM1/S3): was stored-ref `&T` field owner ambiguity, D-REF-SHORTHAND1
-        "E0745", // retired by D-SHAPE8=A: former #Pure plus non-empty #(…) contradiction
-        "E0427", // retired (D-MEM1/S3): was `#Ref(owner) name: T` retired-form teaching
-        "E0426", // retired by D-UNINIT-SENTINEL1; teaching is synthesized from the retired spelling
-        "E0912", // retired (D-MEM1/S2): was frozen capability signature drift, D-CAP8/c129
-        "L0201", // retired (D-MEM1/S2): was implicit `.clone()` lint; superseded by hard error E0209
-        "E2101", // CLI: emitted via eprintln! (not Diagnostic::error) in main.rs
-        "E2102", // CLI: emitted via eprintln! (not Diagnostic::error) in main.rs
-        "E2110", // GC report: emitted in human/JSON form by CmdGc.rs
-        "E2301", // retired (D-MEM1/S3): was returned `view` outlives its owner
-        "E2302", // retired (D-MEM1/S3): was stored `ref` field outliving its source
-        "E2303", // alias for E1102 (view crossing task boundary); registered for jet explain
-        "E2304", // retired (D-MEM1/S3): was indexed/sliced piece returned as `view`
-        "E2306", // retired (D-MEM1/S3): was `#Ref(label)` naming no candidate, D-REF-SHORTHAND2
-        "L2301", // retired (D-MEM1/S3): was advisory naming a borrowed return's source
-        "E2403", // E2-M6 (library authoring) — staged
-        "E2410", // D-SERDE: runtime decode error (missing required field) — emitted as a FieldError string in generated code, not a compile Diagnostic
-        "E2412", // D-SERDE: runtime decode error (unknown field under #[DenyUnknownFields]) — emitted as a FieldError string, not a compile Diagnostic
-        "E2413", // retired (D-SERDE12): generic #[Codable] is first-class; no gate
-        "E2701", // E2-M9 (ring library) — staged
-        "E2801", // E2-M10 (networking) — staged
-        "E2802", // E2-M10 — staged
-        "E2803", // E2-M10 — staged
-        "E2804", // E2-M10 — staged, but appears in tests/ui snapshot
-        "E2902", // E2-M11 (#Todo typed holes) — staged
-        "E2940", // D-PROVE-SEM1: emitted only when complete_required policy is wired
-        "E3001", // E2-M12 runtime panic report — runtime, not compile-time
-        "E3002", // E2-M12 error propagation trace — runtime
-        "E3005", // D-PREPOST1 #Pre/#Post contract failure — runtime (jet_contract_fail in generated code), not a compile Diagnostic
-        "E3104", // retired by universal consuming close; use-after-close is E0121
-        "L2501", // reserved (path-normalisation issue noted in spec)
-        "L2701", // E2-M9 — staged
-        "L2801", // E2-M10 — staged
-        "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
-        "E0951", // retired by D-META-EFFECT1 c3: redirected to E3401
-        "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
-        "E0328", // retired (D-IFDIST1=A): `|` binds tighter than `&&`/`||`; mixing needs no parens
-        "E0334", // retired by D-TRAILBLOCK2=A: trailing blocks no longer have a separate mismatch
-        "E0954", // retired by D-S14-PAUSE: was two-keyword comptime binding teaching
-        "E0920", // retired: `#InlineAlways` was condensed into `#Inline(Always)`
-        "E1109", // deferred by D-SOA2B: v1 supports only whole-struct columnar layout
-        "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable
-        "L3101", // retired by D-UNSAFE-REASON1=A: bare `#Unsafe` is hard error E3112
-        "E0410", // retired by D-MARK-DISCARD1=A (was `#Suppress` unknown argument); registry row
-                 // already says "retired" — no live Diagnostic::error call to find.
-        "E0859", // D-GENMOD-IDENTITY1=A: raised via `jet_foundation::ice!` (ICE 101), not
-                 // `Diagnostic::error`, so the literal-scan `emitted_codes()` never sees it. It
-                 // guards a SHA256 fingerprint collision between two distinct generic-module
-                 // instance keys — an invariant violation, not a user-triggerable condition; no
-                 // .jet fixture can force a hash collision. Card #521.
-        "E0416", // retired by D-MARK-REPEAT1=A: was duplicate `#PubFile` marker in one file;
-                 // registry row already says "retired" — kept for historical reference only.
-        "E0428", // retired by D-MARK-REPEAT1=A: was duplicate `#NoPrelude` marker in one file;
-                 // registry row already says "retired" — kept for historical reference only.
-        "E2407", // D-SERDE: `#[Rename(...)]` string-literal-only check — registered ahead of
-                 // its own emission site; serde_diags.rs currently only emits E2408-E2415.
-        "E3626", // D-JREPLAY1: replay capture lacks an existing authority for an operation —
-                 // registered ahead of implementation; ProveReplay.rs emits E3620-E3625/E3627-E3629
-                 // but not this one yet. Card #521.
+    // Reason is exactly `retired` or `staged #<owning-card>`.
+    const EXPECTED_SPEC_AHEAD_OF_IMPL: &[(&str, &str)] = &[
+        ("E0004", "retired"),
+        ("E0005", "retired"),
+        ("E0006", "retired"),
+        ("E0062", "retired"),
+        ("E0010", "retired"),
+        ("E0011", "retired"),
+        ("E0020", "retired"),
+        ("E0058", "retired"),
+        ("E0206", "retired"),
+        ("E0207", "retired"),
+        ("E0745", "retired"),
+        ("E0427", "retired"),
+        ("E0912", "retired"),
+        ("E0990", "retired"),
+        ("E2301", "retired"),
+        ("E2302", "retired"),
+        ("E2303", "staged #1164"),
+        ("E2304", "retired"),
+        ("E2306", "retired"),
+        ("E2403", "staged #1542"),
+        ("E2410", "staged #1830"),
+        ("E2412", "staged #1830"),
+        ("E2413", "retired"),
+        ("E2701", "staged #1495"),
+        ("E2801", "staged #17"),
+        ("E2802", "staged #17"),
+        ("E2803", "staged #17"),
+        ("E2804", "staged #17"),
+        ("E2902", "staged #1530"),
+        ("E2940", "staged #240"),
+        ("E3002", "staged #1530"),
+        ("E3104", "retired"),
+        ("E0958", "retired"),
+        ("E0951", "retired"),
+        ("E0993", "retired"),
+        ("E0328", "retired"),
+        ("E0342", "staged #1606"),
+        ("E0954", "retired"),
+        ("E0920", "retired"),
+        ("E1109", "staged #1220"),
+        ("E1229", "retired"),
+        ("E0410", "retired"),
+        ("E0859", "staged #521"),
+        ("E0416", "retired"),
+        ("E0428", "retired"),
+        ("E2407", "staged #1330"),
+        ("E3626", "staged #521"),
     ];
 
     let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL
         .iter()
-        .map(|s| s.to_string())
+        .map(|(code, _)| (*code).to_string())
         .collect();
 
     let emitted = emitted_codes();
     let registered = registered_codes();
     let exclusions = all_exclusions();
+
+    let reason_errors = allowlist_reason_errors(EXPECTED_SPEC_AHEAD_OF_IMPL);
+    assert!(
+        reason_errors.is_empty(),
+        "Invalid EXPECTED_SPEC_AHEAD_OF_IMPL reasons:\n  {}",
+        reason_errors.join("\n  ")
+    );
+
+    const STALE_ALLOWLIST_FIXTURE: &[&str] = &["E2101", "E3001"];
+    let stale_fixture_failure = stale_allowlist_failure(
+        STALE_ALLOWLIST_FIXTURE.iter().copied(),
+        &emitted,
+    )
+    .expect("embedded stale allowlist fixture must fail");
+    assert!(stale_fixture_failure.contains("E2101"));
+    assert!(stale_fixture_failure.contains("E3001"));
+    assert!(stale_fixture_failure.contains("remove the line"));
 
     assert!(
         registered.contains("E0033"),
@@ -958,14 +1000,11 @@ fn registered_unimplemented_codes_are_expected() {
         unexpected.join("\n  ")
     );
 
-    // Also flag anything in expected but now emitted (good news — just clean up the list).
-    let now_emitted: Vec<String> = expected
-        .iter()
-        .filter(|c| emitted.contains(*c))
-        .cloned()
-        .collect();
-    // Only mention this in documentation; it's not a hard failure.
-    // (The codes in EXPECTED_SPEC_AHEAD_OF_IMPL may be promoted to emitted as
-    //  features land; remove them from the list when that happens.)
-    let _ = now_emitted;
+    let now_emitted = stale_allowlist_failure(
+        EXPECTED_SPEC_AHEAD_OF_IMPL.iter().map(|(code, _)| *code),
+        &emitted,
+    );
+    if let Some(failure) = now_emitted {
+        panic!("{failure}");
+    }
 }
