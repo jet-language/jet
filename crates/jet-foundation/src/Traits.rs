@@ -2362,17 +2362,19 @@ pub fn sized_int_has_datatree_form(ty: &Type) -> bool {
 }
 
 pub fn struct_auto_derive_ok(s: &StructDef) -> bool {
-    s.reflection_fields()
+    !s.is_single_use
+        && s.reflection_fields()
         .all(|field| field_auto_ok(&field.ty, &s.name))
 }
 
 pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {
     use crate::AST::VariantPayload;
-    e.variants.iter().all(|v| match &v.payload {
-        VariantPayload::Unit => true,
-        VariantPayload::Single(t, _) => field_auto_ok(t, &e.name),
-        VariantPayload::Named(fs) => fs.iter().all(|f| field_auto_ok(&f.ty, &e.name)),
-    })
+    !e.is_single_use
+        && e.variants.iter().all(|v| match &v.payload {
+            VariantPayload::Unit => true,
+            VariantPayload::Single(t, _) => field_auto_ok(t, &e.name),
+            VariantPayload::Named(fs) => fs.iter().all(|f| field_auto_ok(&f.ty, &e.name)),
+        })
 }
 
 fn field_auto_ok(ty: &Type, owner: &str) -> bool {
