@@ -2707,6 +2707,31 @@ fn run() {
 }
 
 #[test]
+fn fmt_preserves_inline_range_in_type_positions() {
+    // D-TYPE2-SPELL1: one inline range spelling survives parameters, returns,
+    // fields, and the typed conversion head used by a binding.
+    let src = "\
+struct Brightness {
+    level: Int(0..100)
+}
+
+fn set_brightness(level: Int(0..100)) => Int(0..100) {
+    return level
+}
+
+fn run() {
+    value :: Int(0..100).from_int(12)
+    print(\"{set_brightness(value)}\")
+}
+";
+    assert_fmt_keeps(
+        src,
+        &["level: Int(0..100)", "=> Int(0..100)", "Int(0..100).from_int(12)"],
+        "inline range type positions",
+    );
+}
+
+#[test]
 fn fmt_preserves_parse_pattern() {
     // D-PARSESTR1: a str-match arm head must keep BOTH an untyped hole and a
     // typed hole's `:Type` suffix byte-for-byte — the `:Type` suffix never

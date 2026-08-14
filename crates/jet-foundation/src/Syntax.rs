@@ -192,6 +192,8 @@
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
 // value. Range carries end inclusivity; arm heads and distinct constraints
 // keep their literal-only grammar.
+// D-TYPE2-SPELL1=A makes `Int(lo..hi)` the structural inline refinement in
+// every type position. `TYPE_INLINE_RANGE` is re-exported from math_layout.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
 // `{value:Fixed(n)}` uses the colon rail and ordinary integer-call parentheses.
 // D-FMT-INTERP2=A: trailing `=` in a hole reprints the expression source,

@@ -10,6 +10,9 @@ struct Brightness {
 
 fn set_brightness(level: Int(0..100)) => Int(0..100) :: level
 
+// The same structural inline type can cross the comptime/runtime boundary.
+@comptime_brightness :: set_brightness(42)
+
 fn checked_inline(raw: Int) => Int(0..100) ? String :: Int(0..100).from_int(raw)
 
 fn checked(raw: Int) => Severity ? String :: Severity.from_int(raw)
@@ -21,8 +24,11 @@ fn sum(band: Range) => Int {
 }
 
 fn run() {
+    print("{@comptime_brightness}")
     inline_value :: set_brightness(42)
     print("{inline_value}")
+    same_inline :: set_brightness(inline_value)
+    print("{same_inline}")
     inline_binding :: Int(0..100).from_int(12)
     print("{inline_binding}")
     brightness :: Brightness.{ level: 55 }

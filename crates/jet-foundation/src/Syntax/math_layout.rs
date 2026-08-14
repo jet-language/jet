@@ -175,8 +175,8 @@ pub const TYPE_REMOVE_BY: &str = "RemoveBy";
 /// D-RANGE-VALUE1=A: one nominal integer range for inclusive and half-open values.
 pub const TYPE_RANGE: &str = "Range";
 /// D-TYPE2-SPELL1=A (ratified 2026-08-06): the structural inline refinement
-/// form. Bounds are literal-only; this row records the spelling before #1549
-/// makes it legal in every type position.
+/// form. Bounds are literal-only and the spelling is legal in every type
+/// position.
 pub const TYPE_INLINE_RANGE: &str = "Int(lo..hi)";
 
 /// S41 (ratified M5): character type.

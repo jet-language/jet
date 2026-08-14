@@ -2031,6 +2031,10 @@ impl Type {
         }
 
         match (self, target) {
+            // An inline range is a transparent proof on its carrier. Once
+            // interval containment does not discharge the move, the ordinary
+            // carrier widening still applies (for example, Int(0..10) to Int).
+            (Type::InlineRange { base, .. }, target) => base.numeric_widening_to(target),
             // Exact Int can cross into a fixed width only through the checked
             // destination conversion. Every fixed width widens exactly into
             // the arbitrary-precision carrier.

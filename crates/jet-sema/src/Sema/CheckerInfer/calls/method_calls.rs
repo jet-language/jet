@@ -25,7 +25,7 @@ use crate::Sema::CheckerCoreLib::{
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
 };
-use crate::Sema::CheckerInfer::contains_tuple_type;
+use crate::Sema::CheckerInfer::{contains_tuple_type, exact_integer_fits, exact_integer_literal};
 use crate::Sema::Diagnostics::{
     builtin_type_from_ident, expr_root_ident, is_printable, suggest_field, type_is_copy,
 };
@@ -410,11 +410,11 @@ fn inline_range_descriptor(expr: &Expr) -> Option<(i64, i64)> {
     Some((*lo, *hi))
 }
 
-fn inline_range_literal(expr: &Expr) -> Option<(i64, Span)> {
-    let Expr::Int(value, span, ..) = expr else {
+fn inline_range_literal(expr: &Expr) -> Option<(crate::Numeric::CtBigInt, Span)> {
+    let Expr::Int(value, span, _, raw) = expr else {
         return None;
     };
-    Some((*value, *span))
+    Some((exact_integer_literal(*value, raw.as_deref()), *span))
 }
 
 impl<'a> Checker<'a> {
@@ -1231,12 +1231,13 @@ impl<'a> Checker<'a> {
                     call.resolved_ret = Some(target.clone());
                 }
                 if let Some((value, literal_span)) = inline_range_literal(&args[0].expr) {
-                    if value < lo || value > hi {
+                    if !exact_integer_fits(&value, i128::from(lo), i128::from(hi)) {
+                        let shown = value.to_string_rep();
                         self.diags.push(Diagnostic::error(
                             "E0135",
-                            format!("`{value}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
+                            format!("`{shown}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
                             format!(
-                                "a range type only holds values inside its bounds; `{value}` can never be an `Int({lo}..{hi})`"
+                                "a range type only holds values inside its bounds; `{shown}` can never be an `Int({lo}..{hi})`"
                             ),
                             format!("use a value in `{lo}..{hi}`, or widen the type's range"),
                             Some(literal_span),

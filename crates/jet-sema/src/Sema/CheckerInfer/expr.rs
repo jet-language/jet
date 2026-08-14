@@ -1438,12 +1438,14 @@ impl<'a> Checker<'a> {
                     other => other,
                 };
                 if let Some(Type::InlineRange { base, lo, hi }) = expected {
-                    if (n as i128) < i128::from(lo) || (n as i128) > i128::from(hi) {
+                    let value = super::exact_integer_literal(n, raw.as_deref());
+                    if !super::exact_integer_fits(&value, i128::from(lo), i128::from(hi)) {
+                        let shown = value.to_string_rep();
                         self.diags.push(Diagnostic::error(
                             "E0135",
-                            format!("`{n}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
+                            format!("`{shown}` is outside `Int({lo}..{hi})`'s range {lo}..{hi}"),
                             format!(
-                                "a range type only holds values inside its bounds; `{n}` can never be an `Int({lo}..{hi})`"
+                                "a range type only holds values inside its bounds; `{shown}` can never be an `Int({lo}..{hi})`"
                             ),
                             format!("use a value in `{lo}..{hi}`, or widen the type's range"),
                             Some(span),

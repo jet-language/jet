@@ -664,8 +664,8 @@ impl<'a> Checker<'a> {
                 .map(|(_, candidate)| candidate)
         }
     
-        /// Returns true when a diagnostic was emitted (the mismatch is already
-        /// reported); callers may add a context-specific error otherwise.
+        /// Returns true when a diagnostic was emitted or compatibility was
+        /// handled; callers may add a context-specific error otherwise.
         ///
         pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
             if want == got {
@@ -685,6 +685,14 @@ impl<'a> Checker<'a> {
                     return true;
                 }
                 return false;
+            }
+            // D-TYPE2-SPELL1=A: an inline range is proof attached to its carrier.
+            // Its stored value is already an `Int`, so an exact carrier boundary
+            // needs no runtime conversion or second range check.
+            if matches!(got, Type::InlineRange { .. })
+                && got.erased_inline_ranges() == *want
+            {
+                return true;
             }
             if let (
                 Type::Fn {
