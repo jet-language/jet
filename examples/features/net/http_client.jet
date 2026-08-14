@@ -18,7 +18,7 @@ fn run() ? {
         _req_two :: stream_two.read_text(8192) ?? return
         net.tcp_reply(^stream_two, "200 OK", "hello from core.http") ?? return
     }
-    addr :: ch.receive()?
+    addr :: ch.receive().or_err("no addr")?
     simple :: http.get("http://{addr}/")?
     configured :: http_client.request("GET", "http://{addr}/")
         .connect_timeout(1000)
