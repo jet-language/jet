@@ -3676,7 +3676,7 @@ pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), Lock
     let path = live_path(project);
     let project = project.to_path_buf();
     let lock = lock.clone();
-    crate::RuntimePolicy::with_project_lock(&project, "semantic-lock", move || {
+    crate::RuntimePolicy::with_project_lock(&project, "semantic-lock", || {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
