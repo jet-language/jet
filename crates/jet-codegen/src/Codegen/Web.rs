@@ -932,6 +932,17 @@ fn web_wasm_expr_supported(
                     .iter()
                     .all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions))
         }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } => {
+            wasm_math_core_helper(module, method, args, &expr.ty).is_some()
+                && args.iter().all(|arg| {
+                    web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
+                })
+        }
         TIR::TExprKind::IfExpr {
             cond,
             then_body,
@@ -2507,6 +2518,11 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
+    if super::core_usage_matches(&bundle.used_core, &["core.math"]) {
+        // I9: Wasm calls the same scalar math Prelude as AOT, JIT, and the
+        // interpreter. This is an adapter inclusion, not a second kernel.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathLibPure.rs"));
+    }
     let need_packed_abi = |pred: &dyn Fn(&Type) -> bool| {
         wasm_funcs.iter().any(|f| {
             let export = f.marker == Some(WebPartitionMarker::WasmExport)
@@ -4363,6 +4379,19 @@ fn wasm_emit_expr(
             callees.next().ok_or(())?;
             if callees.next().is_some() { return Err(()); }
             format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } => {
+            let helper = wasm_math_core_helper(module, method, args, &expr.ty).ok_or(())?;
+            let args = args
+                .iter()
+                .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?;
+            format!("{helper}({})", args.join(", "))
         }
         TIR::TExprKind::NumericMethod {
             recv,
@@ -6481,6 +6510,31 @@ fn web_core_arity(module: &str, method: &str) -> Option<usize> {
         (false, "on") => Some(3),
         _ => None,
     }
+}
+
+fn wasm_math_core_helper(
+    module: &str,
+    method: &str,
+    args: &[TIR::TExpr],
+    ret_ty: &Type,
+) -> Option<&'static str> {
+    if module != "core.math" {
+        return None;
+    }
+    let arity = match method {
+        "abs" => 1,
+        "min" | "max" => 2,
+        "clamp" => 3,
+        _ => return None,
+    };
+    if args.len() != arity {
+        return None;
+    }
+    let scalar_ty = &args.first()?.ty;
+    if args.iter().any(|arg| &arg.ty != scalar_ty) || ret_ty != scalar_ty {
+        return None;
+    }
+    TIR::core_math_scalar_helper(method, scalar_ty)
 }
 
 fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {

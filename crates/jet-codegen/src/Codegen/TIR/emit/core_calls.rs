@@ -87,7 +87,7 @@ fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
     format!("{name} {{ {fields} }}")
 }
 
-fn core_math_scalar_helper(method: &str, ty: &Type) -> Option<&'static str> {
+pub(crate) fn core_math_scalar_helper(method: &str, ty: &Type) -> Option<&'static str> {
     match (method, ty) {
         ("abs", Type::Int) => Some("jet_std_math_abs_i64"),
         ("min", Type::Int) => Some("jet_std_math_min_i64"),
