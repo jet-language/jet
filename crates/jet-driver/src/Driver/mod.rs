@@ -2076,8 +2076,10 @@ fn read_build_file(
 pub fn query_build_plan(
     file: &str,
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-    compile_bundle_path_build(file, build_query_options())
-        .map(|output| output.build.map(|build| build.plan))
+    crate::run_compiler_work(|| {
+        compile_bundle_path_build(file, build_query_options())
+            .map(|output| output.build.map(|build| build.plan))
+    })
 }
 
 /// Read the one build-fact snapshot produced by the query path. This keeps
@@ -2091,7 +2093,7 @@ pub fn query_build_facts(
     let mut options = build_query_options();
     options.profile = profile.to_string();
     options.setting_overrides = setting_overrides.clone();
-    compile_bundle_path_build(file, options).map(|output| output.build_facts)
+    crate::run_compiler_work(|| compile_bundle_path_build(file, options).map(|output| output.build_facts))
 }
 
 fn build_query_options() -> BuildRunOptions {
@@ -2139,13 +2141,15 @@ pub fn query_build_plan_with_overlay(
     file: &str,
     source: &str,
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(
-        file,
-        build_query_options(),
-        Some((std::path::Path::new(file), source)),
-        None,
-    )
-    .map(|output| output.build.map(|build| build.plan))
+    crate::run_compiler_work(|| {
+        compile_bundle_path_build_inner(
+            file,
+            build_query_options(),
+            Some((std::path::Path::new(file), source)),
+            None,
+        )
+        .map(|output| output.build.map(|build| build.plan))
+    })
 }
 
 /// One canonical graph representation shared by CLI and LSP.

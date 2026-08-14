@@ -895,11 +895,21 @@ fn workspace_build_root_diagnostic(
     workspace_path: &std::path::Path,
     diagnostic: &Diagnostic,
 ) -> Diagnostic {
+    // Workspace policy parsing already owns the registered E3503 wording.
+    // Preserve it instead of replacing the diagnostic with a path-shaped
+    // variant that loses the build-authority contract.
+    if diagnostic.code == "E3503" {
+        return diagnostic.clone();
+    }
     Diagnostic::error(
         "E3503",
-        format!("build policy in `{}` is malformed", workspace_path.display()),
-        diagnostic.why.clone(),
-        diagnostic.fix.clone(),
+        "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy.".to_string(),
+        format!(
+            "workspace build policy in `{}` is present but unavailable: {}",
+            workspace_path.display(),
+            diagnostic.why
+        ),
+        "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy.".to_string(),
         None,
     )
 }
@@ -1279,9 +1289,8 @@ fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>>
     let workspace_root = Loader::find_workspace_root_checked(&directory).map_err(|diagnostic| {
         vec![workspace_build_root_diagnostic(&directory, &diagnostic)]
     })?;
-    let package_root = Loader::find_manifest_root_checked(&directory).map_err(|diagnostic| {
-        vec![workspace_build_root_diagnostic(&directory, &diagnostic)]
-    })?;
+    let package_root = Loader::find_manifest_root_checked(&directory)
+        .map_err(|diagnostic| vec![diagnostic])?;
     Ok(match (workspace_root, package_root) {
         (Some(workspace), Some(package)) if Loader::is_physically_within(&workspace, &package) => {
             package
@@ -1349,7 +1358,7 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
         .as_ref()
         .map(|(_, source)| source.path.clone());
     let package_root = Loader::find_manifest_root_checked(entry_dir)
-        .map_err(|diagnostic| vec![workspace_build_root_diagnostic(entry_dir, &diagnostic)])?
+        .map_err(|diagnostic| vec![diagnostic])?
         .filter(|root| {
             workspace_root
                 .as_ref()

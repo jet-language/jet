@@ -1864,7 +1864,10 @@ fn nested_workspace_is_the_module_import_root() {
         .iter()
         .find(|diagnostic| diagnostic.code == "E0603")
         .expect("project-local import must fail at the nested workspace root");
-    assert_eq!(diagnostic.what, "can't find a project module named `_outside`");
+    assert_eq!(
+        diagnostic.what,
+        "can't find a project module named `project._outside`"
+    );
     assert_eq!(
         diagnostic.why,
         "project-local imports resolve declared module names, not filenames"

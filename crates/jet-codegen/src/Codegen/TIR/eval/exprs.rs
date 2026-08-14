@@ -4457,6 +4457,89 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    fn apply_core_call_with_policy(
+        &mut self,
+        module: &str,
+        method: &str,
+        argv: Vec<CtValue>,
+        source_span: Span,
+        resolved_ret: Option<&Type>,
+    ) -> Result<CtValue, Diagnostic> {
+        if !crate::Comptime::is_tier2_core_call(module, method, self.repl_mode) {
+            return apply_core_call_with_type(
+                module,
+                method,
+                argv,
+                source_span,
+                self.repl_mode,
+                resolved_ret,
+            );
+        }
+        if self.repl_mode {
+            let mut sink = self
+                .sink
+                .as_ref()
+                .map(|sink| sink.lock().expect("evaluator sink poisoned"));
+            return apply_repl_authorized_core_call_with_type(
+                module,
+                method,
+                argv,
+                source_span,
+                &self.base_dir,
+                sink.as_deref_mut(),
+                &self.repl_grants,
+                reborrow_repl_authorizer(&mut self.repl_authorizer),
+                resolved_ret,
+            );
+        }
+        if self.impure_depth > 0
+            && jet_foundation::Policy::resolve_invocation(
+                jet_foundation::Policy::PolicyKey::Impure,
+                &self.gates,
+            )
+            .unwrap_or(false)
+        {
+            let mut sink = self
+                .sink
+                .as_ref()
+                .map(|sink| sink.lock().expect("evaluator sink poisoned"));
+            return apply_impure_core_call_with_type(
+                module,
+                method,
+                argv,
+                source_span,
+                &self.base_dir,
+                sink.as_deref_mut(),
+                false,
+                None,
+                None,
+                resolved_ret,
+            );
+        }
+        if self.impure_depth == 0 {
+            return Err(crate::Sema::Diagnostics::render_registered(
+                "E3410",
+                format!(
+                    "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
+                ),
+                "ambient I/O and storeful Core APIs are not allowed in pure comptime evaluation"
+                    .to_string(),
+                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime"
+                    .to_string(),
+                Some(source_span),
+            ));
+        }
+        Err(crate::Sema::Diagnostics::render_registered(
+            "E3411",
+            format!(
+                "`{module}.{method}()` inside `#Impure` gate, but `--gate impure=allow` was not passed"
+            ),
+            "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
+            "add `--gate impure=allow` to your `jet build` / `jet run` invocation".to_string(),
+            Some(source_span),
+        ))
+    }
+
     fn eval_core_call_expr(
         &mut self,
         expr: &'a TExpr,
@@ -4803,97 +4886,14 @@ impl<'a> EvalCtx<'a> {
         if let Some(value) = self.runtime_time_now(module, method, &argv) {
             return Ok(value);
         }
-        let is_tier2 = crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
         let is_shuffle = module == "core.math.random" && method == "shuffle";
-        if !is_tier2 {
-            let value = apply_core_call_with_type(
-                module,
-                method,
-                argv,
-                source_span,
-                self.repl_mode,
-                Some(&expr.ty),
-            )?;
-            if is_shuffle {
-                if let Some(place) = args.first() {
-                    let items = match &value {
-                        CtValue::List(items) => items.clone(),
-                        _ => return Err(unsupported("random.shuffle needs a list", source_span)),
-                    };
-                    self.write_back_place(place, CtValue::List(items), scope)?;
-                    return Ok(CtValue::Unit);
-                }
-            }
-            return Ok(mark_unknown_progress_total(
-                value,
-                module,
-                method,
-                args,
-                progress_known_total,
-            ));
-        }
-        let value = if self.repl_mode {
-            let mut sink = self
-                .sink
-                .as_ref()
-                .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            apply_repl_authorized_core_call_with_type(
-                module,
-                method,
-                argv,
-                source_span,
-                &self.base_dir,
-                sink.as_deref_mut(),
-                &self.repl_grants,
-                reborrow_repl_authorizer(&mut self.repl_authorizer),
-                Some(&expr.ty),
-            )
-        } else if self.impure_depth > 0
-            && jet_foundation::Policy::resolve_invocation(
-                jet_foundation::Policy::PolicyKey::Impure,
-                &self.gates,
-            )
-            .unwrap_or(false)
-        {
-            let mut sink = self
-                .sink
-                .as_ref()
-                .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-            apply_impure_core_call_with_type(
-                module,
-                method,
-                argv,
-                source_span,
-                &self.base_dir,
-                sink.as_deref_mut(),
-                false,
-                None,
-                None,
-                Some(&expr.ty),
-            )
-        } else if self.impure_depth == 0 {
-            return Err(crate::Sema::Diagnostics::render_registered(
-                "E3410",
-                format!(
-                    "`{module}.{method}()` is a Tier-2 comptime effect — it requires a `#Impure` gate"
-                ),
-                "ambient I/O and storeful Core APIs are not allowed in pure comptime evaluation"
-                    .to_string(),
-                "wrap the comptime binding in `#Impure(\"reason\") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime"
-                    .to_string(),
-                Some(source_span),
-            ));
-        } else {
-            return Err(crate::Sema::Diagnostics::render_registered(
-                "E3411",
-                format!(
-                    "`{module}.{method}()` inside `#Impure` gate, but `--gate impure=allow` was not passed"
-                ),
-                "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
-                "add `--gate impure=allow` to your `jet build` / `jet run` invocation".to_string(),
-                Some(source_span),
-            ));
-        }?;
+        let value = self.apply_core_call_with_policy(
+            module,
+            method,
+            argv,
+            source_span,
+            Some(&expr.ty),
+        )?;
         if is_shuffle {
             if let Some(place) = args.first() {
                 let items = match &value {
@@ -8273,12 +8273,11 @@ impl<'a> EvalCtx<'a> {
                                     .ok_or_else(|| unsupported("reflect value", self.span()))?;
                                 return Ok(self.reflect_value(value, &args[0].value.ty));
                             }
-                            let value = apply_core_call_with_type(
+                            let value = self.apply_core_call_with_policy(
                                 module,
                                 &method.name,
                                 argv,
                                 self.span(),
-                                self.repl_mode,
                                 Some(&expr.ty),
                             )?;
                             if module == "core.math.random" && method.name == "shuffle" {
