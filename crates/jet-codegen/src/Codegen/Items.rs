@@ -1725,23 +1725,6 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     for item in items {
         walk_item(item, &mut seen, &mut unions);
     }
-    fn generated_union_names(items: &[Item], names: &mut std::collections::HashSet<String>) {
-        for item in items {
-            match item {
-                Item::Enum(definition) if definition.name.starts_with("__JetUnion_") => {
-                    names.insert(definition.name.clone());
-                }
-                Item::CodeModule(module) => {
-                    if let Some(body) = &module.body {
-                        generated_union_names(body, names);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    let mut generated_union_names_set = std::collections::HashSet::new();
-    generated_union_names(items, &mut generated_union_names_set);
     for members in unions {
         let name = crate::AST::union_enum_name(&members);
         let rust_name = mangle_path(&name);
@@ -1760,20 +1743,18 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             rust_derives.push("Eq");
             rust_derives.push("Hash");
         }
-        // D-SERDE2: sema supplies the anonymous union as a typed Enum item.
-        // Keep this representation fallback only for direct codegen callers;
-        // production programs already have the ordinary item above.
-        if !generated_union_names_set.contains(name.as_str()) {
-            if !rust_derives.is_empty() {
-                out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
-            }
-            out.push_str(&format!("pub enum {rust_name} {{\n"));
-            for m in &members {
-                let tag = crate::AST::union_member_tag(m);
-                out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
-            }
-            out.push_str("}\n\n");
+        // The synthetic Enum item carries checked codec and trait bodies. Its
+        // Rust representation is emitted here exactly once; the ordinary item
+        // loop deliberately skips `__JetUnion_*` enums below.
+        if !rust_derives.is_empty() {
+            out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
         }
+        out.push_str(&format!("pub enum {rust_name} {{\n"));
+        for m in &members {
+            let tag = crate::AST::union_member_tag(m);
+            out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
+        }
+        out.push_str("}\n\n");
         if !has_shared_guard {
             out.push_str(&format!(
                 "impl JetShow for {rust_name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
