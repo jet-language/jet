@@ -5515,6 +5515,39 @@ fn run() {
 }
 
 #[test]
+fn mutable_task_list_drain_discharges_linear_duty() {
+    let src = r#"
+fn run() {
+    workers := [Task<Int>].{}
+    workers.push(task 1)
+    loop workers.len() > 0 {
+        worker :: workers.pop() ?? panic("missing worker")
+        print(worker.join() ?? 0)
+    }
+}
+"#;
+    jet::compile(src).expect("a proven pop-to-empty loop must discharge the task-list duty");
+}
+
+#[test]
+fn task_list_drain_that_reinserts_still_owes_consume() {
+    let src = r#"
+fn run() {
+    workers := [Task<Int>].{}
+    workers.push(task 1)
+    loop workers.len() > 0 {
+        worker :: workers.pop() ?? panic("missing worker")
+        print(worker.join() ?? 0)
+        workers.push(task 2)
+    }
+}
+"#;
+    let diags = jet::compile(src).expect_err("a drain that reinserts is not proven empty");
+    let duty = diags.iter().find(|d| d.code == "E0140").expect("E0140");
+    assert!(duty.what.contains("workers"), "{duty:?}");
+}
+
+#[test]
 fn moved_task_list_parameter_loop_compiles() {
     let src = r#"
 fn drain(hs: ^[Task<Int>]) => Int {

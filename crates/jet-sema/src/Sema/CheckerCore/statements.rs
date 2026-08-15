@@ -60,6 +60,75 @@ fn exits_current_block(stmt: &Stmt) -> bool {
     )
 }
 
+/// A canonical `while handles.len() > 0` drain proves a linear collection is
+/// empty when control reaches the next statement. Keep this proof structural:
+/// the first body statement must pop that same collection, and neither its
+/// fallback nor any later straight-line statement may touch the collection.
+fn drained_collection<'a>(
+    cond: &'a Expr,
+    body: &'a [Stmt],
+) -> Option<(&'a str, crate::Diagnostics::Span)> {
+    let Expr::Binary(crate::AST::BinOp::Gt, lhs, rhs, _) = cond.without_parens() else {
+        return None;
+    };
+    let Expr::MethodCall {
+        receiver,
+        method,
+        args,
+        ..
+    } = lhs.without_parens()
+    else {
+        return None;
+    };
+    let Expr::Ident(name, name_span) = receiver.without_parens() else {
+        return None;
+    };
+    if method != "len"
+        || !args.is_empty()
+        || !matches!(rhs.without_parens(), Expr::Int(0, ..))
+        || !body
+            .iter()
+            .all(|stmt| matches!(stmt, Stmt::Val(_) | Stmt::Expr(_)))
+        || body
+            .iter()
+            .skip(1)
+            .any(|stmt| crate::Sema::Captures::stmt_refs_name(stmt, name))
+    {
+        return None;
+    }
+    let Stmt::Val(binding) = body.first()? else {
+        return None;
+    };
+    let value = match binding.init.without_parens() {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
+            if crate::Sema::Captures::expr_refs_name(fallback, name) {
+                return None;
+            }
+            value.without_parens()
+        }
+        value => value,
+    };
+    let Expr::MethodCall {
+        receiver: popped,
+        method,
+        args,
+        ..
+    } = value
+    else {
+        return None;
+    };
+    if method == "pop"
+        && args.is_empty()
+        && matches!(popped.without_parens(), Expr::Ident(popped, _) if popped == name)
+    {
+        Some((name, *name_span))
+    } else {
+        None
+    }
+}
+
 impl<'a> Checker<'a> {
         fn push_loop_value_frame(&mut self, label: Option<&(String, crate::Diagnostics::Span)>) {
             let (kind, pending_label) = self
@@ -1777,6 +1846,17 @@ impl<'a> Checker<'a> {
                     let after_body = self.flow.clone();
                     self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     self.loop_depth -= 1;
+                    if after_body.reachable {
+                        if let Some((name, span)) = drained_collection(cond, body) {
+                            let name = name.to_string();
+                            let carries_duty = self
+                                .lookup(&name)
+                                .is_some_and(|info| self.type_is_single_use(&info.ty));
+                            if carries_duty {
+                                self.mark_moved(name, span);
+                            }
+                        }
+                    }
                     self.pop_loop_value_frame();
                     if label.is_some() {
                         self.loop_labels.pop();

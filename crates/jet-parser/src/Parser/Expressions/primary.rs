@@ -767,9 +767,32 @@ impl<'a> Parser<'a> {
             };
             let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
                 let open = self.bump().span;
-                let body = self.block_stmts();
-                let end = self.toks[self.pos - 1].span.end;
-                (LambdaBody::Block(body), Span::new(open.start, end))
+                let body_start = self.pos;
+                let diagnostic_start = self.diags.len();
+                let tail = match self.expr() {
+                    Ok(expr) => {
+                        if matches!(self.peek().kind, TokKind::Semi)
+                            && matches!(self.peek2().kind, TokKind::RBrace)
+                        {
+                            self.bump();
+                        }
+                        matches!(self.peek().kind, TokKind::RBrace).then_some(expr)
+                    }
+                    Err(_) => None,
+                };
+                if let Some(expr) = tail {
+                    let close = self.bump().span;
+                    (
+                        LambdaBody::Expr(Box::new(expr)),
+                        Span::new(open.start, close.end),
+                    )
+                } else {
+                    self.pos = body_start;
+                    self.diags.truncate(diagnostic_start);
+                    let body = self.block_stmts();
+                    let end = self.toks[self.pos - 1].span.end;
+                    (LambdaBody::Block(body), Span::new(open.start, end))
+                }
             } else {
                 let body = self.expr()?;
                 let body_span = body.span();
