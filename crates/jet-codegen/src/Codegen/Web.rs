@@ -8,7 +8,7 @@ use super::{
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-use crate::AST::{AccessConvention, FfiLink, Func, Item, ProgramBundle, Type};
+use crate::AST::{AccessConvention, CtFloat, FfiLink, Func, Item, ProgramBundle, Type};
 use crate::Codegen::mangle_generated;
 use jet_foundation::WebPartition::{partition_key, WebBucket, WebPartitionMarker};
 
@@ -4661,7 +4661,13 @@ fn wasm_emit_expr(
             "JetWasmInt::from_decimal({:?}).expect(\"valid exact integer literal\")",
             value.to_string_rep()
         ),
-        TIR::TExprKind::FloatLit(n) => n.to_string(),
+        TIR::TExprKind::FloatLit(n) => {
+            if matches!(&expr.ty, Type::Float32) {
+                CtFloat::f32(*n as f32).serialize()
+            } else {
+                CtFloat::f64(*n).serialize()
+            }
+        }
         TIR::TExprKind::BoolLit(b) => b.to_string(),
         TIR::TExprKind::Unit => "()".to_string(),
         TIR::TExprKind::StrLit(parts) => {
