@@ -56,7 +56,7 @@ fn main_returns_app(program: &JitProgram) -> bool {
 }
 
 pub(crate) fn fresh_runtime() -> JitRuntime {
-    fresh_runtime_with_program_allocator(None)
+    fresh_runtime_with_allocator_cap(None)
 }
 
 pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRuntime {
