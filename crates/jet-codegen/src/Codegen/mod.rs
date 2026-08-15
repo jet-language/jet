@@ -625,10 +625,11 @@ fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) 
 /// counters are written to `JET_COV_OUT` so `jet test` can render its report.
 /// Std-only (I6): mutex-protected ordered maps.
 const COV_PRELUDE: &str = r#"
-use std::sync::Mutex;
-use std::collections::{BTreeMap, BTreeSet};
-static JET_COV_HITS: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
-static JET_COV_BRANCHES: Mutex<BTreeMap<String, (String, u64, u64)>> = Mutex::new(BTreeMap::new());
+static JET_COV_HITS: std::sync::Mutex<std::collections::BTreeSet<usize>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+static JET_COV_BRANCHES: std::sync::Mutex<
+    std::collections::BTreeMap<String, (String, u64, u64)>,
+> = std::sync::Mutex::new(std::collections::BTreeMap::new());
 fn jet_cov(line: usize) {
     if let Ok(mut s) = JET_COV_HITS.lock() { s.insert(line); }
 }
