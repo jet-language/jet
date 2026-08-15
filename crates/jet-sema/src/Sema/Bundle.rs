@@ -3,7 +3,7 @@ use crate::Diagnostics::{Diagnostic, TextEdit};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, CodeModule, ConstAttr, EnumDef, EnumLitArg, Expr, ForKind, Func,
+    AccessConvention, CodeModule, ConstAttr, EnumLitArg, Expr, ForKind, Func,
     GenericModuleDef, GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef,
     ModuleArg, OrFallback, Param, ParamZone, Pattern, ProgramBundle, RustConstKind, Stmt, StrPart,
     SwitchArm, Type, VariantPayload,

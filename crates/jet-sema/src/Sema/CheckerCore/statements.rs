@@ -103,7 +103,7 @@ fn drained_collection<'a>(
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            if crate::Sema::Captures::expr_refs_name(fallback, name) {
+            if crate::Sema::Captures::fallback_refs_name(fallback, name) {
                 return None;
             }
             value.without_parens()

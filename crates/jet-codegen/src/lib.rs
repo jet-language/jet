@@ -7,6 +7,11 @@ pub use jet_sema::{
 };
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
+// `EncodingJson.rs` resolves exact-number validation through
+// `super::jet_json_number`; supply it at the root the same way `jet-jit` does.
+#[allow(unused_imports)]
+pub(crate) use jet_foundation::JSONNumber as jet_json_number;
+#[allow(dead_code)]
 pub(crate) mod jet_encoding_json {
     include!("../../jet-foundation/src/EncodingJson.rs");
 }

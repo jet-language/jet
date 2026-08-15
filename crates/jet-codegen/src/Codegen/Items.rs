@@ -1667,9 +1667,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                     walk(t, seen, out_members);
                 }
             }
-            Type::FixedList { elem, .. }
-            | Type::InlineRange { base: elem, .. }
-            | Type::Quantity { base: elem, .. } => walk(elem, seen, out_members),
+            Type::FixedList { elem, .. } => walk(elem, seen, out_members),
             _ => {}
         }
     }

@@ -2,7 +2,7 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, CModule, ExternFn, ExternRustBlock, Func, FuncSig, Item, Param, Type,
+    AccessConvention, CModule, ExternFn, ExternRustBlock, FuncSig, Item, Param, Type,
     VariantPayload,
 };
 use crate::Sema::Bundle::fn_types_compatible;

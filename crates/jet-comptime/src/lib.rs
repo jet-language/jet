@@ -9,6 +9,11 @@ pub use jet_foundation::{
     SHA256,
 };
 
+// The included `jet_std` Prelude fragments resolve exact-number lexing through
+// `crate::jet_json_number`, the same path `jet-jit` provides at its own root.
+#[allow(unused_imports)]
+pub(crate) use jet_foundation::JSONNumber as jet_json_number;
+
 pub(crate) trait JetShow {
     fn jet_show(&self) -> String;
 }

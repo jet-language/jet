@@ -322,6 +322,24 @@ pub(crate) fn lambda_body_refs_name(body: &LambdaBody, name: &str) -> bool {
     }
 }
 
+/// Does an `expr ?? …` right-hand side read `name`? The value-bearing arms
+/// recurse; the diverging arms (`return`/`panic`/`break`/`next`) never can.
+pub(crate) fn fallback_refs_name(fallback: &OrFallback, name: &str) -> bool {
+    match fallback {
+        OrFallback::Value(e) => expr_refs_name(e, name),
+        OrFallback::Block { body, value, .. } => {
+            body.iter().any(|stmt| stmt_refs_name(stmt, name)) || expr_refs_name(value, name)
+        }
+        OrFallback::Return(Some(e), _) => expr_refs_name(e, name),
+        OrFallback::Return(None, _)
+        | OrFallback::Panic { .. }
+        | OrFallback::Break(_)
+        | OrFallback::Continue(_)
+        | OrFallback::BreakLabel(..)
+        | OrFallback::ContinueLabel(..) => false,
+    }
+}
+
 pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
     match e {
         Expr::PtrFromAddr { addr, .. } => expr_refs_name(addr, name),
@@ -387,18 +405,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_refs_name(inner, name),
         Expr::OrFallback {
             value, fallback, ..
-        } => {
-            expr_refs_name(value, name)
-                || match fallback {
-                    OrFallback::Value(e) => expr_refs_name(e, name),
-                    OrFallback::Block { body, value, .. } => {
-                        body.iter().any(|stmt| stmt_refs_name(stmt, name))
-                            || expr_refs_name(value, name)
-                    }
-                    OrFallback::Return(Some(e), _) => expr_refs_name(e, name),
-                    _ => false,
-                }
-        }
+        } => expr_refs_name(value, name) || fallback_refs_name(fallback, name),
         Expr::PatternTest {
             subject, pattern, ..
         } => {

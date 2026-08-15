@@ -186,7 +186,7 @@ fn resolve_output_callable(
         ));
         return None;
     }
-    let mut contract_diags = Vec::new();
+    let contract_diags = Vec::new();
     let params_ok = match kind {
         crate::AST::OutputKind::Executable if signature.params.len() == 1 => {
             let param_ty = &signature.params[0].1;

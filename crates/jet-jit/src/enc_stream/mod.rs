@@ -135,6 +135,9 @@ pub(crate) mod runtime {
             Bool(bool),
             Int(i64),
             Float(f64),
+            // D-JSON-EXACTNUM1: internal exact-number carrier, mirrored from
+            // CommonTypes.rs so the JIT host and AOT agree on the variant set.
+            Number(String),
             Text(String),
             Bytes(Vec<u8>),
             ArrayStart,
@@ -150,11 +153,18 @@ pub(crate) mod runtime {
             Bool(bool),
             Int(i64),
             Float(f64),
+            Number(String),
+            TypedText(String),
             Text(String),
             Bytes(Vec<u8>),
             Array(Vec<DataTree>),
             Object(Vec<(String, DataTree)>),
         }
+
+        // `EncodingStream.rs` validates exact JSON number tokens through
+        // `jet_std::validate_json_number`; the JIT host reads the same
+        // foundation implementation the AOT Prelude embeds.
+        pub use jet_foundation::JSONNumber::validate_json_number;
 
         // #1636: one home for the limb-arithmetic bigint routine.
         // `jet_foundation::Numeric::CtBigInt` (already a direct dependency of
@@ -274,6 +284,7 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) eof: bool,
             pub(crate) record_mode: bool,
+            pub(crate) typed_numbers: bool,
             pub(crate) allocation_budget: Option<super::JetEncodingAllocationBudget>,
             pub(crate) output_heap: usize,
         }

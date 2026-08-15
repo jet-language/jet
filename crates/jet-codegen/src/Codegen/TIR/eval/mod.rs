@@ -27,6 +27,9 @@ mod gc_runtime {
     include!("../../../../../jet-rt/src/__gc.rs");
 }
 
+// Included Prelude fragment: the evaluator marshals only the arms it reaches,
+// so the unreached rows in the shared source are not dead product code.
+#[allow(dead_code)]
 mod contract_semantics {
     use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
     include!("../../../Prelude/Core/Contracts.rs");
@@ -37,6 +40,7 @@ mod range_semantics {
     include!("../../../Prelude/Core/RangeBounds.rs");
     include!("../../../Prelude/Core/InlineRange.rs");
 }
+#[allow(dead_code)]
 mod measurement_semantics {
     include!("../../../Prelude/Core/Measurement.rs");
 }

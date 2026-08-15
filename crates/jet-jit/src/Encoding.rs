@@ -123,7 +123,11 @@ pub(crate) mod json_rt {
     }
 
     pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
-        crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(value))
+        // `with_runtime_mut` needs a `Default` return, and a `Result` has none:
+        // carry the fallible answer in an `Option` so "no resident runtime" is
+        // reported instead of silently reading as a parse failure.
+        crate::Concurrency::with_runtime_mut(|rt| Some(rt.heap.int_from_str(value)))
+            .unwrap_or_else(|| Err("no resident runtime to hold an exact Int".to_string()))
     }
 
     pub fn jet_int_to_i64(value: i64) -> Option<i64> {

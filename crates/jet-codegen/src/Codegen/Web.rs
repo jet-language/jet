@@ -2132,7 +2132,7 @@ fn js_runtime_stop_metadata() -> String {
         "__JET_RUNTIME_MESSAGE__",
         "",
     );
-    let default_source = default_report.source.clone();
+    let default_source = default_report.source;
     let default_exit_code = default_report.exit_code;
     let default_rendered = report_template(default_report);
     let mut out = format!(
@@ -2169,7 +2169,7 @@ fn js_runtime_stop_metadata() -> String {
             message,
             "",
         );
-        let source = report.source.clone();
+        let source = report.source;
         let exit_code = report.exit_code;
         let rich_context = jet_foundation::Outcome::jet_runtime_stop_has_context(report.code);
         let rendered = report_template(report);

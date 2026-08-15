@@ -2244,7 +2244,6 @@ mod WebPartition;
 
 pub(crate) use KnowledgeLoss::{
     allows_gate as knowledge_gate_allows,
-    diagnostic as knowledge_loss_diagnostic,
     requires_gate as knowledge_loss_requires_gate,
     KnowledgeGate,
     KnowledgePlane,
