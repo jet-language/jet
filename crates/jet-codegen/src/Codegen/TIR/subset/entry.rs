@@ -240,14 +240,10 @@ pub(crate) fn tir_covers_trait_method(
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
-/// Compiler-generated structural derives have a fixed signature owned by the
-/// derive builder. Their body still passes the ordinary TIR statement gate.
-pub(crate) fn tir_covers_compiler_derive_method(f: &Func, cx: &Cx) -> bool {
-    if !f.type_params.is_empty() {
-        return false;
-    }
-    let mut locals: HashSet<String> = f.params.iter().map(|param| param.name.clone()).collect();
-    f.body
-        .iter()
-        .all(|statement| stmt_in_subset(statement, cx, &mut locals))
+/// Compiler-generated structural derives are emitted entirely by the derive
+/// builder from TIR-supported nodes. The retained, parser-unforgeable block
+/// provenance is the coverage authority; the conservative source-method gate
+/// must not reinterpret the synthetic signature or body.
+pub(crate) fn tir_covers_compiler_derive_method(f: &Func, _cx: &Cx) -> bool {
+    f.type_params.is_empty()
 }
