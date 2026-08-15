@@ -1682,12 +1682,30 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         funcs.push(lowered);
                     }
                 }
-                Item::Struct(definition) if definition.type_params.is_empty() => {
+                item @ (Item::Struct(_) | Item::Enum(_)) => {
+                    let (name, type_params, methods, trait_impls) = match item {
+                        Item::Struct(definition) => (
+                            &definition.name,
+                            &definition.type_params,
+                            &definition.methods,
+                            &definition.trait_impls,
+                        ),
+                        Item::Enum(definition) => (
+                            &definition.name,
+                            &definition.type_params,
+                            &definition.methods,
+                            &definition.trait_impls,
+                        ),
+                        _ => unreachable!("nominal item gate"),
+                    };
+                    if !type_params.is_empty() {
+                        continue;
+                    }
                     imported_cx.jit_local_call_prefix =
                         Some(format!("{}::", mangle(&imported.alias)));
                     for owner in imported_type_owners(bundle, module_idx) {
-                        let qualified = imported_type_name(&owner, &definition.name);
-                        for method in &definition.methods {
+                        let qualified = imported_type_name(&owner, name);
+                        for method in methods {
                             if !tir_covers_method(method, &qualified, &imported_cx) {
                                 continue;
                             }
@@ -1699,6 +1717,34 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             );
                             lowered.name = format!("{}::{}", qualified, method.name);
                             funcs.push(lowered);
+                        }
+                        for implementation in trait_impls {
+                            if matches!(
+                                implementation.trait_name.as_str(),
+                                crate::Generics::ENCODE | crate::Generics::DECODE
+                            ) {
+                                continue;
+                            }
+                            for method in &implementation.methods {
+                                if !tir_covers_trait_method(
+                                    method,
+                                    &qualified,
+                                    &imported_cx,
+                                    &implementation.trait_name,
+                                ) && !(implementation.compiler_generated
+                                    && tir_covers_compiler_derive_method(method, &imported_cx))
+                                {
+                                    continue;
+                                }
+                                let mut lowered = lower_trait_method(
+                                    method,
+                                    &qualified,
+                                    &imported_cx,
+                                    &implementation.trait_name,
+                                );
+                                lowered.name = format!("{}::{}", qualified, method.name);
+                                funcs.push(lowered);
+                            }
                         }
                     }
                 }
