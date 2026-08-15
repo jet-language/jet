@@ -88,8 +88,14 @@ fn jet_args_program_name(prog: &str) -> String {
 
 /// Normalize a source-file argv[0] to the name used by its built program.
 fn jet_args_source_program_name(prog: &str) -> String {
-    let name = jet_args_program_name(prog);
-    name.strip_suffix(".jet").unwrap_or(&name).to_string()
+    let (program, suffix) = prog.split_once(' ').unwrap_or((prog, ""));
+    let name = jet_args_program_name(program);
+    let source = name.strip_suffix(".jet").unwrap_or(&name);
+    if suffix.is_empty() {
+        source.to_string()
+    } else {
+        format!("{source} {suffix}")
+    }
 }
 
 fn jet_args_program(mut spec: JetArgsSpec, prog: &str) -> JetArgsSpec {
@@ -102,7 +108,7 @@ impl JetArgsSpec {
     fn help(&self) -> String {
         let mut s = String::new();
         // usage line
-        let prog = jet_args_program_name(&self.prog);
+        let prog = jet_args_source_program_name(&self.prog);
         let has_opts = self.entries.iter().any(|e| {
             matches!(
                 e,

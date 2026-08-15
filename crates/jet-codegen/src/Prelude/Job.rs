@@ -10,7 +10,7 @@ pub enum JetJobScope {
 pub struct JetJobEntry {
     pub name: &'static str,
     pub scope: JetJobScope,
-    pub invoke: fn(&[String]),
+    pub invoke: fn(&str, &[String]),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,7 @@ pub fn jet_job_has_visible(jobs: &[(&str, JetJobScope)]) -> bool {
 }
 
 pub fn jet_job_help_text(argv: &[String], jobs: &[(&str, JetJobScope)]) -> String {
-    let program = argv.first().map(String::as_str).unwrap_or("");
+    let program = jet_args_source_program_name(argv.first().map(String::as_str).unwrap_or(""));
     let mut text = format!("Usage: {program} <job> [options]\n\nJobs:");
     for (name, scope) in jobs {
         if jet_job_scope_visible(*scope) {
@@ -59,7 +59,7 @@ pub fn jet_job_help(argv: &[String], jobs: &[(&str, JetJobScope)]) {
 }
 
 fn jet_job_unknown(argv: &[String], jobs: &[(&str, JetJobScope)], name: &str) -> ! {
-    let program = argv.first().map(String::as_str).unwrap_or("");
+    let program = jet_args_source_program_name(argv.first().map(String::as_str).unwrap_or(""));
     eprintln!("Error [E1294]: unknown command `{name}`");
     eprintln!("\nUsage: {program} <job> [options]");
     eprintln!("\nknown jobs:");
@@ -118,7 +118,10 @@ pub fn jet_job_dispatch(argv: &[String], jobs: &[JetJobEntry]) -> bool {
             true
         }
         JetJobSelection::Job(index) => {
-            (jobs[index].invoke)(&argv[1..]);
+            (jobs[index].invoke)(
+                argv.first().map(String::as_str).unwrap_or("program"),
+                &argv[1..],
+            );
             true
         }
         JetJobSelection::Unknown => {

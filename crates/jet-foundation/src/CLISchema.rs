@@ -3,7 +3,7 @@
 //! reconstruct shell names, requiredness, defaults, or help independently.
 
 use crate::AST::{
-    CtFloat, CtValue, Expr, Field, Func, Item, Marker, ProgramBundle, StrPart,
+    CtFloat, CtValue, Expr, Field, Func, Item, Marker, Param, ProgramBundle, StrPart,
     StructDef, Type,
 };
 use crate::Syntax;
@@ -153,6 +153,101 @@ pub struct CLISubcommandSchema {
     /// Optional #Doc text on the callable member.
     pub description: Option<String>,
     pub inputs: Vec<CLIInputSchema>,
+}
+
+/// The checked callable selected by one CLI command.
+///
+/// This is the one target projection used by AOT emission, JIT planning, and
+/// TIR evaluation. The schema owns command shape; this projection owns the
+/// callable and its receiver/payload split.
+#[derive(Debug, Clone)]
+pub struct CLICommandTarget {
+    pub function: Func,
+    pub is_method: bool,
+    pub is_binding: bool,
+    pub bound_shared: bool,
+    pub function_name: String,
+}
+
+fn command_payload_params(function: &Func, shared_type: &str, bound_shared: bool) -> Vec<Param> {
+    function
+        .params
+        .iter()
+        .filter(|param| {
+            param.name != Syntax::KW_SELF
+                && !(bound_shared
+                    && matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == shared_type))
+        })
+        .cloned()
+        .collect()
+}
+
+impl CLICommandTarget {
+    pub fn payload_params(&self, shared_type: &str) -> Vec<Param> {
+        command_payload_params(&self.function, shared_type, self.bound_shared)
+    }
+}
+
+/// Resolve a schema command to its canonical callable target.
+///
+/// Methods win over same-named bindings. A binding may target a free function
+/// whose first parameter is the shared command struct; that parameter is the
+/// command receiver and is not part of the decoded payload.
+pub fn command_target(
+    structure: &StructDef,
+    command: &CLISubcommandSchema,
+    items: &[Item],
+    function_owner: &str,
+) -> Option<CLICommandTarget> {
+    let method = structure
+        .methods
+        .iter()
+        .find(|method| {
+            method.name.to_lowercase() == command.name
+                && !structure
+                    .fields
+                    .iter()
+                    .any(|field| field.name == method.name && field.computed.is_some())
+        });
+
+    let (function, is_binding) = if let Some(method) = method {
+        (method.clone(), false)
+    } else {
+        let binding = structure
+            .cli_bindings
+            .iter()
+            .find(|binding| binding.name.to_lowercase() == command.name)?;
+        let target_name = binding_target_name(binding)?;
+        let function = items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == target_name => Some(function.clone()),
+            _ => None,
+        })?;
+        (function, true)
+    };
+
+    let is_method = function
+        .params
+        .iter()
+        .any(|param| param.name == Syntax::KW_SELF);
+    let bound_shared = is_binding
+        && function.params.first().is_some_and(|param| {
+            matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == structure.name)
+        });
+    let function_name = if is_method {
+        format!("{function_owner}::{}", function.name)
+    } else if let Some((module, _)) = function_owner.rsplit_once("::") {
+        format!("{module}::{}", function.name)
+    } else {
+        function.name.clone()
+    };
+
+    Some(CLICommandTarget {
+        function,
+        is_method,
+        is_binding,
+        bound_shared,
+        function_name,
+    })
 }
 
 /// Checked command surface for an executable. Plain `fn run()` deliberately
@@ -1025,10 +1120,7 @@ fn binding_target_name(binding: &crate::AST::CLICommandBinding) -> Option<&str> 
 
 fn function_inputs_for_binding(function: &Func, shared_type: &str) -> Option<Vec<CLIInputSchema>> {
     let mut command = function.clone();
-    command.params.retain(|param| {
-        param.name != Syntax::KW_SELF
-            && !matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == shared_type)
-    });
+    command.params = command_payload_params(function, shared_type, true);
     function_inputs(&command)
 }
 

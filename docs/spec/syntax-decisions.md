@@ -6702,7 +6702,7 @@ is the commit hash, with a
 when the lock is written and replayed from the lock. All stamps are recorded
 in `.jet/lock`; a locked rebuild does not read the wall clock. Repository state
 is a Tier-1 locked input under D-CTEFFECT1. The timestamp describes lock
-history, not source.
+history, not source or binary build time.
 
 **D-CONF-WORD1=A — one meaning for the word `profile`** *(ratified 2026-08-06,
 card #1526)*:

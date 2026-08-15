@@ -3,7 +3,7 @@
 //! `run(args)`.
 
 use super::Concurrency;
-use jet_foundation::AST::{CtValue, Expr, Item, ProgramBundle, StructDef, Type};
+use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type};
 use jet_foundation::CLISchema::{
     self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
@@ -360,82 +360,31 @@ fn cli_plan_from_struct_schema(
         _ => None,
     })?;
     let function_owner = type_identity.unwrap_or(entry);
-    let computed: std::collections::HashSet<&str> = structure
-        .fields
-        .iter()
-        .filter(|field| field.computed.is_some())
-        .map(|field| field.name.as_str())
-        .collect();
     let commands = schema
         .commands
         .iter()
         .map(|command| {
-            let method = structure
-                .methods
-                .iter()
-                .find(|function| {
-                    !computed.contains(function.name.as_str())
-                        && function.name.to_lowercase() == command.name
-                });
-            let binding = structure
-                .cli_bindings
-                .iter()
-                .find(|binding| binding.name.to_lowercase() == command.name);
-            let function = if let Some(method) = method {
-                method
-            } else {
-                let Expr::Ident(target, _) = binding?.target.without_parens() else {
-                    return None;
-                };
-                cli_items.iter().find_map(|item| match item {
-                    Item::Func(function) if function.name == *target => Some(function),
-                    _ => None,
-                })?
-            };
-            let bound_shared = binding.is_some()
-                && function.params.first().is_some_and(|param| {
-                    matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == entry)
-                });
-            let method = function
-                .params
-                .iter()
-                .any(|param| param.name == jet_foundation::Syntax::KW_SELF)
-                || bound_shared;
+            let target = jet_foundation::CLISchema::command_target(
+                structure,
+                command,
+                cli_items,
+                function_owner,
+            )?;
+            let method = target.is_method || target.bound_shared;
             let mut arg_types = if method {
                 vec![Type::Named(function_owner.to_string())]
             } else {
                 Vec::new()
             };
             arg_types.extend(
-                function
-                    .params
-                    .iter()
-                    .filter(|param| {
-                        param.name != jet_foundation::Syntax::KW_SELF
-                            && !(bound_shared
-                                && matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == entry))
-                    })
-                    .map(|param| param.ty.clone()),
+                target
+                    .payload_params(&structure.name)
+                    .into_iter()
+                    .map(|param| param.ty),
             );
-            let function_name = if function
-                .params
-                .iter()
-                .any(|param| param.name == jet_foundation::Syntax::KW_SELF)
-            {
-                // Inherent methods are lowered under their nominal owner.
-                format!("{}::{}", function_owner, function.name)
-            } else {
-                // A `name = function` binding targets a free function. Keep
-                // its module-qualified path when the CLI type is imported,
-                // but never invent an owner-qualified local function name.
-                function_owner
-                    .rsplit_once("::")
-                    .map(|(module, _)| format!("{module}::{}", function.name))
-                    .unwrap_or_else(|| function.name.clone())
-            };
             Some(CLICommandPlan {
                 name: command.name.clone(),
-                function: function_name,
+                function: target.function_name,
                 method,
                 arg_types,
                 ptr: None,

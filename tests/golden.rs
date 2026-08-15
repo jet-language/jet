@@ -523,17 +523,25 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         );
         let out_path = env.ex_dir.join("expected").join(format!("{}.out", stem));
         let actual_raw = String::from_utf8_lossy(&run.stdout);
-        // CLI usage intentionally names argv[0]. Golden binaries have a
-        // process-specific temporary name, so normalize only that product
-        // field while keeping every other byte exact.
+        // CLI usage intentionally names argv[0]. The golden binary has a
+        // process-specific temporary name, so normalize it to the source
+        // basename while keeping every other byte exact.
         let actual_normalized;
         let actual = if stem.starts_with("cli/") {
+            let source_name = entry
+                .path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .expect("golden source name is utf8");
             let binary_name = bin
                 .file_name()
                 .and_then(|name| name.to_str())
                 .expect("golden binary name is utf8");
-            actual_normalized =
-                actual_raw.replacen(&format!("Usage: {binary_name}"), "Usage: <program>", 1);
+            actual_normalized = actual_raw.replacen(
+                &format!("Usage: {binary_name}"),
+                &format!("Usage: {source_name}"),
+                1,
+            );
             actual_normalized.as_str()
         } else {
             actual_raw.as_ref()

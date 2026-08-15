@@ -573,39 +573,16 @@ pub(super) fn prepare(
     let help = spec_help(&mut help_spec, span)?;
     let structure = find_struct(items, type_name)
         .ok_or_else(|| unsupported("typed CLI entry struct", span))?;
-    let method_member = structure
-        .methods
-        .iter()
-        .any(|method| method.name.to_lowercase() == command.as_str());
-    let method = structure
-        .methods
-        .iter()
-        .find(|method| method.name.to_lowercase() == command.as_str());
-    let binding = structure
-        .cli_bindings
-        .iter()
-        .find(|binding| binding.name.to_lowercase() == command.as_str());
-    let function = if let Some(method) = method {
-        method
-    } else {
-        let crate::AST::Expr::Ident(target, _) = binding
-            .ok_or_else(|| unsupported("typed CLI command binding", span))?
-            .target
-            .without_parens()
-        else {
-            return Err(unsupported("typed CLI command binding target", span));
-        };
-        find_func(items, target)
-            .ok_or_else(|| unsupported("typed CLI bound function", span))?
-    };
-    let is_method = function
-        .params
-        .iter()
-        .any(|param| param.name == crate::Syntax::KW_SELF);
-    let bound_shared = binding.is_some()
-        && function.params.first().is_some_and(|param| {
-            matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == type_name)
-        });
+    let function_owner = nominal_name(&structure.name);
+    let target = jet_foundation::CLISchema::command_target(
+        structure,
+        command_schema,
+        items,
+        &function_owner,
+    )
+    .ok_or_else(|| unsupported("typed CLI command target", span))?;
+    let is_method = target.is_method;
+    let bound_shared = target.bound_shared;
     let mut receiver = if is_method || bound_shared {
         let value_type_name = nominal_name(type_name);
         Some(
@@ -631,16 +608,7 @@ pub(super) fn prepare(
     } else {
         None
     };
-    let command_params = function
-        .params
-        .iter()
-        .filter(|param| {
-            param.name != crate::Syntax::KW_SELF
-                && !(bound_shared
-                    && matches!(&param.ty, Type::Named(name) if name.rsplit('.').next().unwrap_or(name) == type_name))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let command_params = target.payload_params(&structure.name);
     let args = decode_params(&command_params, &command_schema.inputs, &mut parsed, &help, span)
         .map_err(|error| {
             crate::Sema::Diagnostics::render_registered(
@@ -666,16 +634,8 @@ pub(super) fn prepare(
     } else {
         (receiver, args)
     };
-    let function_owner = nominal_name(&structure.name);
-    let function_name = if method_member {
-        format!("{}::{}", function_owner, function.name)
-    } else if let Some((module_name, _)) = function_owner.rsplit_once("::") {
-        format!("{module_name}::{}", function.name)
-    } else {
-        function.name.clone()
-    };
     Ok(Dispatch::Invoke {
-        function: function_name,
+        function: target.function_name,
         receiver,
         args,
     })
