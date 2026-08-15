@@ -4534,6 +4534,7 @@ impl<'a> EvalCtx<'a> {
         };
         let mut fields = vec![
             ("value".to_string(), value),
+            ("type_name".to_string(), CtValue::Str(ty.leaf_name())),
             ("path".to_string(), CtValue::Str(path)),
         ];
         if let Some(field_names) = field_names {

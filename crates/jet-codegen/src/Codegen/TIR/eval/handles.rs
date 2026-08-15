@@ -203,8 +203,20 @@ fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
     })
 }
 
-fn reflect_type_name(value: &CtValue) -> String {
-    value.jet_type().leaf_name()
+fn reflected_type_name(recv: &CtValue) -> Option<String> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return None;
+    };
+    if type_name != "__Reflect" {
+        return None;
+    }
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("type_name", CtValue::Str(name)) => Some(name.clone()),
+            _ => None,
+        })
+        .or_else(|| reflect_inner(recv).map(|value| value.jet_type().leaf_name()))
 }
 
 fn reflection_rows<'a>(
@@ -229,12 +241,11 @@ fn reflection_rows<'a>(
         .map(Vec::as_slice)
 }
 
-fn reflect_path_for_value(
-    value: &CtValue,
+fn reflect_path_for_type(
+    ty: &Type,
     reflect_paths: Option<&HashMap<String, String>>,
 ) -> String {
-    let ty = value.jet_type();
-    match (&ty, reflect_paths) {
+    match (ty, reflect_paths) {
         (Type::Named(name) | Type::Apply { name, .. }, Some(paths)) => paths
             .get(name)
             .cloned()
@@ -245,14 +256,23 @@ fn reflect_path_for_value(
 
 fn reflect_value_carrier(
     value: &CtValue,
+    declared_type: Option<&Type>,
     reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
     reflect_paths: Option<&HashMap<String, String>>,
 ) -> CtValue {
+    let inferred_type;
+    let ty = if let Some(ty) = declared_type {
+        ty
+    } else {
+        inferred_type = value.jet_type();
+        &inferred_type
+    };
     let mut fields = vec![
         ("value".to_string(), value.clone()),
+        ("type_name".to_string(), CtValue::Str(ty.leaf_name())),
         (
             "path".to_string(),
-            CtValue::Str(reflect_path_for_value(value, reflect_paths)),
+            CtValue::Str(reflect_path_for_type(ty, reflect_paths)),
         ),
     ];
     if let Some(rows) = reflection_rows(value, reflection_fields) {
@@ -289,11 +309,11 @@ fn reflect_handle(
     reflect_paths: Option<&HashMap<String, String>>,
 ) -> Result<CtValue, Diagnostic> {
     match method {
-        "type_name" => reflect_inner(recv)
-            .map(|value| CtValue::Str(reflect_type_name(value)))
+        "type_name" => reflected_type_name(recv)
+            .map(CtValue::Str)
             .ok_or_else(|| unsupported("reflect value", span)),
         "path" => reflect_path(recv)
-            .or_else(|| reflect_inner(recv).map(|value| CtValue::Str(reflect_type_name(value))))
+            .or_else(|| reflected_type_name(recv).map(CtValue::Str))
             .ok_or_else(|| unsupported("reflect value", span)),
         // `Value.display()` needs the evaluator's user-function table. The
         // HandleMethod evaluator routes it through `EvalCtx::show_value`; a
@@ -301,6 +321,7 @@ fn reflect_handle(
         "display" => Err(unsupported("reflect display evaluator", span)),
         "fields" => {
             let value = reflect_inner(recv).ok_or_else(|| unsupported("reflect value", span))?;
+            let rows = reflection_rows(value, reflection_fields);
             let Some(field_names) = reflect_field_names(recv) else {
                 return Ok(CtValue::List(Vec::new()));
             };
@@ -317,6 +338,9 @@ fn reflect_handle(
                                 || actual.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(name.as_str()))
                                 .then_some(value)
                         })?;
+                        let declared_type = rows
+                            .and_then(|rows| rows.iter().find(|field| field.name == name))
+                            .map(|field| &field.ty);
                         Some(CtValue::Struct {
                             type_name: "__ReflectField".to_string(),
                             fields: vec![
@@ -328,6 +352,7 @@ fn reflect_handle(
                                     "value".to_string(),
                                     reflect_value_carrier(
                                         value,
+                                        declared_type,
                                         reflection_fields,
                                         reflect_paths,
                                     ),
@@ -1412,8 +1437,9 @@ fn duration_new(
 
 #[cfg(test)]
 mod tests {
-    use super::datatree_int_result;
-    use crate::AST::{CtFloat, CtReport, CtValue};
+    use super::{datatree_int_result, reflect_handle, reflect_value_carrier};
+    use crate::AST::{CtFloat, CtReport, CtValue, Type};
+    use crate::Diagnostics::Span;
 
     fn tree(variant: &str, value: CtValue) -> CtValue {
         CtValue::Enum {
@@ -1443,6 +1469,26 @@ mod tests {
                         _ => None,
                     })
             })
+    }
+
+    #[test]
+    fn reflected_field_keeps_declared_inline_range_type() {
+        let declared = Type::InlineRange {
+            base: Box::new(Type::Int),
+            lo: 0,
+            hi: 10,
+        };
+        let carrier = reflect_value_carrier(
+            &CtValue::Int(3),
+            Some(&declared),
+            None,
+            None,
+        );
+        assert_eq!(
+            reflect_handle(&carrier, "type_name", Span::new(0, 0), None, None)
+                .expect("reflected field type name"),
+            CtValue::Str("Int(0..10)".to_string())
+        );
     }
 
     #[test]
