@@ -298,7 +298,13 @@ mod rewrite_tests {
 }
 
 /// Whole-program interpreter deopt — same evaluator as `--interpret` / comptime.
+/// The deopt owns its allocator marshalling boundary because it can run after
+/// the resident runtime has been rejected or torn down.
 pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
+    crate::with_program_allocator(bundle, || run_whole_interp_configured(bundle, plan))
+}
+
+fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
     TIR::install_comptime_bridge();
     let started = Instant::now();
     let mut sink = DevSink::new();

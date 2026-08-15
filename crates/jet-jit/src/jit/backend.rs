@@ -23,7 +23,7 @@ impl CraneliftBackend {
 
 impl JitBackend for CraneliftBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
-        crate::with_program_allocator(bundle, || {
+        let resident = crate::with_program_allocator(bundle, || {
             let _ = try_anyway;
             TIR::install_comptime_bridge();
             if cranelift_host_supported() {
@@ -32,18 +32,18 @@ impl JitBackend for CraneliftBackend {
                     if let Some(gap) = plan.gap.as_mut() {
                         gap.reason = reason;
                     }
-                    note_deopt_invoked_for_test();
-                    return run_whole_interp(bundle, &plan);
+                    return Err(plan);
                 }
             }
-            match try_resident(bundle) {
-                Ok(outcome) => outcome,
-                Err(plan) => {
-                    note_deopt_invoked_for_test();
-                    run_whole_interp(bundle, &plan)
-                }
+            try_resident(bundle)
+        });
+        match resident {
+            Ok(outcome) => outcome,
+            Err(plan) => {
+                note_deopt_invoked_for_test();
+                run_whole_interp(bundle, &plan)
             }
-        })
+        }
     }
 
     fn hot_swap(
@@ -52,40 +52,42 @@ impl JitBackend for CraneliftBackend {
         bundle: &ProgramBundle,
         _try_anyway: bool,
     ) -> Result<RunOutcome, Vec<jet_foundation::Diagnostics::Diagnostic>> {
-        crate::with_program_allocator(bundle, || {
+        let resident = crate::with_program_allocator(bundle, || {
             TIR::install_comptime_bridge();
-            match try_resident_hot_swap(bundle) {
-                Ok(outcome) => Ok(outcome),
-                Err(plan) => {
-                    note_deopt_invoked_for_test();
-                    match run_whole_interp(bundle, &plan) {
-                        RunOutcome::Ran {
-                            stdout,
-                            stderr,
-                            exit_code,
-                        } => Ok(RunOutcome::Ran {
-                            stdout,
-                            stderr,
-                            exit_code,
-                        }),
-                        RunOutcome::Problems(diags) => Err(diags),
-                    }
+            try_resident_hot_swap(bundle)
+        });
+        match resident {
+            Ok(outcome) => Ok(outcome),
+            Err(plan) => {
+                note_deopt_invoked_for_test();
+                match run_whole_interp(bundle, &plan) {
+                    RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    } => Ok(RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    }),
+                    RunOutcome::Problems(diags) => Err(diags),
                 }
             }
-        })
+        }
     }
 
     fn restart(&mut self, bundle: &ProgramBundle, _try_anyway: bool) -> RunOutcome {
-        crate::with_program_allocator(bundle, || {
+        let resident = crate::with_program_allocator(bundle, || {
             TIR::install_comptime_bridge();
-            match try_resident_restart(bundle) {
-                Ok(outcome) => outcome,
-                Err(plan) => {
-                    note_deopt_invoked_for_test();
-                    run_whole_interp(bundle, &plan)
-                }
+            try_resident_restart(bundle)
+        });
+        match resident {
+            Ok(outcome) => outcome,
+            Err(plan) => {
+                note_deopt_invoked_for_test();
+                run_whole_interp(bundle, &plan)
             }
-        })
+        }
     }
 }
 
