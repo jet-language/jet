@@ -100,11 +100,11 @@ fn assert_tier_text(text: &str) {
         "42",
         "comptime_range=9",
         "comptime_exactness=true",
-        "comptime_unit=5.0",
+        "comptime_unit=2.0",
         "comptime_state=state",
         "comptime_classification=world",
         "exactness=true",
-        "unit=5.0",
+        "unit=2.0",
         "state=state",
         "classification=world",
         "range=9",
@@ -397,7 +397,7 @@ fn i9_comptime_tier_keeps_the_compile_time_value() {
     let text = stdout(&run(&scratch.path, &["run", "tier.jet"]));
     assert_eq!(
         text,
-        "42\ncomptime_range=9\ncomptime_exactness=true\ncomptime_unit=5.0\ncomptime_state=state\ncomptime_classification=world\nexactness=true\nunit=5.0\nstate=state\nclassification=world\nrange=9\n"
+        "42\ncomptime_range=9\ncomptime_exactness=true\ncomptime_unit=2.0\ncomptime_state=state\ncomptime_classification=world\nexactness=true\nunit=2.0\nstate=state\nclassification=world\nrange=9\n"
     );
 }
 
