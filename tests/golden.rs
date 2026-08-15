@@ -318,11 +318,19 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     }
 
     let _ffi_lock = uses_ffi_bridge.then(FfiBridgeLock::acquire);
+    // Both compile entry points must name the example with ONE spelling: the
+    // repo-relative `entry.shown` every golden was authored against. `entry.path`
+    // is absolute (`root.join("examples/features")`), and Loader gives the entry
+    // module `display = entry_path` verbatim, so passing it here baked an absolute
+    // Jet path into `cx.file` for all 59 examples that `has_package_build_entry`
+    // routes this way — every file directly in `examples/features/tooling/` and
+    // `examples/features/comptime/`, because those directories have no manifest and
+    // a SIBLING (`tooling/compiler_api.jet`, `comptime/build_stamp.jet`) supplies
+    // the discovered `fn build`. Examples that print their own source location then
+    // disagreed with their golden: `tooling/provenance_track` (`Float.origin()`,
+    // D-PROVENANCE1) and `tooling/panic_report` (E3001 `--> file:line`).
     let compiled_result = if has_package_build_entry(&entry.path, &src) {
-        jet::compile_programmable_build(
-            entry.path.to_str().expect("example path is utf8"),
-            &[],
-        )
+        jet::compile_programmable_build(&entry.shown, &[])
     } else {
         jet::compile_with_path(&src, &entry.shown)
     };

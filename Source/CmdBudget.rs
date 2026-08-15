@@ -393,7 +393,9 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         };
         let requests=request_indices.iter().map(|index|ProviderSpec{budget_hash:bases[*index].1.clone(),metric:ordered[*index].spec.metric.clone()}).collect();
         let request=ProviderRequest{schema:"jet.provider-request".into(),version:1,request_id:stable_id(&workload),provider_hash:stable_id(provider),context_hash:stable_id(&context_subject),specs:requests,workload,policy:CanonicalJson::Null};
-        let evidence=registry.collect(kind,&request,PROVIDER_DEADLINE).map_err(|e|e.reason)?;
+        let cache_state=ordered[request_indices[0]].spec.compile_workload.as_ref().map(|workload|workload.mode.as_str());
+        let deadline=jet::BudgetProviders::collection_deadline(kind,cache_state,PROVIDER_DEADLINE,SELECTED_BUILD_DEADLINE);
+        let evidence=registry.collect(kind,&request,deadline).map_err(|e|e.reason)?;
         for event in evidence.events {
             match event {
                 ProviderEvent::Sample{spec,value,..}=>{
@@ -807,10 +809,38 @@ mod tests {
     use super::{PROVIDER_DEADLINE, SELECTED_BUILD_DEADLINE};
     use std::time::Duration;
 
+    /// A provider that only reads facts keeps the strict bound. A provider
+    /// that compiles or benchmarks must be allowed the inner deadlines it is
+    /// pinned to spend: 21 trials of child compiles for CompilerProbe (twice
+    /// per trial in `Edit`, which compiles the clean tree and then the patched
+    /// one), and one real native build for a bench harness. Cancelling sooner
+    /// than that kills a healthy measurement instead of a stuck one.
     #[test]
-    fn provider_deadline_stays_stricter_than_artifact_build_prep() {
+    fn measuring_provider_deadlines_cover_their_pinned_inner_work() {
+        use jet::BudgetProviders::collection_deadline;
+
         assert_eq!(PROVIDER_DEADLINE, Duration::from_secs(30));
         assert_eq!(SELECTED_BUILD_DEADLINE, Duration::from_secs(120));
+        let bound = |kind: &str, mode: Option<&str>| collection_deadline(kind, mode, PROVIDER_DEADLINE, SELECTED_BUILD_DEADLINE);
+
+        assert_eq!(bound("CompilerFacts", None), PROVIDER_DEADLINE);
+        assert_eq!(bound("BuildArtifact", None), PROVIDER_DEADLINE);
+        assert_eq!(bound("ServiceProbe", None), PROVIDER_DEADLINE);
+
+        assert_eq!(bound("CompilerProbe", Some("Clean")), Duration::from_secs(21 * 20 + 30));
+        assert_eq!(bound("CompilerProbe", Some("NoChange")), Duration::from_secs(21 * 20 + 30));
+        assert_eq!(bound("CompilerProbe", Some("Edit")), Duration::from_secs(21 * 2 * 20 + 30));
+        assert_eq!(bound("BenchMeasurement", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE);
+        assert_eq!(bound("AllocationProbe", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE);
+
+        for (kind, mode) in [
+            ("CompilerProbe", Some("Clean")),
+            ("CompilerProbe", Some("Edit")),
+            ("BenchMeasurement", None),
+            ("AllocationProbe", None),
+        ] {
+            assert!(bound(kind, mode) > PROVIDER_DEADLINE, "{kind} measures but is bounded like a fact read");
+        }
     }
 
     #[cfg(target_os="linux")]

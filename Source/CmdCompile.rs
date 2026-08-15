@@ -2535,6 +2535,15 @@ fn format_source_for_fmt(
     explicit_copies: bool,
     simplify: bool,
 ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
+    // D-ECO-FILEROOT1=A: `package.jet` is the reserved Package root — a typed
+    // record (`name: "demo"`), never a module in the compiler's grammar. The
+    // module-grammar formatter can only ever reject it (E0003 at the first
+    // `field:`), so it is never asked. The file name is the whole fact, and it
+    // decides this on every route into the formatter: the directory walk, an
+    // explicit path, and `--changed` alike.
+    if is_package_manifest_file(origin) {
+        return format_package_manifest_for_fmt(src, origin);
+    }
     let materialized = if explicit_copies
         && Path::new(origin).is_file()
         && !is_typed_package_source(src, origin)
@@ -2733,9 +2742,7 @@ fn rewrite_retired_package_targets(src: &str, origin: &str) -> (String, usize) {
 }
 
 fn is_typed_package_source(src: &str, origin: &str) -> bool {
-    if Path::new(origin).file_name().and_then(|name| name.to_str())
-        == Some(jet::Syntax::PACKAGE_FILE)
-    {
+    if is_package_manifest_file(origin) {
         return true;
     }
     let trimmed = src.trim_start();
@@ -2751,6 +2758,42 @@ fn is_typed_package_source(src: &str, origin: &str) -> bool {
     };
     let value = value.trim_start();
     value.starts_with(".{") || value.starts_with('{')
+}
+
+/// D-ECO-FILEROOT1=A: the one reserved Package root filename. Its `config.jet`,
+/// `env.jet` and `workspace.jet` siblings are deliberately *not* in this family:
+/// those are `module name { … }` declarations that the ordinary grammar parses
+/// (`Parser::Modules::module_decl`) and the ordinary formatter owns.
+fn is_package_manifest_file(origin: &str) -> bool {
+    Path::new(origin).file_name().and_then(|name| name.to_str())
+        == Some(jet::Syntax::PACKAGE_FILE)
+}
+
+/// Format `package.jet` with the typed Package model — the only formatter that
+/// owns manifest text.
+///
+/// That model fails closed on authored comments instead of dropping them
+/// (`tests/fmt.rs`), so a declined layout says this model has no canonical form
+/// to offer for this file, not that the file is wrong: `jet fmt` then leaves the
+/// manifest exactly as written and `--check` calls it clean. A manifest the
+/// Package model cannot read at all still stops the whole run, now with the
+/// registered manifest diagnostic (E1206 and its family) that `jet build` gives
+/// the same file, instead of module-grammar noise about `:`.
+fn format_package_manifest_for_fmt(
+    src: &str,
+    origin: &str,
+) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
+    let (materialized, _) = jet::Package::rewrite_retired_targets(src);
+    if let Err(error) = jet::Package::PackageFacts::parse(&materialized, origin) {
+        return Err(vec![jet::Manifest::manifest_parse_diagnostic(
+            Path::new(origin),
+            &error,
+        )]);
+    }
+    match jet::Package::format_source(&materialized, origin) {
+        Ok(formatted) => Ok(formatted),
+        Err(_declined) => Ok(materialized),
+    }
 }
 
 /// D-FMTPROJECT1=D: the full project formatter.

@@ -230,6 +230,34 @@ fn build_artifact_provider(request: &ProviderRequest, _: &ProviderCancellation) 
 const COMPILE_WARMUPS: u128 = 1;
 const COMPILE_SAMPLES: usize = 20;
 const COMPILE_MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
+/// One child compile inside a CompilerProbe trial gets this long. Every
+/// CompilerProbe collection bound below is derived from it, never assumed.
+const COMPILE_CHILD_DEADLINE: Duration = Duration::from_secs(20);
+
+/// How long one provider collection may take, derived from the workload the
+/// provider kind is pinned to run.
+///
+/// `facts` is the bound for a provider that answers from memory. A provider
+/// that compiles or benchmarks is already bounded from the inside — every
+/// CompilerProbe child compile has `COMPILE_CHILD_DEADLINE`, and a bench
+/// harness is one real native build — so a collection cancelled sooner than
+/// those allow kills a healthy measurement instead of catching a stuck one.
+/// `native_build` is the command's allowance for one real native build.
+/// `mode` names the CompilerProbe cache state; other kinds pass `None`.
+pub fn collection_deadline(kind: &str, mode: Option<&str>, facts: Duration, native_build: Duration) -> Duration {
+    match kind {
+        "CompilerProbe" => {
+            // An `Edit` trial compiles the clean tree, applies the patch, and
+            // compiles again; `Clean` and `NoChange` compile once.
+            let compiles_per_trial = if mode == Some("Edit") { 2 } else { 1 };
+            let trials = COMPILE_WARMUPS as u32 + COMPILE_SAMPLES as u32;
+            trials * compiles_per_trial * COMPILE_CHILD_DEADLINE + facts
+        }
+        // Build the release bench harness, then run its pinned 20 trials.
+        "BenchMeasurement" | "AllocationProbe" => native_build + facts,
+        _ => facts,
+    }
+}
 
 /// Build the command-owned workload identity. The path is carried only in the
 /// request; report identity uses the source and patch digests below.
@@ -771,7 +799,7 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
     }
     #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
     let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot start compile workload build: {error}")))?;
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + COMPILE_CHILD_DEADLINE;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
