@@ -2021,6 +2021,9 @@ impl Cx {
             Type::Named(name) if name == "EffectInfo" && !self.type_names.contains(name) => {
                 format!("{}JetEffectInfo", self.root_prefix)
             }
+            Type::Named(name) if name == "TrackOriginInfo" && !self.type_names.contains(name) => {
+                format!("{}JetTrackOriginInfo", self.root_prefix)
+            }
             Type::Named(name)
                 if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
             {

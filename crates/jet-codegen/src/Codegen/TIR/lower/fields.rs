@@ -471,6 +471,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "StateRef" => matches!(member, "owner" | "name" | "path"),
         "StateInfo" => matches!(member, "name" | "path"),
         "EffectInfo" => member == "values",
+        "TrackOriginInfo" => matches!(member, "tracked" | "source"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
         }

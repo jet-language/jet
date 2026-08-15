@@ -129,6 +129,12 @@ struct JetEffectInfo {
     values: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct JetTrackOriginInfo {
+    tracked: bool,
+    source: Option<String>,
+}
+
 macro_rules! impl_fact_value_traits {
     ($ty:ty) => {
         impl JetShow for $ty {
@@ -164,6 +170,7 @@ impl_fact_value_traits!(JetDimensionInfo);
 impl_fact_value_traits!(JetStateRef);
 impl_fact_value_traits!(JetStateInfo);
 impl_fact_value_traits!(JetEffectInfo);
+impl_fact_value_traits!(JetTrackOriginInfo);
 
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
 // Drop consumes it exactly once; declaration order gives reverse cleanup order.

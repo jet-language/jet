@@ -157,26 +157,21 @@ fn every_registered_plane_has_a_source_fact_read() {
 
 #[test]
 fn registry_derived_plane_reads_are_typed_and_folded() {
-    let output = jet::compile(
-        "@flow :: Flow.@flow\n@taint :: Taint.@taint\n@duty :: Duty.@duty\n\nfn run() {\n    print(@flow.kind == .Flow)\n    print(@taint.kind == .Taint)\n    print(@duty.kind == .Duty)\n}\n",
-    )
-    .expect("registry-derived plane reads should compile");
-    assert!(output.rust.contains("Flow"));
-    assert!(output.rust.contains("Taint"));
-    assert!(output.rust.contains("Duty"));
+    let source = "@flow :: Flow.@flow\n@taint :: Taint.@taint\n@duty :: Duty.@duty\n\nfn run() {\n    print(@flow.kind == .Flow)\n    print(@taint.kind == .Taint)\n    print(@duty.kind == .Duty)\n}\n";
+    tir_support::assert_tiers_agree(
+        "registry-derived-plane-reads",
+        source,
+        "true\ntrue\ntrue\n",
+    );
+    let output = jet::compile(source).expect("registry-derived plane reads should compile");
     assert!(!has_runtime_fact_dispatch(&output.rust));
 }
 
 #[test]
 fn tracked_binding_origin_reads_the_track_marker() {
-    let output = jet::compile(
-        "fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@track_origin\n    print(@origin.tracked)\n    print(@origin.source ?? \"missing\")\n}\n",
-    )
-    .expect("a tracked binding should publish its typed origin");
-    assert!(
-        output.rust.contains("\"tracked\""),
-        "the #Track source was not folded into the typed fact"
-    );
+    let source = "fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@track_origin\n    print(@origin.tracked)\n    print(@origin.source ?? \"missing\")\n}\n";
+    tir_support::assert_tiers_agree("tracked-binding-origin", source, "true\ntracked\n");
+    let output = jet::compile(source).expect("a tracked binding should publish its typed origin");
     assert!(!has_runtime_fact_dispatch(&output.rust));
 }
 
