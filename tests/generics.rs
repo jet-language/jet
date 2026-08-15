@@ -81,10 +81,23 @@ fn run() { print(tuned.slots()) }
 
 #[test]
 fn generic_module_fact_value_example_has_profile_and_tier_parity() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let entry = root.join("examples/features/modules/fact_value_arguments.jet");
-    let expected = std::fs::read(root.join("examples/features/expected/modules/fact_value_arguments.out"))
-        .expect("fact-value module golden");
+    let repo = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = repo.join("examples/features/modules");
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_module_fact_parity_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create isolated fact-value example");
+    let entry = root.join("fact_value_arguments.jet");
+    std::fs::copy(fixture.join("fact_value_arguments.jet"), &entry)
+        .expect("copy fact-value module");
+    std::fs::copy(fixture.join("package.jet"), root.join("package.jet"))
+        .expect("copy fact-value package");
+    let expected = std::fs::read(
+        repo.join("examples/features/expected/modules/fact_value_arguments.out"),
+    )
+    .expect("fact-value module golden");
     for (profile, setting, expected_output) in [
         ("compact", "2", b"2\n".as_slice()),
         ("spacious", "5", b"5\n".as_slice()),
@@ -195,6 +208,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         );
         assert_eq!(run.stdout, expected, "execution tier output drifted");
     }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

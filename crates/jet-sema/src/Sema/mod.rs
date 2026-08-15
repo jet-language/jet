@@ -1721,6 +1721,15 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| name.to_string())
     }
 
+    /// Project every nominal leaf in a diagnostic type through the same
+    /// source-name ledger used by hover and completion.
+    pub(crate) fn display_type(&self, ty: &Type) -> Type {
+        ty.map_named_types(&|name| {
+            self.name_ledger
+                .display_path(self.module_idx, name, None)
+        })
+    }
+
     pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
         self.source_nesting += 1;
         if self.source_nesting <= crate::Diagnostics::MAX_SOURCE_NESTING {

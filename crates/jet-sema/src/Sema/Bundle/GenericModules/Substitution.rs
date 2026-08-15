@@ -203,6 +203,7 @@ pub(super) fn substitute_expr(
         Expr::StructLit {
             type_name,
             type_args,
+            import_ns,
             fields,
             span,
             ..
@@ -213,8 +214,18 @@ pub(super) fn substitute_expr(
             fields
                 .iter_mut()
                 .for_each(|(_, _, value)| substitute_expr(value, types, values));
-            match types.get(type_name) {
-                Some(Type::Named(resolved)) => *type_name = resolved.clone(),
+            let qualified = import_ns
+                .as_ref()
+                .map(|namespace| format!("{namespace}.{type_name}"));
+            let resolved = qualified
+                .as_ref()
+                .and_then(|name| types.get(name))
+                .or_else(|| types.get(type_name));
+            match resolved {
+                Some(Type::Named(resolved)) => {
+                    *type_name = resolved.clone();
+                    *import_ns = None;
+                }
                 // A type param may instantiate to a builtin (T=Int). The
                 // hand-written Int.{ … } parses as a TypedLit, so the
                 // substituted node must become one too — a StructLit with a

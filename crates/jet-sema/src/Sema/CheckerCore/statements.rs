@@ -1554,6 +1554,7 @@ impl<'a> Checker<'a> {
                                                 | Some(AccessConvention::Write)
                                         )
                                     {
+                                        let display_type = self.display_type(&info.ty).name();
                                         self.diags.push(Diagnostic::error(
                                             "E0120",
                                             format!(
@@ -1571,7 +1572,7 @@ impl<'a> Checker<'a> {
                                                 n,
                                                 n,
                                                 Syntax::SIGIL_MOVE,
-                                                info.ty.name()
+                                                display_type
                                             ),
                                             Some(*nspan),
                                         ));
@@ -1608,17 +1609,19 @@ impl<'a> Checker<'a> {
                                     && !string_view_compatible
                                     && !union_member_widen
                                 {
+                                    let display_return = self.display_type(&rt);
+                                    let display_actual = self.display_type(&et);
                                     self.diags.push(Diagnostic::error(
                                         "E0113",
                                         format!(
                                             "`{}` promises to return {}, but this returns {}",
                                             self.fn_name,
-                                            rt.show(),
-                                            et.show()
+                                            display_return.show(),
+                                            display_actual.show()
                                         ),
                                         "the value handed back must match the type after `=>`"
                                             .to_string(),
-                                        type_fix_hint(&rt, &et),
+                                        type_fix_hint(&display_return, &display_actual),
                                         Some(e.span()),
                                     ));
                                 }
