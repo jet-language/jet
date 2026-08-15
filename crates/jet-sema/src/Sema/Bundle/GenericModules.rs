@@ -1112,7 +1112,12 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
             }
             TraitObject(names) => { out.push(14); out.extend_from_slice(&(names.len() as u64).to_be_bytes()); for name in names { frame_text(out, name); } }
             Tuple(fields) => { out.push(15); out.extend_from_slice(&(fields.len() as u64).to_be_bytes()); for (name, ty) in fields { frame_text(out, name); write(out, ty); } }
-            FixedList { elem, len, .. } => { out.push(16); write(out, elem); out.extend_from_slice(&len.to_be_bytes()); }
+            FixedList { elem, len, .. } => {
+                out.push(16);
+                write(out, elem);
+                frame_text(out, len.kind());
+                frame_text(out, &len.expression());
+            }
             IntN { signed, bits } => { out.push(17); out.push(u8::from(*signed)); out.push(*bits); }
             Float32 => out.push(18),
             Tagged { inner, .. } => write(out, inner),

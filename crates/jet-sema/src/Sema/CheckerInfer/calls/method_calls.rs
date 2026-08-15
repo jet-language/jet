@@ -3517,7 +3517,8 @@ impl<'a> Checker<'a> {
                         let fixed_bytes = matches!(
                             inferred,
                             Some(Type::FixedList { elem, len, .. })
-                                if len > 0 && matches!(*elem, Type::IntN { signed: false, bits: 8 })
+                                if len.literal_value().is_some_and(|len| len > 0)
+                                    && matches!(*elem, Type::IntN { signed: false, bits: 8 })
                         );
                         let direct_mutable_buffer = args[0].convention == AccessConvention::Write
                             && matches!(&args[0].expr, Expr::Ident(..));
