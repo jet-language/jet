@@ -549,6 +549,7 @@ impl KnowledgeFact {
                 }
                 Exactness::Measured => "exactness:measured".to_string(),
             },
+            Self::Dimension(dimension) => format!("dimension:{}", dimension.identity()),
             Self::Classification(name) => format!("classification:{name}"),
             Self::Nominal(name) => format!("nominal:{name}"),
             Self::Obligation(obligation) => {
