@@ -5,6 +5,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::file_handle_rust_type;
 use crate::Codegen::layout_handle_rust_type;
 use crate::Codegen::net_handle_rust_type;
+use crate::Codegen::root_prelude_rust_type_name;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::struct_is_covered;
@@ -472,6 +473,7 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     // the opaque handles, all of which `cx.rust_type` renders.)
     is_prelude_struct_name(name)
         || core_rust_type_name(name).is_some()
+        || root_prelude_rust_type_name(name).is_some()
         || cx.core_qualified_rust_type_name(name).is_some()
         || file_handle_rust_type(name).is_some()
         || net_handle_rust_type(name).is_some()

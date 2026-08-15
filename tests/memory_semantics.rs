@@ -181,15 +181,23 @@ fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
     std::fs::write(
         &source,
         r#"#Policy(gc)
+#!Equatable
+#!Comparable
+enum Link {
+    End(Int)
+    Next(Link)
+}
 
-fn promoted() => [Int] {
-    values :: [1, 2, 3]
-    return values
+fn promoted_cycle() => Link {
+    first :: Link.Next(Link.End(1))
+    second :: Link.Next(first)
+    first = Link.Next(second)
+    return first
 }
 
 fn run() {
-    values :: promoted()
-    print(values[0])
+    cycle :: promoted_cycle()
+    print(cycle)
 }
 "#,
     )
@@ -202,7 +210,10 @@ fn run() {
         "first GC run failed: {}",
         String::from_utf8_lossy(&first.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&first.stdout), "1\n");
+    assert_eq!(
+        String::from_utf8_lossy(&first.stdout),
+        "Next(Next(End(1)))\n"
+    );
     let ledger_path = root.join(".jet/memory/ledger-v1.jsonl");
     let first_ledger = std::fs::read_to_string(&ledger_path).unwrap();
     let first_rows = first_ledger.lines().count();
@@ -218,7 +229,10 @@ fn run() {
         "second GC run failed: {}",
         String::from_utf8_lossy(&second.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&second.stdout), "1\n");
+    assert_eq!(
+        String::from_utf8_lossy(&second.stdout),
+        "Next(Next(End(1)))\n"
+    );
     let persisted = std::fs::read_to_string(&ledger_path).unwrap();
     assert_eq!(persisted.lines().count(), first_rows * 2);
 

@@ -408,6 +408,16 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
+/// Plain Prelude records emitted at the generated crate root rather than under
+/// `jet_std`. Keep this separate from `core_rust_type_name`: that table's caller
+/// always inserts `jet_std::`.
+pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&'static str> {
+    match name {
+        n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
+        _ => None,
+    }
+}
+
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
@@ -534,8 +544,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // (the generic `DecodeResult<T>` has its own `rust_type` arm below, since
         // this table only covers non-generic names).
         "MigrationStatus" => Some("MigrationStatus"),
-        // D-MEMO1=A: `name.cache()` is a small top-level Prelude record.
-        n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -2145,6 +2153,16 @@ impl Cx {
                 if name == Syntax::TYPE_COMPLEX && !self.type_names.contains(name) =>
             {
                 format!("{}JetComplex", self.root_prefix)
+            }
+            Type::Named(name)
+                if root_prelude_rust_type_name(name).is_some()
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    root_prelude_rust_type_name(name).unwrap()
+                )
             }
             // A user struct/enum sharing a built-in Core type name (e.g. a user
             // `Vec3`) wins — it keeps its own `__jet_<Name>` lowering. Only fall to the
@@ -5320,6 +5338,20 @@ mod tests {
         );
         assert_eq!(raylib_handle_rust_type("RaylibColor"), Some("RaylibColor"));
     }
+    #[test]
+    fn memo_stats_lowers_to_the_generated_root_record() {
+        let source = "fn run() {}\n";
+        let (tokens, lex_diags) = crate::Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let program = crate::Parser::parse(&tokens).expect("parse failed");
+        let cx = build_cx(&program, source, "test.jet");
+        assert_eq!(
+            cx.rust_type(&Type::Named(Syntax::TYPE_MEMO_STATS.to_string())),
+            "JetMemoStats"
+        );
+        assert_eq!(core_rust_type_name(Syntax::TYPE_MEMO_STATS), None);
+    }
+
 
     #[test]
     fn type_alias_expansion_preserves_function_parameter_contract() {
