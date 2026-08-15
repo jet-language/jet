@@ -30,8 +30,7 @@ pub(in super::super) fn expand_builtin_derive_items(
             Item::Struct(s) => {
                 let comparable = has_derive(&s.derives, crate::Generics::COMPARABLE)
                     || auto.auto_comparable.contains(&s.name);
-                let equatable = comparable
-                    || has_derive(&s.derives, crate::Generics::EQUATABLE)
+                let equatable = has_derive(&s.derives, crate::Generics::EQUATABLE)
                     || auto.auto_equatable.contains(&s.name);
                 if equatable || comparable {
                     generated.extend(struct_derive_items(s, equatable, comparable));
@@ -40,8 +39,7 @@ pub(in super::super) fn expand_builtin_derive_items(
             Item::Enum(e) => {
                 let comparable = has_derive(&e.derives, crate::Generics::COMPARABLE)
                     || auto.auto_comparable.contains(&e.name);
-                let equatable = comparable
-                    || has_derive(&e.derives, crate::Generics::EQUATABLE)
+                let equatable = has_derive(&e.derives, crate::Generics::EQUATABLE)
                     || auto.auto_equatable.contains(&e.name);
                 if equatable || comparable {
                     generated.extend(enum_derive_items(e, equatable, comparable));

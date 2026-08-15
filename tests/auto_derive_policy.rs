@@ -10,11 +10,7 @@ fn project_dir(name: &str) -> std::path::PathBuf {
     ))
 }
 
-fn checked_project(
-    name: &str,
-    manifest_policy: &str,
-    source: &str,
-) -> jet::AST::ProgramBundle {
+fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
     let dir = project_dir(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -27,7 +23,10 @@ fn checked_project(
     .unwrap();
     let entry = dir.join("main.jet");
     std::fs::write(&entry, source).unwrap();
-    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    jet::Loader::load_entry(entry.to_str().unwrap()).unwrap()
+}
+
+fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> jet::AST::ProgramBundle {
     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
         .filter(|diagnostic| {
@@ -39,6 +38,14 @@ fn checked_project(
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
     bundle
+}
+
+fn checked_project(
+    name: &str,
+    manifest_policy: &str,
+    source: &str,
+) -> jet::AST::ProgramBundle {
+    checked_bundle(loaded_project(name, manifest_policy, source))
 }
 
 fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<String> {
@@ -265,19 +272,35 @@ fn run() {
     let Some(before) = aot_measurement(&before, "auto_measure_before_aot") else {
         return;
     };
+    let Some(before_repeat) = aot_measurement(&before, "auto_measure_before_aot") else {
+        return;
+    };
     let Some(after) = aot_measurement(&after, "auto_measure_after_aot") else {
         return;
     };
+    let Some(after_repeat) = aot_measurement(&after, "auto_measure_after_aot") else {
+        return;
+    };
+    for (label, first, repeat) in [
+        ("explicit", &before, &before_repeat),
+        ("automatic", &after, &after_repeat),
+    ] {
+        assert_eq!(first.exit, repeat.exit, "{label} exit changed between runs");
+        assert_eq!(first.stdout, repeat.stdout, "{label} stdout changed between runs");
+        assert_eq!(
+            first.generated_rust_bytes,
+            repeat.generated_rust_bytes,
+            "{label} generated-Rust bytes changed between runs",
+        );
+        assert_eq!(
+            first.binary_bytes,
+            repeat.binary_bytes,
+            "{label} binary bytes changed between runs",
+        );
+    }
     assert_eq!(before.exit, 0);
     assert_eq!(after.exit, 0);
     assert_eq!(before.stdout, after.stdout);
-    assert_eq!(
-        before.generated_rust_bytes,
-        after.generated_rust_bytes,
-        "before/after compile-time artifact bytes: {} -> {}",
-        before.generated_rust_bytes,
-        after.generated_rust_bytes,
-    );
     assert_eq!(
         before.binary_bytes,
         after.binary_bytes,
@@ -289,7 +312,7 @@ fn run() {
 
 #[test]
 fn structural_defaults_cover_codable_and_refusals_are_silent() {
-    let bundle = checked_project(
+    let bundle = loaded_project(
         "structural_defaults",
         "",
         r#"
@@ -326,11 +349,12 @@ fn run() {}
     }
     assert!(!facts.auto_encode.contains("Refused"));
     assert!(!facts.auto_decode.contains("Refused"));
+    let _ = checked_bundle(bundle);
 }
 
 #[test]
 fn project_refusal_is_a_default_fact_and_explicit_codable_still_wins() {
-    let bundle = checked_project(
+    let bundle = loaded_project(
         "project_refusal_fact",
         "policy: .{ lints: .{ deny: [auto_derive] } }",
         r#"
@@ -357,6 +381,12 @@ fn run() {}
     assert!(!facts.auto_decode.contains("Defaulted"));
     assert!(facts.auto_encode.contains("Explicit"));
     assert!(facts.auto_decode.contains("Explicit"));
+    let bundle = checked_bundle(bundle);
+    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    assert!(!rust.contains("impl __jet_Encode for __jet_Defaulted"));
+    assert!(!rust.contains("impl __jet_Decode for __jet_Defaulted"));
+    assert!(rust.contains("impl __jet_Encode for __jet_Explicit"));
+    assert!(rust.contains("impl __jet_Decode for __jet_Explicit"));
 }
 
 #[test]
@@ -571,7 +601,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     let dep = workspace.join("dep");
     let _ = std::fs::remove_dir_all(&workspace);
     std::fs::create_dir_all(&app).unwrap();
-    std::fs::create_dir_all(dep.join(".jet")).unwrap();
+    std::fs::create_dir_all(&dep).unwrap();
     std::fs::write(
         app.join("package.jet"),
         "name: \"app\"\nversion: \"1\"\ndeps: { dep: ../dep }\n",
@@ -588,7 +618,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     )
     .unwrap();
     std::fs::write(
-        dep.join(".jet").join("main.jet"),
+        dep.join("dep.jet"),
         "pub struct DepType { value: Int }\n",
     )
     .unwrap();
@@ -607,9 +637,12 @@ fn package_default_reaches_nested_and_dependency_modules() {
         ]
     );
     assert_eq!(
-        by_module[&dep.join(".jet").join("main.jet")],
+        by_module[&dep.join("dep.jet")],
         vec![("DepType".to_string(), false)]
     );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    assert!(!facts.auto_printable.contains("ImportedOuter"));
     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
@@ -618,9 +651,6 @@ fn package_default_reaches_nested_and_dependency_modules() {
         errors.iter().any(|diagnostic| diagnostic.code == "E0112"),
         "{errors:#?}"
     );
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let facts = &facts[bundle.entry];
-    assert!(!facts.auto_printable.contains("ImportedOuter"));
 }
 
 #[test]
@@ -631,8 +661,8 @@ fn same_named_dependency_type_keeps_its_own_auto_derive_policy() {
     let open_dep = workspace.join("open_dep");
     let _ = std::fs::remove_dir_all(&workspace);
     std::fs::create_dir_all(&app).unwrap();
-    std::fs::create_dir_all(dep.join(".jet")).unwrap();
-    std::fs::create_dir_all(open_dep.join(".jet")).unwrap();
+    std::fs::create_dir_all(&dep).unwrap();
+    std::fs::create_dir_all(&open_dep).unwrap();
     std::fs::write(
         app.join("package.jet"),
         "name: \"app\"\n\
@@ -669,7 +699,7 @@ fn run() {
     )
     .unwrap();
     std::fs::write(
-        dep.join(".jet").join("main.jet"),
+        dep.join("dep.jet"),
         "pub struct Token { value: Int }\n",
     )
     .unwrap();
@@ -679,13 +709,22 @@ fn run() {
     )
     .unwrap();
     std::fs::write(
-        open_dep.join(".jet").join("main.jet"),
+        open_dep.join("open_dep.jet"),
         "pub struct Badge { pub value: Int }\n",
     )
     .unwrap();
 
     let mut bundle =
         jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let app_facts = &facts[bundle.entry];
+    for selected in [
+        &app_facts.auto_printable,
+        &app_facts.auto_debug,
+        &app_facts.auto_equatable,
+    ] {
+        assert!(!selected.contains("SharedEnvelope"), "{selected:?}");
+    }
     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
@@ -698,15 +737,6 @@ fn run() {
         1,
         "{errors:#?}"
     );
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let app_facts = &facts[bundle.entry];
-    for selected in [
-        &app_facts.auto_printable,
-        &app_facts.auto_debug,
-        &app_facts.auto_equatable,
-    ] {
-        assert!(!selected.contains("SharedEnvelope"), "{selected:?}");
-    }
 
     std::fs::write(
         app.join("main.jet"),
@@ -745,18 +775,12 @@ fn run() {
     .unwrap();
     let mut bundle =
         jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
-        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "{errors:#?}");
-
     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
     let app_facts = &facts[bundle.entry];
     let dep_idx = bundle
         .modules
         .iter()
-        .position(|module| module.path == dep.join(".jet").join("main.jet"))
+        .position(|module| module.path == dep.join("dep.jet"))
         .unwrap();
     let dep_facts = &facts[dep_idx];
     for selected in [
@@ -781,6 +805,12 @@ fn run() {
     ] {
         assert!(!selected.contains("Token"), "{selected:?}");
     }
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+
 
     let expected = "\
 Token { value: 7 }\n\
