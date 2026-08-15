@@ -5,8 +5,8 @@
 //! `jet_std_process_*`) — thin std wrappers, not a third algorithm.
 //! parity: guard tests/dev.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
 
+use super::runtime_host::{contract_kernel, jit_result_parts};
 use super::Concurrency;
-use crate::runtime_host::jit_result_parts;
 use std::cell::{Cell, RefCell};
 use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 use std::sync::{mpsc, OnceLock};
@@ -1831,9 +1831,7 @@ extern "C" fn jet_jit_process_exit(code: i64) {
     // that exit status. Never terminate the resident host — that would kill
     // the resident/test process (three-way battery, `jet serve`, …).
     Concurrency::with_runtime_mut(|rt| {
-        rt.exit_code = Some(
-            crate::jit::runtime_host::contract_kernel::jet_runtime_exit_code(code),
-        );
+        rt.exit_code = Some(contract_kernel::jet_runtime_exit_code(code));
         rt.set_trap("__jet_process_exit__");
     });
 }
