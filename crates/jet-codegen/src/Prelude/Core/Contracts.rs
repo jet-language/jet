@@ -23,6 +23,12 @@ pub(crate) fn jet_contract_report(
 // D-FAIL-ARITH1: engines marshal an operation fact to this one arithmetic
 // boundary. The code and wording do not live in a host adapter.
 pub(crate) const JET_ARITHMETIC_CODE: &str = "E3010";
+pub(crate) const JET_ARITHMETIC_ADD_OVERFLOW: &str =
+    "this addition overflows the value's type (the result is outside its range)";
+pub(crate) const JET_ARITHMETIC_SUB_OVERFLOW: &str =
+    "this subtraction overflows the value's type (the result is outside its range)";
+pub(crate) const JET_ARITHMETIC_MUL_OVERFLOW: &str =
+    "this multiplication overflows the value's type (the result is outside its range)";
 pub(crate) const JET_ARITHMETIC_DIVIDE_ZERO: &str = "divided by zero";
 pub(crate) const JET_ARITHMETIC_DIVISION_ERROR: &str =
     "this division can't be done (dividing by zero, or overflow)";
@@ -37,9 +43,9 @@ pub(crate) const JET_ARITHMETIC_REMAINDER_OVERFLOW: &str =
 
 pub(crate) fn jet_arithmetic_message(kind: &str) -> &'static str {
     match kind {
-        "add" => "this addition overflows the value's type (the result is outside its range)",
-        "sub" => "this subtraction overflows the value's type (the result is outside its range)",
-        "mul" => "this multiplication overflows the value's type (the result is outside its range)",
+        "add" => JET_ARITHMETIC_ADD_OVERFLOW,
+        "sub" => JET_ARITHMETIC_SUB_OVERFLOW,
+        "mul" => JET_ARITHMETIC_MUL_OVERFLOW,
         "div" => JET_ARITHMETIC_DIVISION_ERROR,
         "divide_zero" => JET_ARITHMETIC_DIVIDE_ZERO,
         "divide_overflow" => JET_ARITHMETIC_DIVIDE_OVERFLOW,

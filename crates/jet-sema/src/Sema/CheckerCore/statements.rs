@@ -1378,6 +1378,17 @@ impl<'a> Checker<'a> {
                     }
                     match (&mut *expr, resolved_ret) {
                         (Some(e), Some(rt)) => {
+                            // A direct `return value?` in a fallible function returns
+                            // the propagated success value. Desugar it through the
+                            // existing `Ok` constructor so inference checks the success
+                            // payload while `infer_try` still records the error conversion.
+                            if matches!(&rt, Type::Result { .. })
+                                && matches!(e.without_parens(), Expr::Try(..))
+                            {
+                                let span = e.span();
+                                let inner = std::mem::replace(e, Expr::Absent(span));
+                                *e = Expr::Ok(Box::new(inner), span);
+                            }
                             let string_view_return = matches!(
                                 &rt,
                                 Type::Apply { name, args }

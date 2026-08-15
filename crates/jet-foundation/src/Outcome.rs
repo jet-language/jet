@@ -415,9 +415,12 @@ pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut
 /// carrier. Exit 101 is reserved for Jet defects, so an explicit user exit
 /// cannot forge it; the request becomes the ordinary user-error status.
 pub fn jet_runtime_exit_code(code: i64) -> i32 {
+    const RESERVED_ICE: i32 = 101;
+    const USER_ERROR: i32 = 1;
+
     let code = code as i32;
-    if code == crate::ExitCodes::ICE {
-        crate::ExitCodes::USER_ERROR
+    if code == RESERVED_ICE {
+        USER_ERROR
     } else {
         code
     }
