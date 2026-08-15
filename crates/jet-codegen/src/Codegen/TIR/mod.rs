@@ -1527,12 +1527,19 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             continue;
                         }
                         let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                            if !tir_covers_trait_method(
-                                &specialized,
-                                &imp.type_name,
-                                &cx,
-                                trait_name,
-                            ) {
+                            // D-SERDE2=A / I9: a generated codec's provenance is the
+                            // coverage authority in every execution tier, exactly as it
+                            // is in the AOT emitter (Codegen/Items.rs::emit_trait_method).
+                            // Dropping it here would leave the Cranelift JIT and the
+                            // interpreter without a method AOT emits.
+                            if !imp.is_generated_serde
+                                && !tir_covers_trait_method(
+                                    &specialized,
+                                    &imp.type_name,
+                                    &cx,
+                                    trait_name,
+                                )
+                            {
                                 continue;
                             }
                             lower_trait_method(&specialized, &imp.type_name, &cx, trait_name)
@@ -1597,7 +1604,15 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                             };
                             for method in &imp.methods {
                                 let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                                    if !tir_covers_trait_method(method, &type_name, &cx, trait_name)
+                                    // D-SERDE2=A / I9: same generated-codec provenance
+                                    // authority as the top-level impl arm above.
+                                    if !imp.is_generated_serde
+                                        && !tir_covers_trait_method(
+                                            method,
+                                            &type_name,
+                                            &cx,
+                                            trait_name,
+                                        )
                                     {
                                         continue;
                                     }

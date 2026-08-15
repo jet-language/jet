@@ -2563,8 +2563,15 @@ pub(crate) fn emit_external_trait_impl(
             );
         }
     } else {
+        // D-SERDE2=A: a top-level auto codec is compiler-written, exactly like an
+        // in-type structural derive block. `ImplDef.is_generated_serde` is the same
+        // parser-unforgeable provenance as `TraitImplBlock.compiler_generated` — a
+        // source `impl T.Encode` is ALWAYS false (jet-foundation `AST/items.rs`) —
+        // so it carries the same authority the derive path already gets at
+        // `emit_trait_impl`.
+        let compiler_written = i.is_generated_serde;
         for m in &i.methods {
-            emit_trait_method(cx, trait_name, &i.type_name, m, out, 1);
+            emit_trait_method(cx, trait_name, &i.type_name, m, out, 1, compiler_written);
         }
     }
     let migration_struct = struct_def.filter(|s|
@@ -2604,6 +2611,7 @@ fn emit_trait_method(
     f: &Func,
     out: &mut String,
     indent: usize,
+    compiler_written: bool,
 ) {
     // c109 Phase N: the typed IR is the only codegen seam (R7). A trait-impl
     // method always emits at indent 1 inside the `impl Trait for __jet_<T>` block
@@ -2613,15 +2621,28 @@ fn emit_trait_method(
         indent, 1,
         "trait methods always emit at impl-block indent 1"
     );
-    if TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
+    // `compiler_written` is the serde builder's retained provenance, not a
+    // relaxation: the method still lowers and emits through `lower_trait_method`
+    // + `emit_tir_func`, the one seam. It exists because the conservative
+    // source-method gate must not reinterpret a synthetic signature or body
+    // (the rule already ratified for in-type derive blocks in
+    // `tir_covers_compiler_derive_method`). Without it the SAME type whose
+    // derived `display`/`debug`/`equal`/`compare` lower fine aborts on its
+    // derived `encode`/`decode` — an authority difference, never a capability
+    // one. A hand-written `impl T.Encode` keeps the unconditional ICE.
+    if compiler_written || TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
         let tir = TIR::lower_trait_method(f, type_name, cx, trait_name);
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
+    // Name the owner and trait, not just the method: an I2/R7 abort that cannot
+    // be localized costs a whole build cycle to attribute.
     jet_foundation::ice!(
         None,
-        "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
-        f.name
+        "codegen reached a construct the typed IR does not cover ({}.{} for {}) — compiler bug (I2/R7)",
+        trait_name,
+        f.name,
+        type_name
     );
 }
 
