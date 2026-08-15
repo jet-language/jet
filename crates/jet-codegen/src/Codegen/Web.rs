@@ -4977,21 +4977,22 @@ fn wasm_emit_expr(
                     }
                     TIR::TStrPart::Lit(_) => {}
                     TIR::TStrPart::Interp(interp, format) => {
-                        let spec = match format {
-                            crate::AST::StrFormat::Display => "{}",
-                            crate::AST::StrFormat::Debug => "{:?}",
+                        let rendered =
+                            wasm_emit_expr(interp, funcs, file_prefix, reconstructions)?;
+                        match format {
+                            crate::AST::StrFormat::Display => value.push_str(&jet_format!(
+                                "{jet_prefix}s.push_str(&({rendered}).jet_display()); "
+                            )),
+                            crate::AST::StrFormat::Debug => value.push_str(&jet_format!(
+                                "{jet_prefix}s.push_str(&format!(\"{{:?}}\", {rendered})); "
+                            )),
                             crate::AST::StrFormat::Fixed(_) => {
                                 unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                             }
                             crate::AST::StrFormat::Unit(_) => {
                                 unreachable!("Unit interpolation lowers to a String")
                             }
-                        };
-                        value.push_str(&jet_format!(
-                            "{jet_prefix}s.push_str(&format!({:?}, {})); ",
-                            spec,
-                            wasm_emit_expr(interp, funcs, file_prefix, reconstructions)?
-                        ));
+                        }
                     }
                 }
             }
@@ -7900,7 +7901,7 @@ fn tir_js_string(
             match part {
                 TIR::TStrPart::Lit(text) => out.push_str(text),
                 TIR::TStrPart::Interp(value, _) => {
-                    let is_float = matches!(&value.ty, Type::Float | Type::Float32);
+                    let is_float = value.ty.is_float();
                     let rendered = tir_js_expr(value, funcs, file_prefix)?;
                     if is_float {
                         out.push_str(&format!("${{jet_float_display({rendered})}}"));
