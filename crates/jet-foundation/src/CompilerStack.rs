@@ -83,25 +83,45 @@ pub fn on_compiler_worker() -> bool {
 /// rows. Each checks [`on_compiler_worker`] before capturing, so the inline
 /// path stays allocation-free.
 ///
-/// Values and panics propagate unchanged: `join` returns the work's value, and
-/// a panic is re-raised with `resume_unwind`, so the ICE path and the
-/// diagnostics a caller catches keep their shape instead of being reshaped
-/// into an error.
+/// Values and panics both cross unchanged. The value rides out through
+/// `join`; a panic is captured on the worker with `catch_unwind` and re-raised
+/// on the caller with `resume_unwind`, so the caller observes the original
+/// payload at the original panic location — the ICE path and the diagnostics a
+/// caller catches keep their shape instead of being reshaped into an error.
+///
+/// The capture sits directly around `work`, not on the join result, so the
+/// transport owes nothing to `std::thread::scope`'s internals. The worker never
+/// dies panicking, `ScopeData::a_thread_panicked` is never set, and `scope` can
+/// never substitute its own `"a scoped thread panicked"` payload for the
+/// compiler's. `resume_unwind` then runs on the caller's own frame, outside the
+/// scope, so the caller's unwind is raised exactly once, by us.
+///
+/// What the boundary cannot move is the panic *hook*: it runs at panic time, on
+/// the worker, before any payload crosses back. A hook that reads thread-local
+/// state therefore reads the worker's — that is why a compiler panic's message
+/// lands outside libtest's per-test output capture, and why
+/// `JET_SCHEDULER_CATCHING_PANIC` (`jet-codegen/src/Prelude/Scheduler.rs`) is
+/// read on the worker rather than on the caller. `resume_unwind` deliberately
+/// does not run the hook a second time.
 pub fn run_on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     if on_compiler_worker() {
         return work();
     }
-    std::thread::scope(|scope| {
+    let outcome = std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("jet-compiler".to_string())
             .stack_size(COMPILER_STACK_SIZE)
             .spawn_scoped(scope, move || {
                 ON_COMPILER_WORKER.with(|active| active.set(true));
-                work()
+                // Asserted, not proven: the payload is re-raised immediately
+                // and unchanged, so no caller ever observes state this panic
+                // left behind without unwinding through it itself.
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
             })
             .unwrap_or_else(|error| crate::ice!(None, "could not start compiler worker: {error}"));
-        worker
-            .join()
-            .unwrap_or_else(|payload| std::panic::resume_unwind(payload))
-    })
+        // An outer `Err` is a panic raised after `work` returned, by the thread
+        // epilogue itself; fold it into the one channel.
+        worker.join().unwrap_or_else(Err)
+    });
+    outcome.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }

@@ -2329,7 +2329,28 @@ pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {
     let mut bound = HashSet::new();
     let mut read = HashSet::new();
     let mut mut_cap = HashSet::new();
-    Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap);
+    let mut called = HashSet::new();
+    Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
     read.extend(mut_cap);
     read
+}
+
+/// [`block_free_var_reads`], split from the free names the block invokes with
+/// direct-call syntax (`f(x)`).
+///
+/// A `Call` carries its callee in `Call::name` rather than an `Expr::Ident`, so
+/// a fn-valued binding invoked this way is invisible to the read set even
+/// though the lowered body reads that local. It is reported separately because
+/// the same spelling names top-level functions and builtins, which are not
+/// captured values; only the caller's scope can tell them apart.
+pub fn block_free_reads_and_calls(
+    stmts: &[crate::AST::Stmt],
+) -> (HashSet<String>, HashSet<String>) {
+    let mut bound = HashSet::new();
+    let mut read = HashSet::new();
+    let mut mut_cap = HashSet::new();
+    let mut called = HashSet::new();
+    Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
+    read.extend(mut_cap);
+    (read, called)
 }

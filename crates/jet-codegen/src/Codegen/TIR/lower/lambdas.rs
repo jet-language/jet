@@ -255,13 +255,24 @@ fn lower_lambda_expecting_with_host_borrow(
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
     {
         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
-        let mut reads = match &lam.body {
-            LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
+        let (mut reads, called) = match &lam.body {
+            LambdaBody::Block(stmts) => crate::Sema::block_free_reads_and_calls(stmts),
             LambdaBody::Expr(e) => {
-                crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())])
+                crate::Sema::block_free_reads_and_calls(&[Stmt::Expr((**e).clone())])
             }
         };
         reads.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
+        // A direct call carries its callee in `Call::name`, never an
+        // `Expr::Ident`, so the free-read walker cannot see a fn-valued binding
+        // invoked as `f(x)` — the pack used to ship without it and the body's
+        // `Local` read had nothing to resolve against. Only a fn-typed local can
+        // be that callee; every other spelling is a top-level function, a
+        // builtin, or a module path, and none of those is a captured value.
+        for name in called {
+            if matches!(env.ty_of(&name), Some(Type::Fn { .. })) {
+                reads.insert(name);
+            }
+        }
         for name in reads {
             if param_names.contains(name.as_str()) {
                 continue;
@@ -275,8 +286,14 @@ fn lower_lambda_expecting_with_host_borrow(
             let cap_ty = env
                 .ty_of(&name)
                 .unwrap_or_else(|| Type::Named("Unit".to_string()));
-            // Body still reads the outer place (no `__jet___cap_` rebind).
-            captures.push((name.clone(), crate::Codegen::TIR::local_place(&name), cap_ty));
+            // Body still reads the outer slot (no `__jet___cap_` rebind), so the
+            // capture place is that slot's own Rust name — NOT one synthesized
+            // from the Jet name. An enclosing lambda or `#Reactive` block may
+            // already have rebound this name to its `__jet___cap_*` clone, and
+            // the body reads that generated spelling; naming the slot keeps the
+            // pack and the body's local reads on the same key. Deref is dropped
+            // on purpose: every engine keys a local by its bare binding name.
+            captures.push((name.clone(), env.rust_name_of(&name), cap_ty));
         }
     }
     // Params bind as `mangle(name)` (no deref), typed from the annotation, falling
@@ -438,12 +455,22 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
         .iter()
         .map(|s| s.as_str())
         .collect();
-    let reads = match &lam.body {
-        LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
-        LambdaBody::Expr(e) => crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())]),
+    let (reads, called) = match &lam.body {
+        LambdaBody::Block(stmts) => crate::Sema::block_free_reads_and_calls(stmts),
+        LambdaBody::Expr(e) => {
+            crate::Sema::block_free_reads_and_calls(&[Stmt::Expr((**e).clone())])
+        }
     };
     let mut reads = reads;
     reads.extend(lam.take_names.iter().map(|(name, _)| name.clone()));
+    // Same hole as the stored-lambda pack: `f(x)` keeps its callee in
+    // `Call::name`, so a fn-valued local invoked by the body never reached the
+    // free-read set. Only a fn-typed local can be that callee.
+    for name in called {
+        if matches!(env.ty_of(&name), Some(Type::Fn { .. })) {
+            reads.insert(name);
+        }
+    }
     let mut captures: Vec<JitSpawnCapture> = reads
         .into_iter()
         .filter(|n| !param_names.contains(n.as_str()))

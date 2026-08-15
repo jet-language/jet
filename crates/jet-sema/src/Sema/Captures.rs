@@ -585,20 +585,47 @@ pub(crate) fn stmt_uses_name_through_lambdas(stmt: &Stmt, name: &str) -> bool {
     let mut bound = HashSet::new();
     let mut read = HashSet::new();
     let mut written = HashSet::new();
-    stmt_collect_captures(stmt, &mut bound, &mut read, &mut written);
+    stmt_collect_captures(
+        stmt,
+        &mut bound,
+        &mut read,
+        &mut written,
+        &mut HashSet::new(),
+    );
     read.contains(name) || written.contains(name)
 }
 
+/// Free names a lambda body reads, and the names it changes.
+///
+/// The callee of a direct call (`f(x)`) is deliberately dropped here: a
+/// `Call` carries its callee in `Call::name`, and only the enclosing scope
+/// can say whether that name is a fn-valued binding or a top-level function.
+/// Callers that own a scope use [`lambda_collect_free_names`] instead.
 pub(crate) fn lambda_collect_captures(
     body: &LambdaBody,
     params: &HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
 ) {
+    lambda_collect_free_names(body, params, read, mut_cap, &mut HashSet::new());
+}
+
+/// [`lambda_collect_captures`] plus `called`: the free names the body invokes
+/// with direct-call syntax. A fn-valued binding called as `f(x)` is a capture
+/// exactly like any other read of it, but the walker cannot tell it apart from
+/// a top-level function or a builtin, so the scope that owns the bindings
+/// filters this set (`LowerEnv::locals`, `Checker::visible_names`).
+pub(crate) fn lambda_collect_free_names(
+    body: &LambdaBody,
+    params: &HashSet<String>,
+    read: &mut HashSet<String>,
+    mut_cap: &mut HashSet<String>,
+    called: &mut HashSet<String>,
+) {
     let mut bound = params.clone();
     match body {
-        LambdaBody::Expr(e) => expr_collect_captures(e, &bound, read, mut_cap),
-        LambdaBody::Block(stmts) => block_collect_captures(stmts, &mut bound, read, mut_cap),
+        LambdaBody::Expr(e) => expr_collect_captures(e, &bound, read, mut_cap, called),
+        LambdaBody::Block(stmts) => block_collect_captures(stmts, &mut bound, read, mut_cap, called),
     }
 }
 
@@ -607,9 +634,10 @@ pub(crate) fn block_collect_captures(
     bound: &mut HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
+    called: &mut HashSet<String>,
 ) {
     for s in stmts {
-        stmt_collect_captures(s, bound, read, mut_cap);
+        stmt_collect_captures(s, bound, read, mut_cap, called);
     }
 }
 
@@ -618,14 +646,15 @@ pub(crate) fn expr_collect_captures(
     bound: &HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
+    called: &mut HashSet<String>,
 ) {
     match e {
         Expr::Ident(n, _) if !bound.contains(n) => {
             read.insert(n.clone());
         }
-        Expr::Unary(_, inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
+        Expr::Unary(_, inner, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
         Expr::IncDec { operand, .. } => {
-            expr_collect_captures(operand, bound, read, mut_cap);
+            expr_collect_captures(operand, bound, read, mut_cap, called);
             if let Expr::Ident(name, _) = operand.as_ref() {
                 if !bound.contains(name) {
                     mut_cap.insert(name.clone());
@@ -639,23 +668,30 @@ pub(crate) fn expr_collect_captures(
             }
         }
         Expr::Binary(_, l, r, _) => {
-            expr_collect_captures(l, bound, read, mut_cap);
-            expr_collect_captures(r, bound, read, mut_cap);
+            expr_collect_captures(l, bound, read, mut_cap, called);
+            expr_collect_captures(r, bound, read, mut_cap, called);
         }
         Expr::CompareChain { operands, .. } => {
             for e in operands {
-                expr_collect_captures(e, bound, read, mut_cap);
+                expr_collect_captures(e, bound, read, mut_cap, called);
             }
         }
         Expr::Call(c) => {
+            // A direct call reaches its callee through `Call::name`, never an
+            // `Expr::Ident`, so a fn-valued binding invoked here would be
+            // invisible to `read`. Record it as a call instead of a read: the
+            // same name may be a top-level function, which is not a capture.
+            if !bound.contains(&c.name) {
+                called.insert(c.name.clone());
+            }
             for a in &c.args {
-                expr_collect_captures(&a.expr, bound, read, mut_cap);
+                expr_collect_captures(&a.expr, bound, read, mut_cap, called);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            expr_collect_captures(callee, bound, read, mut_cap);
+            expr_collect_captures(callee, bound, read, mut_cap, called);
             for a in args {
-                expr_collect_captures(&a.expr, bound, read, mut_cap);
+                expr_collect_captures(&a.expr, bound, read, mut_cap, called);
             }
         }
         Expr::Field(inner, _, _)
@@ -666,11 +702,11 @@ pub(crate) fn expr_collect_captures(
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
         | Expr::Copy(inner, _)
-        | Expr::Place(inner, _, _) => expr_collect_captures(inner, bound, read, mut_cap),
+        | Expr::Place(inner, _, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
         Expr::Try(inner, _, _, note) => {
-            expr_collect_captures(inner, bound, read, mut_cap);
+            expr_collect_captures(inner, bound, read, mut_cap, called);
             if let Some(note) = note {
-                expr_collect_captures(note, bound, read, mut_cap);
+                expr_collect_captures(note, bound, read, mut_cap, called);
             }
         }
         Expr::MethodCall { receiver, args, .. } => {
@@ -690,57 +726,57 @@ pub(crate) fn expr_collect_captures(
                 Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER
             );
             if !static_type && !task_surface {
-                expr_collect_captures(receiver, bound, read, mut_cap);
+                expr_collect_captures(receiver, bound, read, mut_cap, called);
             }
             for a in args {
-                expr_collect_captures(&a.expr, bound, read, mut_cap);
+                expr_collect_captures(&a.expr, bound, read, mut_cap, called);
             }
         }
         Expr::Index { base, index, .. } => {
-            expr_collect_captures(base, bound, read, mut_cap);
-            expr_collect_captures(index, bound, read, mut_cap);
+            expr_collect_captures(base, bound, read, mut_cap, called);
+            expr_collect_captures(index, bound, read, mut_cap, called);
         }
         Expr::Slice {
             base, start, end, range, ..
         } => {
-            expr_collect_captures(base, bound, read, mut_cap);
+            expr_collect_captures(base, bound, read, mut_cap, called);
             if let Some(range) = range {
-                expr_collect_captures(range, bound, read, mut_cap);
+                expr_collect_captures(range, bound, read, mut_cap, called);
             } else {
-                expr_collect_captures(start, bound, read, mut_cap);
-                expr_collect_captures(end, bound, read, mut_cap);
+                expr_collect_captures(start, bound, read, mut_cap, called);
+                expr_collect_captures(end, bound, read, mut_cap, called);
             }
         }
         Expr::ListLit(elems, _) => {
             for el in elems {
-                expr_collect_captures(el, bound, read, mut_cap);
+                expr_collect_captures(el, bound, read, mut_cap, called);
             }
         }
         Expr::TupleLit(fields, _, _) => {
             for (_, e) in fields {
-                expr_collect_captures(e, bound, read, mut_cap);
+                expr_collect_captures(e, bound, read, mut_cap, called);
             }
         }
         Expr::MapLit(entries, _) => {
             for (k, v) in entries {
-                expr_collect_captures(k, bound, read, mut_cap);
-                expr_collect_captures(v, bound, read, mut_cap);
+                expr_collect_captures(k, bound, read, mut_cap, called);
+                expr_collect_captures(v, bound, read, mut_cap, called);
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, f) in fields {
-                expr_collect_captures(f, bound, read, mut_cap);
+                expr_collect_captures(f, bound, read, mut_cap, called);
             }
         }
         Expr::TypedLit { body, .. } => {
-            body.for_each_expr(|f| expr_collect_captures(f, bound, read, mut_cap));
+            body.for_each_expr(|f| expr_collect_captures(f, bound, read, mut_cap, called));
         }
         Expr::EnumLit { args, .. } => {
             for a in args {
                 match a {
-                    EnumLitArg::Positional(ex) => expr_collect_captures(ex, bound, read, mut_cap),
+                    EnumLitArg::Positional(ex) => expr_collect_captures(ex, bound, read, mut_cap, called),
                     EnumLitArg::Named { expr, .. } => {
-                        expr_collect_captures(expr, bound, read, mut_cap);
+                        expr_collect_captures(expr, bound, read, mut_cap, called);
                     }
                 }
             }
@@ -748,28 +784,28 @@ pub(crate) fn expr_collect_captures(
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            expr_collect_captures(value, bound, read, mut_cap);
+            expr_collect_captures(value, bound, read, mut_cap, called);
             match fallback {
-                OrFallback::Value(ex) => expr_collect_captures(ex, bound, read, mut_cap),
+                OrFallback::Value(ex) => expr_collect_captures(ex, bound, read, mut_cap, called),
                 OrFallback::Block { body, value, .. } => {
                     let mut block_bound = bound.clone();
                     for stmt in body {
-                        stmt_collect_captures(stmt, &mut block_bound, read, mut_cap);
+                        stmt_collect_captures(stmt, &mut block_bound, read, mut_cap, called);
                     }
-                    expr_collect_captures(value, &block_bound, read, mut_cap);
+                    expr_collect_captures(value, &block_bound, read, mut_cap, called);
                 }
                 OrFallback::Return(Some(ex), _) => {
-                    expr_collect_captures(ex, bound, read, mut_cap);
+                    expr_collect_captures(ex, bound, read, mut_cap, called);
                 }
                 _ => {}
             }
         }
         Expr::PatternTest { subject, pattern, .. } => {
-            expr_collect_captures(subject, bound, read, mut_cap);
+            expr_collect_captures(subject, bound, read, mut_cap, called);
             if let Pattern::Struct { fields, .. } = pattern {
                 for field in fields {
                     if let crate::AST::StructPatField::Value { value, .. } = field {
-                        expr_collect_captures(value, bound, read, mut_cap);
+                        expr_collect_captures(value, bound, read, mut_cap, called);
                     }
                 }
             }
@@ -777,7 +813,7 @@ pub(crate) fn expr_collect_captures(
         Expr::Str(parts, _) => {
             for p in parts {
                 if let StrPart::Interp(ex, _) = p {
-                    expr_collect_captures(ex, bound, read, mut_cap);
+                    expr_collect_captures(ex, bound, read, mut_cap, called);
                 }
             }
         }
@@ -792,11 +828,13 @@ pub(crate) fn expr_collect_captures(
                 .collect::<HashSet<_>>();
             let mut nested_read = HashSet::new();
             let mut nested_write = HashSet::new();
-            lambda_collect_captures(
+            let mut nested_called = HashSet::new();
+            lambda_collect_free_names(
                 &lambda.body,
                 &params,
                 &mut nested_read,
                 &mut nested_write,
+                &mut nested_called,
             );
             nested_read.extend(lambda.take_names.iter().map(|(name, _)| name.clone()));
             for name in nested_read {
@@ -810,8 +848,15 @@ pub(crate) fn expr_collect_captures(
                     read.insert(name);
                 }
             }
+            // A name the inner closure calls is reached through the outer one,
+            // so the outer capture list needs it too.
+            for name in nested_called {
+                if !bound.contains(&name) {
+                    called.insert(name);
+                }
+            }
         }
-        Expr::Paren(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
+        Expr::Paren(inner, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
         _ => {}
     }
 }
@@ -821,13 +866,14 @@ pub(crate) fn stmt_collect_captures(
     bound: &mut HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
+    called: &mut HashSet<String>,
 ) {
     match stmt {
         Stmt::Expr(e)
         | Stmt::Yield(e, _)
-        | Stmt::DeferClose { close: e, .. } => expr_collect_captures(e, bound, read, mut_cap),
+        | Stmt::DeferClose { close: e, .. } => expr_collect_captures(e, bound, read, mut_cap, called),
         Stmt::Val(b) => {
-            expr_collect_captures(&b.init, bound, read, mut_cap);
+            expr_collect_captures(&b.init, bound, read, mut_cap, called);
             bound.insert(b.name.clone());
         }
         Stmt::Assign { target, value, .. } => {
@@ -836,31 +882,31 @@ pub(crate) fn stmt_collect_captures(
                     mut_cap.insert(name.clone());
                 }
             } else if let LValue::Index { base, index, .. } = target {
-                expr_collect_captures(base, bound, read, mut_cap);
-                expr_collect_captures(index, bound, read, mut_cap);
+                expr_collect_captures(base, bound, read, mut_cap, called);
+                expr_collect_captures(index, bound, read, mut_cap, called);
                 if let Expr::Ident(n, _) = base.as_ref() {
                     if !bound.contains(n) {
                         mut_cap.insert(n.clone());
                     }
                 }
             } else if let LValue::Field { base, .. } = target {
-                expr_collect_captures(base, bound, read, mut_cap);
+                expr_collect_captures(base, bound, read, mut_cap, called);
                 if let Some(root) = expr_root_ident(base) {
                     if !bound.contains(root) {
                         mut_cap.insert(root.to_string());
                     }
                 }
             }
-            expr_collect_captures(value, bound, read, mut_cap);
+            expr_collect_captures(value, bound, read, mut_cap, called);
         }
-        Stmt::Return(Some(e), _) => expr_collect_captures(e, bound, read, mut_cap),
+        Stmt::Return(Some(e), _) => expr_collect_captures(e, bound, read, mut_cap, called),
         Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
-            expr_collect_captures(e, bound, read, mut_cap)
+            expr_collect_captures(e, bound, read, mut_cap, called)
         }
         Stmt::While { cond, body, .. } => {
-            expr_collect_captures(cond, bound, read, mut_cap);
+            expr_collect_captures(cond, bound, read, mut_cap, called);
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
         Stmt::Reactive { body, .. } => {
             let mut body_bound = bound.clone();
@@ -871,6 +917,7 @@ pub(crate) fn stmt_collect_captures(
                 &mut body_bound,
                 &mut reactive_read,
                 &mut reactive_mut,
+                called,
             );
             // Registration clones every free root. Mutations happen later
             // against that clone, so the enclosing closure only reads roots
@@ -887,16 +934,16 @@ pub(crate) fn stmt_collect_captures(
         } => {
             match kind {
                 ForKind::Range { start, end, step, exclusive: _ } => {
-                    expr_collect_captures(start, bound, read, mut_cap);
-                    expr_collect_captures(end, bound, read, mut_cap);
+                    expr_collect_captures(start, bound, read, mut_cap, called);
+                    expr_collect_captures(end, bound, read, mut_cap, called);
                     if let Some(step) = step {
-                        expr_collect_captures(step, bound, read, mut_cap);
+                        expr_collect_captures(step, bound, read, mut_cap, called);
                     }
                 }
                 ForKind::In { collection, step } => {
-                    expr_collect_captures(collection, bound, read, mut_cap);
+                    expr_collect_captures(collection, bound, read, mut_cap, called);
                     if let Some(step) = step {
-                        expr_collect_captures(step, bound, read, mut_cap);
+                        expr_collect_captures(step, bound, read, mut_cap, called);
                     }
                 }
             }
@@ -905,7 +952,7 @@ pub(crate) fn stmt_collect_captures(
             if let Some((name, _)) = var2 {
                 body_bound.insert(name.clone());
             }
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
         Stmt::Switch {
             subject,
@@ -919,7 +966,7 @@ pub(crate) fn stmt_collect_captures(
             else_body,
             ..
         } => {
-            expr_collect_captures(subject, bound, read, mut_cap);
+            expr_collect_captures(subject, bound, read, mut_cap, called);
             // `it` is synthesised by the when-checker when the subject is a
             // non-ident fallible value; always treat it as bound so that the
             // `| it == Ok(n)` pattern subjects are not treated as free vars.
@@ -928,7 +975,7 @@ pub(crate) fn stmt_collect_captures(
             for a in arms {
                 // Collect from the condition using the extended bound set so
                 // that the synthesised `it` subject is not treated as a capture.
-                expr_collect_captures(&a.cond, &when_bound, read, mut_cap);
+                expr_collect_captures(&a.cond, &when_bound, read, mut_cap, called);
                 // Add any pattern bindings introduced by the arm condition so
                 // they are not treated as captures inside the arm body.
                 let mut arm_bound = when_bound.clone();
@@ -984,11 +1031,11 @@ pub(crate) fn stmt_collect_captures(
                         }
                     }
                 }
-                block_collect_captures(&a.body, &mut arm_bound, read, mut_cap);
+                block_collect_captures(&a.body, &mut arm_bound, read, mut_cap, called);
             }
             if let Some(b) = else_body {
                 let mut else_bound = bound.clone();
-                block_collect_captures(b, &mut else_bound, read, mut_cap);
+                block_collect_captures(b, &mut else_bound, read, mut_cap, called);
             }
         }
         Stmt::CountedLoop {
@@ -998,13 +1045,13 @@ pub(crate) fn stmt_collect_captures(
             body,
             ..
         } => {
-            expr_collect_captures(&init.init, bound, read, mut_cap);
+            expr_collect_captures(&init.init, bound, read, mut_cap, called);
             bound.insert(init.name.clone());
-            expr_collect_captures(cond, bound, read, mut_cap);
+            expr_collect_captures(cond, bound, read, mut_cap, called);
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
             if let Some(step) = step {
-                stmt_collect_captures(step, bound, read, mut_cap);
+                stmt_collect_captures(step, bound, read, mut_cap, called);
             }
         }
         Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
@@ -1022,7 +1069,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. } => {
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
         Stmt::Break(_)
         | Stmt::Continue(_)
@@ -1032,7 +1079,7 @@ pub(crate) fn stmt_collect_captures(
         // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; still walk body for captures (conservative).
         Stmt::ComptimeBlock { body, .. } => {
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
         Stmt::ComptimeIf {
             then_body,
@@ -1040,30 +1087,30 @@ pub(crate) fn stmt_collect_captures(
             ..
         } => {
             let mut then_bound = bound.clone();
-            block_collect_captures(then_body, &mut then_bound, read, mut_cap);
+            block_collect_captures(then_body, &mut then_bound, read, mut_cap, called);
             if let Some(eb) = else_body {
                 let mut else_bound = bound.clone();
-                block_collect_captures(eb, &mut else_bound, read, mut_cap);
+                block_collect_captures(eb, &mut else_bound, read, mut_cap, called);
             }
         }
         Stmt::ContextBlock { fields, body, .. } => {
             for (_, e, _) in fields {
-                expr_collect_captures(e, bound, read, mut_cap);
+                expr_collect_captures(e, bound, read, mut_cap, called);
             }
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
         // D-TERM1 (ratified 2026-06-22): collect captures from live block body.
         Stmt::Live { body, .. } => {
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
         // D-DOTSCOPE1: a scope-member region body is its own block for capture
         // analysis — except `.setup`, whose bindings leak; scanning a fresh clone
         // is conservative (over-captures nothing, under-captures nothing needed).
         Stmt::ScopeMember { body, .. } => {
             let mut body_bound = bound.clone();
-            block_collect_captures(body, &mut body_bound, read, mut_cap);
+            block_collect_captures(body, &mut body_bound, read, mut_cap, called);
         }
     }
 }
