@@ -62,6 +62,11 @@ mod disjoint_semantics {
 
 #[allow(dead_code)]
 mod division_semantics {
+    use super::contract_semantics::{
+        JET_ARITHMETIC_DIVIDE_OVERFLOW, JET_ARITHMETIC_DIVIDE_ZERO,
+        JET_ARITHMETIC_DIVISION_ERROR,
+    };
+
     // Division.rs also carries AOT-only stop adapters. The evaluator uses its
     // fallible Prelude policy below, so this path must never be called here.
     fn jet_arithmetic_stop(_: &str, _: u32, _: &str) -> ! {

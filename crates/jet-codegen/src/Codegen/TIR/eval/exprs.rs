@@ -7090,8 +7090,8 @@ impl<'a> EvalCtx<'a> {
                             }
                             crate::Codegen::TIR::TTryConvert::WidenUnion { enum_name, tag } => {
                                 CtValue::failed(Box::new(CtValue::Enum {
-                                    type_name: enum_name,
-                                    variant: tag,
+                                    type_name: enum_name.clone(),
+                                    variant: tag.clone(),
                                     args: vec![(None, *e)],
                                 }))
                             }
