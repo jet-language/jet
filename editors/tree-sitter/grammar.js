@@ -39,8 +39,8 @@ module.exports = grammar({
     [$._expr, $.if_expr],
     [$.named_type_field, $.lambda_param],
     // Inside a struct/enum/trait body, leading markers can precede either a
-    // field/method-sig or a method — fork until `fn`/name disambiguates.
-    [$.function_def, $.struct_field],
+    // binding, field/method-sig, or method — fork until syntax disambiguates.
+    [$.function_def, $.struct_cli_binding, $.struct_field],
     [$.function_def, $.trait_method_sig],
     // `(a, b)` — destructure target vs tuple expr vs lambda params; the `::`/
     // `=>` after the `)` disambiguates.
