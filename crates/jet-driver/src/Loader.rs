@@ -834,7 +834,9 @@ fn load_entry_with_overlays_mode_with_sink(
         .collect::<Vec<_>>();
     let (project_parts, project_part_failures) =
         crate::ProjectParts::scan_with_diagnostics(&project_root, &project_part_overlays);
-    if let Some(failure) = project_part_failures.iter().find(|failure| failure.authority) {
+    if validates_project_parts
+        && let Some(failure) = project_part_failures.iter().find(|failure| failure.authority)
+    {
         let file = relative_display(&project_root, &failure.path);
         return Err(record_loader_error(
             &mut sink,
