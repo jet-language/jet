@@ -998,20 +998,34 @@ fn resident_safe_expr_work_item<'a>(
             }) && jit_value_type(&expr.ty);
             Some((gate, vec![lhs, rhs]))
         }
+        // D-CHAINCMP1: `ops` and `hooks` are per-COMPARISON facts — comparison
+        // `i` joins `operands[i]` with `operands[i + 1]`, so `operands` holds
+        // exactly one entry MORE than either. Walk adjacent operand pairs
+        // zipped with their own op and hook, so a hook flag can never be read
+        // against an operand index (and no index is taken at all). A hooked
+        // pair dispatches through `Comparable.compare`; an unhooked pair lowers
+        // to a native machine comparison, so BOTH of its sides must be a native
+        // arithmetic type (`LowerCtx::lower_compare_chain`).
         TExprKind::CompareChain { operands, ops, hooks } => Some((
             jit_value_type(&expr.ty)
                 && operands.len() == ops.len() + 1
                 && hooks.len() == ops.len()
-                && operands.iter().enumerate().all(|(i, operand)| {
-                    hooks[i]
-                        || matches!(
-                            &operand.ty,
-                            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Float
-                        )
-                })
-                && ops
-                    .iter()
-                    .all(|op| matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)),
+                && operands
+                    .windows(2)
+                    .zip(ops.iter().zip(hooks.iter()))
+                    .all(|(pair, (op, hook))| {
+                        matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+                            && (*hook
+                                || pair.iter().all(|operand| {
+                                    matches!(
+                                        &operand.ty,
+                                        Type::Int
+                                            | Type::IntN { .. }
+                                            | Type::InlineRange { .. }
+                                            | Type::Float
+                                    )
+                                }))
+                    }),
             operands.iter().collect(),
         )),
         TExprKind::StrLit(parts) if jit_value_type(&expr.ty) => Some((
@@ -2085,19 +2099,29 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
         }
         TExprKind::CompareChain { operands, ops, hooks } => {
+            // Same per-COMPARISON pairing as the work-item gate above (which
+            // shadows this arm today): an op/hook belongs to the operand PAIR
+            // it joins, never to a single operand, and the chain's last operand
+            // is only ever the right-hand side of the final comparison.
             operands.len() == ops.len() + 1
                 && hooks.len() == ops.len()
                 && operands.iter().all(|e| resident_safe_expr(e, callees))
-                && ops.iter().enumerate().all(|(i, _)| {
-                    hooks[i]
-                        || matches!(
-                            &operands[i].ty,
-                            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Float
-                        )
-                })
-                && ops
-                    .iter()
-                    .all(|op| matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge))
+                && operands
+                    .windows(2)
+                    .zip(ops.iter().zip(hooks.iter()))
+                    .all(|(pair, (op, hook))| {
+                        matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+                            && (*hook
+                                || pair.iter().all(|operand| {
+                                    matches!(
+                                        &operand.ty,
+                                        Type::Int
+                                            | Type::IntN { .. }
+                                            | Type::InlineRange { .. }
+                                            | Type::Float
+                                    )
+                                }))
+                    })
         }
         TExprKind::IfExpr {
             cond,
