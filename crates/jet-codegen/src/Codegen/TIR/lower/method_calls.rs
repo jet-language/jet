@@ -4741,6 +4741,33 @@ fn lower_method_call_impl(
             }
         }
     }
+    // Sema rewrites built-in operator syntax to its selected trait method.
+    // Once a generic body is specialized, lower that proved hook back through
+    // the one canonical typed operator path so overflow, precise numerics, and
+    // every execution tier keep the same Prelude-backed semantics.
+    let trait_operator = match (recv_type.as_deref(), method, args.len()) {
+        (Some(crate::Syntax::TRAIT_ADD), "add", 1) => Some(crate::AST::BinOp::Add),
+        (Some(crate::Syntax::TRAIT_SUB), "sub", 1) => Some(crate::AST::BinOp::Sub),
+        (Some(crate::Syntax::TRAIT_MUL), "mul", 1) => Some(crate::AST::BinOp::Mul),
+        (Some(crate::Syntax::TRAIT_DIV), "div", 1) => Some(crate::AST::BinOp::Div),
+        (Some(crate::Syntax::TRAIT_EQUATABLE), "equal", 1) => {
+            Some(crate::AST::BinOp::Eq)
+        }
+        (Some(crate::Syntax::TRAIT_COMPARABLE), "compare", 1) => {
+            Some(crate::AST::BinOp::Compare)
+        }
+        _ => None,
+    };
+    if let Some(op) = trait_operator {
+        let operator = Expr::Binary(
+            op,
+            Box::new(receiver.clone()),
+            Box::new(args[0].expr.clone()),
+            method_span,
+        );
+        return lower_expr(&operator, cx, env);
+    }
+
     // Core enum equality is represented by the shared Prelude's native
     // `PartialEq` value operation. Sema has already proved the Equatable
     // contract; preserve it as the existing typed equality node so emitters do
