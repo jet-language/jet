@@ -438,6 +438,7 @@ impl<'a> Checker<'a> {
                     }),
                 _ => None,
             },
+            jet_foundation::Registry::FactRead::RegisteredPlane(_) => None,
             jet_foundation::Registry::FactRead::BuildProfile => self
                 .modules
                 .and_then(|modules| modules.get(self.module_idx))

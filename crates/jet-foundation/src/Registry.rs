@@ -607,6 +607,10 @@ pub enum FactRead {
     ViewProvenance,
     UnitScaleProvenance,
     Maturity,
+    /// A registered value plane without a source member-position read. The
+    /// canonical row name is carried directly so new planes are reflected
+    /// without adding another fact-kind name table.
+    RegisteredPlane(&'static str),
     BuildPackageName,
     BuildPackageVersion,
     BuildOS,
@@ -640,6 +644,7 @@ impl FactRead {
             Self::ViewProvenance => Some("ViewProvenance"),
             Self::UnitScaleProvenance => Some("UnitScaleProvenance"),
             Self::Maturity => Some("Maturity"),
+            Self::RegisteredPlane(name) => reflection_kind(name),
             Self::BuildPackageName
             | Self::BuildPackageVersion
             | Self::BuildOS
@@ -669,6 +674,7 @@ impl FactRead {
             Self::ViewProvenance => Some("view_provenance"),
             Self::UnitScaleProvenance => Some("unit_scale_provenance"),
             Self::Maturity => Some("maturity"),
+            Self::RegisteredPlane(_) => None,
             Self::Layout
             | Self::Name
             | Self::Fields
@@ -688,6 +694,9 @@ impl FactRead {
     /// intentionally derived from the Prelude registry's reflection kind;
     /// readers do not carry a second plane-name table.
     pub fn registered_plane(self) -> Option<&'static RegistryRow> {
+        if let Self::RegisteredPlane(name) = self {
+            return row(name).filter(|registered| registered.kind() == RowKind::Plane);
+        }
         let kind = self.reflection_kind()?;
         fact_rows().find(|row| reflection_kind(row.name) == Some(kind))
     }
@@ -728,6 +737,7 @@ pub fn fact_read(member: &str) -> Option<FactRead> {
 /// reflection and producer guards; the registered row remains the authority
 /// for the plane name.
 pub fn registered_fact_read(name: &str) -> Option<FactRead> {
+    let registered = row(name).filter(|row| row.kind() == RowKind::Plane)?;
     let kind = reflection_kind(name)?;
     [
         FactRead::Layout,
@@ -750,7 +760,11 @@ pub fn registered_fact_read(name: &str) -> Option<FactRead> {
         FactRead::Maturity,
     ]
     .into_iter()
-    .find(|read| read.reflection_kind() == Some(kind) && read.registered_plane().is_some_and(|row| row.name == name))
+    .find(|read| {
+        read.reflection_kind() == Some(kind)
+            && read.registered_plane().is_some_and(|row| row.name == name)
+    })
+    .or(Some(FactRead::RegisteredPlane(registered.name)))
 }
 
 /// D-CONF-READ1=A / D-CONF-STAMP1=B: resolve one complete `@build.*` path

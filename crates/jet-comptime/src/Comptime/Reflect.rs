@@ -1592,6 +1592,7 @@ pub fn fact_read_value(
         | jet_foundation::Registry::FactRead::BuildStampAt => {
             build_fact_value(build_facts, read)
         }
+        jet_foundation::Registry::FactRead::RegisteredPlane(_) => None,
         jet_foundation::Registry::FactRead::Layout
         | jet_foundation::Registry::FactRead::Name
         | jet_foundation::Registry::FactRead::Fields => None,
