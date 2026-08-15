@@ -566,34 +566,67 @@ fn idempotent_format() {
     );
 }
 
-/// `--simplify` rewrites the approved concise body and stays stable on the
-/// second project pass.
+/// `--simplify` rewrites every selected corpus root and a second project check
+/// leaves the same bytes untouched.
 #[test]
 fn simplify_mode_is_stable_across_a_project() {
     let dir = tmpdir(&line!().to_string());
-    let f = write(
-        &dir,
-        "main.jet",
-        "fn answer() => Int {\n    return 42\n}\n",
-    );
+    let sources = [
+        write(
+            &dir,
+            "examples/answer.jet",
+            "fn answer() => Int {\n    return 42\n}\n",
+        ),
+        write(
+            &dir,
+            "tests/double.jet",
+            "fn double(value: Int) => Int {\n    return value * 2\n}\n",
+        ),
+        write(
+            &dir,
+            "docs/reference/sample.jet",
+            "fn label() => String {\n    return \"sample\"\n}\n",
+        ),
+    ];
+    let corpus = [
+        dir.join("examples"),
+        dir.join("tests"),
+        dir.join("docs/reference"),
+    ];
 
     let first = Command::new(jet())
         .args(["fmt", "--simplify"])
-        .arg(&f)
+        .args(&corpus)
         .current_dir(&dir)
         .output()
         .unwrap();
     assert_eq!(first.status.code(), Some(0));
-    assert_eq!(read(&f), "fn answer() => Int :: 42\n");
+    assert_eq!(read(&sources[0]), "fn answer() => Int :: 42\n");
+    assert_eq!(
+        read(&sources[1]),
+        "fn double(value: Int) => Int :: value * 2\n"
+    );
+    assert_eq!(read(&sources[2]), "fn label() => String :: \"sample\"\n");
 
+    let before_second: Vec<Vec<u8>> = sources
+        .iter()
+        .map(|source| fs::read(source).unwrap())
+        .collect();
     let second = Command::new(jet())
         .args(["fmt", "--simplify", "--check"])
-        .arg(&f)
+        .args(&corpus)
         .current_dir(&dir)
         .output()
         .unwrap();
     assert_eq!(second.status.code(), Some(0));
-    assert_eq!(read(&f), "fn answer() => Int :: 42\n");
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| fs::read(source).unwrap())
+            .collect::<Vec<_>>(),
+        before_second,
+        "the second simplify corpus check must not change bytes"
+    );
 }
 
 /// Map type spacing is canonical and remains byte-stable across project passes.
