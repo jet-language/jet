@@ -5664,6 +5664,19 @@ fn compile_command_override(
     Ok((rust, ffi))
 }
 
+/// D-CMD-OVERRIDE1=C: install the command override as the program entry.
+///
+/// `fn test(suite: TestSuite)` / `fn bench(suite: BenchSuite)` own command
+/// policy, but Jet's only entry is `fn run` (S12), so park any existing one as
+/// `__jet___unused_run` (still callable under that name) and inject
+/// `fn run() { test(core.testing.test_suite()) }` — zero params, built from the
+/// target's own first-parameter convention so the suite is passed exactly as
+/// declared.
+///
+/// The installed name is `Codegen::ENTRY_FN`, which is also what
+/// `Codegen::command_override_entry` looks up to decide the harness emits this
+/// item and to name it in the generated `main`. One constant, one lookup: the
+/// call site cannot name an entry this function did not install.
 fn swap_command_entry_point(
     bundle: &mut crate::AST::ProgramBundle,
     kind: crate::Codegen::CommandOverrideKind,
@@ -5671,6 +5684,9 @@ fn swap_command_entry_point(
     use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt};
     use crate::Diagnostics::Span;
 
+    // S12: the program entry the override wrapper is installed as, and the name
+    // `Codegen::command_override_entry` looks up when it emits the harness.
+    let run_fn = crate::Codegen::ENTRY_FN;
     let (entry_name, suite_name, suite_method) = match kind {
         crate::Codegen::CommandOverrideKind::Test => ("test", "TestSuite", "test_suite"),
         crate::Codegen::CommandOverrideKind::Bench => ("bench", "BenchSuite", "bench_suite"),
@@ -5685,7 +5701,7 @@ fn swap_command_entry_point(
     if entry_module
         .items
         .iter()
-        .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
+        .any(|item| matches!(item, Item::Func(function) if function.name == run_fn))
         && !entry_module.script_body.is_empty()
     {
         return;
@@ -5720,7 +5736,7 @@ fn swap_command_entry_point(
 
     for item in entry_module.items.iter_mut() {
         if let Item::Func(function) = item {
-            if function.name == "run" {
+            if function.name == run_fn {
                 function.name = jet_foundation::Names::mangle_generated("unused_run");
                 if function.span == function.name_span {
                     function.return_type = None;
@@ -5768,7 +5784,7 @@ fn swap_command_entry_point(
         vec![Stmt::Expr(call)]
     };
     let mut wrapper = target;
-    wrapper.name = "run".to_string();
+    wrapper.name = run_fn.to_string();
     wrapper.name_span = zero;
     wrapper.params = Vec::new();
     wrapper.type_params = Vec::new();

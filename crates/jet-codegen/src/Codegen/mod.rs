@@ -3356,7 +3356,7 @@ fn emit_test_main_cov(
     out: &mut String,
     coverage: bool,
 ) {
-    emit_test_main_cov_mode(tests, checks, coverage_branches, out, coverage, false, false);
+    emit_test_main_cov_mode(tests, checks, coverage_branches, out, coverage, None, false);
 }
 
 fn emit_test_main_cov_mode(
@@ -3365,12 +3365,12 @@ fn emit_test_main_cov_mode(
     coverage_branches: &[crate::Codegen::Context::CoverageBranch],
     out: &mut String,
     coverage: bool,
-    command_override: bool,
+    override_entry: Option<&str>,
     package_hardened: bool,
 ) {
     out.push_str("#[derive(Clone, Copy)]\n");
     out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
-    if command_override {
+    if override_entry.is_some() {
         out.push_str("fn jet_test_command_run() -> (i64, i64) {\n");
         out.push_str("    let output = jet_test_take_output();\n");
         out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
@@ -3473,14 +3473,15 @@ fn emit_test_main_cov_mode(
         // D-COV1: write the hit set before any `exit` (which would skip Drop).
         out.push_str("    jet_cov_dump();\n");
     }
-    if command_override {
+    if override_entry.is_some() {
         out.push_str("    (slots.len() as i64, i64::from(report.failed > 0))\n");
     } else {
         out.push_str("    if report.failed > 0 { std::process::exit(1); }\n");
     }
     out.push_str("}\n");
-    if command_override {
+    if let Some(entry) = override_entry {
         emit_command_override_main(
+            entry,
             "jet_test_suite_install",
             "jet_test_command_run",
             "jet_test_suite_status",
@@ -3491,16 +3492,32 @@ fn emit_test_main_cov_mode(
     }
 }
 
+/// S12: Jet's one program entry function. `Driver::swap_command_entry_point`
+/// installs the command-override wrapper under this name, and
+/// `emit_program_items`'s `include_main` decides whether that item is emitted,
+/// so neither side spells the name a second time.
+pub const ENTRY_FN: &str = "run";
+
+/// The Rust name of the entry an override harness emits — read back off the very
+/// item `emit_program_items` emits when `include_main` is set. A hand-written
+/// `run();`, and then `mangle("run")`, both named a function the harness had
+/// skipped (`include_main` was `false`, so the driver's synthesized `fn run` was
+/// dropped); I2 makes generated Rust that does not compile a compiler bug, so
+/// the name and the decision to emit it now come from this one lookup.
+fn command_override_entry(items: &[Item]) -> Option<String> {
+    items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == ENTRY_FN => Some(mangle(&function.name)),
+        _ => None,
+    })
+}
+
 /// D-CMD-OVERRIDE1=C: the `main` an overridden command gets. It installs the
-/// stock harness as the suite runner, hands control to the user's command
-/// entry, then reports the suite's status as the process status. `jet test`
-/// and `jet bench` share this emitter so the entry call exists once: a
-/// hand-written `run()` resolved against nothing (the Jet entry mangles to
-/// `__jet_run`) and rustc offered `crate::jet_runtime_atexit::run` instead —
-/// generated Rust that does not compile is an I2 compiler bug. The driver
-/// synthesizes the entry as the Jet function `run` (`swap_command_entry_point`),
-/// so its Rust name is whatever `mangle` says, never a literal.
+/// stock harness as the suite runner, hands control to the user's command entry
+/// (`entry`: the Rust name of the `fn run` this same harness emitted, never a
+/// literal), then reports the suite's status as the process status. `jet test`
+/// and `jet bench` share this emitter so that call exists once.
 fn emit_command_override_main(
+    entry: &str,
     install: &str,
     runner: &str,
     status: &str,
@@ -3518,7 +3535,7 @@ fn emit_command_override_main(
         out.push_str("    jet_test_trace_tier();\n");
     }
     out.push_str(&format!("    {install}({runner});\n"));
-    out.push_str(&format!("    {}();\n", mangle("run")));
+    out.push_str(&format!("    {entry}();\n"));
     out.push_str("    let output = jet_test_take_output();\n");
     out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
     out.push_str(&format!("    let status = {status}();\n"));
@@ -4235,7 +4252,14 @@ fn emit_bundle_tests_cov_inner(
         inline_foreign_reexport_signature_maps(bundle, bundle.entry);
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-    emit_program_items(&cx, &entry.items, &mut out, false, false);
+    // D-CMD-OVERRIDE1=C: an override harness must emit the Jet entry the driver
+    // installed (`Driver::swap_command_entry_point`), because its `main` calls
+    // it; the stock harness still skips `fn run` — nothing there calls it.
+    let override_entry = command_override.then(|| {
+        command_override_entry(&entry.items)
+            .expect("Driver::swap_command_entry_point installs the override entry before codegen")
+    });
+    emit_program_items(&cx, &entry.items, &mut out, override_entry.is_some(), false);
 
     emit_test_fns(&cx, &tests, None, &mut out);
     coverage_branches.extend(cx.coverage_branches.borrow().iter().cloned());
@@ -4246,7 +4270,7 @@ fn emit_bundle_tests_cov_inner(
         &coverage_branches,
         &mut out,
         coverage,
-        command_override,
+        override_entry.as_deref(),
         bundle.package_guarantees.harden,
     );
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
@@ -4842,7 +4866,13 @@ fn emit_bundle_benches_inner(
         inline_foreign_reexport_signature_maps(bundle, bundle.entry);
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-    emit_program_items(&cx, &entry.items, &mut out, false, false);
+    // D-CMD-OVERRIDE1=C: see the test harness — the override `main` calls the
+    // Jet entry the driver installed, so this harness has to emit it.
+    let override_entry = command_override.then(|| {
+        command_override_entry(&entry.items)
+            .expect("Driver::swap_command_entry_point installs the override entry before codegen")
+    });
+    emit_program_items(&cx, &entry.items, &mut out, override_entry.is_some(), false);
 
     out.push_str(
         "fn jet_bench_check(result: Result<(), String>) {\n\
@@ -4938,8 +4968,9 @@ fn emit_bundle_benches_inner(
         out.push_str("    (selected, 0)\n");
     }
     out.push_str("}\n");
-    if command_override {
+    if let Some(entry_fn) = override_entry {
         emit_command_override_main(
+            &entry_fn,
             "jet_bench_suite_install",
             "jet_bench_command_run",
             "jet_bench_suite_status",
