@@ -33,6 +33,10 @@ fn stdout(outcome: jet::Interpreter::RunOutcome, tier: &str) -> String {
     }
 }
 
+fn has_runtime_fact_dispatch(rust: &str) -> bool {
+    rust.contains("fact_read(") || rust.contains("jet.fact")
+}
+
 #[test]
 fn runtime_fact_reads_are_refused_before_codegen() {
     let diags = diagnostics(
@@ -67,10 +71,7 @@ fn folded_fact_reads_emit_values_without_runtime_dispatch() {
     )
     .expect("a comptime fact read should compile");
     assert!(output.rust.contains("JetRange"), "the typed fact carrier is missing");
-    assert!(
-        !output.rust.contains("fact_read") && !output.rust.contains("jet.fact"),
-        "a folded fact must not emit a runtime reader or dispatch path"
-    );
+    assert!(!has_runtime_fact_dispatch(&output.rust), "a folded fact must not emit a runtime reader or dispatch path");
 }
 
 #[test]
@@ -97,7 +98,7 @@ fn typed_fact_fixture_folds_all_planes_without_runtime_dispatch() {
     for value in ["report"] {
         assert!(output.rust.contains(value), "folded fact value missing: {value}");
     }
-    assert!(!output.rust.contains("fact_read"));
+    assert!(!has_runtime_fact_dispatch(&output.rust));
 }
 
 #[test]
@@ -106,7 +107,7 @@ fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
     for value in ["Range"] {
         assert!(output.rust.contains(value), "aggregate fact value missing: {value}");
     }
-    assert!(!output.rust.contains("fact_read"));
+    assert!(!has_runtime_fact_dispatch(&output.rust));
 }
 
 #[test]
@@ -126,7 +127,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
         .expect("web fact fixture must compile")
         .web
         .expect("web fact fixture must produce artifacts");
-    assert!(!web.wasm_rust.contains("fact_read"));
+    assert!(!has_runtime_fact_dispatch(&web.wasm_rust));
 }
 
 #[test]
@@ -148,7 +149,7 @@ fn registered_build_facts_are_folded_in_value_position() {
     assert!(output.rust.contains("0.0.0"), "script version was not folded");
     assert!(output.rust.contains("dev"), "default profile was not folded");
     assert!(
-        !output.rust.contains("@build") && !output.rust.contains("fact_read"),
+        !output.rust.contains("@build") && !has_runtime_fact_dispatch(&output.rust),
         "a build fact must not reach generated runtime code"
     );
 }
