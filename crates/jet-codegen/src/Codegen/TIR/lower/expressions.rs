@@ -1908,6 +1908,27 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     if value.ty.quantity_parts().is_some() {
         return lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx);
     }
+    // D-TYPE2-IMAG1=A: the precise `Complex` carrier has no scalar print ABI on
+    // any tier — it is a two-`f64` value AOT renders through `JetShow for
+    // JetComplex` and the resident/web engines render through a host handle. Name
+    // that render once here, as the shared Prelude `Complex.to_string` call every
+    // tier already lowers (`jet_complex_to_string`, the same `to_string_rep` the
+    // AOT trait impl and the comptime evaluator use), so no engine grows a
+    // private display rule for it. Without this, `print(z)` on a `Complex` left
+    // TIR with a `Print` whose payload type has no print dispatch, which the
+    // resident JIT can only report as a compile gap and deopt on.
+    if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
+        && !cx.type_names.contains(Syntax::TYPE_COMPLEX)
+    {
+        return TExpr {
+            ty: Type::String,
+            kind: TExprKind::PreciseBuiltin {
+                type_name: Syntax::TYPE_COMPLEX.to_string(),
+                func: "to_string".to_string(),
+                args: vec![value],
+            },
+        };
+    }
     let Type::Named(name) = &value.ty else {
         return value;
     };

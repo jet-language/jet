@@ -50,6 +50,25 @@ thread_local! {
 /// frames riding along, and matches the canonical TIR evaluator's own worker.
 /// A thread stack is reserved address space committed page by page, so an
 /// ordinary compile still touches only the pages it uses.
+///
+/// The budget is recursion depth only; unwind space is not a second term.
+/// Both unwind phases run on the panicking thread's own stack, so a raise
+/// that runs out of it faults on the guard page and std's per-thread handler
+/// says so: `thread '<name>' has overflowed its stack`, then
+/// `fatal runtime error: stack overflow` (`std::sys::pal::unix::stack_overflow`).
+/// That text is the only abort this number can answer for.
+///
+/// `fatal runtime error: failed to initiate panic, error 5` is a different
+/// defect and a bigger stack cannot move it. Error 5 is `_URC_END_OF_STACK`
+/// (`library/unwind/src/types.rs`), which libgcc's phase-1 loop returns when
+/// it walked off the top of the stack without finding a *handler*
+/// (`unwind.inc` -> `uw_frame_state_for`): a panic raised where no
+/// `catch_unwind` is above it at all. The usual source is a thread-local
+/// destructor — glibc runs those from `__call_tls_dtors` after the thread's
+/// Rust entry frame and its `catch_unwind` have already returned, which is
+/// also why the `extern "C" destroy` shim does not convert it into the
+/// "non-unwinding panic" abort: that shim is a phase-2 cleanup pad, and
+/// phase 2 never starts.
 pub const COMPILER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 /// Raising the accepted nesting depth must raise the stack that lowers it.
