@@ -209,9 +209,6 @@ impl<'a> Checker<'a> {
         }
         if let Some(return_type) = &f.return_type {
             let return_type = self.resolve_type(return_type.clone());
-            if crate::Sema::type_uses_default_int(&return_type) {
-                self.uses_exact_int = true;
-            }
             self.check_declared_type(&return_type, f.return_type_span.unwrap_or(f.name_span));
         }
         for p in &f.params {
@@ -237,9 +234,6 @@ impl<'a> Checker<'a> {
                 && matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP);
             if !skip_type_check && !taskgroup_parameter {
                 let pty = self.resolve_type(p.ty.clone());
-                if crate::Sema::type_uses_default_int(&pty) {
-                    self.uses_exact_int = true;
-                }
                 self.check_declared_type(&pty, p.ty_span);
             }
             if p.name == Syntax::KW_SELF {

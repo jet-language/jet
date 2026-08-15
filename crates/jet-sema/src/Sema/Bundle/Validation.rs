@@ -1658,12 +1658,7 @@ fn check_func_body_bundle_scoped(
             .collect(),
         binder_ref_types: HashMap::new(),
         expected_type: None,
-        uses_exact_int: f.params.iter().any(|param| {
-            crate::Sema::type_uses_default_int(&param.ty)
-        }) || f
-            .return_type
-            .as_ref()
-            .is_some_and(crate::Sema::type_uses_default_int),
+        uses_exact_int: false,
         knowledge_gate: None,
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
