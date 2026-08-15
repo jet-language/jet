@@ -2286,13 +2286,7 @@ fn compile_bundle_path_build_inner(
     } else {
         None
     };
-    let mut bundle = match (overlay, direct_package_overlay.as_ref()) {
-        (Some(overlay), _) => crate::Loader::load_entry_with_overlay(file, Some(overlay), false)?,
-        (None, Some((path, source))) => {
-            crate::Loader::load_entry_with_overlay(file, Some((path, source)), false)?
-        }
-        (None, None) => crate::Loader::load_entry_with_overlay(file, None, false)?,
-    };
+    let mut bundle = load_build_entry_bundle(file, overlay, direct_package_overlay.as_ref())?;
     let mut runtime_bundle_for_package = None;
     // D-BUILDSCOPE1: resolve one package build entry through PackageFacts. The
     // checked resolver owns package-wide discovery; this Driver only loads the
@@ -2937,13 +2931,29 @@ fn compile_bundle_path_build_inner(
         }
         let mut planned_bundle = if options.execute {
             let project_root = bundle.project_root.clone();
-            let fallback_bundle = runtime_bundle_for_package.take().unwrap_or(bundle);
+            let stashed_runtime_bundle = runtime_bundle_for_package.take();
             load_planned_runtime_bundle(
                 file,
                 &evaluated.plan,
                 &generated,
                 &project_root,
-                fallback_bundle,
+                || match stashed_runtime_bundle {
+                    // Stashed before the build-entry check ran, so it still
+                    // holds unfolded fact reads.
+                    Some(runtime) => Ok(runtime),
+                    // The build entry and the runtime program share one file.
+                    // The pre-build check already folded every `@build.*` read
+                    // against the snapshot that had no `fn build` contribution,
+                    // and a fact read is replaced in place, so that AST can no
+                    // longer answer the final snapshot. Re-parse the entry and
+                    // let the complete front end below fold the contributed
+                    // values.
+                    None => load_build_entry_bundle(
+                        file,
+                        overlay,
+                        direct_package_overlay.as_ref(),
+                    ),
+                },
             )?
         } else {
             bundle
@@ -3156,7 +3166,7 @@ fn load_planned_runtime_bundle(
     plan: &crate::Comptime::Build::BuildPlan,
     generated: &[GeneratedSourceProvenance],
     project_root: &std::path::Path,
-    fallback_bundle: crate::AST::ProgramBundle,
+    fallback_bundle: impl FnOnce() -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>>,
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
     let sources = plan
         .selected_sources()
@@ -3170,9 +3180,12 @@ fn load_planned_runtime_bundle(
         }
     };
     // An empty/default BuildPlan augments the package's batteries program; it
-    // does not select a synthetic target with no sources. The caller retains
-    // the checked runtime bundle before switching to a separately discovered
-    // package build entry, or keeps it when build and run share a file.
+    // does not select a synthetic target with no sources. `fallback_bundle`
+    // then supplies the runtime program, and it is a thunk for two reasons: a
+    // selected target never needs it, and the caller must hand over a freshly
+    // parsed bundle. Every fact read has to still be foldable, because the one
+    // complete front-end pass after this reload is what folds the final
+    // `@build.*` snapshot.
     let mut bundle = if let Some(entry_source) = sources.first() {
         let entry_path = resolve(entry_source.as_str());
         crate::Loader::load_entry_with_overlay(
@@ -3181,7 +3194,7 @@ fn load_planned_runtime_bundle(
             false,
         )?
     } else {
-        fallback_bundle
+        fallback_bundle()?
     };
 
     // Additional selected roots and generated modules merge before the one
@@ -3765,6 +3778,60 @@ fn build_entry_resolution_diagnostic(error: &str) -> Diagnostic {
         )
     };
     Diagnostic::error(code, error.to_string(), why.to_string(), fix.to_string(), None)
+}
+
+/// D-BUILDENTRY1 / D-CONF-ENTRY1: does this program select a `fn build`?
+/// Selection is exactly what `compile_bundle_path_build` stages — a `fn build`
+/// among the entry file's own declarations, or the one the package authority
+/// discovers for the whole package — so a command router asks here instead of
+/// re-deriving the answer from source text.
+///
+/// A selected build entry contributes computed facts (D-CONF-SPLIT1), may
+/// generate modules, and records both in `.jet/lock`. A lane that cannot stage
+/// it must therefore hand the program to the build pipeline instead of folding
+/// `@build.*` from manifest declarations alone: otherwise one tier runs a
+/// program built from the declared default while another runs the contributed
+/// value, which is the tier split I9 forbids.
+///
+/// Routing runs before any tier claims the program, so this answer costs one
+/// lex and parse of the entry source that the caller already holds, and it
+/// never walks the import closure. `project_root` is the package root when the
+/// entry belongs to a package and `None` for a manifest-less single file, which
+/// can only select its own `fn build`. A source the parser rejects is not a
+/// routing answer: the pipeline that runs next reports the parse error.
+pub fn selects_build_entry(source: &str, project_root: Option<&std::path::Path>) -> bool {
+    let (tokens, lex_diags) = crate::Lexer::lex(source);
+    if lex_diags.is_empty() {
+        if let Ok((program, _teaching)) = crate::Parser::parse_for_check(&tokens) {
+            if program
+                .items
+                .iter()
+                .any(|item| matches!(item, crate::AST::Item::Func(func) if func.name == "build"))
+            {
+                return true;
+            }
+        }
+    }
+    project_root.is_some_and(|root| matches!(package_build_entry_source(root), Ok(Some(_))))
+}
+
+/// Load the selected build entry from its checked source. A `fn build` may be
+/// carried by an authority overlay or by `package.jet` itself, so the overlay
+/// choice belongs to one place: the build staging loads this bundle first for
+/// the build-entry check, then again for the runtime program, and both loads
+/// must see the same bytes.
+fn load_build_entry_bundle(
+    file: &str,
+    overlay: Option<(&std::path::Path, &str)>,
+    direct_package_overlay: Option<&(std::path::PathBuf, String)>,
+) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
+    match (overlay, direct_package_overlay) {
+        (Some(overlay), _) => crate::Loader::load_entry_with_overlay(file, Some(overlay), false),
+        (None, Some((path, source))) => {
+            crate::Loader::load_entry_with_overlay(file, Some((path, source)), false)
+        }
+        (None, None) => crate::Loader::load_entry_with_overlay(file, None, false),
+    }
 }
 
 fn package_manifest_build_overlay(

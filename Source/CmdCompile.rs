@@ -390,6 +390,22 @@ pub(crate) fn run_compile_cmd(
         exit(ExitCodes::USAGE);
     }
 
+    // D-BUILDENTRY1 + I9: a program that selects a `fn build` has one meaning
+    // in every tier, and only the build pipeline can produce it — the entry
+    // computes fact contributions (D-CONF-SPLIT1), may generate modules, and
+    // records both in `.jet/lock`, all before the runtime program is checked.
+    // The fact-blind lanes must therefore stand aside so `jet run` stages the
+    // build exactly as `jet build` does: otherwise `jet run` folds
+    // `@build.settings.*` from manifest declarations while `jet build` and
+    // `jet explain` fold the contributed value.
+    let package_manifest = load_pkg_manifest(file);
+    // `jet build` already stages the entry, so only `jet run` has to ask.
+    let selects_build_entry = cmd == "run"
+        && jet::Driver::selects_build_entry(
+            &src,
+            package_manifest.as_ref().map(|(root, _)| root.as_path()),
+        );
+
     // D-ONCE-TIER1=A: `jet run --interpret` selects tier 0 without entering the
     // watch engine. Keep artifact/build controls explicit instead of ignoring them.
     let force_interpreter = cmd == "run" && cli_requests_interpreter();
@@ -445,7 +461,8 @@ pub(crate) fn run_compile_cmd(
     }
 
     // D-LENS-RUN1: default native `jet run` is strict Cranelift. Explicit
-    // profiles and artifact-oriented flags keep the AOT escape hatch.
+    // profiles and artifact-oriented flags keep the AOT escape hatch, and a
+    // selected `fn build` is one of them: this lens cannot stage a build entry.
     if cmd == "run"
         && matches!(profile, BuildProfile::Default)
         && cross_target.is_none()
@@ -458,6 +475,7 @@ pub(crate) fn run_compile_cmd(
         && !sbom
         && !is_web
         && !is_plugin
+        && !selects_build_entry
     {
         let args = program_args
             .iter()
@@ -524,7 +542,10 @@ pub(crate) fn run_compile_cmd(
     // invalidates the entry, so effect-budget enforcement can't be masked.
     // `jet build` deliberately stays on the full path below so its effect +
     // capability summaries always print; it still skips rustc via `native_key`.
-    if cmd == "run" && mode_tag == "run" && !emit_rust {
+    // A selected `fn build` also stays on the full path: replaying a binary
+    // would skip staging the build entry, so nothing would execute the action
+    // graph or record the computed writers in this project's `.jet/lock`.
+    if cmd == "run" && mode_tag == "run" && !emit_rust && !selects_build_entry {
         if let Some(ref key) = native_key {
             let out = bin_path(file);
             if jet::BuildCache::try_copy_cached(key, &out) {
@@ -546,7 +567,6 @@ pub(crate) fn run_compile_cmd(
         }
     }
 
-    let package_manifest = load_pkg_manifest(file);
     let library_output = if cmd == "build" && !is_web && !is_plugin {
         package_manifest.as_ref().and_then(|(_, manifest)| {
             let selected = output_name
@@ -610,7 +630,7 @@ pub(crate) fn run_compile_cmd(
             profile.budget_name(),
             setting_overrides,
         )
-    } else if cmd == "build" {
+    } else if cmd == "build" || selects_build_entry {
         jet::compile_programmable_build_opts_with_builder_and_profile_and_settings(
             file,
             build_grants,
