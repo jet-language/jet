@@ -2,10 +2,14 @@
 // whole hosted program. The request exceeds its 2 GB cap on every tier, and
 // the fallible Core collection API reports that policy without aborting.
 fn run() {
-    values :: List.try_with_capacity(400_000_000) ?? {
-        print("program allocator cap reached")
-        return
+    allocation :: List.try_with_capacity(400_000_000)
+    if allocation == {
+        .Ok(values) -> {
+            values.try_push(1) ?? return
+            print("unexpected allocation success")
+        }
+        .Err(_error) -> {
+            print("program allocator cap reached")
+        }
     }
-    values.try_push(1) ?? return
-    print("unexpected allocation success")
 }
