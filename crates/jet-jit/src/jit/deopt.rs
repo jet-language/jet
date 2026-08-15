@@ -319,26 +319,6 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                     .exit_code
                     .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
             },
-            // Evaluator traps under whole-program deopt are live-program stops;
-            // this adapter keeps the Foundation renderer as the sole wording
-            // owner when an older E0953 boundary reaches it.
-            Err(d) if d.code == "E0953" => {
-                let msg = d
-                    .why
-                    .strip_prefix(
-                        "while computing this value at compile time, the program panicked: ",
-                    )
-                    .unwrap_or(d.why.as_str());
-                let report = jet_foundation::Outcome::jet_render_runtime_stop(
-                    "E3001", "", 0, "", "", 1, 1, msg, "",
-                );
-                sink.stderr.push_str(&report.rendered);
-                RunOutcome::Ran {
-                    stdout: sink.stdout,
-                    stderr: sink.stderr,
-                    exit_code: 70,
-                }
-            }
             Err(d) => RunOutcome::Problems(vec![rewrite_runtime_tier_diag(d)]),
         },
     );

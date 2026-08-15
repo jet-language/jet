@@ -235,6 +235,13 @@ mod err_tests {
         );
 
     }
+
+    #[test]
+    fn explicit_exit_cannot_claim_the_reserved_ice_status() {
+        assert_eq!(jet_runtime_exit_code(101), crate::ExitCodes::USER_ERROR);
+        assert_eq!(jet_runtime_exit_code(70), crate::ExitCodes::RUNTIME_PANIC);
+        assert_eq!(jet_runtime_exit_code(17), 17);
+    }
 }
 
 /// The clean report: no payload, nothing to say. This is what `T?` puts on the
@@ -404,9 +411,16 @@ pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut
     }
 }
 
-/// Project a Jet process status into the native process status carrier.
+/// Project a user-requested Jet process status into the native process
+/// carrier. Exit 101 is reserved for Jet defects, so an explicit user exit
+/// cannot forge it; the request becomes the ordinary user-error status.
 pub fn jet_runtime_exit_code(code: i64) -> i32 {
-    code as i32
+    let code = code as i32;
+    if code == crate::ExitCodes::ICE {
+        crate::ExitCodes::USER_ERROR
+    } else {
+        code
+    }
 }
 
 /// D-REPORT-RUNTIME1=A: the dependency-free runtime projection of one

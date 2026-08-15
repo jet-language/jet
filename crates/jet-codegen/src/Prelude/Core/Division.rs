@@ -9,15 +9,13 @@
 // that came out one too high is corrected here. Dividing by zero traps, the
 // same as `/` does. On floats `/%` is the ordinary division with the answer
 // rounded down.
-const JET_FLOORDIV_ZERO: &str = "divided by zero";
-const JET_FLOORDIV_OVERFLOW: &str =
-    "this division overflows the value's type (the result is outside its range)";
+const JET_FLOORDIV_ZERO: &str = JET_ARITHMETIC_DIVIDE_ZERO;
+const JET_FLOORDIV_OVERFLOW: &str = JET_ARITHMETIC_DIVIDE_OVERFLOW;
 
 // Fixed-width `/` uses one policy for signed and unsigned values. The caller
 // supplies the result range because the evaluator carries every IntN value in
 // an i64, while AOT calls this with the concrete Rust width.
-const JET_DIVISION_ERROR: &str =
-    "this division can't be done (dividing by zero, or overflow)";
+const JET_DIVISION_ERROR: &str = JET_ARITHMETIC_DIVISION_ERROR;
 
 pub fn jet_division(
     left: i128,

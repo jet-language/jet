@@ -7088,6 +7088,13 @@ impl<'a> EvalCtx<'a> {
                                     other => CtValue::failed(Box::new(other)),
                                 }
                             }
+                            crate::Codegen::TIR::TTryConvert::WidenUnion { enum_name, tag } => {
+                                CtValue::failed(Box::new(CtValue::Enum {
+                                    type_name: enum_name,
+                                    variant: tag,
+                                    args: vec![(None, *e)],
+                                }))
+                            }
                             _ => CtValue::failed(e),
                         };
                         // Propagate as a function return of the converted error value.
@@ -8319,7 +8326,7 @@ impl<'a> EvalCtx<'a> {
                 type_name,
                 base,
                 index,
-                ..
+                line,
             } => {
                 let recv = self.eval_expr_child(base, scope)?;
                 let key = self.eval_expr_child(index, scope)?;
@@ -8332,6 +8339,9 @@ impl<'a> EvalCtx<'a> {
                 child.insert("self".to_string(), recv);
                 match self.run_func(func, vec![key], &mut child)? {
                     CtValue::Present(value) => Ok(*value),
+                    CtValue::Failed(CtReport::Clean(_)) if self.runtime_execution => {
+                        Err(self.runtime_stop("E3001", *line as u32, "index miss"))
+                    }
                     CtValue::Failed(CtReport::Clean(_)) => Err(unsupported("index miss", self.span())),
                     _ => Err(unsupported("Index.get result", self.span())),
                 }

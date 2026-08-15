@@ -2997,9 +2997,10 @@ pub(crate) fn bundle_foreign_undos(bundle: &ProgramBundle) -> HashMap<String, St
     for module in &bundle.modules {
         let module_undos = foreign_undo_map(&module.items);
         let module_prefix = mangle(&module.alias);
-        for (name, inverse) in module_undos {
-            map.insert(name.clone(), inverse.clone());
-            map.insert(format!("{module_prefix}::{name}"), inverse);
+        for (binding, inverse) in module_undos {
+            // Bundle facts are keyed by the defining foreign binding, never by
+            // a bare spelling that another module can silently overwrite.
+            map.insert(format!("{module_prefix}::{binding}"), inverse);
         }
     }
     map
@@ -3189,6 +3190,11 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.foreign_undos = bundle_foreign_undos(bundle);
+    // Unqualified calls bind only to this module. Restore those local
+    // identities after the bundle-qualified map so same-spelled foreign
+    // functions in sibling modules cannot steal each other's undo contract.
+    cx.foreign_undos
+        .extend(foreign_undo_map(&bundle.modules[module_idx].items));
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(cx, bundle, module_idx);
     register_imported_methods(cx, bundle, module_idx);

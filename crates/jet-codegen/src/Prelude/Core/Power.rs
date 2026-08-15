@@ -11,9 +11,8 @@
 //
 // The exponent arrives as an `i128` so an exponent of any integer width,
 // signed or unsigned, reaches here losslessly.
-const JET_POW_NEGATIVE: &str =
-    "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
-const JET_POW_OVERFLOW: &str = "this power overflows the value's type (the result is outside its range)";
+const JET_POW_NEGATIVE: &str = JET_ARITHMETIC_POWER_NEGATIVE;
+const JET_POW_OVERFLOW: &str = JET_ARITHMETIC_POWER_OVERFLOW;
 
 trait JetPow: Copy {
     fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self;

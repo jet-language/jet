@@ -136,6 +136,9 @@ pub(crate) struct JitRuntime {
     pub(crate) source_file: String,
     pub(crate) source_text: String,
     pub(crate) current_function: String,
+    pub(crate) current_line: u32,
+    pub(crate) current_source_line: String,
+    pub(crate) source_frames: Vec<JitSourceFrame>,
     pub(crate) stack_depth: usize,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -277,6 +280,9 @@ pub(crate) struct JitRuntime {
     /// `E0953` diagnostic, exactly as the tier-0 interpreter reports the same
     /// panic. Keeps the FIRST message; later traps on the unwind path are noise.
     pub(crate) trapped: Option<String>,
+    /// A Rust helper fault is a Jet defect. The resident driver renders the
+    /// branded ICE report after generated control flow reaches the boundary.
+    pub(crate) host_fault: bool,
     /// Soft process exit for rich `require`/`panic` reports — stderr already
     /// holds the AOT-matching text; resident returns `Ran` with this code.
     pub(crate) exit_code: Option<i32>,
@@ -295,6 +301,14 @@ pub(crate) struct JitRuntime {
     pub(crate) ui: crate::Ui::UiState,
     /// D-WEBAPP1 / c-devserver: web app + DevServer handles (#1226).
     pub(crate) web: crate::Web::WebState,
+}
+
+#[derive(Clone)]
+struct JitSourceFrame {
+    file: String,
+    line: u32,
+    fn_name: String,
+    source_line: String,
 }
 
 /// Control transfer for a shared Prelude stop whose Rust signature is `!`.
@@ -334,14 +348,15 @@ impl JitRuntime {
     }
 
     /// A Rust helper panic is an engine fault, not a user runtime stop. Keep
-    /// its opaque payload in the host trap for diagnostics, but never send it
-    /// through the E3001 renderer.
-    fn set_host_fault(&mut self, msg: &str) {
+    /// no Rust payload in the program report; the resident driver owns the
+    /// branded ICE boundary.
+    fn set_host_fault(&mut self, _msg: &str) {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
+        self.host_fault = true;
         self.exit_code = Some(jet_foundation::ExitCodes::ICE);
-        self.store_trap(msg);
+        self.trapped = Some("__jet_host_fault__".to_string());
     }
 
     pub(crate) fn set_deadline(&mut self, rendered: String) {
@@ -356,17 +371,21 @@ impl JitRuntime {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
-        let src_line = self
-            .source_text
-            .lines()
-            .nth((line as usize).saturating_sub(1))
-            .unwrap_or_default();
+        let source_line = if self.current_source_line.is_empty() {
+            self.source_text
+                .lines()
+                .nth((line as usize).saturating_sub(1))
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            self.current_source_line.clone()
+        };
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             code,
             &self.source_file,
             line,
             &self.current_function,
-            src_line,
+            &source_line,
             1,
             1,
             message,
@@ -375,6 +394,10 @@ impl JitRuntime {
         self.stderr.push_str(&report.rendered);
         self.exit_code = Some(report.exit_code);
         self.store_trap(message);
+    }
+
+    pub(crate) fn set_arithmetic_stop(&mut self, line: u32, message: &str) {
+        self.set_runtime_stop(contract_kernel::JET_ARITHMETIC_CODE, line, message);
     }
 
     pub(crate) fn set_rendered_runtime_stop(&mut self, rendered: String, exit_code: i32) {
@@ -388,8 +411,17 @@ impl JitRuntime {
 
     pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
         const LIMIT: usize = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
+        self.source_frames.push(JitSourceFrame {
+            file: self.source_file.clone(),
+            line: self.current_line,
+            fn_name: self.current_function.clone(),
+            source_line: self.current_source_line.clone(),
+        });
         self.source_file = file.to_string();
-        self.stack_depth = self.stack_depth.saturating_add(1);
+        self.current_line = line;
+        self.current_function = fn_name.to_string();
+        self.current_source_line = src_line.to_string();
+        self.stack_depth = self.source_frames.len();
         if self.stack_depth > LIMIT {
             let message = jet_foundation::Outcome::jet_stack_overflow_message(fn_name);
             let report = jet_foundation::Outcome::jet_render_runtime_stop(
@@ -410,7 +442,17 @@ impl JitRuntime {
     }
 
     pub(crate) fn stack_leave(&mut self) {
-        self.stack_depth = self.stack_depth.saturating_sub(1);
+        if let Some(frame) = self.source_frames.pop() {
+            self.source_file = frame.file;
+            self.current_line = frame.line;
+            self.current_function = frame.fn_name;
+            self.current_source_line = frame.source_line;
+        } else {
+            self.current_line = 0;
+            self.current_function.clear();
+            self.current_source_line.clear();
+        }
+        self.stack_depth = self.source_frames.len();
     }
 }
 
@@ -502,16 +544,8 @@ fn with_runtime_result<R: Default, F: FnOnce(&mut JitRuntime) -> R>(default: R, 
 /// caller yields a dummy `0`); JIT code branches to its epilogue at the next
 /// `emit_trap_check`. Message text is unchanged from the old exit-70 path.
 fn jet_trap_overflow(op: &str, line: u32) {
-    use jet_codegen::Comptime::MathLayout;
-    let msg = match op {
-        "add" => "this addition overflows the value's type (the result is outside its range)",
-        "sub" => "this subtraction overflows the value's type (the result is outside its range)",
-        "mul" => "this multiplication overflows the value's type (the result is outside its range)",
-        "div" => "this division can't be done (dividing by zero, or overflow)",
-        "pow" => MathLayout::INTEGER_POWER_OVERFLOW,
-        _ => "this operation overflows the value's type (the result is outside its range)",
-    };
-    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, msg));
+    let msg = contract_kernel::jet_arithmetic_message(op);
+    with_runtime_mut(|rt| rt.set_arithmetic_stop(line, msg));
 }
 
 pub(crate) const INTN_OP_ADD: i64 = 0;
@@ -604,11 +638,9 @@ extern "C" fn jet_jit_div_i64(a: i64, b: i64, line: u32) -> i64 {
 /// D-EXPSEM1=A: the same exact, trapping whole-number power the Prelude runs
 /// (`Prelude/Core/Power.rs`). A negative exponent has no whole-number result.
 extern "C" fn jet_jit_pow_i64(a: i64, b: i64, line: u32) -> i64 {
-    use jet_codegen::Comptime::MathLayout;
     if b < 0 {
-        with_runtime_mut(|rt| {
-            rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_POWER_NEGATIVE)
-        });
+        let message = contract_kernel::jet_arithmetic_message("pow_negative");
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
     match u32::try_from(b).ok().and_then(|e| a.checked_pow(e)) {
@@ -630,13 +662,15 @@ extern "C" fn jet_jit_pow_f64(a: f64, b: f64) -> f64 {
 extern "C" fn jet_jit_floordiv_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if b == 0 {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_ZERO));
+        let message = contract_kernel::jet_arithmetic_message("divide_zero");
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
     match MathLayout::floor_div(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_OVERFLOW));
+            let message = contract_kernel::jet_arithmetic_message("divide_overflow");
+            with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
             0
         }
     }
@@ -652,13 +686,15 @@ extern "C" fn jet_jit_floordiv_f64(a: f64, b: f64) -> f64 {
 extern "C" fn jet_jit_mod_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if b == 0 {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_ZERO));
+        let message = contract_kernel::jet_arithmetic_message("divide_zero");
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
     match MathLayout::floored_mod(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_OVERFLOW));
+            let message = contract_kernel::jet_arithmetic_message("divide_overflow");
+            with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
             0
         }
     }
@@ -667,7 +703,7 @@ extern "C" fn jet_jit_mod_i64(a: i64, b: i64, line: u32) -> i64 {
 extern "C" fn jet_jit_rem_i64(a: i64, b: i64, line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if let Some(message) = MathLayout::integer_remainder_trap(b) {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, message));
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
     // D-MODSEM1=A: `MIN %% -1` is 0, the same answer `%` gives.
@@ -702,7 +738,8 @@ extern "C" fn jet_jit_intn_binop(
         INTN_OP_MOD => BinOp::Mod,
         _ => {
             with_runtime_mut(|rt| {
-                rt.set_runtime_stop("E3010", line, "unknown fixed-width integer operation")
+                let message = contract_kernel::jet_arithmetic_message("unknown");
+                rt.set_arithmetic_stop(line, message)
             });
             return 0;
         }
@@ -711,19 +748,27 @@ extern "C" fn jet_jit_intn_binop(
     let bits = bits as u8;
     let right_signed = right_signed != 0;
     let shift_count = MathLayout::integer_widen(right, right_signed);
-    if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, &message));
+    let shift_direction = match op {
+        BinOp::Shl => Some("left"),
+        BinOp::Shr => Some("right"),
+        _ => None,
+    };
+    if let Some(message) = shift_direction
+        .and_then(|direction| contract_kernel::jet_arithmetic_shift_message(direction, shift_count, bits))
+    {
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, &message));
         return 0;
     }
     // D-FLOORDIV1=A: `/%` names a zero divisor exactly, rather than falling
     // into the shared "this division can't be done" wording below.
     if mode == INTN_MODE_TRAP && matches!(op, BinOp::FloorDiv | BinOp::Mod) && right == 0 {
-        with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_ZERO));
+        let message = contract_kernel::jet_arithmetic_message("divide_zero");
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
     if mode == INTN_MODE_TRAP && op == BinOp::Rem {
         if let Some(message) = MathLayout::integer_remainder_trap(right) {
-            with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, message));
+            with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
             return 0;
         }
     }
@@ -779,10 +824,12 @@ extern "C" fn jet_jit_intn_binop(
             // here as it does on every other tier.
             match op {
                 BinOp::FloorDiv | BinOp::Mod => {
-                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_DIVIDE_OVERFLOW));
+                    let message = contract_kernel::jet_arithmetic_message("divide_overflow");
+                    with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
                 }
                 BinOp::Pow => {
-                    with_runtime_mut(|rt| rt.set_runtime_stop("E3010", line, MathLayout::INTEGER_POWER_OVERFLOW));
+                    let message = contract_kernel::jet_arithmetic_message("pow");
+                    with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
                 }
                 _ => {
                     let name = match op {
@@ -1291,6 +1338,13 @@ extern "C" fn jet_jit_todo_stop(line: i64, expected_type: i64) -> i64 {
 extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap("panic");
+        0
+    })
+}
+
+extern "C" fn jet_jit_index_miss(line: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.set_runtime_stop("E3001", line.max(0) as u32, "index miss");
         0
     })
 }
@@ -3680,6 +3734,7 @@ host_fns! {
     result_get_i8: "jet_jit_result_get_i8" => jet_jit_result_get_i8: sig_result_query_i8;
     result_get_i32: "jet_jit_result_get_i32" => jet_jit_result_get_i32: sig_result_query_i32;
     trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
+    index_miss: "jet_jit_index_miss" => jet_jit_index_miss: sig_i64;
     rich_panic: "jet_jit_rich_panic" => jet_jit_rich_panic: sig_rich_panic;
     todo_stop: "jet_jit_todo_stop" => jet_jit_todo_stop: sig_todo_stop;
     contract_check: "jet_jit_contract_check" => jet_jit_contract_check: sig_contract_check;

@@ -73,6 +73,7 @@ export function raiseRuntimeError(error) {
 export function takeWasmError(wasm) {
   const length = Number(wasm?.jet_wasm_error_len?.() ?? 0);
   if (!length) return null;
+  const status = Number(wasm?.jet_wasm_error_status?.() ?? 0);
   const ptr = Number(wasm.jet_wasm_error_ptr?.() ?? 0);
   const bytes = new Uint8Array(wasm.memory.buffer, ptr, length).slice();
   const frame = new TextDecoder().decode(bytes);
@@ -80,7 +81,15 @@ export function takeWasmError(wasm) {
   try {
     return JSON.parse(frame);
   } catch (_) {
-    return { code: "E3001", message: frame, cause: null, journey: "", frame };
+    return {
+      tag: "Host",
+      status,
+      error: {
+        code: "__malformed_wasm_error__",
+        message: "Wasm host returned malformed error JSON",
+      },
+      report: frame,
+    };
   }
 }
 

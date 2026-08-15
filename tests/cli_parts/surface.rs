@@ -1058,7 +1058,9 @@ fn explain_typed_build_setting_golden() {
 
 #[test]
 fn explain_runtime_stop_golden() {
-    for code in ["E3001", "E3002", "E3010", "E3011", "E3012"] {
+    for code in [
+        "E3001", "E3002", "E3003", "E3004", "E3005", "E3010", "E3011", "E3012",
+    ] {
         let out = Command::new(jet()).arg("explain").arg(code).output().unwrap();
         assert!(out.status.success(), "jet explain {code} should succeed");
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();

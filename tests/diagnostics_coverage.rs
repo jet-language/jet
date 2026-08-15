@@ -863,12 +863,6 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // E0153: protocol expansion parse failure — internal compiler error path only
     // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
     "E0153",
-    // E3005: `jet prove --json` (Source/CmdProve.rs render_report) embeds this
-    // as a literal quoted `"E3005"` JSON-field value in generated evidence records,
-    // which the literal-scan `emitted_codes()` picks up. Its real user-facing
-    // contract-failure rendering is deliberately bracket-free, so coverage stays
-    // in the structural CLI assertion until a live runtime fixture exists.
-    "E3005",
 ];
 
 /// All exclusions combined.
@@ -1232,7 +1226,7 @@ fn acknowledged_gaps_are_still_unresolved() {
 #[test]
 fn exclusion_list_counts_do_not_grow() {
     const CEILINGS: &[(&str, usize, usize)] = &[
-        ("ACKNOWLEDGED_COVERAGE_GAPS", ACKNOWLEDGED_COVERAGE_GAPS.len(), 6),
+        ("ACKNOWLEDGED_COVERAGE_GAPS", ACKNOWLEDGED_COVERAGE_GAPS.len(), 2),
         ("STAGED_BEHIND_GATE", STAGED_BEHIND_GATE.len(), 5),
         ("UNTESTABLE_VIA_SNAPSHOT", UNTESTABLE_VIA_SNAPSHOT.len(), 1),
         (

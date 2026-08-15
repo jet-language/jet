@@ -837,7 +837,7 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 }
 
 fn jet_arithmetic_stop(file: &str, line: u32, msg: &str) -> ! {
-    jet_runtime_stop("E3010", file, line, msg)
+    jet_runtime_stop(JET_ARITHMETIC_CODE, file, line, msg)
 }
 
 fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {
@@ -921,15 +921,15 @@ macro_rules! jet_arith_impl {
         impl JetArith for $t {
             fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
                 self.checked_add(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    &format!("this addition overflows the value's type (the result is outside its range)")))
+                    JET_ARITHMETIC_ADD_OVERFLOW))
             }
             fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
                 self.checked_sub(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    &format!("this subtraction overflows the value's type (the result is outside its range)")))
+                    JET_ARITHMETIC_SUB_OVERFLOW))
             }
             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
                 self.checked_mul(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    &format!("this multiplication overflows the value's type (the result is outside its range)")))
+                    JET_ARITHMETIC_MUL_OVERFLOW))
             }
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
                 jet_division(
@@ -943,24 +943,22 @@ macro_rules! jet_arith_impl {
             }
             fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
-                    jet_arithmetic_stop(file, line, "divided by zero");
+                    jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO);
                 }
                 self.checked_rem(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    "attempt to calculate the remainder with overflow"))
+                    JET_ARITHMETIC_REMAINDER_OVERFLOW))
             }
             fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
                 let w = (Self::BITS) as i128;
-                if bits < 0 || bits >= w {
-                    jet_arithmetic_stop(file, line, &format!(
-                        "shifting left by {} bits is out of range (this type is {} bits wide)", bits, w));
+                if let Some(message) = jet_arithmetic_shift_message("left", bits, w as u8) {
+                    jet_arithmetic_stop(file, line, &message);
                 }
                 self << (bits as u32)
             }
             fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self {
                 let w = (Self::BITS) as i128;
-                if bits < 0 || bits >= w {
-                    jet_arithmetic_stop(file, line, &format!(
-                        "shifting right by {} bits is out of range (this type is {} bits wide)", bits, w));
+                if let Some(message) = jet_arithmetic_shift_message("right", bits, w as u8) {
+                    jet_arithmetic_stop(file, line, &message);
                 }
                 self >> (bits as u32)
             }

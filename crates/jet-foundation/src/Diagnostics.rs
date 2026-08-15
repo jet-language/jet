@@ -153,6 +153,24 @@ pub enum StructuredDiagnostic {
     },
 }
 
+/// Stable identity for one report named in a dependent's cause chain. The
+/// public report wire stays code-only; source projections use the span to
+/// distinguish repeated diagnostics with the same code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticCause {
+    pub code: String,
+    pub span: Option<Span>,
+}
+
+impl DiagnosticCause {
+    pub fn matches(&self, diagnostic: &Diagnostic) -> bool {
+        self.code == diagnostic.code
+            && self
+                .span
+                .is_none_or(|span| diagnostic.span == Some(span))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub moment: ReportMoment,
@@ -162,8 +180,8 @@ pub struct Diagnostic {
     pub why: String,
     pub fix: String,
     pub span: Option<Span>,
-    /// Ordered report codes that caused this report. Root reports carry none.
-    pub cause: Vec<String>,
+    /// Ordered report identities that caused this report. Root reports carry none.
+    pub cause: Vec<DiagnosticCause>,
     /// Mechanical fix projected from row metadata or authored from a
     /// source-derived fact at the diagnostic raise site (S14).
     pub edit: Option<TextEdit>,
@@ -441,16 +459,23 @@ impl Diagnostic {
         self
     }
 
-    /// Attach the ordered report-code chain that caused this report.
+    /// Attach a legacy code-only cause chain. New compiler-produced chains
+    /// should use [`Diagnostic::caused_by`] so repeated codes retain identity.
     pub fn with_causes(mut self, cause: Vec<String>) -> Self {
-        self.cause = cause;
+        self.cause = cause
+            .into_iter()
+            .map(|code| DiagnosticCause { code, span: None })
+            .collect();
         self
     }
 
     /// Put the nearest wrapped report first, followed by its own causes.
     pub fn caused_by(mut self, cause: &Self) -> Self {
         self.cause.reserve(cause.cause.len() + 1);
-        self.cause.push(cause.code.clone());
+        self.cause.push(DiagnosticCause {
+            code: cause.code.clone(),
+            span: cause.span,
+        });
         self.cause.extend(cause.cause.iter().cloned());
         self
     }
@@ -667,7 +692,7 @@ impl Diagnostic {
             }
             None => {}
         }
-        report.cause = self.cause.clone();
+        report.cause = self.cause.iter().map(|cause| cause.code.clone()).collect();
         report.clears = clears;
         if let Some(StructuredDiagnostic::CryptoMisuse {
             reason,
@@ -777,7 +802,7 @@ pub fn report_clear_counts(diags: &[Diagnostic]) -> Vec<usize> {
                         && dependent
                             .cause
                             .iter()
-                            .any(|cause| cause == &diagnostic.code)
+                            .any(|cause| cause.matches(diagnostic))
                 })
                 .count()
         })

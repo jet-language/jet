@@ -961,6 +961,7 @@ fn resident_safe_expr_work_item<'a>(
                 TIR::TTryConvert::None
                     | TIR::TTryConvert::DefaultErr
                     | TIR::TTryConvert::Typed(_)
+                    | TIR::TTryConvert::WidenUnion { .. }
             ),
             vec![inner],
         )),
@@ -1998,6 +1999,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 TIR::TTryConvert::None
                     | TIR::TTryConvert::DefaultErr
                     | TIR::TTryConvert::Typed(_)
+                    | TIR::TTryConvert::WidenUnion { .. }
             ) && resident_safe_expr(inner, callees)
         }
         TExprKind::DecodeUnder { segment, inner } => {

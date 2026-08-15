@@ -2437,8 +2437,20 @@ impl LowerCtx<'_, '_> {
                 let tag = self.b.ins().iconst(types::I8, 0);
                 self.call_host(self.host.result_new_i64, &[tag, converted])
             }
-            TIR::TTryConvert::WidenUnion { .. } => {
-                return Err("jit typed Result conversion unsupported".to_string());
+            TIR::TTryConvert::WidenUnion { enum_name, tag } => {
+                let err_ty = inner
+                    .ty
+                    .unwrap_result()
+                    .map(|(_, err)| err.clone())
+                    .ok_or("jit union Result conversion operand is not Result")?;
+                let err_payload = self.result_payload(handle, &err_ty)?;
+                let disc = self
+                    .meta
+                    .enum_variant_index(enum_name, tag)
+                    .ok_or_else(|| format!("jit union variant `{enum_name}::{tag}`"))?;
+                let packed = self.pack_enum_scalar(disc, err_payload, &err_ty)?;
+                let tag = self.b.ins().iconst(types::I8, 0);
+                self.call_host(self.host.result_new_i64, &[tag, packed])
             }
         };
         while !self.txn_stack.is_empty() {
@@ -2462,6 +2474,90 @@ impl LowerCtx<'_, '_> {
         let value = self.result_payload(handle, &ok_ty)?;
         self.track_compute_value(value, &ok_ty)?;
         Ok(value)
+    }
+
+    fn emit_rich_panic(
+        &mut self,
+        loc: &TIR::TPanicLoc,
+        msg_val: Value,
+    ) -> Result<(), String> {
+        let locals_buf = self.call_host(self.host.str_begin, &[]);
+        let mut first = true;
+        for (name, place) in &loc.locals {
+            let key = Self::local_key(place);
+            let Some(var) = self.vars.get(&key).copied() else {
+                continue;
+            };
+            let ty = self.var_tys.get(&key).cloned().unwrap_or(Type::Int);
+            if !matches!(
+                ty,
+                Type::Int | Type::IntN { .. } | Type::Bool | Type::Float | Type::Float32
+            ) {
+                continue;
+            }
+            if !first {
+                let sep = self.runtime.heap.alloc_string(", ");
+                let sep_v = self.b.ins().iconst(types::I64, sep);
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push, &[locals_buf, sep_v]);
+            }
+            first = false;
+            let prefix = self.runtime.heap.alloc_string(format!("{name} = "));
+            let prefix_v = self.b.ins().iconst(types::I64, prefix);
+            let push = self
+                .module
+                .declare_func_in_func(self.host.str_push_str, self.b.func);
+            self.b.ins().call(push, &[locals_buf, prefix_v]);
+            let val = self.b.use_var(var);
+            match ty {
+                Type::Float | Type::Float32 => {
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_f64, self.b.func);
+                    self.b.ins().call(push, &[locals_buf, val]);
+                }
+                Type::Bool => {
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_bool, self.b.func);
+                    self.b.ins().call(push, &[locals_buf, val]);
+                }
+                _ => {
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_i64, self.b.func);
+                    self.b.ins().call(push, &[locals_buf, val]);
+                }
+            }
+        }
+        let file = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(&loc.file));
+        let fn_name = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(&loc.fn_name));
+        let src_line = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(&loc.src_line));
+        let host = self
+            .module
+            .declare_func_in_func(self.host.rich_panic, self.b.func);
+        let file = self.b.ins().iconst(types::I64, file);
+        let line = self.b.ins().iconst(types::I64, i64::from(loc.line));
+        let fn_name = self.b.ins().iconst(types::I64, fn_name);
+        let src_line = self.b.ins().iconst(types::I64, src_line);
+        let col = self.b.ins().iconst(types::I64, i64::from(loc.col));
+        let caret = self.b.ins().iconst(types::I64, i64::from(loc.caret));
+        self.b.ins().call(
+            host,
+            &[file, line, fn_name, src_line, col, caret, msg_val, locals_buf],
+        );
+        self.emit_trap_check()
     }
 
     fn strip_rust_str_lit(s: &str) -> String {
@@ -16263,13 +16359,9 @@ impl LowerCtx<'_, '_> {
                             let val = self.lower_expr(e)?;
                             self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
                         }
-                        TOrFallback::Panic { .. } => {
-                            let zero = self.b.ins().iconst(types::I64, 0);
-                            let host_ref = self
-                                .module
-                                .declare_func_in_func(self.host.trap_panic, self.b.func);
-                            self.b.ins().call(host_ref, &[zero]);
-                            self.emit_trap_check()?;
+                        TOrFallback::Panic { msg, loc } => {
+                            let msg_val = self.lower_expr(msg)?;
+                            self.emit_rich_panic(loc, msg_val)?;
                             let dummy = if merge_ty == types::F64 {
                                 self.b.ins().f64const(0.0)
                             } else {
@@ -16302,16 +16394,11 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(fail_block);
                     self.b.seal_block(fail_block);
                     match fallback {
-                        TOrFallback::Panic { .. } => {
-                            let line = self.b.ins().iconst(types::I32, 1);
-                            let host_ref = self.module.declare_func_in_func(
-                                self.host.conc.panic_channel_closed,
-                                self.b.func,
-                            );
-                            let call = self.b.ins().call(host_ref, &[line]);
-                            let panic_val = self.b.inst_results(call)[0];
-                            self.emit_trap_check()?;
-                            self.b.ins().jump(merge, &[panic_val]);
+                        TOrFallback::Panic { msg, loc } => {
+                            let msg_val = self.lower_expr(msg)?;
+                            self.emit_rich_panic(loc, msg_val)?;
+                            let dummy = self.b.ins().iconst(types::I64, 0);
+                            self.b.ins().jump(merge, &[dummy]);
                         }
                         TOrFallback::Break => {
                             self.emit_loop_fallback(None, "break", false)?;
@@ -16394,13 +16481,9 @@ impl LowerCtx<'_, '_> {
                         let val = self.lower_expr(e)?;
                         self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
                     }
-                    TOrFallback::Panic { .. } => {
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.trap_panic, self.b.func);
-                        self.b.ins().call(host_ref, &[zero]);
-                        self.emit_trap_check()?;
+                    TOrFallback::Panic { msg, loc } => {
+                        let msg_val = self.lower_expr(msg)?;
+                        self.emit_rich_panic(loc, msg_val)?;
                         let dummy = if ret_ty == types::F64 {
                             self.b.ins().f64const(0.0)
                         } else {
@@ -17489,88 +17572,7 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().iconst(types::I64, h)
                     }
                 };
-                let loc_buf = self.call_host(self.host.str_begin, &[]);
-                let mut first = true;
-                for (name, place) in &loc.locals {
-                    let key = Self::local_key(place);
-                    let Some(var) = self.vars.get(&key).copied() else {
-                        continue;
-                    };
-                    let ty = self.var_tys.get(&key).cloned().unwrap_or(Type::Int);
-                    if !matches!(
-                        ty,
-                        Type::Int
-                            | Type::IntN { .. }
-                            | Type::Bool
-                            | Type::Float
-                            | Type::Float32
-                    ) {
-                        continue;
-                    }
-                    if !first {
-                        let sep = self.runtime.heap.alloc_string(", ");
-                        let sep_v = self.b.ins().iconst(types::I64, sep);
-                        let push_s = self
-                            .module
-                            .declare_func_in_func(self.host.str_push_str, self.b.func);
-                        self.b.ins().call(push_s, &[loc_buf, sep_v]);
-                    }
-                    first = false;
-                    let prefix = self.runtime.heap.alloc_string(format!("{name} = "));
-                    let prefix_v = self.b.ins().iconst(types::I64, prefix);
-                    let push_s = self
-                        .module
-                        .declare_func_in_func(self.host.str_push_str, self.b.func);
-                    self.b.ins().call(push_s, &[loc_buf, prefix_v]);
-                    let val = self.b.use_var(var);
-                    match ty {
-                        Type::Float | Type::Float32 => {
-                            let push = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_f64, self.b.func);
-                            self.b.ins().call(push, &[loc_buf, val]);
-                        }
-                        Type::Bool => {
-                            let push = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_bool, self.b.func);
-                            self.b.ins().call(push, &[loc_buf, val]);
-                        }
-                        _ => {
-                            let push = self
-                                .module
-                                .declare_func_in_func(self.host.str_push_i64, self.b.func);
-                            self.b.ins().call(push, &[loc_buf, val]);
-                        }
-                    }
-                }
-                let locals_val = loc_buf;
-                let file_h = self
-                    .runtime
-                    .heap
-                    .alloc_string(Self::strip_rust_str_lit(&loc.file));
-                let fn_h = self
-                    .runtime
-                    .heap
-                    .alloc_string(Self::strip_rust_str_lit(&loc.fn_name));
-                let src_h = self
-                    .runtime
-                    .heap
-                    .alloc_string(Self::strip_rust_str_lit(&loc.src_line));
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.rich_panic, self.b.func);
-                let file_v = self.b.ins().iconst(types::I64, file_h);
-                let line_v = self.b.ins().iconst(types::I64, i64::from(loc.line));
-                let fn_v = self.b.ins().iconst(types::I64, fn_h);
-                let src_v = self.b.ins().iconst(types::I64, src_h);
-                let col_v = self.b.ins().iconst(types::I64, i64::from(loc.col));
-                let caret_v = self.b.ins().iconst(types::I64, i64::from(loc.caret));
-                self.b.ins().call(
-                    host,
-                    &[file_v, line_v, fn_v, src_v, col_v, caret_v, msg_val, locals_val],
-                );
-                self.emit_trap_check()?;
+                self.emit_rich_panic(loc, msg_val)?;
                 self.b.ins().jump(cont, &[]);
                 self.b.switch_to_block(cont);
                 self.b.seal_block(cont);
@@ -17797,7 +17799,7 @@ impl LowerCtx<'_, '_> {
                 type_name,
                 base,
                 index,
-                ..
+                line,
             } => {
                 let key = format!("{type_name}::get");
                 let func_id = self
@@ -17817,11 +17819,11 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(missing, fail, &[], ok, &[]);
                 self.b.switch_to_block(fail);
                 self.b.seal_block(fail);
-                let message = self.b.ins().iconst(types::I64, 0);
                 let trap = self
                     .module
-                    .declare_func_in_func(self.host.trap_panic, self.b.func);
-                self.b.ins().call(trap, &[message]);
+                    .declare_func_in_func(self.host.index_miss, self.b.func);
+                let line = self.b.ins().iconst(types::I64, *line as i64);
+                self.b.ins().call(trap, &[line]);
                 self.b.ins().jump(merge, &[zero]);
                 self.b.switch_to_block(ok);
                 self.b.seal_block(ok);

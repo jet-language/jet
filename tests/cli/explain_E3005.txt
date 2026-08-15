@@ -1,0 +1,12 @@
+E3005
+
+What this means:
+  `@{Pre|Post} contract failed: {msg}` — with file:line.
+
+Why Jet enforces it:
+  A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split).
+
+How to fix it:
+  Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).
+
+This explanation comes from jet's diagnostics reference.

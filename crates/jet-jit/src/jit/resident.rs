@@ -60,6 +60,9 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         source_file: String::new(),
         source_text: String::new(),
         current_function: String::new(),
+        current_line: 0,
+        current_source_line: String::new(),
+        source_frames: Vec::new(),
         stack_depth: 0,
         stdout: String::new(),
         stderr: String::new(),
@@ -143,6 +146,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         fraction_values: Vec::new(),
         complex_values: Vec::new(),
         trapped: None,
+        host_fault: false,
         exit_code: None,
         deadline_exceeded: None,
         readers: Vec::new(),
@@ -179,6 +183,11 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.next_stream_channel = -1;
     rt.next_stream_sender = -1;
     rt.stack_depth = 0;
+    rt.source_frames.clear();
+    rt.current_line = 0;
+    rt.current_function.clear();
+    rt.current_source_line.clear();
+    rt.host_fault = false;
     rt.jit_callables.clear();
     rt.atexit_handlers.clear();
     rt.channels.clear();
@@ -377,6 +386,24 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 stdout,
                 stderr,
                 exit_code: 70,
+            });
+        }
+        if runtime.host_fault {
+            runtime.host_fault = false;
+            runtime.trapped.take();
+            runtime.exit_code.take();
+            let mut stderr = jet_foundation::Diagnostics::render_ice_report(
+                "the JIT runtime helper failed",
+                "",
+                false,
+            );
+            stderr.push('\n');
+            let stdout = runtime.stdout.clone();
+            reset_run_heap(runtime);
+            return Ok(RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code: jet_foundation::ExitCodes::ICE,
             });
         }
         if let Some(msg) = runtime.trapped.take() {
