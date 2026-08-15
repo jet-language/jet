@@ -1075,8 +1075,17 @@ fn web_wasm_expr_supported(
                     Type::Named(type_name)
                         if bundle_has_explicit_unit_display(bundle, type_name)
                 );
-            (computed || display)
+            let inherent = method.mangled
+                && matches!(
+                    &recv.ty,
+                    Type::Named(type_name)
+                        if bundle_has_inherent_method(bundle, type_name, &method.name)
+                );
+            (computed || display || inherent)
                 && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+                && args.iter().all(|arg| {
+                    web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
+                })
         }
         TIR::TExprKind::ModuleCall { form, args, .. } => {
             let key = match form {
@@ -2470,6 +2479,19 @@ fn items_have_computed_field(items: &[Item], type_name: &str, field_name: &str) 
     })
 }
 
+fn items_have_inherent_method(items: &[Item], type_name: &str, method_name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Struct(def) => {
+            def.name == type_name && def.methods.iter().any(|method| method.name == method_name)
+        }
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| items_have_inherent_method(body, type_name, method_name)),
+        _ => false,
+    })
+}
+
 fn bundle_module_index_for_alias(bundle: &ProgramBundle, alias: &str) -> Option<usize> {
     let entry = &bundle.modules[bundle.entry];
     entry
@@ -2525,6 +2547,23 @@ fn bundle_has_computed_field(bundle: &ProgramBundle, type_name: &str, field_name
         .modules
         .iter()
         .any(|module| items_have_computed_field(&module.items, type_name, field_name))
+}
+
+fn bundle_has_inherent_method(
+    bundle: &ProgramBundle,
+    type_name: &str,
+    method_name: &str,
+) -> bool {
+    if let Some((alias, leaf)) = type_name.split_once('.') {
+        return bundle_module_index_for_alias(bundle, alias)
+            .and_then(|index| bundle.modules.get(index))
+            .is_some_and(|module| {
+                items_have_inherent_method(&module.items, leaf, method_name)
+            });
+    }
+    bundle.modules.iter().any(|module| {
+        items_have_inherent_method(&module.items, type_name, method_name)
+    })
 }
 
 fn bundle_has_named_web_type(bundle: &ProgramBundle, name: &str) -> bool {
@@ -2956,21 +2995,17 @@ fn emit_wasm_uninit_storage(out: &mut String) {
     out.push_str("}\n\n");
 }
 
-/// D-FIELDMEMO1=A: computed fields are synthesized inherent getters in sema.
-/// Emit those getters into the Wasm module as well, so a web read reaches the
-/// same Prelude-backed cache method as native code.
-fn emit_wasm_computed_methods(items: &[Item], cx: &Cx, out: &mut String) {
+/// Covered inherent methods use the same TIR-owned Rust bodies in Web Wasm as
+/// native AOT. This includes sema-synthesized computed getters and derive
+/// methods; the Web expression emitter only marshals the already-resolved call.
+fn emit_wasm_inherent_methods(items: &[Item], cx: &Cx, out: &mut String) {
     for item in items {
         match item {
             Item::Struct(def) if def.type_params.is_empty() => {
                 let methods = def
                     .methods
                     .iter()
-                    .filter(|method| {
-                        def.fields.iter().any(|field| {
-                            field.name == method.name && field.computed.is_some()
-                        })
-                    })
+                    .filter(|method| TIR::tir_covers_method(method, &def.name, cx))
                     .collect::<Vec<_>>();
                 if methods.is_empty() {
                     continue;
@@ -2984,7 +3019,7 @@ fn emit_wasm_computed_methods(items: &[Item], cx: &Cx, out: &mut String) {
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
-                    emit_wasm_computed_methods(body, cx, out);
+                    emit_wasm_inherent_methods(body, cx, out);
                 }
             }
             _ => {}
@@ -3389,7 +3424,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             emit_wasm_display_impls(&module.items, &cx, &mut out);
             emit_wasm_reflection_impls(&module.items, &cx, &mut out);
         }
-        emit_wasm_computed_methods(&module.items, &cx, &mut out);
+        emit_wasm_inherent_methods(&module.items, &cx, &mut out);
         // D-ERR-CONV: web conversion calls use the same TIR-owned conversion
         // bodies as native emission. The web expression emitter only marshals
         // the call at the `?` site; it does not recreate the conversion body.
