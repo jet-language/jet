@@ -1000,6 +1000,71 @@ fn run() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn default_int_outside_i64_stops_at_c_boundary_with_e1003() {
+    if !have_rustc() {
+        return;
+    }
+    let root = common::unique_tmp("jet_cffi_exact_int_range");
+    let Some((lib_dir, lib_name)) = build_c_lib(&root) else {
+        return;
+    };
+    declare_local_c_dep(&root, &lib_name);
+    let main = root.join("main.jet");
+    let source = r#"use c.jetc as c
+#Extern module c.jetc {
+    fn twice(value: Int) => Int = "jetc_twice"
+}
+fn run() {
+    print(c.twice(9223372036854775808))
+}
+"#;
+    fs::write(&main, source).unwrap();
+    let out = jet::compile_with_path(source, main.to_str().unwrap())
+        .unwrap_or_else(|diagnostics| panic!("front end rejected exact Int C boundary:\n{diagnostics:?}"));
+    assert!(out.rust.contains(
+        "jet_int_to_i64(a0).unwrap_or_else(|| super::jet_runtime_stop(\"E1003\""
+    ));
+
+    let rust = root.join("main.rs");
+    let binary = root.join("main_bin");
+    fs::write(&rust, &out.rust).unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc
+        .args(["--edition", "2021"])
+        .arg(&rust)
+        .arg("-o")
+        .arg(&binary)
+        .arg("-L")
+        .arg(format!("native={}", lib_dir.display()))
+        .arg("-l")
+        .arg(&lib_name);
+    add_ffi_bridge_args(
+        &mut rustc,
+        out.ffi
+            .as_ref()
+            .expect("C boundary fixture needs its generated bridge"),
+    );
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "rustc rejected exact Int C boundary:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let run = Command::new(binary).output().unwrap();
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(run.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains(
+            "Error [E1003]: a default Int value does not fit in the C i64 range"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("panicked at"), "{stderr}");
+    let _ = fs::remove_dir_all(root);
+}
+
 /// Card #436: build a second C static library exercising the C-ABI shapes
 /// that sema newly accepts (fixed-width ints, a `#Layout(c)` struct passed
 /// by value, a distinct-over-`Int`) so the round trip is proven against a
