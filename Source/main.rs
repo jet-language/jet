@@ -2820,14 +2820,42 @@ pub(crate) fn resolve_source_path(raw: &str) -> String {
         Err(error) if matches!(error, jet::Authority::AuthorityError::WrongKind { .. }) => {}
         Err(error) => report_entry_authority_error(error),
     }
-    if let Some(path) = checked_explicit_file(path) {
-        return path.to_string_lossy().into_owned();
+    if let Some(checked) = checked_explicit_file(path) {
+        return keep_typed_spelling(raw, &checked);
     }
     let with_ext = format!("{}.{}", raw, jet::Syntax::FILE_EXT);
-    if let Some(path) = checked_explicit_file(Path::new(&with_ext)) {
-        return path.to_string_lossy().into_owned();
+    if let Some(checked) = checked_explicit_file(Path::new(&with_ext)) {
+        return keep_typed_spelling(&with_ext, &checked);
     }
     raw.to_string()
+}
+
+/// Keep the spelling the caller typed when it names the same file the authority
+/// check validated.
+///
+/// The point of `checked_explicit_file` is the authority check; its canonical
+/// absolute path is not. Returning that path made every human diagnostic
+/// locator carry the checkout location (`--> /home/…/tests/ui/x.jet:6:4`) and
+/// disagree with `jet dev`, which never resolves and so renders the argument as
+/// typed — two verbs, two locators, one diagnostic. The absolute form stays the
+/// *machine* representation, which `machine_report_path_for_process` builds on
+/// its own for `--json`.
+///
+/// A relative entry runs the whole pipeline: `jet dev` already hands its raw
+/// argument to the loader, sema, the JIT, the watcher, and the cache, and
+/// `find_manifest_root` canonicalizes its start before walking up.
+///
+/// The canonical-equality guard is what makes this safe rather than merely
+/// shorter: it proves the typed spelling and the validated path name the same
+/// file. A spelling that reaches the file through a symlink or `..` — or an
+/// argument the caller already wrote absolute — keeps the validated path, so
+/// nothing downstream is ever pointed at a spelling the resolver did not check.
+fn keep_typed_spelling(typed: &str, checked: &Path) -> String {
+    let path = Path::new(typed);
+    if !path.is_absolute() && fs::canonicalize(path).is_ok_and(|resolved| resolved == checked) {
+        return typed.to_string();
+    }
+    checked.to_string_lossy().into_owned()
 }
 
 fn checked_explicit_file(path: &Path) -> Option<PathBuf> {
