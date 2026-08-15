@@ -560,7 +560,11 @@ impl<'a> Fmt<'a> {
                 self.write("[");
                 self.fmt_type(elem);
                 self.write("#");
-                self.write(&len.expression());
+                if let Some(expression) = len.pending_expression() {
+                    self.fmt_expr(expression, Prec::OrFallback);
+                } else {
+                    self.write(&len.expression());
+                }
                 self.write("]");
             }
             // D-QUAL4=A: `#TagName Type` — prefix value-tag.

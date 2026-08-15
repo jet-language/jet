@@ -664,7 +664,36 @@ impl<'a> ComptimeTypeResolver<'a> {
             }
             Type::FixedList { elem, len } => {
                 self.resolve_type(elem);
-                if len.literal_value().is_none() {
+                if let Some(expression) = len.pending_expression_mut() {
+                    let span = expression.span();
+                    self.resolve_expr_types(expression);
+                    match self.evaluate_integer(expression) {
+                        Ok(value) if (0..=usize::MAX as i128).contains(&value) => {
+                            *len = crate::AST::Measure::literal("length", value as u64);
+                        }
+                        Ok(_) | Err(IntegerFailure::OutOfRange) => self.push_constant_error(
+                            "E0963",
+                            "a fixed-size list length is outside the supported range",
+                            "the list length must fit the target's array-size representation",
+                            "use a non-negative comptime integer within the supported range",
+                            span,
+                        ),
+                        Err(IntegerFailure::NonInteger(ty)) => self.push_constant_error(
+                            "E0963",
+                            format!("a fixed-size list length must be an integer, got {ty}"),
+                            "a fixed-size list needs one known number of elements",
+                            "use an integer literal or a compile-time expression that produces Int",
+                            span,
+                        ),
+                        Err(IntegerFailure::Unknown) => self.push_constant_error(
+                            "E0963",
+                            "a fixed-size list length must be computable at compile time",
+                            "the array layout is fixed before runtime values exist",
+                            "use a literal, a same-file `@` binding, or another comptime expression",
+                            span,
+                        ),
+                    }
+                } else if len.literal_value().is_none() {
                     self.push_constant_error(
                         "E0963",
                         "a fixed-size list length must resolve from a module value parameter",

@@ -132,13 +132,29 @@ fn unescape_axis(axis: &str) -> Option<String> {
 }
 
 
+#[derive(Debug, Clone)]
+pub struct PendingMeasure {
+    expression: Box<Expr>,
+    identity: String,
+}
+
+impl PartialEq for PendingMeasure {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity
+    }
+}
+
+impl Eq for PendingMeasure {}
+
 /// One compile-time number attached to a type. The measure plane owns the
-/// value; the use site gives it meaning through `MeasureRule`.
+/// resolved value; a D-META-CONST1 expression is retained only until the
+/// ordinary comptime evaluator resolves the declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Measure {
     Literal { kind: String, value: u64 },
     SignedLiteral { kind: String, value: i64 },
     Symbol { kind: String, name: String },
+    Pending { kind: String, value: PendingMeasure },
     Combined {
         kind: String,
         rule: MeasureRule,
@@ -148,8 +164,8 @@ pub enum Measure {
 }
 
 /// The closed combination algebra declared by measure-bearing type surfaces.
-/// User code supplies literals or module value parameters; it never selects a
-/// rule or evaluates an arbitrary expression into a type.
+/// User code never selects a rule; declaration expressions resolve before
+/// this algebra reaches type checking or lowering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeasureRule {
     Add,
@@ -175,6 +191,32 @@ impl Measure {
         Self::Symbol {
             kind: kind.into(),
             name: name.into(),
+        }
+    }
+
+    pub fn pending(kind: impl Into<String>, expression: Expr) -> Self {
+        let identity = String::from_utf8(crate::CanonicalAST::canonical_fragment(&expression))
+            .expect("canonical AST fragments are UTF-8");
+        Self::Pending {
+            kind: kind.into(),
+            value: PendingMeasure {
+                expression: Box::new(expression),
+                identity,
+            },
+        }
+    }
+
+    pub fn pending_expression(&self) -> Option<&Expr> {
+        match self {
+            Self::Pending { value, .. } => Some(&value.expression),
+            _ => None,
+        }
+    }
+
+    pub fn pending_expression_mut(&mut self) -> Option<&mut Expr> {
+        match self {
+            Self::Pending { value, .. } => Some(&mut value.expression),
+            _ => None,
         }
     }
     pub fn literal_value(&self) -> Option<u64> {
@@ -250,6 +292,7 @@ impl Measure {
             Self::Literal { kind, .. }
             | Self::SignedLiteral { kind, .. }
             | Self::Symbol { kind, .. }
+            | Self::Pending { kind, .. }
             | Self::Combined { kind, .. } => kind,
         }
     }
@@ -259,6 +302,7 @@ impl Measure {
             Self::Literal { value, .. } => value.to_string(),
             Self::SignedLiteral { value, .. } => value.to_string(),
             Self::Symbol { name, .. } => name.clone(),
+            Self::Pending { .. } => "<computed>".to_string(),
             Self::Combined {
                 rule: MeasureRule::Add,
                 left,
@@ -275,7 +319,10 @@ impl Measure {
     }
 
     fn canonical(&self) -> String {
-        format!("{}:{}", self.kind(), self.expression())
+        match self {
+            Self::Pending { kind, value } => format!("{kind}:pending:{}", value.identity),
+            _ => format!("{}:{}", self.kind(), self.expression()),
+        }
     }
 }
 impl std::fmt::Display for Measure {
@@ -907,10 +954,9 @@ pub enum Type {
     TraitObject(Vec<String>),
     /// S73 (D-SG7): named tuple `(x: Int, y: Int)` — fields stored sorted by name.
     Tuple(Vec<(String, Box<Type>)>),
-    /// S76 / D-TYPE2-MEASURE1=A: fixed-size list `[T#N]`. `N` is the same
-    /// measure substrate used by shapes, lanes and exponents: either a
-    /// declared literal or a module value parameter, never an expression
-    /// evaluated by user code.
+    /// S76 / D-TYPE2-MEASURE1=A: fixed-size list `[T#N]`. `N` resolves through
+    /// the ordinary closed comptime evaluator, then joins the same measure
+    /// substrate used by shapes, lanes, and exponents.
     FixedList {
         elem: Box<Type>,
         len: Measure,

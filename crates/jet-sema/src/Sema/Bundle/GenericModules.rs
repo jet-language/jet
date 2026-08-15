@@ -422,6 +422,9 @@ fn specialize_module_type(
         match ty {
             Type::FixedList { elem, len } => {
                 lengths(elem, types, values);
+                if let Some(expression) = len.pending_expression_mut() {
+                    substitute_expr(expression, types, values);
+                }
                 *len = len.resolve_symbols(&|name| {
                     values.get(name).and_then(|value| match value {
                         crate::AST::CtValue::Int(value) => u64::try_from(*value).ok(),
