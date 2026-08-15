@@ -3626,9 +3626,17 @@ fn ambient_app_handle(
                 None => None,
                 _ => return Some(Err(unsupported("App serve port", span))),
             };
-            std::thread::spawn(move || match port {
-                Some(port) => app.serve_on(port),
-                None => app.serve(),
+            // An empty App has no callback closures to retain `requests`.
+            // Keep the channel alive for exactly the native server's lifetime:
+            // the evaluator waits while it serves 404s, and still observes a
+            // real server stop when this thread drops the sender.
+            let server_lifetime = requests.clone();
+            std::thread::spawn(move || {
+                let _server_lifetime = server_lifetime;
+                match port {
+                    Some(port) => app.serve_on(port),
+                    None => app.serve(),
+                }
             });
             let server = Arc::new(InterpWebServer {
                 requests: Mutex::new(receiver),
