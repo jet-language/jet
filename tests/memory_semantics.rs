@@ -188,8 +188,8 @@ enum Link {
 }
 
 fn promoted_cycle() => Link {
-    first :: Link.Next(Link.End(1))
-    second :: Link.Next(first)
+    first := Link.Next(Link.End(1))
+    second := Link.Next(first)
     first = Link.Next(second)
     return first
 }
