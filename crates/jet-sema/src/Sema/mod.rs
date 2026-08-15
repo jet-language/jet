@@ -1253,6 +1253,10 @@ pub enum CompileMode {
 pub(crate) struct ModuleState {
     module_path: String,
     module_alias: String,
+    /// Source items retained for compile-time reflection folds. The same AST
+    /// is the producer for `Type.reflect()` and direct registered fact reads;
+    /// no reflection lookup table is kept beside it.
+    items: Vec<crate::AST::Item>,
     /// The bundle-wide build fact snapshot, copied into each module state so
     /// the checker can fold facts without an engine or global lookup.
     build_facts: jet_foundation::Facts::BuildFactSnapshot,
@@ -1324,6 +1328,7 @@ pub(crate) struct Checker<'a> {
     effect_facts: &'a jet_foundation::Facts::FactRegistry,
     consts: &'a HashMap<String, Type>,
     modules: Option<&'a [ModuleState]>,
+    items: &'a [crate::AST::Item],
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
     core_imports: &'a HashMap<String, String>,

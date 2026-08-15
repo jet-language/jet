@@ -1,13 +1,42 @@
-// 130 — D-METAREFLECT1 / D-REFLECT1: rich reflection read API for user derives.
-// Demonstrates `.methods`, `.markers`, field `is_pub`, and `.has_marker(...)`.
+// D-METAREFLECT1 / D-REFLECT1 / D-FACT-READ1: aggregate reflection and the
+// typed `@` reader consume the same registered fact carriers.
+#Numeric Severity :: distinct Int(0..10)
+#UnitFamily(Length, dimension) { meter }
+
+state Order { Draft, Published }
+
+struct Order {
+    value: Int
+}
+
+fn send_report() =[IO]=> {}
+
+@range :: Severity.@range
+@dimension :: Meter.@dimension
+@states :: Order.@states
+@effects :: send_report.@effects
+@sendability :: Severity.@sendability
+@movedness :: Severity.@movedness
+@attribution :: report.@attribution
+@track_origin :: Severity.@track_origin
+@view_provenance :: send_report.@view_provenance
+@unit_scale :: Meter.@unit_scale_provenance
+@maturity :: send_report.@maturity
+
 derive T.Summarize {
     info :: T.reflect()
     method :: info.methods[0].name
     method_marker :: info.methods[0].markers[0].name
+    method_effects :: info.methods[0].@effects.values.len()
+    method_sendability :: info.methods[0].@sendability.known
+    method_movedness :: info.methods[0].@movedness.known
+    method_track_origin :: info.methods[0].@track_origin.tracked
+    method_view_mutable :: info.methods[0].@view_provenance.mutable
+    method_maturity :: info.methods[0].@maturity.level
     pub_field :: info.fields[0].name
     hidden_pub :: info.fields[1].is_pub
     has_debug :: info.has_marker("Debug")
-    fn summary(self) => String :: "{T.@name}/{@method}[{@method_marker}]/{@pub_field} debug={@has_debug} hidden_pub={@hidden_pub}"
+    fn summary(self) => String :: "{T.@name}/{@method}[{@method_marker}]/{@pub_field} debug={@has_debug} hidden_pub={@hidden_pub} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity}"
 }
 
 // D-MARK-DEBUG1=A: `Debug` no longer has an explicit derive spelling — it
@@ -18,12 +47,15 @@ derive T.Summarize {
 struct Widget {
     pub label: String
     secret: Int
+    level: Int(0..10)
 
     #Inline
     fn show(self) => String :: ~self.label
 }
 
 fn run() {
-    w :: Widget.{label: "gear", secret: 1}
+    w :: Widget.{label: "gear", secret: 1, level: 2}
     print(w.summary())
+    print("planes:{@range.start}-{@range.end}/{@dimension.axes.len()}/{@states[0].name}/{@effects.values.len()}")
+    print("homed:{@sendability.known}/{@movedness.known}/{@attribution.source}/{@track_origin.tracked}/{@view_provenance.mutable}/{@unit_scale.kind}/{@maturity.level}")
 }

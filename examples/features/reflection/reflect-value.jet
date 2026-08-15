@@ -11,13 +11,23 @@ derive T.Summarize {
     type_name :: info.name
     first :: info.fields[0].name
     second :: info.fields[1].name
-    fn compile_field_names(self) => String :: "{@type_name}: {@first},{@second}"
+    range_start :: info.@range.start
+    method_effects :: info.methods[0].@effects.values.len()
+    method_sendability :: info.methods[0].@sendability.known
+    method_movedness :: info.methods[0].@movedness.known
+    method_track_origin :: info.methods[0].@track_origin.tracked
+    method_view_mutable :: info.methods[0].@view_provenance.mutable
+    method_maturity :: info.methods[0].@maturity.level
+    fn compile_field_names(self) => String :: "{@type_name}: {@first},{@second} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity}"
 }
 
 #Summarize
 struct Point {
-    x: Int
+    x: Int(0..10)
     y: Int
+    level: Int(0..10)
+
+    fn describe(self) => String :: "{self.x},{self.y}"
 
     impl Display {
         fn display(self) => String :: "({self.x}, {self.y})"
@@ -25,7 +35,7 @@ struct Point {
 }
 
 fn run() {
-    p :: Point.{x: 3, y: 4}
+    p :: Point.{x: 3, y: 4, level: 2}
     print(p.compile_field_names())
     v :: reflect.of(p)
     print(v.type_name())

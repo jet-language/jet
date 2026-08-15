@@ -377,6 +377,7 @@ fn check_bundle_opts_for_output_inner(
         .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
             module_alias: m.alias.clone(),
+            items: m.items.clone(),
             build_facts: bundle.build_facts.clone(),
             allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
             funcs: HashMap::new(),

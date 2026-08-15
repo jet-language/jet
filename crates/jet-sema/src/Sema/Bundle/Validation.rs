@@ -1527,6 +1527,7 @@ fn check_func_body_bundle_scoped(
         effect_facts,
         consts: &st.consts,
         modules: Some(states),
+        items: &st.items,
         module_idx,
         imports: &scoped_imports,
         core_imports: &scoped_core_imports,

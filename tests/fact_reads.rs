@@ -2,8 +2,17 @@
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 use jet_foundation::Facts::BuildStamp;
+use jet::AST::Item;
 use std::fs;
+
+const FIXTURE: &str = include_str!("../examples/features/reflection/fact_reads.jet");
+const FIXTURE_EXPECTED: &str = include_str!("../examples/features/expected/reflection/fact_reads.out");
+const AGGREGATE_FIXTURE: &str =
+    include_str!("../examples/features/reflection/reflect-value.jet");
 
 fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
     jet::compile(source).expect_err("the fixture must be rejected")
@@ -62,6 +71,62 @@ fn folded_fact_reads_emit_values_without_runtime_dispatch() {
         !output.rust.contains("fact_read") && !output.rust.contains("jet.fact"),
         "a folded fact must not emit a runtime reader or dispatch path"
     );
+}
+
+#[test]
+fn every_typed_fact_member_uses_the_one_registry_reader() {
+    for (member, _) in jet::Syntax::FACT_READS {
+        assert!(
+            jet_foundation::Registry::fact_read(member).is_some(),
+            "unregistered fact member: {member}"
+        );
+    }
+}
+
+#[test]
+fn parser_preserves_the_typed_fact_fixture() {
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex(FIXTURE);
+    assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");
+    let program = jet::Parser::parse(&tokens).expect("typed fact fixture must parse");
+    assert!(program.items.iter().any(|item| matches!(item, Item::Const(binding) if binding.is_comptime)));
+}
+
+#[test]
+fn typed_fact_fixture_folds_all_planes_without_runtime_dispatch() {
+    let output = jet::compile(FIXTURE).expect("typed fact fixture must compile");
+    for value in ["Rational", "Experimental", "report"] {
+        assert!(output.rust.contains(value), "folded fact value missing: {value}");
+    }
+    assert!(!output.rust.contains("fact_read"));
+}
+
+#[test]
+fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
+    let output = jet::compile(AGGREGATE_FIXTURE).expect("aggregate fact fixture must compile");
+    for value in ["Range", "Experimental"] {
+        assert!(output.rust.contains(value), "aggregate fact value missing: {value}");
+    }
+    assert!(!output.rust.contains("fact_read"));
+}
+
+#[test]
+fn typed_fact_fixture_matches_aot_default_and_interpreter() {
+    tir_support::assert_tiers_agree("reflection/fact_reads", FIXTURE, FIXTURE_EXPECTED);
+}
+
+#[test]
+fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
+    let transcript = jet::REPL::run_transcript(
+        &["@answer :: report.@attribution.source", "print(@answer)"],
+        None,
+    );
+    assert!(transcript.contains("report"), "REPL fact read failed: {transcript}");
+
+    let web = jet::compile_web_with_path(FIXTURE, "examples/features/reflection/fact_reads.jet")
+        .expect("web fact fixture must compile")
+        .web
+        .expect("web fact fixture must produce artifacts");
+    assert!(!web.wasm_rust.contains("fact_read"));
 }
 
 #[test]

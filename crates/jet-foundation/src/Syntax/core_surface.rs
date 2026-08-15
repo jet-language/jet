@@ -893,6 +893,13 @@ pub const COMPILER_FACT_RANGE: &str = "@range";
 pub const COMPILER_FACT_DIMENSION: &str = "@dimension";
 pub const COMPILER_FACT_STATES: &str = "@states";
 pub const COMPILER_FACT_EFFECTS: &str = "@effects";
+pub const COMPILER_FACT_SENDABILITY: &str = "@sendability";
+pub const COMPILER_FACT_MOVEDNESS: &str = "@movedness";
+pub const COMPILER_FACT_ATTRIBUTION: &str = "@attribution";
+pub const COMPILER_FACT_TRACK_ORIGIN: &str = "@track_origin";
+pub const COMPILER_FACT_VIEW_PROVENANCE: &str = "@view_provenance";
+pub const COMPILER_FACT_UNIT_SCALE_PROVENANCE: &str = "@unit_scale_provenance";
+pub const COMPILER_FACT_MATURITY: &str = "@maturity";
 /// The marked member used by the old TypeInfo reader. The complete build
 /// path is `COMPILER_BUILD_FACT_PROFILE_PATH` above.
 pub const COMPILER_BUILD_FACT_PROFILE: &str = "@profile";
@@ -914,6 +921,13 @@ pub const FACT_READS: &[(&str, &str)] = &[
     (COMPILER_FACT_DIMENSION, "dimension"),
     (COMPILER_FACT_STATES, "states"),
     (COMPILER_FACT_EFFECTS, "effects"),
+    (COMPILER_FACT_SENDABILITY, "sendability"),
+    (COMPILER_FACT_MOVEDNESS, "movedness"),
+    (COMPILER_FACT_ATTRIBUTION, "attribution"),
+    (COMPILER_FACT_TRACK_ORIGIN, "track_origin"),
+    (COMPILER_FACT_VIEW_PROVENANCE, "view_provenance"),
+    (COMPILER_FACT_UNIT_SCALE_PROVENANCE, "unit_scale_provenance"),
+    (COMPILER_FACT_MATURITY, "maturity"),
     (COMPILER_BUILD_FACT_PROFILE, "profile"),
 ];
 

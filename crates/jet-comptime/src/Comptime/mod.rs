@@ -264,7 +264,8 @@ pub use Reflect::{
     build_struct_layout_info, build_struct_type_info, build_struct_type_info_with_path,
     build_struct_type_info_with_path_and_vocabulary,
     build_struct_type_info_with_states, build_track_origin_info,
-    build_unit_scale_provenance_info, build_view_provenance_info, ProgramSemanticFacts,
+    build_unit_scale_provenance_info, build_view_provenance_info, reflected_fact_field,
+    reflect_type_value, registered_fact_value, ProgramSemanticFacts,
 };
 pub use crate::AST::{CtReport, CtValue};
 

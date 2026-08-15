@@ -5862,6 +5862,16 @@ fn reflection_value_matches_interpreter_jit_and_aot() {
 }
 
 #[test]
+fn typed_fact_reads_match_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stem = "reflection/fact_reads";
+    assert_data_pipelines_parsing_three_way(&example_path(stem), stem);
+}
+
+#[test]
 fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
     const CHILD_STEM: &str = "JET_1223_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {

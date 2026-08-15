@@ -596,6 +596,13 @@ pub enum FactRead {
     Dimension,
     States,
     Effects,
+    Sendability,
+    Movedness,
+    Attribution,
+    TrackOrigin,
+    ViewProvenance,
+    UnitScaleProvenance,
+    Maturity,
     BuildPackageName,
     BuildPackageVersion,
     BuildOS,
@@ -604,6 +611,66 @@ pub enum FactRead {
     BuildStampDirty,
     BuildStampToolchain,
     BuildStampAt,
+}
+
+impl FactRead {
+    /// The closed reflection kind carried by this read. Build rows have no
+    /// reflected value kind because they are selected from the build snapshot.
+    pub const fn reflection_kind(self) -> Option<&'static str> {
+        match self {
+            Self::Layout => Some("Layout"),
+            Self::Name => Some("Nominal"),
+            Self::Fields => Some("Layout"),
+            Self::Range => Some("Range"),
+            Self::Dimension => Some("Dimension"),
+            Self::States => Some("States"),
+            Self::Effects => Some("Effects"),
+            Self::Sendability => Some("Sendability"),
+            Self::Movedness => Some("Movedness"),
+            Self::Attribution => Some("Attribution"),
+            Self::TrackOrigin => Some("TrackOrigin"),
+            Self::ViewProvenance => Some("ViewProvenance"),
+            Self::UnitScaleProvenance => Some("UnitScaleProvenance"),
+            Self::Maturity => Some("Maturity"),
+            Self::BuildPackageName
+            | Self::BuildPackageVersion
+            | Self::BuildOS
+            | Self::BuildProfile
+            | Self::BuildStampGit
+            | Self::BuildStampDirty
+            | Self::BuildStampToolchain
+            | Self::BuildStampAt => None,
+        }
+    }
+
+    /// Typed detail slot on a reflected FactValue. Aggregate Effects and
+    /// States use their containing info records instead.
+    pub const fn detail_field(self) -> Option<&'static str> {
+        match self {
+            Self::Range => Some("range"),
+            Self::Dimension => Some("dimension"),
+            Self::States => Some("state"),
+            Self::Sendability => Some("sendability"),
+            Self::Movedness => Some("movedness"),
+            Self::Attribution => Some("attribution"),
+            Self::TrackOrigin => Some("track_origin"),
+            Self::ViewProvenance => Some("view_provenance"),
+            Self::UnitScaleProvenance => Some("unit_scale_provenance"),
+            Self::Maturity => Some("maturity"),
+            Self::Layout
+            | Self::Name
+            | Self::Fields
+            | Self::Effects
+            | Self::BuildPackageName
+            | Self::BuildPackageVersion
+            | Self::BuildOS
+            | Self::BuildProfile
+            | Self::BuildStampGit
+            | Self::BuildStampDirty
+            | Self::BuildStampToolchain
+            | Self::BuildStampAt => None,
+        }
+    }
 }
 
 /// Resolve a marked member through the registered fact planes.
@@ -616,6 +683,16 @@ pub fn fact_read(member: &str) -> Option<FactRead> {
         crate::Syntax::COMPILER_FACT_DIMENSION => ("Type.Dimension", FactRead::Dimension),
         crate::Syntax::COMPILER_FACT_STATES => ("States", FactRead::States),
         crate::Syntax::COMPILER_FACT_EFFECTS => ("Effects", FactRead::Effects),
+        crate::Syntax::COMPILER_FACT_SENDABILITY => ("Sendability", FactRead::Sendability),
+        crate::Syntax::COMPILER_FACT_MOVEDNESS => ("Movedness", FactRead::Movedness),
+        crate::Syntax::COMPILER_FACT_ATTRIBUTION => ("Attribution", FactRead::Attribution),
+        crate::Syntax::COMPILER_FACT_TRACK_ORIGIN => ("TrackOrigin", FactRead::TrackOrigin),
+        crate::Syntax::COMPILER_FACT_VIEW_PROVENANCE => ("ViewProvenance", FactRead::ViewProvenance),
+        crate::Syntax::COMPILER_FACT_UNIT_SCALE_PROVENANCE => (
+            "UnitScaleProvenance",
+            FactRead::UnitScaleProvenance,
+        ),
+        crate::Syntax::COMPILER_FACT_MATURITY => ("Maturity", FactRead::Maturity),
         crate::Syntax::COMPILER_BUILD_FACT_PROFILE => ("Build.Profile", FactRead::BuildProfile),
         _ => return None,
     };

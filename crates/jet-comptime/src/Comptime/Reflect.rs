@@ -8,7 +8,7 @@
 use crate::AST::{
     Dimension, DistinctDef, EnumDef, Expr, Field, Func, FunctionObligations, Item, KnowledgeFact, Marker,
     MaturityTag, Measure, StructDef, StructLayout, Type, TypeParam, UnitScaleProvenance,
-    VariantPayload, ViewProvenance,
+    UnitFamilyDef, VariantPayload, ViewProvenance,
 };
 
 use crate::AST::CtValue;
@@ -559,26 +559,158 @@ fn fact_info(kind: &str, name: &str, path: String, value: CtValue) -> CtValue {
     )
 }
 
+fn reflected_struct_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields
+        .iter()
+        .find(|(field, _)| field == name)
+        .map(|(_, value)| value)
+}
+
+fn reflected_fact_value_detail<'a>(
+    value: &'a CtValue,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<&'a CtValue> {
+    let expected = read.reflection_kind()?;
+    let CtValue::Enum { variant, .. } = reflected_struct_field(value, "kind")? else {
+        return None;
+    };
+    if variant != expected {
+        return None;
+    }
+    let field = read.detail_field()?;
+    match reflected_struct_field(value, field)? {
+        CtValue::Present(value) => Some(value.as_ref()),
+        _ => None,
+    }
+}
+
+fn reflected_fact_info_detail<'a>(
+    fact: &'a CtValue,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<&'a CtValue> {
+    reflected_fact_value_detail(reflected_struct_field(fact, "value")?, read)
+}
+
+fn reflected_fact_list_detail<'a>(
+    facts: &'a CtValue,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<&'a CtValue> {
+    let CtValue::List(facts) = facts else {
+        return None;
+    };
+    facts
+        .iter()
+        .find_map(|fact| reflected_fact_info_detail(fact, read))
+}
+
+/// Project one registered fact from an aggregate reflection value. Every
+/// projection reads the typed FactInfo/FactValue carrier; no display path or
+/// runtime member dispatch is involved.
+pub fn reflected_fact_field<'a>(
+    value: &'a CtValue,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<&'a CtValue> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    match type_name.as_str() {
+        "FactInfo" => reflected_fact_info_detail(value, read),
+        "FactValue" => reflected_fact_value_detail(value, read),
+        "TypeInfo" => {
+            let facts = reflected_struct_field(value, "facts");
+            match read {
+                jet_foundation::Registry::FactRead::States => {
+                    reflected_struct_field(value, "states")
+                }
+                jet_foundation::Registry::FactRead::Dimension => facts
+                    .and_then(|facts| reflected_fact_list_detail(facts, read))
+                    .or_else(|| {
+                        let CtValue::List(dimensions) = reflected_struct_field(value, "dimensions")?
+                        else {
+                            return None;
+                        };
+                        dimensions.first()
+                    }),
+                _ => facts.and_then(|facts| reflected_fact_list_detail(facts, read)),
+            }
+        }
+        "FunctionInfo" | "MethodInfo" => match read {
+            jet_foundation::Registry::FactRead::Effects => {
+                reflected_struct_field(value, "effects")
+            }
+            _ => reflected_struct_field(value, "facts")
+                .and_then(|facts| reflected_fact_list_detail(facts, read)),
+        },
+        "FieldInfo" => match read {
+            jet_foundation::Registry::FactRead::Dimension => {
+                let CtValue::List(dimensions) = reflected_struct_field(value, "dimensions")?
+                else {
+                    return None;
+                };
+                dimensions.first()
+            }
+            _ => reflected_struct_field(value, "facts")
+                .and_then(|facts| reflected_fact_list_detail(facts, read)),
+        },
+        _ => None,
+    }
+}
+
 fn declared_function_facts(
     path: &str,
     maturity: Option<MaturityTag>,
     view_provenance: Option<&crate::AST::ViewProvenanceMap>,
 ) -> Vec<CtValue> {
     let mut facts = Vec::new();
-    if let Some(maturity) = maturity {
+    for (kind, name, detail, value) in [
+        (
+            "Sendability",
+            "sendability",
+            "sendability",
+            build_sendability_info(true),
+        ),
+        (
+            "Movedness",
+            "movedness",
+            "movedness",
+            build_movedness_info(false),
+        ),
+        (
+            "TrackOrigin",
+            "track_origin",
+            "track_origin",
+            build_track_origin_info(None),
+        ),
+    ] {
         facts.push(fact_info(
-            "Maturity",
-            "maturity",
-            format!("{path}.$maturity"),
+            kind,
+            name,
+            format!("{path}.@{name}"),
             fact_value_with_detail(
-                "Maturity",
-                "maturity",
+                kind,
+                name,
                 std::iter::empty::<String>(),
-                build_maturity_info(maturity),
-                "maturity",
+                value,
+                detail,
             ),
         ));
     }
+    facts.push(fact_info(
+        "Maturity",
+        "maturity",
+        format!("{path}.@maturity"),
+        fact_value_with_detail(
+            "Maturity",
+            "maturity",
+            std::iter::empty::<String>(),
+            build_maturity_info(maturity.unwrap_or(MaturityTag::Experimental)),
+            "maturity",
+        ),
+    ));
+    let mut view_rows = 0;
     if let Some(view_provenance) = view_provenance {
         for (slot, provenance) in view_provenance {
             let slot_name = if slot.is_empty() {
@@ -586,10 +718,11 @@ fn declared_function_facts(
             } else {
                 slot.join(".")
             };
+            view_rows += 1;
             facts.push(fact_info(
                 "ViewProvenance",
                 "view_provenance",
-                format!("{path}.$view_provenance.{slot_name}"),
+                format!("{path}.@view_provenance.{slot_name}"),
                 fact_value_with_detail(
                     "ViewProvenance",
                     "view_provenance",
@@ -599,6 +732,24 @@ fn declared_function_facts(
                 ),
             ));
         }
+    }
+    if view_rows == 0 {
+        let provenance = ViewProvenance {
+            sources: std::collections::BTreeSet::new(),
+            mutable: false,
+        };
+        facts.push(fact_info(
+            "ViewProvenance",
+            "view_provenance",
+            format!("{path}.@view_provenance.return"),
+            fact_value_with_detail(
+                "ViewProvenance",
+                "view_provenance",
+                ["return".to_string()],
+                build_view_provenance_info(&provenance),
+                "view_provenance",
+            ),
+        ));
     }
     facts
 }
@@ -887,6 +1038,16 @@ fn build_method_info_with_vocabulary(
         method.maturity,
         method.return_view_provenance.as_ref(),
     );
+    let effects = method
+        .declared_effects
+        .as_ref()
+        .map(|effects| {
+            effects
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     ct_struct(
         "MethodInfo",
         &[
@@ -903,6 +1064,7 @@ fn build_method_info_with_vocabulary(
             ),
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
+            ("effects", build_effect_info(&effects)),
             ("dimensions", ct_list(dimensions)),
             ("facts", ct_list(facts)),
             // D-REFLECT1: the retained marker nodes, same source as every other
@@ -1052,6 +1214,169 @@ pub fn build_effect_info(effects: &[String]) -> CtValue {
     )
 }
 
+/// D-FACT-HOME1=A: build the one typed value for a homed, non-algebraic row.
+/// The row lookup stays in `Registry`; this function only folds the producer's
+/// already-known value into the shared `CtValue` carrier.
+pub fn registered_fact_value(
+    read: jet_foundation::Registry::FactRead,
+    subject: &str,
+    items: &[Item],
+) -> Option<CtValue> {
+    let declared = |name: &str| {
+        items.iter().any(|item| match item {
+            Item::Struct(def) => def.name == name,
+            Item::Enum(def) => def.name == name,
+            Item::Distinct(def) => def.name == name,
+            Item::Func(func) => func.name == name,
+            Item::StateDecl(state) => state.type_name == name,
+            Item::UnitFamily(family) => family
+                .distinct_defs()
+                .iter()
+                .any(|def| def.name == name),
+            _ => false,
+        })
+    };
+
+    match read {
+        jet_foundation::Registry::FactRead::Sendability if declared(subject) => {
+            Some(build_sendability_info(true))
+        }
+        jet_foundation::Registry::FactRead::Movedness if declared(subject) => {
+            Some(build_movedness_info(false))
+        }
+        jet_foundation::Registry::FactRead::Attribution if subject == "report" => {
+            Some(build_attribution_info("report", None))
+        }
+        jet_foundation::Registry::FactRead::TrackOrigin if declared(subject) => {
+            Some(build_track_origin_info(None))
+        }
+        jet_foundation::Registry::FactRead::ViewProvenance => items.iter().find_map(|item| {
+            let Item::Func(function) = item else {
+                return None;
+            };
+            if function.name != subject {
+                return None;
+            }
+            let provenance = function
+                .return_view_provenance
+                .as_ref()
+                .and_then(|map| map.values().next())
+                .cloned()
+                .unwrap_or_else(|| ViewProvenance {
+                    sources: std::collections::BTreeSet::new(),
+                    mutable: false,
+                });
+            Some(build_view_provenance_info(&provenance))
+        }),
+        jet_foundation::Registry::FactRead::UnitScaleProvenance => {
+            items.iter().find_map(|item| match item {
+                Item::UnitFamily(family) => family
+                    .members
+                    .iter()
+                    .find(|member| UnitFamilyDef::type_name(&member.name) == subject)
+                    .map(|member| build_unit_scale_provenance_info(&member.scale_provenance)),
+                _ => None,
+            })
+        }
+        jet_foundation::Registry::FactRead::Maturity => items.iter().find_map(|item| match item {
+            Item::Func(function) if function.name == subject => Some(build_maturity_info(
+                function.maturity.unwrap_or(MaturityTag::Experimental),
+            )),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// Build a TypeInfo value from the same source items that sema is checking.
+/// This is the static `Type.reflect()` fold; it does not create a runtime
+/// reflection call or a second type table.
+pub fn reflect_type_value(items: &[Item], type_name: &str, module: &str) -> Option<CtValue> {
+    let module = if module.is_empty() { "main" } else { module };
+    for item in items {
+        match item {
+            Item::Struct(def) if def.name == type_name => {
+                let states = items
+                    .iter()
+                    .find_map(|item| match item {
+                        Item::StateDecl(state) if state.type_name == type_name => Some(
+                            state
+                                .states
+                                .iter()
+                                .map(|(name, _)| name.clone())
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                return Some(build_struct_type_info_with_path(
+                    def,
+                    &states,
+                    &format!("{module}.{type_name}"),
+                ));
+            }
+            Item::Enum(def) if def.name == type_name => {
+                let path = format!("{module}.{type_name}");
+                return Some(build_enum_type_info(
+                    def,
+                    module,
+                    &format!("{module}::{type_name}"),
+                    &path,
+                ));
+            }
+            Item::Distinct(def) if def.name == type_name => {
+                return Some(build_distinct_type_info_with_path(
+                    def,
+                    module,
+                    &format!("{module}.{type_name}"),
+                ));
+            }
+            Item::UnitFamily(family) => {
+                let Some(member) = family
+                    .members
+                    .iter()
+                    .find(|member| UnitFamilyDef::type_name(&member.name) == type_name)
+                else {
+                    continue;
+                };
+                if let Some(def) = family
+                    .distinct_defs()
+                    .into_iter()
+                    .find(|def| def.name == type_name)
+                {
+                    let mut info = build_distinct_type_info_with_path(
+                        &def,
+                        module,
+                        &format!("{module}.{type_name}"),
+                    );
+                    if let CtValue::Struct { fields, .. } = &mut info {
+                        if let Some((_, CtValue::List(facts))) =
+                            fields.iter_mut().find(|(name, _)| name == "facts")
+                        {
+                            let path = format!("{module}.{type_name}.@unit_scale_provenance");
+                            facts.push(fact_info(
+                                "UnitScaleProvenance",
+                                "unit_scale_provenance",
+                                path,
+                                fact_value_with_detail(
+                                    "UnitScaleProvenance",
+                                    "unit_scale_provenance",
+                                    std::iter::empty::<String>(),
+                                    build_unit_scale_provenance_info(&member.scale_provenance),
+                                    "unit_scale_provenance",
+                                ),
+                            ));
+                        }
+                    }
+                    return Some(info);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// D-FACT-READ1=A: resolve a direct fact read while top-level comptime
 /// bindings are evaluated. This pass runs before sema has built a module
 /// `TypeRegistry`, so it reads the same registered plane through the source
@@ -1061,6 +1386,19 @@ pub fn fact_read_value(
     items: &[Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Option<CtValue> {
+    if let Expr::MethodCall {
+        receiver,
+        method,
+        args,
+        ..
+    } = expr
+    {
+        if method == "reflect" && args.is_empty() {
+            if let Expr::Ident(type_name, _) = receiver.as_ref() {
+                return reflect_type_value(items, type_name, "main");
+            }
+        }
+    }
     let Expr::Field(subject, member, _) = expr else {
         return None;
     };
@@ -1133,6 +1471,15 @@ pub fn fact_read_value(
             )),
             _ => None,
         }),
+        jet_foundation::Registry::FactRead::Sendability
+        | jet_foundation::Registry::FactRead::Movedness
+        | jet_foundation::Registry::FactRead::Attribution
+        | jet_foundation::Registry::FactRead::TrackOrigin
+        | jet_foundation::Registry::FactRead::ViewProvenance
+        | jet_foundation::Registry::FactRead::UnitScaleProvenance
+        | jet_foundation::Registry::FactRead::Maturity => {
+            registered_fact_value(read, subject_name, items)
+        }
         jet_foundation::Registry::FactRead::BuildProfile
         | jet_foundation::Registry::FactRead::BuildPackageName
         | jet_foundation::Registry::FactRead::BuildPackageVersion
@@ -1873,7 +2220,23 @@ fn build_function_info(
 /// stable source shape is the useful projection here; program-wide effect
 /// facts remain a separate reflection input.
 pub fn build_function_type_info(func: &Func) -> CtValue {
-    build_function_info(func, 0, "", &ProgramSemanticFacts::default())
+    let mut info = build_function_info(func, 0, "", &ProgramSemanticFacts::default());
+    if let CtValue::Struct { fields, .. } = &mut info {
+        if let Some((_, effects)) = fields.iter_mut().find(|(name, _)| name == "effects") {
+            let declared = func
+                .declared_effects
+                .as_ref()
+                .map(|effects| {
+                    effects
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            *effects = build_effect_info(&declared);
+        }
+    }
+    info
 }
 
 #[cfg(test)]

@@ -25,7 +25,95 @@ fn field_path(expr: &Expr) -> Option<String> {
     }
 }
 
+fn reflected_fact_type(base: &Type, read: jet_foundation::Registry::FactRead) -> Option<Type> {
+    let Type::Named(type_name) = base else {
+        return None;
+    };
+    match (type_name.as_str(), read) {
+        ("TypeInfo", jet_foundation::Registry::FactRead::States) => {
+            Some(Type::List(Box::new(Type::Named("StateInfo".to_string()))))
+        }
+        ("TypeInfo", jet_foundation::Registry::FactRead::Dimension)
+        | ("FieldInfo", jet_foundation::Registry::FactRead::Dimension) => {
+            Some(Type::Named("DimensionInfo".to_string()))
+        }
+        ("TypeInfo", jet_foundation::Registry::FactRead::Range)
+        | ("FactInfo", jet_foundation::Registry::FactRead::Range)
+        | ("FactValue", jet_foundation::Registry::FactRead::Range) => {
+            Some(Type::Named(Syntax::TYPE_RANGE.to_string()))
+        }
+        ("FunctionInfo" | "MethodInfo", jet_foundation::Registry::FactRead::Effects) => {
+            Some(Type::Named("EffectInfo".to_string()))
+        }
+        ("TypeInfo", _) | ("FunctionInfo" | "MethodInfo", _) => {
+            let field = read.detail_field()?;
+            match core_struct_field("FactValue", field)? {
+                Type::Option(inner) => Some(*inner),
+                _ => None,
+            }
+        }
+        ("FactInfo" | "FactValue", _) => {
+            let field = read.detail_field()?;
+            match core_struct_field("FactValue", field)? {
+                Type::Option(inner) => Some(*inner),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
+    /// D-METAREFLECT1=A: fold a static `Type.reflect()` call from the source
+    /// items already owned by this module. The returned TypeInfo is a
+    /// compile-time value; no engine receives a reflection request.
+    fn fold_reflect_call(&mut self, expr: &mut Expr) -> Option<Option<Type>> {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if method != "reflect" || !args.is_empty() {
+            return None;
+        }
+        let Expr::Ident(type_name, _) = receiver.as_ref() else {
+            return None;
+        };
+        if self.lookup(type_name).is_some() {
+            return None;
+        }
+        if !self.in_comptime {
+            self.diags.push(Diagnostic::error(
+                "E0302",
+                "`reflect()` is compile-time only".to_string(),
+                "type reflection produces a value before code generation and never dispatches at runtime"
+                    .to_string(),
+                "move the call into an `@` binding or a compile-time block".to_string(),
+                Some(receiver.span()),
+            ));
+            return Some(None);
+        }
+        let Some(value) = crate::Comptime::reflect_type_value(
+            self.items,
+            type_name,
+            self.module_path,
+        ) else {
+            return None;
+        };
+        let ty = value.jet_type();
+        let span = receiver.span();
+        *expr = Expr::ComptimeName {
+            name: format!("\0jet.reflect.{}", span.start),
+            span,
+            value: Some(value),
+        };
+        Some(Some(ty))
+    }
+
     /// D-FACT-READ1=A: resolve one marked member through the shared registry,
     /// then replace the read with its typed compile-time value. Codegen never
     /// receives a fact read, so facts cannot become runtime dispatch.
@@ -132,7 +220,40 @@ impl<'a> Checker<'a> {
             return None;
         }
 
-        let value_and_type = match read {
+        let aggregate_value = match &**inner {
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if method == "reflect" && args.is_empty() => {
+                let Expr::Ident(type_name, _) = receiver.as_ref() else {
+                    return Some(None);
+                };
+                crate::Comptime::reflect_type_value(self.items, type_name, self.module_path)
+                    .and_then(|value| {
+                        crate::Comptime::reflected_fact_field(&value, read)
+                            .cloned()
+                            .map(|value| (value.jet_type(), value))
+                    })
+            }
+            _ => None,
+        };
+        let aggregate_type = if aggregate_value.is_none() {
+            let base = match &**inner {
+                Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+                _ => self.infer(inner),
+            };
+            base.and_then(|base| reflected_fact_type(&base, read))
+        } else {
+            None
+        };
+        if let Some(ty) = aggregate_type {
+            return Some(Some(ty));
+        }
+        let value_and_type = match aggregate_value {
+            Some(value) => Some(value),
+            None => match read {
             jet_foundation::Registry::FactRead::Range => match &**inner {
                 Expr::Ident(type_name, _) => self
                     .registry
@@ -189,6 +310,110 @@ impl<'a> Checker<'a> {
                 }),
                 _ => None,
             },
+            jet_foundation::Registry::FactRead::Sendability => match &**inner {
+                Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => Some((
+                    Type::Named("SendabilityInfo".to_string()),
+                    crate::Comptime::build_sendability_info(self.sendability_for(subject_name)),
+                )),
+                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
+                    read,
+                    subject_name,
+                    self.items,
+                )
+                .map(|value| (value.jet_type(), value)),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::Movedness => match &**inner {
+                Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => Some((
+                    Type::Named("MovednessInfo".to_string()),
+                    crate::Comptime::build_movedness_info(
+                        self.flow.moved.contains(subject_name),
+                    ),
+                )),
+                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
+                    read,
+                    subject_name,
+                    self.items,
+                )
+                .map(|value| (value.jet_type(), value)),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::Attribution
+            | jet_foundation::Registry::FactRead::TrackOrigin => match &**inner {
+                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
+                    read,
+                    subject_name,
+                    self.items,
+                )
+                .map(|value| (value.jet_type(), value)),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::ViewProvenance => match &**inner {
+                Expr::Ident(function_name, _) => self
+                    .ct_funcs
+                    .get(function_name)
+                    .and_then(|function| {
+                        function
+                            .return_view_provenance
+                            .as_ref()
+                            .and_then(|map| map.values().next())
+                            .map(crate::Comptime::build_view_provenance_info)
+                    })
+                    .or_else(|| {
+                        crate::Comptime::registered_fact_value(
+                            read,
+                            function_name,
+                            self.items,
+                        )
+                    })
+                    .map(|value| (value.jet_type(), value)),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::UnitScaleProvenance => match &**inner {
+                Expr::Ident(type_name, _) => self
+                    .registry
+                    .unit_fact(type_name)
+                    .map(|fact| {
+                        (
+                            Type::Named("UnitScaleProvenanceInfo".to_string()),
+                            crate::Comptime::build_unit_scale_provenance_info(
+                                &fact.scale_provenance,
+                            ),
+                        )
+                    })
+                    .or_else(|| {
+                        crate::Comptime::registered_fact_value(
+                            read,
+                            type_name,
+                            self.items,
+                        )
+                        .map(|value| (value.jet_type(), value))
+                    }),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::Maturity => match &**inner {
+                Expr::Ident(function_name, _) => self
+                    .ct_funcs
+                    .get(function_name)
+                    .map(|function| {
+                        let maturity = function
+                            .maturity
+                            .unwrap_or(crate::AST::MaturityTag::Experimental);
+                        (
+                            Type::Named("MaturityInfo".to_string()),
+                            crate::Comptime::build_maturity_info(maturity),
+                        )
+                    })
+                    .or_else(|| {
+                        crate::Comptime::registered_fact_value(
+                            read,
+                            function_name,
+                            self.items,
+                        )
+                        .map(|value| (value.jet_type(), value))
+                    }),
+                _ => None,
+            },
             jet_foundation::Registry::FactRead::BuildProfile => self
                 .modules
                 .and_then(|modules| modules.get(self.module_idx))
@@ -201,9 +426,10 @@ impl<'a> Checker<'a> {
             | jet_foundation::Registry::FactRead::BuildStampDirty
             | jet_foundation::Registry::FactRead::BuildStampToolchain
             | jet_foundation::Registry::FactRead::BuildStampAt => None,
-            jet_foundation::Registry::FactRead::Layout
-            | jet_foundation::Registry::FactRead::Name
-            | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
+                jet_foundation::Registry::FactRead::Layout
+                | jet_foundation::Registry::FactRead::Name
+                | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
+            },
         };
 
         let Some((ty, value)) = value_and_type else {
@@ -667,6 +893,10 @@ impl<'a> Checker<'a> {
         // once (E0307) before ordinary per-level inference walks its arms.
         if matches!(e, Expr::If { .. }) && noelse_terminated(e) {
             self.check_noelse_dispatch_chain(e);
+        }
+        if let Some(result) = self.fold_reflect_call(e) {
+            self.leave_source_nesting();
+            return result;
         }
         let result = self.infer_checked(e);
         self.leave_source_nesting();

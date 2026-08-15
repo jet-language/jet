@@ -372,6 +372,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
         | "FactKind" | "FactValue" | "DimensionInfo" | "DimensionAxis"
+        | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "TrackOriginInfo"
+        | "ViewProvenanceInfo" | "UnitScaleProvenanceInfo" | "UnitScaleProvenanceKind"
+        | "MaturityInfo" | "Maturity"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
@@ -1079,6 +1082,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
             "params" => Some(Type::List(Box::new(Type::String))),
+            "effects" => Some(Type::Named("EffectInfo".to_string())),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
             "facts" => Some(Type::List(Box::new(Type::Named(
