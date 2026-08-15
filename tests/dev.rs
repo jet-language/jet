@@ -9734,10 +9734,18 @@ fn check_latency_under_budget() {
 // ── c77: hot-swap type-surface stability (D-HOTSWAP1 / E2210) ──────────
 
 /// Parse `src` to a bundle via a temp file (the only loader entry point).
+///
+/// Runs on the canonical compiler worker. `Loader::load_entry` reaches the same
+/// unbounded-depth recursive descent every compile does, so a caller that skips
+/// the driver's own entry seams -- as this helper does, and as any embedder
+/// calling the loader directly would -- must install the sized stack itself.
+/// Without it a 2 MiB libtest worker aborts the whole binary and reports every
+/// other in-flight test in this file as failed.
 fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
     let p = std::env::temp_dir().join(format!("jet_hotswap_{tag}.jet"));
     fs::write(&p, src).unwrap();
-    jet::Loader::load_entry(p.to_str().unwrap()).expect("bundle should load")
+    let path = p.to_str().expect("temp path is utf-8").to_string();
+    jet::run_compiler_work(move || jet::Loader::load_entry(&path)).expect("bundle should load")
 }
 
 const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) => Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1}))\n}\n";
