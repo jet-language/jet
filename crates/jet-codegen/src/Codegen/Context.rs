@@ -3853,7 +3853,13 @@ pub(crate) fn build_cx_items(
         ffi_crate: link.map(|l| l.crate_name.clone()),
         extern_funcs: extern_funcs.clone(),
         foreign_undos: foreign_undo_map(items),
-        code_modules: HashSet::new(),
+        code_modules: items
+            .iter()
+            .filter_map(|item| match item {
+                Item::CodeModule(module) if module.body.is_some() => Some(module.name.clone()),
+                _ => None,
+            })
+            .collect(),
         unqualified_inline: HashMap::new(),
         unqualified_file: HashMap::new(),
         inline_unqualified: HashMap::new(),

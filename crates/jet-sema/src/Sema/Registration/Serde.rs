@@ -1713,7 +1713,7 @@ fn method_with_owner_args(receiver: Expr, name: &str, owner_type_args: Vec<Type>
         owner_type_args,
         type_args: Vec::new(),
         args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
-        recv_type: None,
+        recv_type: (name == "encode").then(|| "__SerdeEncode__".to_string()),
         resolved_ret: None,
         checked_widen: false,
     }
@@ -1727,7 +1727,8 @@ fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<Type>, span:
         owner_type_args: Vec::new(),
         type_args,
         args: Vec::new(),
-        recv_type: None,
+        recv_type: (name == Syntax::METHOD_DATATREE_DECODE)
+            .then(|| Syntax::TYPE_DATA.to_string()),
         resolved_ret: None,
         checked_widen: false,
     }
