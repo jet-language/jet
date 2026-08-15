@@ -1031,9 +1031,17 @@ fn fmt_is_idempotent_on_ui_fixes() {
 
 #[test]
 fn fmt_canonicalizes_subject_first_refutable_test_bind() {
-    let src = "fn run(){\n    (parse()) == .Ok(value) ?? return\n    print(value)\n}\n";
+    let src = "fn run(){\n    (parse()) == .Ok(value) ?? return\n    ((left + right).parse()) == .Ok(other) ?? return\n    print(value)\n    print(other)\n}\n";
     let once = jet::format_source(src).expect("subject-first test-bind should format");
     assert!(once.contains("parse() == .Ok(value) ?? return"), "{once}");
+    assert!(
+        once.contains("(left + right).parse() == .Ok(other) ?? return"),
+        "{once}"
+    );
+    assert!(
+        !once.contains("((left + right).parse())"),
+        "only receiver-required grouping should remain:\n{once}"
+    );
     assert_eq!(once, jet::format_source(&once).unwrap());
 }
 

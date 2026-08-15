@@ -1279,6 +1279,27 @@ impl<'a> Fmt<'a> {
         matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
     }
 
+    /// Subject-first test-binds own their `==` delimiter, so outer parens
+    /// around an already-postfix subject are redundant. Keep grouping inside
+    /// the subject: `(left + right).method()` still needs its receiver parens.
+    fn fmt_refutable_subject(&mut self, expr: &Expr) {
+        let unwrapped = expr.without_parens();
+        if matches!(
+            unwrapped,
+            Expr::Call(_)
+                | Expr::CallValue { .. }
+                | Expr::MethodCall { .. }
+                | Expr::Field(..)
+                | Expr::OptField { .. }
+                | Expr::Index { .. }
+                | Expr::Slice { .. }
+        ) {
+            self.fmt_expr(unwrapped, Prec::Cmp);
+        } else {
+            self.fmt_expr(expr, Prec::Cmp);
+        }
+    }
+
     pub(super) fn fmt_binding(&mut self, b: &Binding) {
         if let Some(meta) = &b.meta {
             self.fmt_meta_attr(meta);
@@ -1300,7 +1321,7 @@ impl<'a> Fmt<'a> {
         {
             // D-CHOOSE-TEST1=A: this statement has no binding sigil in its
             // surface form; the successful pattern captures are the locals.
-            self.fmt_expr(&b.init, Prec::Cmp);
+            self.fmt_refutable_subject(&b.init);
             self.write(" == ");
             self.fmt_pattern(pattern);
             self.write(" ");
