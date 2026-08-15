@@ -829,117 +829,16 @@ fn push_corelib_prelude_inner(
     out.push_str(&body);
 }
 
-fn type_uses_stream(ty: &Type) -> bool {
-    match ty {
-        Type::Apply { name, args } => {
-            name == "Stream" || args.iter().any(type_uses_stream)
-        }
-        Type::List(inner)
-        | Type::Shared(inner)
-        | Type::Option(inner)
-        | Type::FixedList { elem: inner, .. }
-        | Type::Tagged { inner, .. } => type_uses_stream(inner),
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            type_uses_stream(key) || type_uses_stream(value)
-        }
-        Type::Tuple(fields) => fields.iter().any(|(_, field)| type_uses_stream(field)),
-        Type::Union(members) => members.iter().any(type_uses_stream),
-        Type::Fn { params, ret, .. } => {
-            params.iter().any(type_uses_stream)
-                || ret.as_deref().is_some_and(type_uses_stream)
-        }
-        _ => false,
-    }
-}
-
-fn func_uses_stream(func: &crate::AST::Func) -> bool {
-    func.params.iter().any(|param| type_uses_stream(&param.ty))
-        || func
-            .return_type
-            .as_ref()
-            .is_some_and(type_uses_stream)
-}
-
-fn trait_method_uses_stream(method: &crate::AST::TraitMethodSig) -> bool {
-    method
-        .params
-        .iter()
-        .any(|param| type_uses_stream(&param.ty))
-        || method
-            .return_type
-            .as_ref()
-            .is_some_and(type_uses_stream)
-}
-
-fn items_use_stream(items: &[Item]) -> bool {
-    items.iter().any(|item| match item {
-        Item::Func(func) => func_uses_stream(func),
-        Item::Struct(def) => {
-            def.fields.iter().any(|field| type_uses_stream(&field.ty))
-                || def.methods.iter().any(func_uses_stream)
-                || def.trait_impls.iter().any(|impl_block| {
-                    impl_block.methods.iter().any(func_uses_stream)
-                        || impl_block
-                            .assoc_type_impls
-                            .iter()
-                            .any(|(_, _, ty)| type_uses_stream(ty))
-                })
-        }
-        Item::Enum(def) => {
-            def.variants.iter().any(|variant| match &variant.payload {
-                crate::AST::VariantPayload::Unit => false,
-                crate::AST::VariantPayload::Single(ty, _) => type_uses_stream(ty),
-                crate::AST::VariantPayload::Named(fields) => {
-                    fields.iter().any(|field| type_uses_stream(&field.ty))
-                }
-            }) || def.methods.iter().any(func_uses_stream)
-                || def.trait_impls.iter().any(|impl_block| {
-                    impl_block.methods.iter().any(func_uses_stream)
-                        || impl_block
-                            .assoc_type_impls
-                            .iter()
-                            .any(|(_, _, ty)| type_uses_stream(ty))
-                })
-        }
-        Item::Distinct(def) => type_uses_stream(&def.base),
-        Item::TypeAlias(def) => type_uses_stream(&def.target),
-        Item::Trait(def) => def.methods.iter().any(trait_method_uses_stream),
-        Item::Impl(def) => {
-            def.methods.iter().any(func_uses_stream)
-                || def
-                    .assoc_type_impls
-                    .iter()
-                    .any(|(_, _, ty)| type_uses_stream(ty))
-        }
-        Item::ExternRust(def) => def.functions.iter().any(|func| {
-            func.params.iter().any(|param| type_uses_stream(&param.ty))
-                || func
-                    .return_type
-                    .as_ref()
-                    .is_some_and(type_uses_stream)
-        }),
-        Item::ProtocolDecl(def) => def
-            .messages
-            .iter()
-            .any(|message| message.fields.iter().any(|(_, ty)| type_uses_stream(ty))),
-        Item::CodeModule(def) => def
-            .body
-            .as_deref()
-            .is_some_and(items_use_stream),
-        Item::GenericModule(def) => items_use_stream(&def.body),
-        _ => false,
-    })
-}
-
-fn uses_stream(bundle: &ProgramBundle) -> bool {
-    bundle
-        .modules
-        .iter()
-        .any(|module| items_use_stream(&module.items))
+fn force_corelib_prelude(_bundle: &ProgramBundle) -> bool {
+    // D-INTBIG1: every checked program has the exact Int ABI. The exact-Int
+    // helpers live inside the contiguous JetStd kernel, and generated Rust can
+    // reach them through inferred values, folded calls, or method returns that
+    // an AST scan cannot soundly enumerate.
+    true
 }
 
 fn needs_embedded_runtime(bundle: &ProgramBundle) -> bool {
-    core_needs_embedded_runtime(&bundle.used_core) || uses_stream(bundle)
+    core_needs_embedded_runtime(&bundle.used_core) || force_corelib_prelude(bundle)
 }
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
@@ -948,9 +847,10 @@ pub fn corelib_emission_fingerprint(
     used_core: &std::collections::HashSet<String>,
 ) -> String {
     let mut body = String::new();
-    if core_needs_embedded_runtime(used_core) {
-        push_corelib_prelude_body(&mut body, used_core, false);
-    }
+    // D-INTBIG1: the exact-Int kernel is part of every emitted program, so
+    // the cache identity must fingerprint it even when no optional Core API
+    // is reached.
+    push_corelib_prelude_body(&mut body, used_core, false);
     corelib_emission_identity(&body, used_core)
 }
 
@@ -2542,6 +2442,14 @@ mod tests {
     }
 
     #[test]
+    fn exact_int_runtime_is_unconditional() {
+        let bundle = checked_generic_bundle("fn run() { print(1) }", "int-runtime");
+        let rust = emit_bundle(&bundle, CompileMode::Run, None);
+        assert!(rust.contains("mod jet_std"));
+        assert!(rust.contains("fn jet_int_to_string"));
+    }
+
+    #[test]
     fn core_prelude_stays_split_by_runtime_ownership() {
         const MAX_MODULE_LINES: usize = 2500;
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -3733,7 +3641,7 @@ pub fn emit_bundle_dbg(
     }
     push_cached_runtime(&mut out, link);
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude(&mut out, &bundle.used_core, force_corelib_prelude(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -4019,7 +3927,11 @@ fn emit_bundle_tests_cov_inner(
         out.push_str(COV_PRELUDE);
     }
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude_for_test_harness(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude_for_test_harness(
+            &mut out,
+            &bundle.used_core,
+            force_corelib_prelude(bundle),
+        );
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -4298,7 +4210,11 @@ pub fn emit_bundle_fuzz(
     // property test is present).
     out.push_str(PROP_PRELUDE);
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude_for_test_harness(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude_for_test_harness(
+            &mut out,
+            &bundle.used_core,
+            force_corelib_prelude(bundle),
+        );
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -4633,7 +4549,11 @@ fn emit_bundle_benches_inner(
         out.push_str(COV_PRELUDE);
     }
     if needs_embedded_runtime(bundle) {
-        push_corelib_prelude_for_test_harness(&mut out, &bundle.used_core, uses_stream(bundle));
+        push_corelib_prelude_for_test_harness(
+            &mut out,
+            &bundle.used_core,
+            force_corelib_prelude(bundle),
+        );
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
