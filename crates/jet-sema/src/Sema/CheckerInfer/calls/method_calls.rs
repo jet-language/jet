@@ -4186,7 +4186,7 @@ impl<'a> Checker<'a> {
                             if !bounds.iter().any(|b| b == trait_name) {
                                 self.diags.push(e0901(method, trait_name, span));
                             }
-                            *recv_type_out = Some(n.clone());
+                            *recv_type_out = Some(trait_name.clone());
                             for (arg, param) in args.iter_mut().zip(msig.params.iter().skip(1)) {
                                 arg.convention = param.convention;
                                 let old = self.expected_type.replace(param.ty.clone());

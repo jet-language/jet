@@ -79,6 +79,7 @@ fn struct_derive_items(
     comparable: bool,
 ) -> Vec<Item> {
     let fields: Vec<_> = s.fields.iter().filter(|field| field.computed.is_none()).collect();
+    let owner_type = applied_owner_type(&s.name, &s.type_params);
     let mut out = Vec::new();
     if equatable {
         let equality = fields
@@ -96,7 +97,7 @@ fn struct_derive_items(
             crate::Generics::EQUATABLE,
             generated_func(
                 "equal",
-                vec![self_param(s.name_span), named_param("rhs", Type::Named(s.name.clone()), s.name_span)],
+                vec![self_param(s.name_span), named_param("rhs", owner_type.clone(), s.name_span)],
                 Some(Type::Bool),
                 vec![Stmt::Return(Some(equality), s.name_span)],
                 s.name_span,
@@ -126,7 +127,7 @@ fn struct_derive_items(
             crate::Generics::COMPARABLE,
             generated_func(
                 "compare",
-                vec![self_param(s.name_span), named_param("rhs", Type::Named(s.name.clone()), s.name_span)],
+                vec![self_param(s.name_span), named_param("rhs", owner_type, s.name_span)],
                 Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
                 body,
                 s.name_span,
@@ -143,6 +144,7 @@ fn enum_derive_items(
     comparable: bool,
 ) -> Vec<Item> {
     let mut out = Vec::new();
+    let owner_type = applied_owner_type(&e.name, &e.type_params);
     if equatable {
         let recursive = e.variants.iter().any(|variant| match &variant.payload {
             VariantPayload::Unit => false,
@@ -154,16 +156,18 @@ fn enum_derive_items(
         if recursive {
             let helper_name = format!("_jet_derive_equal_{}", e.name);
             let helper_body = enum_dispatch_body(e, "left", "right", DispatchKind::Equality);
-            out.push(Item::Func(generated_func(
+            let mut helper = generated_func(
                 &helper_name,
                 vec![
-                    named_param("left", Type::Named(e.name.clone()), e.name_span),
-                    named_param("right", Type::Named(e.name.clone()), e.name_span),
+                    named_param("left", owner_type.clone(), e.name_span),
+                    named_param("right", owner_type.clone(), e.name_span),
                 ],
                 Some(Type::Bool),
                 helper_body,
                 e.name_span,
-            )));
+            );
+            helper.type_params = e.type_params.clone();
+            out.push(Item::Func(helper));
             let call = free_call(
                 &helper_name,
                 vec![ident("self", e.name_span), ident("rhs", e.name_span)],
@@ -174,7 +178,7 @@ fn enum_derive_items(
                 crate::Generics::EQUATABLE,
                 generated_func(
                     "equal",
-                    vec![self_param(e.name_span), named_param("rhs", Type::Named(e.name.clone()), e.name_span)],
+                    vec![self_param(e.name_span), named_param("rhs", owner_type.clone(), e.name_span)],
                     Some(Type::Bool),
                     vec![Stmt::Return(Some(call), e.name_span)],
                     e.name_span,
@@ -187,7 +191,7 @@ fn enum_derive_items(
                 crate::Generics::EQUATABLE,
                 generated_func(
                     "equal",
-                    vec![self_param(e.name_span), named_param("rhs", Type::Named(e.name.clone()), e.name_span)],
+                    vec![self_param(e.name_span), named_param("rhs", owner_type.clone(), e.name_span)],
                     Some(Type::Bool),
                     enum_dispatch_body(e, "self", "rhs", DispatchKind::Equality),
                     e.name_span,
@@ -202,7 +206,7 @@ fn enum_derive_items(
             crate::Generics::COMPARABLE,
             generated_func(
                 "compare",
-                vec![self_param(e.name_span), named_param("rhs", Type::Named(e.name.clone()), e.name_span)],
+                vec![self_param(e.name_span), named_param("rhs", owner_type, e.name_span)],
                 Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
                 enum_dispatch_body(e, "self", "rhs", DispatchKind::Comparison),
                 e.name_span,
@@ -441,6 +445,20 @@ fn has_trait_impl(items: &[Item], type_name: &str, trait_name: &str) -> bool {
         Item::Enum(e) => e.name == type_name && e.trait_impls.iter().any(|i| i.trait_name == trait_name),
         _ => false,
     })
+}
+
+fn applied_owner_type(name: &str, type_params: &[crate::AST::TypeParam]) -> Type {
+    if type_params.is_empty() {
+        Type::Named(name.to_string())
+    } else {
+        Type::Apply {
+            name: name.to_string(),
+            args: type_params
+                .iter()
+                .map(|param| Type::Named(param.name.clone()))
+                .collect(),
+        }
+    }
 }
 
 fn derive_impl(type_name: &str, trait_name: &str, method: Func, span: Span) -> ImplDef {

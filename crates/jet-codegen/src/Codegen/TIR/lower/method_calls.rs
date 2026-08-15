@@ -6205,7 +6205,7 @@ fn lower_method_call_impl(
             // implementation. Keep that concrete ABI and dispatch directly;
             // only genuine trait-object values use the boxed dynamic ABI.
             if let Type::Named(concrete) = &recv.ty {
-                if cx.type_names.contains(concrete) {
+                if !cx.trait_names.contains(concrete) {
                     let targs = lower_method_args(args, &sig, env, cx);
                     return TExpr {
                         ty: ret_ty,

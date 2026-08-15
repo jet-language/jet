@@ -1027,7 +1027,13 @@ impl<'a> Checker<'a> {
                                 label: None,
                                 spread: false,
                             }],
-                            recv_type: Some(Self::split_type_name(type_name).1.to_string()),
+                            recv_type: Some(
+                                if self.type_param_scope.iter().any(|param| param.name == type_name.as_str()) {
+                                    trait_name.to_string()
+                                } else {
+                                    Self::split_type_name(type_name).1.to_string()
+                                },
+                            ),
                             resolved_ret: Some(ret),
                             checked_widen: false,
                         };
