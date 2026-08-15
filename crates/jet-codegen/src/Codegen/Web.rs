@@ -78,6 +78,7 @@ struct FuncWeb {
     source_path: String,
     /// Project-relative source name used in Source Map `sources` (never a host path).
     source_name: String,
+    source_line: String,
     source_marker: String,
     file_prefix: Option<String>,
     bucket: WebBucket,
@@ -98,6 +99,7 @@ struct CloseWeb {
     key: String,
     source_path: String,
     source_name: String,
+    source_line: String,
     source_marker: String,
     file_prefix: Option<String>,
     tir: TIR::TFunc,
@@ -1866,13 +1868,21 @@ fn collect_close_impl(
     if !TIR::tir_covers_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE) {
         return;
     }
+    let tir = TIR::lower_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE);
     out.push(CloseWeb {
         key: web_close_key_for_name(type_name),
         source_path: source_path.to_string(),
         source_name: source_name.to_string(),
+        source_line: cx
+            .src
+            .lines()
+            .nth(tir.line.saturating_sub(1))
+            .unwrap_or_default()
+            .trim_end()
+            .to_string(),
         source_marker: source_marker.to_string(),
         file_prefix: file_prefix.map(str::to_string),
-        tir: TIR::lower_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE),
+        tir,
     });
 }
 
@@ -1903,11 +1913,19 @@ fn collect_module_funcs(
                     .unwrap_or(WebBucket::Wasm);
                 let tir = TIR::lower_web_func(f, cx);
                 let is_generator = tir.ret.as_ref().is_some_and(is_stream_type);
+                let source_line = cx
+                    .src
+                    .lines()
+                    .nth(tir.line.saturating_sub(1))
+                    .unwrap_or_default()
+                    .trim_end()
+                    .to_string();
                 out.push(FuncWeb {
                     name: f.name.clone(),
                     key,
                     source_path: source_path.to_string(),
                     source_name: source_name.to_string(),
+                    source_line,
                     source_marker: source_marker.to_string(),
                     file_prefix: file_prefix.map(str::to_string),
                     bucket,
@@ -2052,50 +2070,78 @@ fn json_quote(s: &str) -> String {
     out
 }
 
-/// D-FAIL-BREACH1: the JS frame consumes the same active runtime rows and
-/// Prelude renderer as the native report. The generated object is data, not a
-/// second hand-maintained code-to-copy table in the JavaScript adapter.
+/// D-FAIL-BREACH1: the JS adapter consumes the same active runtime rows and
+/// Prelude-rendered report template as the native report. It carries no
+/// What/Why/Fix policy of its own.
 fn js_runtime_stop_metadata() -> String {
+    let report_template = |report: jet_foundation::Outcome::JetRuntimeDiagnostic| {
+        let location = format!(
+            "  --> __JET_RUNTIME_FILE__:{} in __JET_RUNTIME_FUNCTION__\n",
+            u32::MAX
+        );
+        report
+            .rendered
+            .replace(&location, "")
+            .replace(&u32::MAX.to_string(), "__JET_RUNTIME_LINE__")
+            .replace("\n Why:", "\n__JET_RUNTIME_CONTEXT__\n Why:")
+    };
     let default_report = jet_foundation::Outcome::jet_render_runtime_stop(
-        "__JET_RUNTIME_STOP_DEFAULT__",
-        "",
-        0,
-        "",
+        "__JET_RUNTIME_STOP_CODE__",
+        "__JET_RUNTIME_FILE__",
+        u32::MAX,
+        "__JET_RUNTIME_FUNCTION__",
         "",
         1,
         1,
         "__JET_RUNTIME_MESSAGE__",
         "",
     );
+    let default_source = default_report.source.clone();
+    let default_exit_code = default_report.exit_code;
+    let default_rendered = report_template(default_report);
     let mut out = format!(
-        "const JET_RUNTIME_STOP_DEFAULT = Object.freeze({{ what: {}, why: {}, fix: {} }});\n\
+        "const JET_RUNTIME_STACK = [];\n\
+         const JET_RUNTIME_STACK_LIMIT = {};\n\
+         const JET_STACK_OVERFLOW_MESSAGE = {};\n\
+         const JET_RUNTIME_STOP_DEFAULT = Object.freeze({{ source: {}, exit_code: {}, rendered: {} }});\n\
          const JET_RUNTIME_STOP_METADATA = Object.freeze({{\n",
-        json_quote(&default_report.what),
-        json_quote(&default_report.why),
-        json_quote(&default_report.fix),
+        jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT,
+        json_quote(&jet_foundation::Outcome::jet_stack_overflow_message(
+            "__JET_RUNTIME_FUNCTION__",
+        )),
+        json_quote(&default_source),
+        default_exit_code,
+        json_quote(&default_rendered),
     );
     for row in jet_foundation::Registry::diagnostic_rows().iter().filter(|row| {
         row.stage == "runtime"
             && row.status == jet_foundation::Registry::DiagnosticStatus::Active
-            && row.code.starts_with("E30")
     }) {
+        let message = if row.template_holes.iter().any(|hole| *hole == "type") {
+            "__JET_RUNTIME_TODO_PREFIX__ — expected __JET_RUNTIME_TODO_TYPE__"
+        } else {
+            "__JET_RUNTIME_MESSAGE__"
+        };
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             row.code,
-            "",
-            0,
-            "",
+            "__JET_RUNTIME_FILE__",
+            u32::MAX,
+            "__JET_RUNTIME_FUNCTION__",
             "",
             1,
             1,
-            "__JET_RUNTIME_MESSAGE__",
+            message,
             "",
         );
+        let source = report.source.clone();
+        let exit_code = report.exit_code;
+        let rendered = report_template(report);
         out.push_str(&format!(
-            "  {}: Object.freeze({{ what: {}, why: {}, fix: {} }}),\n",
+            "  {}: Object.freeze({{ source: {}, exit_code: {}, rendered: {} }}),\n",
             json_quote(row.code),
-            json_quote(&report.what),
-            json_quote(&report.why),
-            json_quote(&report.fix),
+            json_quote(&source),
+            exit_code,
+            json_quote(&rendered),
         ));
     }
     out.push_str("});\n\n");
@@ -3265,7 +3311,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| web_emit_error(f))?;
         out.push_str(&params.join(", "));
-        out.push_str(") -> i32 {\n    jet_wasm_call(|| {\n");
+        out.push_str(") -> i32 {\n    jet_wasm_call_status(|| {\n");
         for (name, ty) in &flat {
             if is_default_int(ty) {
                 out.push_str(&format!("        let {name} = jet_abi_int_arg({name});\n"));
@@ -3433,9 +3479,15 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
     out.push_str("{\n");
     out.push_str(&format!("    // jet:source-map source={}\n", f.source_name));
     let source_file = mangle_generated("source_file");
+    let source_fn = mangle_generated("source_fn");
+    let source_line = mangle_generated("source_line");
+    let stack_frame = mangle_generated("stack_frame");
     out.push_str(&format!(
-        "    let {source_file}: &str = {:?};\n",
-        f.source_name
+        "    let {source_file}: &str = {:?};\n    let {source_fn}: &str = {:?};\n    let {source_line}: &str = {:?};\n    let {stack_frame} = jet_stack_enter({source_file}, {}u32, {source_fn}, {source_line});\n",
+        f.source_name,
+        f.tir.name,
+        f.source_line,
+        f.tir.line,
     ));
     emit_wasm_body(
         &f.tir.body,
@@ -4640,6 +4692,8 @@ fn wasm_emit_expr(
     file_prefix: Option<&str>,
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<String, ()> {
+    let source_fn = mangle_generated("source_fn");
+    let source_line = mangle_generated("source_line");
     Ok(match &expr.kind {
         TIR::TExprKind::InlineBlock(stmts) => {
             wasm_emit_inline_block(stmts, funcs, file_prefix, reconstructions)?
@@ -5086,9 +5140,13 @@ fn wasm_emit_expr(
             };
             let msg = wasm_emit_expr(msg, funcs, file_prefix, reconstructions)?;
             format!(
-                "match ({value}) {{ Ok(__jet_ok) => __jet_ok, Err(_) => jet_panic({:?}, {}, &({msg})) }}",
+                "match ({value}) {{ Ok(__jet_ok) => __jet_ok, Err(_) => jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }}",
                 loc.file,
                 loc.line,
+                loc.fn_name,
+                loc.src_line,
+                loc.col,
+                loc.caret,
             )
         }
         TIR::TExprKind::DistinctRaw(inner) => {
@@ -5204,7 +5262,7 @@ fn wasm_emit_expr(
             let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
             let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
             format!(
-                "{{ let __jet_map = &({base}); let __jet_key = &({index}); __jet_map.get(__jet_key).cloned().unwrap_or_else(|| jet_panic({}, {}, &jet_missing_map_key_value(__jet_key))) }}",
+                "{{ let __jet_map = &({base}); let __jet_key = &({index}); __jet_map.get(__jet_key).cloned().unwrap_or_else(|| jet_panic({}, {}, {source_fn}, {source_line}, &jet_missing_map_key_value(__jet_key))) }}",
                 mangle_generated("source_file"),
                 line,
             )
@@ -5455,7 +5513,11 @@ fn emit_js_app(
                  journey: jet_web_wasm_text(wasm, \"jet_wasm_error_journey\"),\n\
                  frame: jet_web_wasm_text(wasm, \"jet_wasm_error_frame\"),\n\
                };\n\
+               const status = Number(wasm.jet_wasm_error_status?.() ?? 0);\n\
                const outcome = jetDom.takeWasmError(wasm);\n\
+               if (status === 101 || outcome?.tag === \"Host\") {\n\
+                 throw jet_web_wasm_host_error(outcome, metadata, status || 101);\n\
+               }\n\
                return outcome ? { outcome, metadata } : null;\n\
              }\n\n",
         );
@@ -5533,22 +5595,24 @@ fn emit_js_app(
     if let Some(main_fn) = funcs.iter().find(|f| f.key == "run") {
         if main_fn.bucket == WebBucket::JS {
             out.push_str("export async function jet_main() {\n");
+            let source_file = mangle_generated("source_file");
+            let source_fn = mangle_generated("source_fn");
+            let source_line = mangle_generated("source_line");
+            let stack_frame = mangle_generated("stack_frame");
             out.push_str(&format!(
-                "  jetDom.enterRenderScope({});\n",
-                json_quote("run")
+                "  const {source_file} = {};\n  const {source_fn} = {};\n  const {source_line} = {};\n  const {stack_frame} = jet_stack_enter({source_file}, {}, {source_fn}, {source_line});\n  try {{\n    jetDom.enterRenderScope({});\n",
+                json_quote(&main_fn.source_name),
+                json_quote(&main_fn.name),
+                json_quote(&main_fn.source_line),
+                main_fn.tir.line,
+                json_quote("run"),
             ));
-            out.push_str("  try {\n");
             let fallible_main = matches!(main_fn.return_type.as_ref(), Some(Type::Result { .. }));
             if fallible_main {
                 out.push_str("    const __jet_edge_result = await (async () => {\n");
             }
             let body_indent = if fallible_main { 3 } else { 2 };
             let body_pad = "  ".repeat(body_indent);
-            let source_file = mangle_generated("source_file");
-            out.push_str(&format!(
-                "{body_pad}const {source_file} = {};\n",
-                json_quote(&main_fn.source_name)
-            ));
             let mut body = String::new();
             body.push_str(&format!(
                 "{body_pad}{source_marker} file {}\n",
@@ -5572,7 +5636,7 @@ fn emit_js_app(
                 out.push_str("    if (error instanceof JetWebPropagation) return jet_web_edge_result({ tag: \"Err\", error: error.wire }, { journey: error.journey, frame: error.frame });\n");
                 out.push_str("    throw error;\n");
             }
-            out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
+            out.push_str(&format!("  }} finally {{\n    jetDom.exitRenderScope();\n    jet_stack_leave({stack_frame});\n  }}\n"));
             out.push_str("}\n\n");
             if auto_start {
                 out.push_str("void jet_main().catch((error) => { jetDom.raiseRuntimeError(error); });\n");
@@ -5610,14 +5674,20 @@ fn emit_js_close_fn(
     sources: &[JSSource],
     out: &mut String,
 ) -> WebEmitResult<()> {
+    let source_file = mangle_generated("source_file");
+    let source_fn = mangle_generated("source_fn");
+    let source_line = mangle_generated("source_line");
+    let stack_frame = mangle_generated("stack_frame");
     out.push_str(&format!(
-        "function {}(self) {{\n  const {} = {};\n",
+        "function {}(self) {{\n  const {source_file} = {};\n  const {source_fn} = {};\n  const {source_line} = {};\n  const {stack_frame} = jet_stack_enter({source_file}, {}, {source_fn}, {source_line});\n  try {{\n",
         close.key,
-        mangle_generated("source_file"),
         json_quote(&close.source_name),
+        json_quote(&close.tir.name),
+        json_quote(&close.source_line),
+        close.tir.line,
     ));
     out.push_str(&format!(
-        "  {} file {}\n",
+        "    {} file {}\n",
         close.source_marker,
         js_source_index(sources, &close.source_path),
     ));
@@ -5626,13 +5696,13 @@ fn emit_js_close_fn(
         out,
         funcs,
         close.file_prefix.as_deref(),
-        1,
+        2,
     )
     .map_err(|()| WebTirUnsupported {
         func_name: format!("{}::close", close.key),
         span: close.tir.source_span,
     })?;
-    out.push_str("}\n\n");
+    out.push_str(&format!("  }} finally {{ jet_stack_leave({stack_frame}); }}\n}}\n\n"));
     Ok(())
 }
 
@@ -5676,20 +5746,22 @@ fn emit_js_fn(
         ""
     };
     let generator_mark = if f.is_generator { "*" } else { "" };
+    let source_file = mangle_generated("source_file");
+    let source_fn = mangle_generated("source_fn");
+    let source_line = mangle_generated("source_line");
+    let stack_frame = mangle_generated("stack_frame");
     out.push_str(&format!(
         "export {async_kw}function{generator_mark} {}({}) {{\n",
         f.key,
         param_names(&f.params)
     ));
     out.push_str(&format!(
-        "  jetDom.enterRenderScope({});\n",
-        json_quote(&f.key)
-    ));
-    out.push_str("  try {\n");
-    let source_file = mangle_generated("source_file");
-    out.push_str(&format!(
-        "    const {source_file} = {};\n",
-        json_quote(&f.source_name)
+        "  const {source_file} = {};\n  const {source_fn} = {};\n  const {source_line} = {};\n  const {stack_frame} = jet_stack_enter({source_file}, {}, {source_fn}, {source_line});\n  try {{\n    jetDom.enterRenderScope({});\n",
+        json_quote(&f.source_name),
+        json_quote(&f.name),
+        json_quote(&f.source_line),
+        f.tir.line,
+        json_quote(&f.key),
     ));
     out.push_str(&bind_inline_handler_symbols(&body, f, handlers));
     if matches!(f.return_type.as_ref(), Some(Type::Result { .. })) {
@@ -5697,7 +5769,7 @@ fn emit_js_fn(
         out.push_str("    if (error instanceof JetWebPropagation) return { tag: \"Err\", values: [{ wire: error.wire, journey: error.journey, frame: error.frame }] };\n");
         out.push_str("    throw error;\n");
     }
-    out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
+    out.push_str(&format!("  }} finally {{\n    jetDom.exitRenderScope();\n    jet_stack_leave({stack_frame});\n  }}\n"));
     out.push_str("}\n\n");
     Ok(())
 }
@@ -6299,6 +6371,8 @@ fn emit_tir_js_body_inner(
 ) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
     let source_file = mangle_generated("source_file");
+    let source_fn = mangle_generated("source_fn");
+    let source_line = mangle_generated("source_line");
     for stmt in body {
         match stmt {
             TIR::TStmt::SourceSpan(_) => {}
@@ -6536,7 +6610,7 @@ fn emit_tir_js_body_inner(
                         emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                     }
                     (true, None, true) => out.push_str(&format!(
-                        "{inner}jet_runtime_stop(\"E3001\", {source_file}, 0, \"jet: exhaustiveness bug\");\n"
+                        "{inner}jet_runtime_stop(\"E3001\", {source_file}, 0, \"jet: exhaustiveness bug\", {source_fn}, {source_line});\n"
                     )),
                     (true, None, false) => {}
                     (false, Some(body), _) => {
@@ -6545,7 +6619,7 @@ fn emit_tir_js_body_inner(
                         out.push_str(&format!("{inner}}}\n"));
                     }
                     (false, None, true) => out.push_str(&format!(
-                        "{inner}}} else {{\n{inner}  jet_runtime_stop(\"E3001\", {source_file}, 0, \"jet: exhaustiveness bug\");\n{inner}}}\n"
+                        "{inner}}} else {{\n{inner}  jet_runtime_stop(\"E3001\", {source_file}, 0, \"jet: exhaustiveness bug\", {source_fn}, {source_line});\n{inner}}}\n"
                     )),
                     (false, None, false) => out.push_str(&format!("{inner}}}\n")),
                 }
@@ -7395,10 +7469,14 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             let value = tir_js_expr(value, funcs, file_prefix)?;
             let msg = tir_js_expr(msg, funcs, file_prefix)?;
             jet_format!(
-                "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : jet_runtime_stop(\"E3001\", {}, {}, {})))({}))",
+                "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : jet_runtime_stop(\"E3001\", {}, {}, {}, {}, {}, {}, {}, \"\")))({}))",
                 json_quote(&loc.file),
                 loc.line,
                 msg,
+                json_quote(&loc.fn_name),
+                json_quote(&loc.src_line),
+                loc.col,
+                loc.caret,
                 value,
             )
         },
@@ -7716,8 +7794,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    unsafe { jet_web_print(text.as_ptr() as u32, text.len() as u32); }\n",
     "}\n\n",
     "#[derive(Debug)]\n",
-    "struct JetWasmRuntimeFailure { error: JetErr, frame: String }\n\n",
-    "struct JetWasmHostError { json: String, journey: String, frame: String }\n\n",
+    "struct JetWasmRuntimeFailure { error: JetErr, frame: String, exit_code: i32 }\n\n",
+    "struct JetWasmHostError { json: String, journey: String, frame: String, status: i32 }\n\n",
     "thread_local! {\n",
     "    static JET_WASM_ERROR: std::cell::RefCell<Option<JetWasmHostError>> = const { std::cell::RefCell::new(None) };\n",
     "}\n\n",
@@ -7728,13 +7806,12 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "impl Drop for JetStackFrame {\n",
     "    fn drop(&mut self) { JET_STACK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1))); }\n",
     "}\n\n",
-    "fn jet_stack_enter(file: &str, line: u32, fn_name: &str, _src_line: &str) -> JetStackFrame {\n",
+    "fn jet_stack_enter(file: &str, line: u32, fn_name: &str, src_line: &str) -> JetStackFrame {\n",
     "    let overflow = JET_STACK_DEPTH.with(|depth| {\n",
     "        let next = depth.get().saturating_add(1);\n",
-    "        depth.set(next);\n",
-    "        next > JET_RUNTIME_STACK_LIMIT\n",
+    "        if next > JET_RUNTIME_STACK_LIMIT { true } else { depth.set(next); false }\n",
     "    });\n",
-    "    if overflow { jet_runtime_stop(\"E3012\", file, line, &jet_stack_overflow_message(fn_name)); }\n",
+    "    if overflow { jet_runtime_stop_with_context(\"E3012\", file, line, fn_name, src_line, 1, 1, &jet_stack_overflow_message(fn_name)); }\n",
     "    JetStackFrame\n",
     "}\n\n",
     "fn jet_wasm_json(value: &str) -> String {\n",
@@ -7766,25 +7843,29 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    let cause = match jet_err_cause(error) { Ok(cause) => jet_wasm_err_wire(&cause), Err(_) => \"null\".to_string() };\n",
     "    format!(\"{{\\\"schema\\\":\\\"jet.err/v1\\\",\\\"message\\\":{},\\\"code\\\":{},\\\"cause\\\":{}}}\", jet_wasm_json(&jet_err_message(error)), code, cause)\n",
     "}\n\n",
-    "fn jet_wasm_store(json: String, journey: String, frame: String) {\n",
-    "    JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = Some(JetWasmHostError { json, journey, frame }));\n",
+    "fn jet_wasm_store(json: String, journey: String, frame: String, status: i32) {\n",
+    "    JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = Some(JetWasmHostError { json, journey, frame, status }));\n",
     "}\n\n",
     "fn jet_wasm_store_ok(value: String) {\n",
-    "    jet_wasm_store(format!(\"{{\\\"tag\\\":\\\"Ok\\\",\\\"value\\\":{value}}}\"), String::new(), String::new());\n",
+    "    jet_wasm_store(format!(\"{{\\\"tag\\\":\\\"Ok\\\",\\\"value\\\":{value}}}\"), String::new(), String::new(), 0);\n",
     "}\n\n",
     "fn jet_wasm_store_error(error: &JetErr) {\n",
     "    let journey = jet_journey_take();\n",
     "    let frame = format!(\"{journey}{}\", jet_render_err(error));\n",
     "    let journey = journey.trim_end().to_string();\n",
     "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error));\n",
-    "    jet_wasm_store(json, journey, frame);\n",
+    "    jet_wasm_store(json, journey, frame, 1);\n",
     "}\n\n",
-    "fn jet_wasm_store_runtime_error(error: &JetErr, rendered: &str) {\n",
+    "fn jet_wasm_store_runtime_error(error: &JetErr, rendered: &str, status: i32) {\n",
     "    let journey = jet_journey_take();\n",
     "    let frame = format!(\"{journey}{rendered}\");\n",
     "    let journey = journey.trim_end().to_string();\n",
-    "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error));\n",
-    "    jet_wasm_store(json, journey, frame);\n",
+    "    let json = if status == 101 {\n",
+    "        format!(\"{{\\\"tag\\\":\\\"Host\\\",\\\"status\\\":101,\\\"error\\\":{},\\\"report\\\":{}}}\", jet_wasm_err_wire(error), jet_wasm_json(rendered))\n",
+    "    } else {\n",
+    "        format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error))\n",
+    "    };\n",
+    "    jet_wasm_store(json, journey, frame, status);\n",
     "}\n\n",
     "fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {\n",
     "    if r.is_err() { let _ = jet_journey_frame(file, line, fn_name, || String::new()); }\n",
@@ -7801,6 +7882,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "#[no_mangle]\n",
     "pub extern \"C\" fn jet_wasm_error_ptr() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.json.as_ptr() as u32).unwrap_or(0)) }\n\n",
     "#[no_mangle]\n",
+    "pub extern \"C\" fn jet_wasm_error_status() -> i32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.status).unwrap_or(0)) }\n\n",
+    "#[no_mangle]\n",
     "pub extern \"C\" fn jet_wasm_error_clear() { JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = None); }\n\n",
     "#[no_mangle]\n",
     "pub extern \"C\" fn jet_wasm_error_journey_len() -> u32 { JET_WASM_ERROR.with(|slot| slot.borrow().as_ref().map(|error| error.journey.len() as u32).unwrap_or(0)) }\n\n",
@@ -7815,7 +7898,7 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "        Ok(value) => value,\n",
     "        Err(payload) => {\n",
     "            if let Some(failure) = payload.downcast_ref::<JetWasmRuntimeFailure>() {\n",
-    "                jet_wasm_store_runtime_error(&failure.error, &failure.frame);\n",
+    "                jet_wasm_store_runtime_error(&failure.error, &failure.frame, failure.exit_code);\n",
     "            } else {\n",
     "                // Unknown panic has no Jet provenance; preserve the host/compiler defect.\n",
     "                std::panic::resume_unwind(payload);\n",
@@ -7824,17 +7907,38 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "        }\n",
     "    }\n",
     "}\n\n",
+    "fn jet_wasm_call_status(run: impl FnOnce() -> i32) -> i32 {\n",
+    "    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {\n",
+    "        Ok(status) => status,\n",
+    "        Err(payload) => {\n",
+    "            if let Some(failure) = payload.downcast_ref::<JetWasmRuntimeFailure>() {\n",
+    "                jet_wasm_store_runtime_error(&failure.error, &failure.frame, failure.exit_code);\n",
+    "                failure.exit_code\n",
+    "            } else {\n",
+    "                std::panic::resume_unwind(payload);\n",
+    "            }\n",
+    "        }\n",
+    "    }\n",
+    "}\n\n",
     "fn jet_runtime_stop(code: &'static str, file: &str, line: u32, message: &str) -> ! {\n",
-    "    let report = jet_render_runtime_stop(code, file, line, \"\", \"\", 1, 1, message, \"\");\n",
+    "    jet_runtime_stop_with_context(code, file, line, \"\", \"\", 1, 1, message)\n",
+    "}\n\n",
+    "fn jet_runtime_stop_with_context(code: &'static str, file: &str, line: u32, fn_name: &str, src_line: &str, col: u32, caret_len: u32, message: &str) -> ! {\n",
+    "    let report = jet_render_runtime_stop(code, file, line, fn_name, src_line, col, caret_len, message, \"\");\n",
     "    let error = jet_err(message.to_string(), Ok(code.to_string()), Err(JetAbsent));\n",
-    "    jet_wasm_store_runtime_error(&error, &report.rendered);\n",
-    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: report.rendered }))\n",
+    "    let rendered = report.rendered;\n",
+    "    let exit_code = report.exit_code;\n",
+    "    jet_wasm_store_runtime_error(&error, &rendered, exit_code);\n",
+    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: rendered, exit_code }))\n",
     "}\n\n",
     "fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {\n",
     "    jet_runtime_stop(\"E3010\", file, line, message)\n",
     "}\n\n",
-    "fn jet_panic(file: &str, line: u32, message: &str) -> ! {\n",
-    "    jet_runtime_stop(\"E3001\", file, line, message)\n",
+    "fn jet_panic(file: &str, line: u32, fn_name: &str, src_line: &str, message: &str) -> ! {\n",
+    "    jet_runtime_stop_with_context(\"E3001\", file, line, fn_name, src_line, 1, 1, message)\n",
+    "}\n\n",
+    "fn jet_panic_rich(file: &str, line: u32, fn_name: &str, src_line: &str, col: u32, caret_len: u32, message: &str) -> ! {\n",
+    "    jet_runtime_stop_with_context(\"E3001\", file, line, fn_name, src_line, col, caret_len, message)\n",
     "}\n\n",
     // D-TIMERES1=A / D-TYPE2-TIME1=A: the wasm adapter includes the same
     // fixed nanosecond kernels as native AOT. It only changes the nominal
@@ -7859,8 +7963,9 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {\n",
     "    let report = jet_contract_report(clause_kw, msg, file, line);\n",
     "    let error = jet_err(report.what.clone(), Ok(\"E3005\".to_string()), Err(JetAbsent));\n",
-    "    jet_wasm_store_runtime_error(&error, &report.rendered);\n",
-    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: report.rendered }))\n",
+    "    let rendered = report.rendered;\n",
+    "    jet_wasm_store_runtime_error(&error, &rendered, 70);\n",
+    "    std::panic::resume_unwind(Box::new(JetWasmRuntimeFailure { error, frame: rendered, exit_code: 70 }))\n",
     "}\n\n",
     include_str!("../Prelude/Core/TaskWasm.rs"),
     "\n",

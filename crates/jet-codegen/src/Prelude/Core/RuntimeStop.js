@@ -125,32 +125,101 @@ function jet_map_get(base, key, file, line) {
   return base.get(key);
 }
 
-function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, caret_len, message, locals) {
-  const policy = JET_RUNTIME_STOP_METADATA[code] ?? JET_RUNTIME_STOP_DEFAULT;
-  const substitute = (template) => template.split("__JET_RUNTIME_MESSAGE__").join(String(message));
-  const what = substitute(policy.what);
-  const why = policy.why;
-  const fix = policy.fix;
+class JetHostError extends Error {
+  constructor(code, frame) {
+    super(frame);
+    this.name = "JetHostError";
+    this.code = code;
+    this.status = 101;
+    this.exitCode = 101;
+    this.frame = frame;
+  }
+}
 
-  let rendered = `Stop [${code}]: ${what}\n`;
-  if (file) {
-    rendered += `  --> ${file}:${line}${fn_name ? ` in ${fn_name}` : ""}\n`;
+function jet_web_runtime_context(file, line, fn_name, source_line, col, caret_len, locals) {
+  const active = JET_RUNTIME_STACK.length === 0
+    ? null
+    : JET_RUNTIME_STACK[JET_RUNTIME_STACK.length - 1];
+  return {
+    file: file || active?.file || "",
+    line: line || active?.line || 0,
+    fn_name: fn_name || active?.fn_name || "",
+    source_line: source_line || active?.source_line || "",
+    col: col || active?.col || 1,
+    caret_len: caret_len || active?.caret_len || 1,
+    locals: locals || active?.locals || "",
+  };
+}
+
+function jet_web_runtime_context_frame(context) {
+  let frame = "";
+  if (context.file) {
+    frame += `  --> ${context.file}:${context.line}${context.fn_name ? ` in ${context.fn_name}` : ""}\n`;
   }
-  if (source_line) {
-    const margin = String(line).length;
+  if (context.source_line) {
+    const margin = String(context.line).length;
     const pad = " ".repeat(margin);
-    rendered += `   ${pad}|\n`;
-    rendered += `${line} | ${source_line}\n`;
-    rendered += `   ${pad}| ${" ".repeat(Math.max(0, col - 1))}${"^".repeat(Math.max(1, caret_len))}\n`;
+    frame += `   ${pad}|\n`;
+    frame += `${context.line} | ${context.source_line}\n`;
+    frame += `   ${pad}| ${" ".repeat(Math.max(0, context.col - 1))}${"^".repeat(Math.max(1, context.caret_len))}\n`;
   }
-  if (locals) rendered += `locals: ${locals}\n`;
-  rendered += ` Why: ${why}\n Fix: ${fix}\n`;
+  if (context.locals) frame += `locals: ${context.locals}\n`;
+  return frame;
+}
+
+function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, caret_len, message, locals) {
+  const known = Object.prototype.hasOwnProperty.call(JET_RUNTIME_STOP_METADATA, code);
+  const projected = known ? JET_RUNTIME_STOP_METADATA[code] : JET_RUNTIME_STOP_DEFAULT;
+  const context = jet_web_runtime_context(file, line, fn_name, source_line, col, caret_len, locals);
+  const substitute = (template, marker, value) => template.split(marker).join(String(value));
+  let rendered = projected.rendered;
+  const todo_parts = String(message).split(" — expected ");
+  const todo_type = todo_parts.pop();
+  const todo_prefix = todo_parts.join(" — expected ");
+  rendered = substitute(rendered, "__JET_RUNTIME_STOP_CODE__", code);
+  rendered = substitute(rendered, "__JET_RUNTIME_MESSAGE__", message);
+  rendered = substitute(rendered, "__JET_RUNTIME_TODO_PREFIX__", todo_prefix);
+  rendered = substitute(rendered, "__JET_RUNTIME_TODO_TYPE__", todo_type);
+  rendered = substitute(rendered, "__JET_RUNTIME_FILE__", context.file);
+  rendered = substitute(rendered, "__JET_RUNTIME_LINE__", context.line);
+  rendered = substitute(rendered, "__JET_RUNTIME_FUNCTION__", context.fn_name);
+  rendered = substitute(rendered, "__JET_RUNTIME_CONTEXT__", jet_web_runtime_context_frame(context));
   return rendered;
 }
 
-function jet_runtime_stop(code, file, line, message, fn_name = "", source_line = "", locals = "") {
-  const frame = jet_runtime_stop_report(code, file, line, fn_name, source_line, 1, 1, message, locals);
+function jet_runtime_stop(code, file, line, message, fn_name = "", source_line = "", col = 1, caret_len = 1, locals = "") {
+  const frame = jet_runtime_stop_report(code, file, line, fn_name, source_line, col, caret_len, message, locals);
+  if (!Object.prototype.hasOwnProperty.call(JET_RUNTIME_STOP_METADATA, code)) {
+    throw new JetHostError(code, frame);
+  }
   throw jet_web_edge_error({ schema: "jet.err/v1", message, code, cause: null }, { frame });
+}
+
+function jet_web_wasm_host_error(outcome, metadata, status = 101) {
+  const code = outcome?.error?.code || outcome?.code || "__unknown_runtime_stop__";
+  const frame = outcome?.report || metadata?.frame || "Internal error: Web host failure\n";
+  const error = new JetHostError(code, frame);
+  error.status = status;
+  error.exitCode = status;
+  return error;
+}
+
+function jet_stack_overflow_message(fn_name) {
+  return JET_STACK_OVERFLOW_MESSAGE.split("__JET_RUNTIME_FUNCTION__").join(String(fn_name));
+}
+
+function jet_stack_enter(file, line, fn_name, source_line, col = 1, caret_len = 1, locals = "") {
+  if (JET_RUNTIME_STACK.length >= JET_RUNTIME_STACK_LIMIT) {
+    jet_runtime_stop("E3012", file, line, jet_stack_overflow_message(fn_name), fn_name, source_line, col, caret_len, locals);
+  }
+  const frame = Object.freeze({file, line, fn_name, source_line, col, caret_len, locals});
+  JET_RUNTIME_STACK.push(frame);
+  return frame;
+}
+
+function jet_stack_leave(frame) {
+  const index = JET_RUNTIME_STACK.lastIndexOf(frame);
+  if (index >= 0) JET_RUNTIME_STACK.splice(index, 1);
 }
 
 function jet_todo_stop(file, line, expected_type) {

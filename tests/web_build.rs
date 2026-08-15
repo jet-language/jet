@@ -1612,6 +1612,184 @@ fn run() {
 }
 
 #[test]
+fn web_js_unknown_runtime_stop_preserves_host_status_101() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping JS unknown runtime-stop test (need rustc + node)");
+        return;
+    }
+    let source = "#Target(JS)\nfn run() {}\n";
+    let dir = build_web_fixture(
+        "js_unknown_runtime_stop",
+        source,
+        "tests/fixtures/web_unknown_runtime_stop.jet",
+    );
+    let app_path = dir.join("build/app.js");
+    let mut app = fs::read_to_string(&app_path).unwrap();
+    app.push_str("\nexport { jet_runtime_stop };\n");
+    fs::write(app_path, app).unwrap();
+    let harness = r#"
+const { jet_runtime_stop } = await import("./app.js");
+for (const code of ["E9999", "E1001"]) {
+  try {
+    jet_runtime_stop(code, "tests/fixtures/web_unknown_runtime_stop.jet", 9, "host defect", "run", "fn run() {}", 1, 1, "");
+    throw new Error("unexpected success");
+  } catch (error) {
+    if (error?.name !== "JetHostError") throw error;
+    if (error.status !== 101 || error.exitCode !== 101) throw error;
+    if (error.code !== code) throw error;
+    console.log(`${code}:status=${error.status}:name=${error.name}`);
+  }
+}
+"#;
+    let stdout = run_node_harness(&dir, "js_unknown_runtime_stop_harness.mjs", harness);
+    assert!(stdout.contains("E9999:status=101:name=JetHostError"), "{stdout}");
+    assert!(stdout.contains("E1001:status=101:name=JetHostError"), "{stdout}");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_e3001_context_matches_on_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web E3001 context test (need rustc + node)");
+        return;
+    }
+    let cases = [
+        (
+            "e3001_js_context",
+            r#"#Target(JS)
+fn missing() => Int? {
+    return None
+}
+
+fn run() {
+    print(missing() ?? panic("missing value"))
+}
+"#,
+            "tests/fixtures/web_e3001_js_context.jet",
+        ),
+        (
+            "e3001_wasm_context",
+            r#"#Target(Wasm)
+fn missing() => Int? {
+    return None
+}
+
+fn run() {
+    print(missing() ?? panic("missing value"))
+}
+"#,
+            "tests/fixtures/web_e3001_wasm_context.jet",
+        ),
+    ];
+    let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  throw new Error("unexpected success");
+} catch (error) {
+  if (error?.name !== "JetError") throw error;
+  console.log(error.frame);
+}
+"#;
+    for (stem, source, shown) in cases {
+        let dir = build_web_fixture(stem, source, shown);
+        let stdout = run_node_harness(&dir, "e3001_context_harness.mjs", harness);
+        assert!(
+            stdout.contains("Stop [E3001]: `panic: missing value`"),
+            "{stem} lost E3001 report:\n{stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("--> {shown}:7 in run")),
+            "{stem} lost function context:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("7 |     print(missing() ?? panic(\"missing value\"))"),
+            "{stem} lost source-line context:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("Why: The program hit a `panic`")
+                && stdout.contains("Fix: Fix the logic that led to the failure"),
+            "{stem} lost canonical E3001 policy:\n{stdout}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn web_e3012_context_matches_on_js_and_wasm() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web E3012 context test (need rustc + node)");
+        return;
+    }
+    let cases = [
+        (
+            "e3012_js_context",
+            r#"#Target(JS)
+fn recurse(n: Int) => Int {
+    return recurse(n + 1)
+}
+
+fn run() {
+    print(recurse(0))
+}
+"#,
+            "tests/fixtures/web_e3012_js_context.jet",
+        ),
+        (
+            "e3012_wasm_context",
+            r#"#Target(Wasm)
+fn recurse(n: Int) => Int {
+    return recurse(n + 1)
+}
+
+fn run() {
+    print(recurse(0))
+}
+"#,
+            "tests/fixtures/web_e3012_wasm_context.jet",
+        ),
+    ];
+    let harness = r#"
+process.on("unhandledRejection", (error) => {
+  if (error?.name !== "JetError") throw error;
+});
+const { jet_main } = await import("./app.js");
+try {
+  await jet_main();
+  throw new Error("unexpected success");
+} catch (error) {
+  if (error?.name !== "JetError") throw error;
+  console.log(error.frame);
+}
+"#;
+    for (stem, source, shown) in cases {
+        let dir = build_web_fixture(stem, source, shown);
+        let stdout = run_node_harness(&dir, "e3012_context_harness.mjs", harness);
+        assert!(
+            stdout.contains("Stop [E3012]: stack overflow in `recurse`"),
+            "{stem} lost E3012 report:\n{stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("--> {shown}:2 in recurse")),
+            "{stem} lost function context:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("2 | fn recurse(n: Int) => Int"),
+            "{stem} lost source-line context:\n{stdout}"
+        );
+        assert!(
+            stdout.contains("Why: the call stack exceeded Jet's safe runtime limit")
+                && stdout.contains("Fix: end the recursion or make progress toward a base case"),
+            "{stem} lost canonical E3012 policy:\n{stdout}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn web_todo_runs_through_shared_stop_on_js_and_wasm() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web Todo stop test (need rustc + node)");
@@ -1838,7 +2016,9 @@ try {
     let wasm_js = fs::read_to_string(wasm_dir.join("build/app.js")).unwrap();
     assert!(wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"), "{wasm}");
     assert!(wasm.contains("jet_wasm_error_len"), "{wasm}");
+    assert!(wasm.contains("jet_wasm_error_status"), "{wasm}");
     assert!(wasm.contains("jet.err/v1"), "{wasm}");
+    assert!(wasm.contains("\\\"tag\\\":\\\"Host\\\""), "{wasm}");
     assert!(wasm.contains("\\\"tag\\\":\\\"Err\\\""), "{wasm}");
     assert!(wasm.contains("Ok(value) =>"), "{wasm}");
     assert!(wasm.contains("jet_wasm_store_ok("), "{wasm}");
@@ -1850,6 +2030,8 @@ try {
         "raw Wasm panic survived:\n{wasm}"
     );
     assert!(wasm_js.contains("jetDom.takeWasmError"), "{wasm_js}");
+    assert!(wasm_js.contains("jet_wasm_error_status"), "{wasm_js}");
+    assert!(wasm_js.contains("jet_web_wasm_host_error"), "{wasm_js}");
     assert!(wasm_js.contains("const JET_EDGE_TARGET = \"web\";"), "{wasm_js}");
     assert!(!wasm_js.contains("_isMain") && !wasm_js.contains("process.argv[1]"), "{wasm_js}");
     fs::write(wasm_dir.join("build/failure_edge_harness.mjs"), wasm_harness).unwrap();
