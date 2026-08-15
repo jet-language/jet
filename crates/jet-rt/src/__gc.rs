@@ -444,8 +444,8 @@ fn trace_promotion(id: ObjectId, site: PromotionSite) -> Result<(), Fault> {
         "represent identity-bearing links as Id<T>",
         "use Pool<T> when the lifetime is bounded",
     ];
-    let _ = jet_foundation::MemSentry::jet_memory_ledger_record(
-        jet_foundation::MemSentry::MemoryLedgerWitness {
+    let _ = super::jet_mem::jet_memory_ledger_record(
+        super::jet_mem::MemoryLedgerWitness {
             kind: "gc",
             code: "gc",
             source: site.source,

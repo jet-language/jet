@@ -6,6 +6,13 @@ use std::collections::BTreeMap;
 mod uninit_semantics {
     include!("../../jet-codegen/src/Prelude/Uninit.rs");
 }
+#[doc(hidden)]
+pub(crate) mod jet_mem {
+    pub(crate) use jet_foundation::MemSentry::{
+        jet_memory_ledger_record, MemoryLedgerWitness,
+    };
+}
+
 
 /// Compiler/runtime-only traced heap. Jet source reaches this through codegen.
 #[doc(hidden)]

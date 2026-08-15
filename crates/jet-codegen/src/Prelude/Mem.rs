@@ -35,8 +35,9 @@
     use self::jet_sentry as sentry_kernel;
 
     pub use self::jet_sentry::{
-        jet_sentry_fenced_scope, jet_sentry_policy_scope, jet_sentry_reset, jet_sentry_scope,
-        jet_sentry_set_hardened, JetSentryGuard,
+        jet_memory_ledger_record, jet_sentry_fenced_scope, jet_sentry_policy_scope,
+        jet_sentry_reset, jet_sentry_scope, jet_sentry_set_hardened, JetSentryGuard,
+        MemoryLedgerWitness,
     };
 
     pub fn jet_sentry_register_allocation(ptr: *mut u8, bytes: usize) {

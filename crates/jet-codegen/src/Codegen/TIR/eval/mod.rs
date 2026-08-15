@@ -16,6 +16,12 @@ mod stmts;
 mod stream;
 mod webapp;
 
+mod jet_mem {
+    pub(super) use jet_foundation::MemSentry::{
+        jet_memory_ledger_record, MemoryLedgerWitness,
+    };
+}
+
 #[allow(dead_code)]
 mod gc_runtime {
     include!("../../../../../jet-rt/src/__gc.rs");
