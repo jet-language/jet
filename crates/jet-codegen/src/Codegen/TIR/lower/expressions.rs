@@ -1914,6 +1914,19 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
 
 #[inline(never)]
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    if let Expr::PatternTest {
+        subject, pattern, ..
+    } = e
+    {
+        if let Some(value) =
+            crate::Codegen::TIR::fold_typed_fact_enum_pattern(cx, subject, pattern)
+        {
+            return TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::BoolLit(value),
+            };
+        }
+    }
     match e {
         Expr::Int(n, _, width, raw) => {
             // D-INTBIG1: the lexer preserves a decimal literal that does not

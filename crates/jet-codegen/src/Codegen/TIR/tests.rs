@@ -1,5 +1,5 @@
     use super::*;
-    use crate::AST::{Expr, Func, Item, Stmt};
+    use crate::AST::{Expr, Func, Item, Pattern, Stmt};
     use std::collections::{HashMap, HashSet};
 
     /// Parse `src` (no full sema needed — `tir_covers` is structural plus
@@ -30,6 +30,49 @@
     fn empty_string_parts_emit_balanced_format_call() {
         let cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new());
         assert_eq!(emit_tir_str(&[], &cx), "format!(\"\").to_string()");
+    }
+
+    #[test]
+    fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
+        let span = crate::Diagnostics::Span::new(0, 0);
+        let fact_value = Expr::EnumLit {
+            type_name: "Maturity".to_string(),
+            variant: "Experimental".to_string(),
+            args: Vec::new(),
+            leading_dot: false,
+            span,
+        };
+        let pattern = Pattern::Variant {
+            variant: "Experimental".to_string(),
+            bindings: Vec::new(),
+            leading_dot: true,
+            span,
+        };
+        let compiler_cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new());
+        assert_eq!(
+            fold_typed_fact_enum_pattern(&compiler_cx, &fact_value, &pattern),
+            Some(true)
+        );
+
+        let source = "enum Maturity { Experimental Tested }";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
+        let program = crate::Parser::parse(&tokens).expect("parse failed");
+        let user_cx = build_cx(&program, source, "test.jet");
+        assert!(
+            fold_typed_fact_enum_pattern(&user_cx, &fact_value, &pattern).is_none(),
+            "a user enum must not be folded as a compiler fact"
+        );
+        assert!(
+            fold_typed_fact_enum_equality(
+                &user_cx,
+                crate::AST::BinOp::Eq,
+                &fact_value,
+                &fact_value,
+            )
+            .is_none(),
+            "the binary route must preserve the same user-enum ownership wall"
+        );
     }
 
     /// Like `covers`, but runs the FULL front end (sema) on `src` first, so

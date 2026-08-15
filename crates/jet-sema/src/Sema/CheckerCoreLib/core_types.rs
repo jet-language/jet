@@ -431,7 +431,7 @@ pub(crate) fn core_lang_variants(
 
 /// D-FACT-READ1=A: reflection fact kinds are a closed typed menu, not strings
 /// smuggled through `FactInfo.kind`.
-pub(crate) fn core_fact_kind_variants(
+pub fn core_fact_kind_variants(
     enum_name: &str,
 ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
     let variants: Vec<String> = match enum_name {

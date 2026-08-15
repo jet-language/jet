@@ -7,6 +7,7 @@ use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::arg_conv_in_subset;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::fold_typed_fact_enum_equality;
+use crate::Codegen::TIR::fold_typed_fact_enum_pattern;
 use crate::Codegen::TIR::foreign_struct_lit_in_subset;
 use crate::Codegen::TIR::is_covered_generic_struct_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -57,6 +58,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
             expr_in_subset(inner, cx, locals)
         }
+        // D-FACT-ENUM-TIR: `value == .Variant` parses as a PatternTest. A
+        // compiler fact enum comparison is closed here before a runtime enum
+        // pattern can enter any engine.
+        Expr::PatternTest {
+            subject, pattern, ..
+        } if fold_typed_fact_enum_pattern(cx, subject, pattern).is_some() => true,
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
         // Bool `matches!` (`TExprKind::PatternMatches`). Only user enums whose
