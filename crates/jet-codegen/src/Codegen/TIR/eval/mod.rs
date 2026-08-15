@@ -2660,6 +2660,20 @@ impl<'a> EvalCtx<'a> {
                 break;
             }
         }
+        let result = result.map(|mut value| {
+            if let (
+                Some(Type::Named(expected)),
+                CtValue::Enum { type_name, .. } | CtValue::Struct { type_name, .. },
+            ) = (&func.ret, &mut value)
+            {
+                if crate::Codegen::nominal_leaf(type_name)
+                    == crate::Codegen::nominal_leaf(expected)
+                {
+                    *type_name = expected.clone();
+                }
+            }
+            value
+        });
         let returned = result.as_ref().ok().cloned().unwrap_or(CtValue::Unit);
         self.local_cells.leave_frame(&returned);
         self.call_depth -= 1;

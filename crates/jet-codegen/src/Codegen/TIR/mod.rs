@@ -1715,6 +1715,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 Type::Named(qualified.clone()),
                                 &imported_cx,
                             );
+                            lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                qualify_imported_type(bundle, module_idx, &owner, ty)
+                            });
                             lowered.name = format!("{}::{}", qualified, method.name);
                             funcs.push(lowered);
                         }
@@ -1742,6 +1745,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &imported_cx,
                                     &implementation.trait_name,
                                 );
+                                lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                    qualify_imported_type(bundle, module_idx, &owner, ty)
+                                });
                                 lowered.name = format!("{}::{}", qualified, method.name);
                                 funcs.push(lowered);
                             }

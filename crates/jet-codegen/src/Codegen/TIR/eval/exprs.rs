@@ -9612,9 +9612,9 @@ impl<'a> EvalCtx<'a> {
             }
         }
         if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
-            let canonical_type_name = type_name
+            let canonical_type_name = crate::Codegen::nominal_leaf(type_name)
                 .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                .unwrap_or(type_name);
+                .unwrap_or_else(|| crate::Codegen::nominal_leaf(type_name));
             for key in [
                 format!("{type_name}::display"),
                 format!("{canonical_type_name}::display"),
@@ -9654,7 +9654,7 @@ impl<'a> EvalCtx<'a> {
                     .iter()
                     .map(|(key, value)| {
                         Ok((
-                            self.show_value(&key.to_value(), scope)?,
+                            self.debug_value(&key.to_value()),
                             self.show_value(value, scope)?,
                         ))
                     })
@@ -9835,7 +9835,9 @@ impl<'a> EvalCtx<'a> {
     pub(super) fn debug_value(&self, v: &CtValue) -> String {
         match v {
             CtValue::Struct { type_name, fields } => {
-                let ty = type_name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
+                let ty = crate::Codegen::nominal_leaf(type_name)
+                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or_else(|| crate::Codegen::nominal_leaf(type_name));
                 if ty == crate::Syntax::TYPE_RANGE {
                     if let Some((start, end, exclusive)) = range_parts(v) {
                         return super::range_semantics::jet_range_structural_text(
@@ -9906,8 +9908,12 @@ impl<'a> EvalCtx<'a> {
                 variant,
                 args,
             } => {
-                let ty = type_name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
-                let var = variant.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant);
+                let ty = crate::Codegen::nominal_leaf(type_name)
+                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or_else(|| crate::Codegen::nominal_leaf(type_name));
+                let var = variant
+                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(variant);
                 if ty.starts_with("__JetUnion_") {
                     let payload = args
                         .first()
