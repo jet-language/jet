@@ -1066,8 +1066,28 @@ fn lower_callable_lambda_with_env(
     } else {
         fn_value_signature(module, &fn_ty, meta)?
     };
+    // #1981: `lam.jit_name` is span-derived (`__jet___lambda_<start>_<end>`), so
+    // a source lambda TIR lowering reaches twice mints the same symbol twice and
+    // Cranelift rejects the second definition. One lambda is one machine
+    // function per callback ABI: the environment-forcing and capture-writeback
+    // callbacks are different code, so they carry their own reserved names, and
+    // a repeat lowering of the same variant reuses the FuncId already minted
+    // instead of re-defining the symbol — the `lower_interrupt_named_callback`
+    // pattern above.
+    let symbol = match (force_env, writeback_captures) {
+        (false, false) => lam.jit_name.clone(),
+        (true, false) => format!("{}_env", lam.jit_name),
+        (false, true) => format!("{}_cb", lam.jit_name),
+        (true, true) => format!("{}_env_cb", lam.jit_name),
+    };
+    if let Some(cranelift_module::FuncOrDataId::Func(id)) = module.get_name(&symbol) {
+        // The already-compiled body is reentrant machine code the warm-run
+        // FuncId ordering does not account for (see the `#1592` note below).
+        super::tier_cache::abort_capture();
+        return Ok(id);
+    }
     let id = module
-        .declare_function(&lam.jit_name, Linkage::Local, &sig)
+        .declare_function(&symbol, Linkage::Local, &sig)
         .map_err(|error| error.to_string())?;
     let mut ctx = module.make_context();
     ctx.func.signature = sig;
@@ -1228,7 +1248,7 @@ fn lower_callable_lambda_with_env(
     cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|error| {
         format!(
             "{}: verifier: {error:?} (ret={:?}, captures={}, sig_returns={})",
-            lam.jit_name,
+            symbol,
             lam.ret,
             lam.captures.len(),
             ctx.func.signature.returns.len()

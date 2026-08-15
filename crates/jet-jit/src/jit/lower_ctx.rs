@@ -279,9 +279,45 @@ impl LowerCtx<'_, '_> {
     /// multi-result host calls still spell the three steps by hand — see the
     /// remaining `declare_func_in_func` sites in this file.
     fn call_host(&mut self, id: FuncId, args: &[Value]) -> Value {
+        self.assert_host_arity(id, args.len());
         let func_ref = self.module.declare_func_in_func(id, self.b.func);
         let call = self.b.ins().call(func_ref, args);
         self.b.inst_results(call)[0]
+    }
+
+    /// A call whose argument count disagrees with the host table's declared
+    /// signature is invalid CLIF — Cranelift's verifier rejects it inside
+    /// `define_function`, far from the lowering that built it. Invalid CLIF Jet
+    /// emitted is a compiler bug, never a user diagnostic, so fail here instead,
+    /// naming the symbol and both counts.
+    ///
+    /// Arity only. Argument *types* are deliberately not asserted here: a `Float`
+    /// value arriving at an `i64` slot means lowering selected the wrong host
+    /// (`list_push` where `list_push_f64` was owed), and the repair is the host
+    /// selection, not a conversion at the call. The registry seam that does own
+    /// ABI marshalling checks and repairs types in `marshal_host_args`.
+    fn assert_host_arity(&self, id: FuncId, argc: usize) {
+        if cfg!(debug_assertions) {
+            let declaration = self.module.declarations().get_function_decl(id);
+            let declared = declaration.signature.params.len();
+            assert_eq!(
+                argc,
+                declared,
+                "jit host `{}` emitted with {argc} args for a {declared}-param signature",
+                declaration.name.as_deref().unwrap_or("<anonymous>"),
+            );
+        }
+    }
+
+    /// Declared positional-parameter count of a resident host symbol, read from
+    /// the host table without materializing the parameter list.
+    fn host_param_count(&self, id: FuncId) -> usize {
+        self.module
+            .declarations()
+            .get_function_decl(id)
+            .signature
+            .params
+            .len()
     }
 
     fn clear_memo_for_record(&mut self, record: Value) {
@@ -402,6 +438,85 @@ impl LowerCtx<'_, '_> {
         let _ = self.call_host(self.host.stack_enter, &args);
         self.emit_trap_check()
     }
+    /// The resident host symbol this Core row projects onto, when the host
+    /// registry carries one. A missing candidate is a normal fall-through to
+    /// the typed lowering, not a JIT gap.
+    fn recorded_core_call_host(
+        &self,
+        row: &jet_foundation::Syntax::CoreCallRecord,
+    ) -> Option<FuncId> {
+        row.jit_symbol_candidates()
+            .into_iter()
+            .find_map(|symbol| self.host.lookup(&symbol))
+    }
+
+    /// Declared CLIF parameter types of a resident host symbol. The host table
+    /// owns that signature, so it is the one fact an emitted call has to agree
+    /// with: Cranelift's verifier rejects every disagreement, so a call built
+    /// from any other type source is invalid CLIF, never a user diagnostic.
+    fn host_param_types(&self, id: FuncId) -> Vec<types::Type> {
+        self.module
+            .declarations()
+            .get_function_decl(id)
+            .signature
+            .params
+            .iter()
+            .map(|param| param.value_type)
+            .collect()
+    }
+
+    /// Marshal already-lowered values into the host's declared parameter types.
+    ///
+    /// The resident host is an ABI adapter, so a scalar can arrive in a
+    /// narrower CLIF type than the slot the host declares: `Bool` lowers to
+    /// `i8` and `Char` to `i32`, while these hosts read each scalar as `i64`
+    /// and test `!= 0`. Zero-extending once here is that marshalling step, so
+    /// no individual call site has to remember it. A widening is mechanical; a
+    /// narrowing or an integer/float domain change is not, so those stay a loud
+    /// emit-time error instead of invalid CLIF.
+    fn marshal_host_args(
+        &mut self,
+        symbol: &str,
+        params: &[types::Type],
+        arg_values: &[Value],
+    ) -> Result<Vec<Value>, String> {
+        let mut marshalled = Vec::with_capacity(arg_values.len());
+        for (index, (&value, &want)) in arg_values.iter().zip(params).enumerate() {
+            let have = self.b.func.dfg.value_type(value);
+            if have == want {
+                marshalled.push(value);
+            } else if have.is_int() && want.is_int() && have.bits() < want.bits() {
+                marshalled.push(self.b.ins().uextend(want, value));
+            } else {
+                let message = format!(
+                    "jit host `{symbol}` arg {index}: lowered {have} for declared {want}"
+                );
+                // Loud where the tier census runs; a release build degrades to
+                // the ordinary lowering error rather than emitting invalid CLIF.
+                debug_assert_eq!(have, want, "{message}");
+                return Err(message);
+            }
+        }
+        Ok(marshalled)
+    }
+
+    /// A zero in the CLIF type this expression's own slot declares.
+    ///
+    /// A sema-proved-dead edge (`Unreachable`, `Todo`) still has to hand a value
+    /// to the block parameter or return slot it flows into, and that slot's type
+    /// is `expr.ty` — not `i64`. An exhaustive `Float` match lowers to nested
+    /// if-let expressions whose final else is `Unreachable`, and it merges on an
+    /// `f64` block parameter, so an `i64` zero on that edge is invalid CLIF.
+    fn dead_edge_zero(&mut self, ty: &Type) -> Value {
+        let clif = self.meta.clif_ty(ty).or_else(|| clif_ty(ty));
+        match clif {
+            Some(clif) if clif == types::F64 => self.b.ins().f64const(0.0),
+            Some(clif) => self.b.ins().iconst(clif, 0),
+            // A void slot never reads the value; keep the historical carrier.
+            None => self.b.ins().iconst(types::I64, 0),
+        }
+    }
+
     /// Lower a plain Core row through the resident host symbol derived from
     /// the same foundation record used by AOT. Special calls keep their
     /// existing typed lowering below; a missing host candidate is therefore a
@@ -427,13 +542,18 @@ impl LowerCtx<'_, '_> {
         {
             return Ok(None);
         }
-        let Some(_host_id) = row
-            .jit_symbol_candidates()
-            .into_iter()
-            .find_map(|symbol| self.host.lookup(&symbol))
-        else {
+        let Some(host_id) = self.recorded_core_call_host(row) else {
             return Ok(None);
         };
+        // The Core row and the resident host must agree on how many positional
+        // slots this call has. When they disagree the host is not this row's
+        // direct projection — `core.data.csv_reader` reads its group limit from
+        // a third host parameter the two-argument Core row does not carry — so
+        // the typed lowering below owns the call. Checked before the arguments
+        // are lowered so the fall-through cannot evaluate them a second time.
+        if self.host_param_count(host_id) != args.len() {
+            return Ok(None);
+        }
         let arg_values = args
             .iter()
             .enumerate()
@@ -460,15 +580,16 @@ impl LowerCtx<'_, '_> {
         if !row.jit_direct {
             return Ok(None);
         }
-        let Some(host_id) = row
-            .jit_symbol_candidates()
-            .into_iter()
-            .find_map(|symbol| self.host.lookup(&symbol))
-        else {
+        let Some(host_id) = self.recorded_core_call_host(row) else {
             return Ok(None);
         };
+        let params = self.host_param_types(host_id);
+        if params.len() != arg_values.len() {
+            return Ok(None);
+        }
+        let arg_values = self.marshal_host_args(row.symbol.name(), &params, arg_values)?;
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, arg_values);
+        let call = self.b.ins().call(host_ref, &arg_values);
         self.emit_trap_check()?;
         Ok(Some(
             clif_ty(ret_ty)
@@ -1926,9 +2047,16 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(ok_block);
         let payload = self.result_payload(decoded_r, elem_ty)?;
         let out = self.b.use_var(out_var);
-        let push_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        // The decoded payload's own CLIF type is the one fact that decides this
+        // host: a `[Float#n]` element arrives as `f64`, and `list_push` declares
+        // `i64`. Reading it off the value keeps this in step with
+        // `result_payload` instead of re-deriving the element ABI here.
+        let push_id = if self.b.func.dfg.value_type(payload) == types::F64 {
+            self.host.coll.list_push_f64
+        } else {
+            self.host.coll.list_push
+        };
+        let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
         self.b.ins().call(push_ref, &[out, payload]);
         self.b.ins().jump(step, &[]);
 
@@ -18586,7 +18714,7 @@ impl LowerCtx<'_, '_> {
                         &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
                     );
                     self.emit_trap_check()?;
-                    Ok(self.b.ins().iconst(types::I64, 0))
+                    Ok(self.dead_edge_zero(&expr.ty))
                 })
             }
             TExprKind::Todo { line, expected_type } => {
@@ -18599,7 +18727,7 @@ impl LowerCtx<'_, '_> {
                     let expected_v = self.b.ins().iconst(types::I64, expected_h);
                     self.b.ins().call(host, &[line_v, expected_v]);
                     self.emit_trap_check()?;
-                    Ok(self.b.ins().iconst(types::I64, 0))
+                    Ok(self.dead_edge_zero(&expr.ty))
                 })
             }
             TExprKind::DistinctRaw(inner) => self.lower_expr(inner),
@@ -21018,7 +21146,10 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.coll.deque_from, &[recv_val]))
                 })
             }
-            TBuiltinOp::TryCollect => self.lower_try_collect(recv),
+            // #1981: the receiver is already lowered above. Re-lowering it here
+            // evaluates the `map(λ)` adapter a second time — a duplicate lambda
+            // symbol, and a second pass over the progress source.
+            TBuiltinOp::TryCollect => self.lower_try_collect(recv, recv_val),
             // Compute aliases are handles backed by the shared Prelude. Keep
             // even a generic View opcode on that path; routing it to the list
             // ABI would discard Tensor bounds and ownership policy.
@@ -26324,7 +26455,15 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(print, &[shown]);
             return Ok(());
         }
-        if let Type::IntN { signed, .. } = &inner.ty {
+        // One type source for every print surface. TIR leaves `Type::Int` on a
+        // CORE-struct field read it has no entry for (`Size.width`), while the
+        // field lowering below recovers the declared slot type and produces an
+        // `f64`. Keying these integer fast paths on the raw TIR type therefore
+        // handed an `f64` to `int_to_string`, whose declared parameter is `i64`
+        // — invalid CLIF. `display_abi_ty` is the same recovered fact the
+        // general path uses, so the host and the value cannot disagree.
+        let print_ty = self.display_abi_ty(inner);
+        if let Type::IntN { signed, .. } = &print_ty {
             let value = self.lower_expr(inner)?;
             let signed = self
                 .b
@@ -26337,7 +26476,7 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(print, &[text]);
             return Ok(());
         }
-        if matches!(&inner.ty, Type::Int) {
+        if matches!(&print_ty, Type::Int) {
             let value = self.lower_expr(inner)?;
             let text = self.call_host(self.host.num.int_to_string, &[value]);
             let print = self
@@ -26363,7 +26502,6 @@ impl LowerCtx<'_, '_> {
             }
             _ => {
                 let val = self.lower_expr(inner)?;
-                let print_ty = self.display_abi_ty(inner);
                 // Some method chains type `list.join(sep)` as Unit in TIR even though
                 // the lowered value is a String handle (seen on Url.path_segments().join).
                 if matches!(&print_ty, Type::Named(n) if n == "Unit") {
@@ -29011,10 +29149,12 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.ins().iconst(types::I8, 0))
     }
 
-    fn lower_try_collect(&mut self, recv: &TExpr) -> Result<Value, String> {
+    /// `recv_val` is the receiver `lower_builtin_method` already lowered. The
+    /// receiver may be a `map(λ)` adapter, so evaluating it twice both mints its
+    /// lambda symbol twice and runs the traversal twice.
+    fn lower_try_collect(&mut self, recv: &TExpr, recv_val: Value) -> Result<Value, String> {
         let (ok_ty, err_ty) = jit_result_list_elem(&recv.ty)
             .ok_or_else(|| "jit try_collect unsupported".to_string())?;
-        let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
