@@ -1245,15 +1245,7 @@ impl TraitRegistry {
             DISPLAY => self
                 .trait_impls
                 .contains(&(type_name.to_string(), DISPLAY.to_string())),
-            EQUATABLE
-                if self.auto_equatable.contains(type_name)
-                    || self
-                        .derives
-                        .get(type_name)
-                        .is_some_and(|derives| derives.contains(COMPARABLE)) =>
-            {
-                true
-            }
+            EQUATABLE if self.auto_equatable.contains(type_name) => true,
             COMPARABLE if self.auto_comparable.contains(type_name) => true,
             ENCODE if self.auto_encode.contains(type_name) => true,
             DECODE if self.auto_decode.contains(type_name) => true,

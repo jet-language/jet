@@ -551,6 +551,10 @@ fn run() {
     ] {
         assert!(!selected.contains(type_name), "{type_name}");
     }
+    for type_name in ["NoEquality", "OuterNoEquality"] {
+        assert!(!facts.auto_equatable.contains(type_name), "{type_name}");
+        assert!(facts.auto_comparable.contains(type_name), "{type_name}");
+    }
     for (tier, force_interpreter) in [("JIT", false), ("interpreter", true)] {
         let outcome =
             jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, force_interpreter);
@@ -782,26 +786,39 @@ fn run() {
         .iter()
         .position(|module| module.path == dep.join("dep.jet"))
         .unwrap();
+    let open_dep_idx = bundle
+        .modules
+        .iter()
+        .position(|module| module.path == open_dep.join("open_dep.jet"))
+        .unwrap();
+    let badge_identity = bundle
+        .name_ledger
+        .nominal_identity(open_dep_idx, "Badge")
+        .unwrap();
+    assert!(badge_identity.contains("::"), "{badge_identity}");
     let dep_facts = &facts[dep_idx];
     for selected in [
         &app_facts.auto_printable,
         &app_facts.auto_debug,
         &app_facts.auto_equatable,
+        &app_facts.auto_comparable,
     ] {
         assert!(selected.contains("Token"), "{selected:?}");
         assert!(selected.contains("LocalEnvelope"), "{selected:?}");
         assert!(selected.contains("UnionEnvelope"), "{selected:?}");
         assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
         assert!(!selected.contains("vendor.Token"), "{selected:?}");
-        assert!(selected.contains("library.Badge"), "{selected:?}");
+        assert!(selected.contains(&badge_identity), "{selected:?}");
     }
     assert!(app_facts.auto_printable.contains("MapEnvelope"));
     assert!(app_facts.auto_debug.contains("MapEnvelope"));
     assert!(!app_facts.auto_equatable.contains("MapEnvelope"));
+    assert!(!app_facts.auto_comparable.contains("MapEnvelope"));
     for selected in [
         &dep_facts.auto_printable,
         &dep_facts.auto_debug,
         &dep_facts.auto_equatable,
+        &dep_facts.auto_comparable,
     ] {
         assert!(!selected.contains("Token"), "{selected:?}");
     }
