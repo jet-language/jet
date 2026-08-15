@@ -1403,10 +1403,46 @@ extern "C" fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
     })
 }
 
+/// Element-kind preserving window (#1995).
+///
+/// The list carrier is heterogeneous at this ABI: `[Float]` stores
+/// `JetVal::Float`, `[Range]` stores `JetVal::Range`, `[String]` and record
+/// lists store handle ints. Materializing the window through the i64 element
+/// view therefore lost every non-integer list — `clone_int_list` answers
+/// `None` as soon as one element is not an `Int`, and the `.expect` behind it
+/// panicked inside this `extern "C"` frame, which aborts the process instead
+/// of reporting. `xs[1..2]` on a `[Float]` reaches here from a correct
+/// program: `jit_list_native_type` (`jit/safety.rs`) admits float slices.
+///
+/// The shared Prelude kernel keeps the window policy (I9): it runs over the
+/// index vector, and the arena copies whatever elements those indexes name.
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
-    let xs = clone_list_ints(list);
-    let out = collection_semantics::list_slice(&xs, start, end);
-    alloc_from_ints(&out)
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            rt.set_host_fault("jit list slice: bad list handle");
+            return 0;
+        };
+        let indexes = (0..len).collect::<Vec<_>>();
+        let kept = collection_semantics::list_slice(&indexes, start, end);
+        let (Some(&first), Some(&last)) = (kept.first(), kept.last()) else {
+            return rt.heap.alloc_empty_list();
+        };
+        if let Some(window) = rt.heap.list_slice(list, first, last + 1) {
+            return window;
+        }
+        // The arena's raw window covers a `JetVal::List` carrier only. A
+        // fixed-size `UninitList` keeps its elements behind the integer view
+        // it is built from, so materialize that one through the same view.
+        let Some(values) = rt.heap.clone_int_list(list) else {
+            rt.set_host_fault("jit list slice: uninitialized fixed-list carrier");
+            return 0;
+        };
+        let out = rt.heap.alloc_empty_list();
+        for &value in &values[first as usize..=last as usize] {
+            let _ = rt.heap.list_push_int(out, value);
+        }
+        out
+    })
 }
 
 extern "C" fn jet_jit_list_range_end(

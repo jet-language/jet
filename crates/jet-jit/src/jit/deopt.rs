@@ -448,6 +448,14 @@ pub(crate) fn lower_deopt_stub(
 }
 
 /// Host: interpret one deopted function with packed i64 args.
+///
+/// `extern "C"` makes this a nounwind frame: rustc wraps the body in an
+/// abort-on-unwind shim, so an unwind that reaches this edge calls
+/// `core::panicking::panic_cannot_unwind` and the process dies with SIGABRT
+/// *before* unwinding starts — no `catch_unwind` further out can intercept it
+/// (#1995). The whole TIR evaluator runs below this line, so every unwind it
+/// can raise is converted here, inside the frame, onto the tier's existing
+/// status channel.
 pub(crate) extern "C" fn jet_deopt_call(
     fn_idx: i64,
     argc: i64,
@@ -462,84 +470,141 @@ pub(crate) extern "C" fn jet_deopt_call(
 ) -> i64 {
     let packed = [a0, a1, a2, a3, a4, a5, a6, a7];
     let argc = argc.clamp(0, 8) as usize;
-    TIR::install_comptime_bridge();
-    let name = DEOPT_NAMES.with(|s| s.borrow().get(fn_idx as usize).cloned());
-    let Some(name) = name else {
-        Concurrency::with_runtime_mut(|rt| {
-            rt.set_trap("deopt call: unknown function index");
-        });
-        return 0;
-    };
-    let program_ptr = DEOPT_PROGRAM.with(|s| *s.borrow());
-    let Some(program_ptr) = program_ptr else {
-        Concurrency::with_runtime_mut(|rt| {
-            rt.set_trap("deopt call: no program");
-        });
-        return 0;
-    };
-    // SAFETY: install_deopt_program keeps this pointer valid for the invoke.
-    let program = unsafe { &*program_ptr };
-    let Some(func) = program.funcs.iter().find(|f| f.name == name) else {
-        Concurrency::with_runtime_mut(|rt| {
-            rt.set_trap(&format!("deopt call: missing `{name}`"));
-        });
-        return 0;
-    };
-    let func_name = func.name.clone();
-    let param_tys: Vec<Type> = func.params.iter().map(|(_, ty, _)| ty.clone()).collect();
-    let ret_ty = func.ret.clone();
+    let interpret = move || -> i64 {
+        TIR::install_comptime_bridge();
+        let name = DEOPT_NAMES.with(|s| s.borrow().get(fn_idx as usize).cloned());
+        let Some(name) = name else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap("deopt call: unknown function index");
+            });
+            return 0;
+        };
+        let program_ptr = DEOPT_PROGRAM.with(|s| *s.borrow());
+        let Some(program_ptr) = program_ptr else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap("deopt call: no program");
+            });
+            return 0;
+        };
+        // SAFETY: install_deopt_program keeps this pointer valid for the invoke.
+        let program = unsafe { &*program_ptr };
+        let Some(func) = program.funcs.iter().find(|f| f.name == name) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap(&format!("deopt call: missing `{name}`"));
+            });
+            return 0;
+        };
+        let func_name = func.name.clone();
+        let param_tys: Vec<Type> = func.params.iter().map(|(_, ty, _)| ty.clone()).collect();
+        let ret_ty = func.ret.clone();
 
-    let result: Option<Result<i64, String>> = Concurrency::with_runtime_mut(|rt| {
-        let mut args = Vec::with_capacity(argc);
-        for i in 0..argc {
-            let ty = match param_tys.get(i) {
-                Some(ty) => ty,
-                None => return Some(Err(format!("deopt `{func_name}` missing param {i}"))),
-            };
-            match bits_to_ct(rt, ty, packed[i]) {
-                Ok(v) => args.push(v),
-                Err(d) => return Some(Err(d.what)),
+        let result: Option<Result<i64, String>> = Concurrency::with_runtime_mut(|rt| {
+            let mut args = Vec::with_capacity(argc);
+            for i in 0..argc {
+                let ty = match param_tys.get(i) {
+                    Some(ty) => ty,
+                    None => return Some(Err(format!("deopt `{func_name}` missing param {i}"))),
+                };
+                match bits_to_ct(rt, ty, packed[i]) {
+                    Ok(v) => args.push(v),
+                    Err(d) => return Some(Err(d.what)),
+                }
+            }
+            let mut sink = DevSink::new();
+            let memos = DEOPT_MEMOS
+                .with(|state| state.borrow().clone())
+                .unwrap_or_else(TIR::new_memo_state);
+            let value =
+                match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
+                    &rt.program_allocator,
+                    || {
+                        jet_codegen::Comptime::with_ambient(
+                            Some(crate::ambient_interp::ambient_core_call),
+                            Some(crate::ambient_interp::ambient_handle),
+                            || {
+                                TIR::run_named_func_with_memos(
+                                    program, &func_name, args, &mut sink, memos,
+                                )
+                            },
+                        )
+                    },
+                ) {
+                    Ok(v) => v,
+                    Err(d) => return Some(Err(d.what)),
+                };
+            rt.stdout.push_str(&sink.stdout);
+            rt.stderr.push_str(&sink.stderr);
+            match &ret_ty {
+                None => Some(Ok(0)),
+                Some(Type::Named(n)) if n == "Unit" => Some(Ok(0)),
+                Some(ty) => Some(ct_to_bits(rt, ty, &value).map_err(|d| d.what)),
+            }
+        });
+        match result {
+            Some(Ok(bits)) => bits,
+            Some(Err(msg)) => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_trap(&msg);
+                });
+                0
+            }
+            None => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_trap("deopt call: no active runtime");
+                });
+                0
             }
         }
-        let mut sink = DevSink::new();
-        let memos = DEOPT_MEMOS
-            .with(|state| state.borrow().clone())
-            .unwrap_or_else(TIR::new_memo_state);
-        let value = match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
-            &rt.program_allocator,
-            || {
-                jet_codegen::Comptime::with_ambient(
-                    Some(crate::ambient_interp::ambient_core_call),
-                    Some(crate::ambient_interp::ambient_handle),
-                    || TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos),
-                )
-            },
-        ) {
-            Ok(v) => v,
-            Err(d) => return Some(Err(d.what)),
-        };
-        rt.stdout.push_str(&sink.stdout);
-        rt.stderr.push_str(&sink.stderr);
-        match &ret_ty {
-            None => Some(Ok(0)),
-            Some(Type::Named(n)) if n == "Unit" => Some(Ok(0)),
-            Some(ty) => Some(ct_to_bits(rt, ty, &value).map_err(|d| d.what)),
+    };
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(interpret)) {
+        Ok(bits) => bits,
+        Err(payload) => {
+            convert_deopt_unwind(payload.as_ref());
+            0
         }
+    }
+}
+
+/// Convert an unwind caught at the [`jet_deopt_call`] boundary. Always returns
+/// normally: generated code reads the runtime's trap flag at its next
+/// `emit_trap_check` and reaches its epilogue through Cranelift control flow,
+/// never through a Rust unwind (I1).
+fn convert_deopt_unwind(payload: &(dyn std::any::Any + Send)) {
+    // A shared-Prelude stop recorded its own report in `runtime_stop_unwind`
+    // before unwinding; a second engine-local message would be an invention.
+    if payload.is::<super::runtime_host::JitRuntimeStop>() {
+        return;
+    }
+    // D-CANCELMODEL1=C: a cancel raised at an interpreter wait point is an
+    // ordinary program event, not a defect. Deliver the same status `#Shield`
+    // already delivers for a deferred cancel (`Concurrency::…ShieldExit`).
+    if jet_codegen::scheduler::jet_scheduler_is_cancel_unwind(payload) {
+        Concurrency::with_runtime_mut(|rt| rt.set_trap("a task was cancelled"));
+        return;
+    }
+    // Anything else is a Jet defect. `JitRuntime::set_host_fault` puts it on
+    // the branded ICE rail: `resident.rs::take_host_fault_outcome` renders the
+    // report and the run exits `ExitCodes::ICE` (I2).
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            payload
+                .downcast_ref::<&'static str>()
+                .map(|message| (*message).to_string())
+        })
+        .unwrap_or_else(|| "a JIT deopt host panicked".to_string());
+    let recorded = Concurrency::with_runtime_mut(|rt| {
+        rt.set_host_fault(&message);
+        true
     });
-    match result {
-        Some(Ok(bits)) => bits,
-        Some(Err(msg)) => {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(&msg);
-            });
-            0
-        }
-        None => {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap("deopt call: no active runtime");
-            });
-            0
-        }
+    if !recorded {
+        // No resident runtime owns this call, so there is no status channel to
+        // put the fault on. Never return a silent success: say it on stderr.
+        let _ = super::runtime_host::write_jit_stderr(
+            &format!("internal compiler error: {message}\n"),
+            true,
+        );
     }
 }
 

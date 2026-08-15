@@ -57,13 +57,69 @@ pub(crate) fn add_struct_new_count_for_test(extra: usize) {
     STRUCT_NEW_COUNT.with(|count| count.set(count.get() + extra));
 }
 
+thread_local! {
+    /// Message from the last panic [`catch_jit_panic`] silenced.
+    ///
+    /// A panic that tries to escape an `extern "C"` JIT host raises the hook
+    /// TWICE: once for the real failure, and once at the frame edge for
+    /// `core::panicking::panic_cannot_unwind`. By the time the second one
+    /// arrives the first message is the only evidence of what actually broke,
+    /// so keep it until the window closes.
+    static SILENCED_JIT_PANIC: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The payloads std raises with `can_unwind == false`
+/// (`core::panicking::panic_cannot_unwind` / `panic_in_cleanup`).
+///
+/// `panic_with_hook` aborts the process immediately after the hook returns for
+/// these, *before* unwinding starts, so no `catch_unwind` below ever observes
+/// them. The hook is the last place anything can be said at all — silencing it
+/// there leaves a bare SIGABRT with no diagnostic (#1995).
+fn is_nounwind_abort(message: Option<&str>) -> bool {
+    matches!(
+        message,
+        Some("panic in a function that cannot unwind" | "panic in a destructor during cleanup")
+    )
+}
+
+/// Run resident JIT work, converting an unwinding panic into a named gap so
+/// the caller deopts instead of dying.
+///
+/// The name is honest only for panics that can unwind. A panic that reaches an
+/// `extern "C"` frame edge is turned into a non-unwinding panic that aborts
+/// inside `panic_with_hook`, so this function neither catches nor converts it;
+/// the installed hook reports it instead, and the fix for that class is to
+/// catch inside the `extern "C"` body (see `jit/deopt.rs::jet_deopt_call`).
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
         let _guard = TRY_COMPILE_PANIC_HOOK_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        SILENCED_JIT_PANIC.with(|slot| *slot.borrow_mut() = None);
         let old_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
+        std::panic::set_hook(Box::new(|info| {
+            let message = info.payload_as_str().unwrap_or("unknown panic payload");
+            if !is_nounwind_abort(Some(message)) {
+                // Recoverable: the caller converts this into a named gap and
+                // deopts, so the user sees no Rust panic banner. Keep the text
+                // in case the same run then hits a frame edge it cannot cross.
+                let recorded = match info.location() {
+                    Some(at) => format!("{message} (at {at})"),
+                    None => message.to_string(),
+                };
+                SILENCED_JIT_PANIC.with(|slot| *slot.borrow_mut() = Some(recorded));
+                return;
+            }
+            // The process aborts as soon as this returns. Say what failed.
+            if let Some(first) = SILENCED_JIT_PANIC.with(|slot| slot.borrow_mut().take()) {
+                eprintln!("jit host panic before the non-unwinding abort: {first}");
+            }
+            match info.location() {
+                Some(at) => eprintln!("jit non-unwinding panic at {at}: {message}"),
+                None => eprintln!("jit non-unwinding panic: {message}"),
+            }
+        }));
         let result = catch_unwind(AssertUnwindSafe(f));
         std::panic::set_hook(old_hook);
         result
@@ -81,7 +137,9 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
             } else if let Some(s) = payload.downcast_ref::<&str>() {
                 (*s).to_string()
             } else {
-                "unknown panic payload".into()
+                SILENCED_JIT_PANIC
+                    .with(|slot| slot.borrow_mut().take())
+                    .unwrap_or_else(|| "unknown panic payload".into())
             };
             Err(format!(
                 "jit {context} panicked before returning an unsupported reason: {detail}"
@@ -361,7 +419,7 @@ impl JitRuntime {
     /// A Rust helper panic is an engine fault, not a user runtime stop. Keep
     /// no Rust payload in the program report; the resident driver owns the
     /// branded ICE boundary.
-    fn set_host_fault(&mut self, _msg: &str) {
+    pub(crate) fn set_host_fault(&mut self, _msg: &str) {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
