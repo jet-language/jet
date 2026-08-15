@@ -5801,6 +5801,17 @@ fn swap_command_entry_point(
     wrapper.task_span = None;
     wrapper.task_metadata = None;
     wrapper.every = None;
+    // The wrapper deletes the target's parameters, so every decoded fact that
+    // names one has to go with them: a copied `#Pre`/`#Post` clause would read
+    // `suite` in an item with no `suite`, and sema would report E0102 against a
+    // body the compiler wrote (I2). The contracts still run where they belong —
+    // on the target this wrapper calls. `inline_foreign` goes for the same
+    // reason in the other direction: the wrapper's body is Jet statements, so a
+    // copied `#FFI(<lang>)` marker would make codegen emit the target's foreign
+    // source as the entry and never call the target at all.
+    wrapper.pre = Vec::new();
+    wrapper.post = Vec::new();
+    wrapper.inline_foreign = None;
     wrapper.markers = Vec::new();
     wrapper.body = body;
     entry_module.items.push(Item::Func(Func { ..wrapper }));
