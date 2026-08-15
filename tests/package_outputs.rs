@@ -261,3 +261,26 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
 
     let _ = fs::remove_dir_all(&build_dir);
 }
+
+#[test]
+fn computed_build_contribution_explain_shows_writer_chain() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/build_contribution");
+    let explain = Command::new(jet_bin())
+        .args(["explain", "build.settings.cache_slots", "run.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("computed build contribution explain should execute");
+    assert!(
+        explain.status.success(),
+        "computed build contribution explain failed:\n{}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    let explanation = String::from_utf8_lossy(&explain.stdout);
+    assert!(explanation.contains("Build.Settings.cache_slots = 4"));
+    assert!(explanation.contains("package.jet:settings.cache_slots (default)"));
+    assert!(explanation.contains("[effective] environment / function 4"));
+    assert!(explanation.contains("build_contribution_demo::build"));
+    assert!(explanation.contains("reason=computed by fn build"));
+}
