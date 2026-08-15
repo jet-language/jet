@@ -6,6 +6,14 @@ Error [E3206]: module path `c.demo.__bindgen__` uses the reserved segment `__bin
  Why: autogen lives in `c.<lib>.__bindgen__`; users declare overlays as `#Extern module c.<lib>` only
  Fix: drop `__bindgen__` from your module path, or use `#Extern module c.demo { … }`
 
+Error [E0065]: This function uses the retired `=` body marker.
+  --> tests/ui/generated_cffi_e3206.jet:3:15
+    |
+  3 |     fn ping() = "demo_ping"
+    |               ^
+ Why: `::` separates a one-line function body; `=` fills a slot inside a definition.
+ Fix: Replace `=` with `::`; `jet fmt` applies this fix.
+
 Error [E0003]: expected a call, binding, assignment, or `return`, found `}`
   --> tests/ui/generated_cffi_e3206.jet:4:1
     |

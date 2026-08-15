@@ -5,3 +5,11 @@ Error [E0031]: Jet doesn't use `unsafe` to call Rust crates
     | ^^^^^^
  Why: foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`
  Fix: write: extern rust "crate@version" { fn name(...) => T = "rust::path"; }
+
+Error [E0003]: expected `=` before the Rust path, found `::`
+  --> tests/ui/unsafe_extern_rust_teaching.jet:2:24
+    |
+  2 |     fn answer() => Int :: "demo::answer"
+    |                        ^^
+ Why: the structure here isn't what the compiler expected
+ Fix: use `=` before the Rust path

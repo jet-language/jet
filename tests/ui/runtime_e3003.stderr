@@ -1,7 +1,7 @@
 Error [E3003]: deadline exceeded while waiting in task join
-  --> tests/ui/runtime_e3003.jet:4:9
+  --> tests/ui/runtime_e3003.jet:4:16
     |
   4 |         handle.join() ?? 0
-    |         ^^^^^^^^^^^^^
- Why: A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed.
- Fix: Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope.
+    |                ^^^^^^^^^^^
+ Why: this wait point observed the task context deadline from `#Context(deadline: …)`
+ Fix: raise the deadline budget or shorten the work before this wait point

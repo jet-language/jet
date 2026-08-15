@@ -1,7 +1,15 @@
 Error [E1113]: `frozen` cannot be assigned; it was frozen at `freeze(...)` at byte 87
-  --> tests/ui/frozen_write.jet:8:5
+  --> tests/ui/frozen_write.jet:8:12
     |
   8 |     frozen.value = 2
-    |     ^^^^^^^^^^^^
+    |            ^^^^^
  Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
  Fix: create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
+
+Error [E0205]: cannot edit `value` — `frozen` does not have the write-capability marker `&`
+  --> tests/ui/frozen_write.jet:8:12
+    |
+  8 |     frozen.value = 2
+    |            ^^^^^
+ Why: editing a field requires the write-capability marker `&` on the owning place
+ Fix: declare it with `frozen := ...` to give it write access

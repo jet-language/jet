@@ -13,11 +13,3 @@ Error [E1102]: this task returns `fn()`, which isn't sendable
     |               ^^^^^
  Why: the closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
-
-Error [E1103]: can't detach task `t` — it captured a value that can't cross a thread boundary
-  --> tests/ui/task_detach_unsound.jet:6:7
-    |
-  6 |     t.detach()
-    |       ^^^^^^
- Why: a detached task runs unsupervised; it must only hold values it owns cleanly
- Fix: fix the E1102 error at the spawn site first, then `.detach()` is safe

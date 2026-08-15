@@ -5,3 +5,11 @@ Error [E3203]: `fn(I32) => I32` is not a C-compatible type for a foreign functio
     |                   ^^^^
  Why: `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+
+Error [E0116]: `callback` doesn't hand back a value
+  --> tests/ui/cffi_abi_function_value.jet:9:11
+    |
+  9 |     print(callback(1))
+    |           ^^^^^^^^
+ Why: only calls that declare `=> Type` can be used as a value
+ Fix: call `callback` on its own line, or give it a return type

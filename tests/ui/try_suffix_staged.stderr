@@ -1,7 +1,7 @@
-Error [E0403]: `?` only works inside a function that returns a fallible result
+Error [E2402]: `?` can't convert `E` into `Err` — no declared conversion exists
   --> tests/ui/try_suffix_staged.jet:7:10
     |
   7 |     x :: compute()?
     |          ^^^^^^^^^^
- Why: propagation early-returns the failure to the caller
- Fix: add `=> ... ? E` to this function, or handle the result with `??`
+ Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E => Err`
+ Fix: add `impl E => Err { … }` before this function, or change the return type

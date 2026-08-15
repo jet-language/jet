@@ -2,7 +2,7 @@ Error [E0106]: the name `Tally` is built in and can't be redefined
   --> tests/ui/incomparable_eq.jet:1:8
     |
   1 | struct Tally {
-    |        ^^^
+    |        ^^^^^
  Why: `Tally` is provided by the language itself
  Fix: choose a different name for this struct
 
@@ -10,22 +10,46 @@ Error [E0119]: there's no type called `Tally`
   --> tests/ui/incomparable_eq.jet:5:12
     |
   5 | fn same(a: Tally, b: Tally) => Bool :: (a == b)
-    |            ^^^
+    |            ^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first
 
 Error [E0119]: there's no type called `Tally`
-  --> tests/ui/incomparable_eq.jet:5:20
+  --> tests/ui/incomparable_eq.jet:5:22
     |
   5 | fn same(a: Tally, b: Tally) => Bool :: (a == b)
-    |                    ^^^
+    |                      ^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first
 
 Error [E0312]: `Tally` can't be compared with `Tally` because field `?` doesn't support `==`
-  --> tests/ui/incomparable_eq.jet:5:37
+  --> tests/ui/incomparable_eq.jet:5:41
     |
   5 | fn same(a: Tally, b: Tally) => Bool :: (a == b)
-    |                                     ^^^^^^
+    |                                         ^^^^^^
  Why: value equality needs every field to support the comparison
  Fix: compare individual fields instead
+
+Error [E0302]: `.data` only works on struct and tuple values
+  --> tests/ui/incomparable_eq.jet:1:8
+    |
+  1 | struct Tally {
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.data`
+
+Error [E0119]: there's no type called `Tally`
+  --> tests/ui/incomparable_eq.jet:1:8
+    |
+  1 | struct Tally {
+    |        ^^^^^
+ Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: check the spelling, or define the struct or enum first
+
+Error [E0119]: there's no type called `Tally`
+  --> tests/ui/incomparable_eq.jet:1:8
+    |
+  1 | struct Tally {
+    |        ^^^^^
+ Why: struct literals need a struct type name
+ Fix: define the struct first, or check the spelling

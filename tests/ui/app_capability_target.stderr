@@ -1,3 +1,11 @@
+Error [E-WEB-TARGET-BROWSER]: `run` is pinned to Wasm but uses the `Browser` effect
+  --> tests/ui/app_capability_target.jet:4:4
+    |
+  4 | fn run() => App :: web.app().csr()
+    |    ^^^
+ Why: the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly
+ Fix: remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls
+
 Error [E-APP-TARGET-CAPABILITY]: App capability `.csr` needs target `JS`, but the resolved target is `Wasm`.
   --> tests/ui/app_capability_target.jet:4:30
     |

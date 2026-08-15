@@ -2,7 +2,7 @@ Error [E0106]: the name `Tally` is built in and can't be redefined
   --> tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
-    |        ^^^
+    |        ^^^^^
  Why: `Tally` is provided by the language itself
  Fix: choose a different name for this struct
 
@@ -10,7 +10,7 @@ Error [E0301]: `impl Tally` names a type that doesn't exist
   --> tests/ui/missing_assoc_type.jet:10:6
     |
  10 | impl Tally.Container {
-    |      ^^^
+    |      ^^^^^
  Why: `Tally` hasn't been defined as a struct or enum
  Fix: define `struct Tally` or `enum Tally` first
 
@@ -18,15 +18,15 @@ Error [E0913]: `impl …: Container` doesn't set `type Item`
   --> tests/ui/missing_assoc_type.jet:10:6
     |
  10 | impl Tally.Container {
-    |      ^^^
+    |      ^^^^^
  Why: `Container` declares an associated type each impl must define
  Fix: add `type Item = …` inside the impl block
 
 Error [E0119]: there's no type called `Tally`
-  --> tests/ui/missing_assoc_type.jet:3:10
+  --> tests/ui/missing_assoc_type.jet:6:8
     |
-  3 |     fn first(self) => Item
-    |          ^^^
+  6 | struct Tally {
+    |        ^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first
 
@@ -34,7 +34,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
   --> tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
-    |        ^^^
+    |        ^^^^^
  Why: enums and other values use methods or pattern tests instead
  Fix: use a struct or tuple value before `.vals`
 
@@ -42,7 +42,47 @@ Error [E0302]: `.vals` only works on struct and tuple values
   --> tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
-    |        ^^^
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.vals`
+
+Error [E0119]: there's no type called `Tally`
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: check the spelling, or define the struct or enum first
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.vals`
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.vals`
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.vals`
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
  Why: enums and other values use methods or pattern tests instead
  Fix: use a struct or tuple value before `.vals`
 
@@ -53,3 +93,35 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |                                   ^^^^
  Why: enums and other values use methods or pattern tests instead
  Fix: use a struct or tuple value before `.vals`
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --> tests/ui/missing_assoc_type.jet:11:35
+    |
+ 11 |     fn first(self) => Int :: self.vals[0]
+    |                                   ^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.vals`
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.vals`
+
+Error [E0119]: there's no type called `Tally`
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: check the spelling, or define the struct or enum first
+
+Error [E0119]: there's no type called `Tally`
+  --> tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: struct literals need a struct type name
+ Fix: define the struct first, or check the spelling
