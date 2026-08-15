@@ -3358,16 +3358,6 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
     imported.dedup();
     for target in imported {
         let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
-        // Synthetic Comparable signatures return a module-owned Ordering even
-        // though that enum has no source Item. Register its canonical identity
-        // on the same foreign-type path as authored imported nominals.
-        let ordering_identity = bundle
-            .name_ledger
-            .nominal_identity(target, Syntax::TYPE_ORDERING)
-            .expect("name ledger must identify every loaded module");
-        cx.foreign_types
-            .entry(ordering_identity)
-            .or_insert_with(|| rust_mod.clone());
         for item in &bundle.modules[target].items {
             let (owner, methods): (&str, Vec<(&Func, Option<&str>, bool)>) = match item {
                 Item::Struct(definition) => {

@@ -297,6 +297,15 @@ pub(crate) fn foreign_type_map(
     };
     let mut add_target = |target: usize| {
         let rust_mod = mangle(&bundle.modules[target].alias);
+        // Comparable and its Ordering return type are generated in every
+        // module, so Ordering has no source Item to visit below. Put its
+        // canonical owner in the ordinary pre-lower foreign-type map.
+        if let Some(identity) = bundle
+            .name_ledger
+            .nominal_identity(target, crate::Syntax::TYPE_ORDERING)
+        {
+            map.insert(identity, rust_mod.clone());
+        }
         for item in &bundle.modules[target].items {
             match item {
                 Item::Struct(s)
