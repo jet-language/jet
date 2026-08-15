@@ -469,9 +469,9 @@ pub const JET_RUNTIME_STACK_LIMIT: usize = 6;
 
 /// D-FAIL-BREACH1=A: the one renderer for a running program's breach stop.
 ///
-/// The source location is data supplied by an execution tier. The code-to-copy
-/// mapping, report shape, and breach exit code live here so AOT, JIT, and TIR
-/// cannot drift into separate panic printers.
+/// The source location is data supplied by an execution tier. The active row,
+/// report shape, and breach exit code live here so AOT, JIT, and TIR cannot
+/// drift into separate panic printers.
 pub fn jet_render_runtime_stop(
     code: &'static str,
     file: &str,
@@ -483,38 +483,49 @@ pub fn jet_render_runtime_stop(
     message: &str,
     locals: &str,
 ) -> JetRuntimeDiagnostic {
-    let (what, why, fix) = match code {
-        "E3001" => (
-            format!("panic: {message}"),
-            "the program reached a panic stop and cannot continue".to_string(),
-            "check the source location and handle the failing condition".to_string(),
-        ),
-        "E3005" => (
-            message.to_string(),
-            "a runtime contract condition evaluated false".to_string(),
-            "satisfy the contract or update it".to_string(),
-        ),
-        "E3010" => (
-            message.to_string(),
-            "the operation has no valid result for these operands".to_string(),
-            "check the operands before the operation, or use a checked operation".to_string(),
-        ),
-        "E3011" => (
-            message.to_string(),
-            "a #Todo hole was reached at runtime".to_string(),
-            "implement this code before running it".to_string(),
-        ),
-        "E3012" => (
-            message.to_string(),
-            "the call stack exceeded Jet's safe runtime limit".to_string(),
-            "end the recursion or make progress toward a base case".to_string(),
-        ),
-        _ => (
-            message.to_string(),
-            "the program reached a registered runtime stop".to_string(),
-            "handle the condition at the reported source location".to_string(),
-        ),
+    let Some(row) = crate::Registry::active_runtime_diagnostic(code) else {
+        let what = format!("runtime diagnostic `{code}` is not an active runtime row");
+        let why = "Jet could not resolve this stop through the active diagnostic registry";
+        let fix = "report this as a Jet compiler or host defect";
+        return JetRuntimeDiagnostic {
+            code,
+            source: "host",
+            what: what.clone(),
+            why: why.to_string(),
+            fix: fix.to_string(),
+            rendered: format!("Internal error: {what}\n Why: {why}\n Fix: {fix}\n"),
+            exit_code: crate::ExitCodes::ICE,
+        };
     };
+
+    let line_text = line.to_string();
+    let todo_type = message
+        .rsplit_once(" — expected ")
+        .map(|(_, expected)| expected)
+        .unwrap_or(message);
+    let holes = row
+        .template_holes
+        .iter()
+        .map(|hole| {
+            let value = match *hole {
+                "msg" => message,
+                "file" => file,
+                "line" | "n" => &line_text,
+                "fn" => fn_name,
+                "type" => todo_type,
+                _ => message,
+            };
+            (*hole, value)
+        })
+        .collect::<Vec<_>>();
+    let rendered_row = row.render(&holes);
+    let what = if code == "E3005" {
+        message.to_string()
+    } else {
+        rendered_row.what
+    };
+    let why = rendered_row.why;
+    let fix = rendered_row.fix;
 
     let mut rendered = format!("Stop [{code}]: {what}\n");
     if !file.is_empty() {

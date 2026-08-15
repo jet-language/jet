@@ -166,6 +166,71 @@ fn run() {
 }
 
 #[test]
+fn typed_runtime_stops_keep_cleanup_and_exit_code_through_native_boundary() {
+    let cases = [
+        (
+            "E3010",
+            "arithmetic",
+            r#"
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) { print("auto {self.name}") }
+}
+fn run() {
+    resource := Resource.{ name: "arithmetic" }
+    print("body")
+    zero :: 0
+    print(10 /% zero)
+}
+"#,
+        ),
+        (
+            "E3011",
+            "todo",
+            r#"
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) { print("auto {self.name}") }
+}
+fn missing() => Int :: #Todo
+fn run() {
+    resource := Resource.{ name: "todo" }
+    print("body")
+    print(missing())
+}
+"#,
+        ),
+        (
+            "E3012",
+            "stack",
+            r#"
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) { print("auto {self.name}") }
+}
+fn recurse(n: Int) => Int {
+    return recurse(n + 1)
+}
+fn run() {
+    resource := Resource.{ name: "stack" }
+    print("body")
+    print(recurse(0))
+}
+"#,
+        ),
+    ];
+
+    for (code, name, src) in cases {
+        let ran = compile_and_run_with_scheduler_unwind(src, &format!("jet_resource_close_{code}"));
+        assert_eq!(ran.status.code(), Some(70), "{code}: {ran:?}");
+        assert_eq!(ran.stdout, format!("body\nauto {name}\n").as_bytes());
+        let stderr = String::from_utf8_lossy(&ran.stderr);
+        assert!(stderr.contains(&format!("Stop [{code}]")), "{code}: {stderr}");
+        assert_eq!(stderr.matches(&format!("Stop [{code}]")).count(), 1, "{code}: {stderr}");
+    }
+}
+
+#[test]
 fn consuming_parameters_and_returns_transfer_the_cleanup_guard() {
     let src = r#"
 struct Resource { name: String }

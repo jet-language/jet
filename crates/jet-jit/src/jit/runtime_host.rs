@@ -333,6 +333,17 @@ impl JitRuntime {
         self.set_runtime_stop("E3001", 0, msg);
     }
 
+    /// A Rust helper panic is an engine fault, not a user runtime stop. Keep
+    /// its opaque payload in the host trap for diagnostics, but never send it
+    /// through the E3001 renderer.
+    fn set_host_fault(&mut self, msg: &str) {
+        if self.trapped.is_some() || self.exit_code.is_some() {
+            return;
+        }
+        self.exit_code = Some(jet_foundation::ExitCodes::ICE);
+        self.store_trap(msg);
+    }
+
     pub(crate) fn set_deadline(&mut self, rendered: String) {
         if self.deadline_exceeded.is_none() {
             self.deadline_exceeded = Some(rendered);
@@ -458,8 +469,17 @@ pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
 
 fn with_runtime_trap<F: FnOnce(&mut JitRuntime)>(f: F) {
     Concurrency::with_runtime_mut(|rt| {
-        if catch_unwind(AssertUnwindSafe(|| f(rt))).is_err() {
-            rt.set_trap("the JIT runtime helper panicked");
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| f(rt))) {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| {
+                    payload
+                        .downcast_ref::<&'static str>()
+                        .map(|message| (*message).to_string())
+                })
+                .unwrap_or_else(|| "the JIT runtime helper panicked".to_string());
+            rt.set_host_fault(&message);
         }
     });
 }
@@ -467,8 +487,17 @@ fn with_runtime_trap<F: FnOnce(&mut JitRuntime)>(f: F) {
 fn with_runtime_result<R: Default, F: FnOnce(&mut JitRuntime) -> R>(default: R, f: F) -> R {
     Concurrency::with_runtime_mut(|rt| match catch_unwind(AssertUnwindSafe(|| f(rt))) {
         Ok(value) => value,
-        Err(_) => {
-            rt.set_trap("the JIT runtime helper panicked");
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| {
+                    payload
+                        .downcast_ref::<&'static str>()
+                        .map(|message| (*message).to_string())
+                })
+                .unwrap_or_else(|| "the JIT runtime helper panicked".to_string());
+            rt.set_host_fault(&message);
             default
         }
     })

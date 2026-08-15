@@ -183,6 +183,71 @@ fn registered_codes() -> BTreeSet<String> {
         .collect()
 }
 
+#[test]
+fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
+    let rows = jet_foundation::Registry::diagnostic_rows();
+    let active_runtime = rows
+        .iter()
+        .filter(|row| {
+            row.stage == "runtime"
+                && row.status == jet_foundation::Registry::DiagnosticStatus::Active
+        })
+        .collect::<Vec<_>>();
+    assert!(!active_runtime.is_empty(), "registry must publish runtime rows");
+
+    for row in active_runtime {
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            row.code,
+            "probe.jet",
+            7,
+            "probe",
+            "stop()",
+            1,
+            1,
+            "runtime probe",
+            "",
+        );
+        assert_eq!(report.code, row.code);
+        assert_eq!(report.source, "runtime");
+        assert_eq!(report.exit_code, 70);
+        assert!(!report.what.is_empty());
+        assert!(!report.why.is_empty());
+        assert!(!report.fix.is_empty());
+    }
+
+    for row in rows.iter().filter(|row| {
+        row.stage != "runtime"
+            || row.status != jet_foundation::Registry::DiagnosticStatus::Active
+    }) {
+        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+            row.code,
+            "probe.jet",
+            7,
+            "probe",
+            "stop()",
+            1,
+            1,
+            "runtime probe",
+            "",
+        );
+        assert_eq!(report.exit_code, 101, "{} must be a host fault", row.code);
+    }
+
+    let unknown = jet_foundation::Outcome::jet_render_runtime_stop(
+        "__unknown_runtime_stop__",
+        "probe.jet",
+        7,
+        "probe",
+        "stop()",
+        1,
+        1,
+        "runtime probe",
+        "",
+    );
+    assert_eq!(unknown.exit_code, 101);
+    assert_eq!(unknown.source, "host");
+}
+
 fn registered_code_rows() -> Vec<(String, usize)> {
     jet_foundation::Registry::diagnostic_rows()
         .iter()

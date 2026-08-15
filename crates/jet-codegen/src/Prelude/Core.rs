@@ -136,7 +136,7 @@ struct JetParaFailure {
 
 enum JetParaRuntimeFailure {
     Simple {
-        code: String,
+        code: &'static str,
         file: String,
         line: u32,
         fn_name: String,
@@ -177,7 +177,7 @@ impl JetParaRuntimeFailure {
                 fn_name,
                 src_line,
                 msg,
-            } => jet_runtime_stop_with_context(&code, &file, line, &fn_name, &src_line, &msg),
+            } => jet_runtime_stop_with_context(code, &file, line, &fn_name, &src_line, &msg),
             Self::Rich {
                 file,
                 line,
@@ -557,6 +557,7 @@ struct JetRuntimeExit;
 
 struct JetRenderedRuntimeStop {
     rendered: String,
+    exit_code: i32,
 }
 
 /// A user-requested process stop unwinds through the same boundary as a
@@ -626,17 +627,10 @@ where
             value
         }
         Err(payload) => {
-            // Program stops that cross a scheduler/interrupt unwind frame
-            // carry the already-rendered report as a String so the inner
-            // frame can inspect it. Classify only the canonical E3001 panic
-            // shape here; arbitrary host/compiler payloads must still unwind
-            // raw and become exit 101.
-            if let Some(report) = payload
-                .downcast_ref::<String>()
-                .filter(|report| report.starts_with("Stop [E3001]: panic: "))
-            {
-                jet_runtime_process_exit(70, Some(report));
-            }
+            // Only the private FFI adapter marker below converts a String
+            // payload into a user stop. A rendered runtime report crosses this
+            // boundary as a typed report or private envelope; arbitrary panic
+            // text remains a host/compiler fault.
             if let Some(message) = payload
                 .downcast_ref::<String>()
                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
@@ -652,7 +646,7 @@ where
                 }
                 Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
                     Ok(report) => {
-                        jet_runtime_process_exit(70, Some(&report.rendered));
+                        jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
                     }
                     Err(payload) => match payload.downcast::<JetExplicitExit>() {
                         Ok(exit) => jet_runtime_process_exit(exit.code, None),
@@ -729,7 +723,7 @@ fn jet_runtime_panic_exit() -> ! {
     jet_runtime_process_exit(70, None)
 }
 
-fn jet_runtime_stop(code: &str, file: &str, line: u32, msg: &str) -> ! {
+fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
     jet_runtime_stop_with_context(code, file, line, "", "", msg)
 }
 
@@ -740,28 +734,24 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
 fn jet_scheduler_runtime_stop_with_report(report: String) -> ! {
     jet_test_record_stop("E3001");
     if jet_runtime_should_unwind() {
-        std::panic::resume_unwind(Box::new(report));
+        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+            rendered: report,
+            exit_code: 70,
+        }));
     }
     eprint!("{}", report);
     jet_runtime_exit();
 }
 
 fn jet_runtime_caught_stop(message: &str) {
-    if message.starts_with("Stop [E") {
-        eprint!("{message}");
-        if !message.ends_with('\n') {
-            eprintln!();
-        }
-        return;
+    eprint!("{message}");
+    if !message.ends_with('\n') {
+        eprintln!();
     }
-    let report = jet_render_runtime_stop(
-        "E3001", "", 0, "", "", 1, 1, message, "",
-    );
-    eprint!("{}", report.rendered);
 }
 
 fn jet_sentry_runtime_stop(
-    code: &str,
+    code: &'static str,
     file: &str,
     line: u32,
     gate: &str,
@@ -787,15 +777,19 @@ fn jet_sentry_runtime_stop(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        std::panic::resume_unwind(Box::new(report.rendered));
+        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+            rendered: report.rendered,
+            exit_code: report.exit_code,
+        }));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered: report.rendered,
+        exit_code: report.exit_code,
     }));
 }
 
 fn jet_runtime_stop_with_context(
-    code: &str,
+    code: &'static str,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -805,7 +799,7 @@ fn jet_runtime_stop_with_context(
     jet_test_record_stop(code);
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Simple {
-            code: code.to_string(),
+            code,
             file: file.to_string(),
             line,
             fn_name: fn_name.to_string(),
@@ -815,14 +809,7 @@ fn jet_runtime_stop_with_context(
     }
     jet_proof_record(2, 1, code, msg, file, line);
     let report = jet_render_runtime_stop(
-        match code {
-            "E3001" => "E3001",
-            "E3005" => "E3005",
-            "E3010" => "E3010",
-            "E3011" => "E3011",
-            "E3012" => "E3012",
-            _ => "E3001",
-        },
+        code,
         file,
         line,
         fn_name,
@@ -834,10 +821,14 @@ fn jet_runtime_stop_with_context(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        std::panic::resume_unwind(Box::new(report.rendered));
+        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+            rendered: report.rendered,
+            exit_code: report.exit_code,
+        }));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered: report.rendered,
+        exit_code: report.exit_code,
     }));
 }
 
@@ -863,7 +854,10 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Diagnostic { rendered }));
     }
     if jet_interrupt_handler_should_unwind() {
-        std::panic::resume_unwind(Box::new(rendered));
+        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+            rendered,
+            exit_code: 70,
+        }));
     }
     eprintln!("{}", rendered);
     jet_runtime_exit();
@@ -1009,10 +1003,14 @@ fn jet_panic_rich(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        std::panic::resume_unwind(Box::new(report.rendered));
+        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+            rendered: report.rendered,
+            exit_code: report.exit_code,
+        }));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
         rendered: report.rendered,
+        exit_code: report.exit_code,
     }));
 }
 /// E3002 / D-FAIL-CTX1: `?`-propagation trace.

@@ -700,6 +700,14 @@ pub fn diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
     diagnostic_rows().iter().find(|row| row.code == code)
 }
 
+/// One runtime-stop lookup. A code is user-owned at runtime only while its
+/// registered row is active and declares the runtime stage.
+pub fn active_runtime_diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
+    diagnostic(code).filter(|row| {
+        row.stage == "runtime" && row.status == DiagnosticStatus::Active
+    })
+}
+
 /// Every lint row in the one diagnostic registry.
 pub fn lint_rows() -> impl Iterator<Item = &'static DiagnosticRow> {
     diagnostic_rows()
