@@ -74,6 +74,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/foreign_do.jet",
     "tests/ui/foreign_for.jet",
     "tests/ui/foreign_loop_parenthesized.jet",
+    "tests/ui/foreign_while.jet",
     "tests/ui/generated_cffi_e3206.jet",
     "tests/ui/generated_cffi_e3207.jet",
     "tests/ui/generic_square_brackets.jet",

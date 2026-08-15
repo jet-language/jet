@@ -2548,6 +2548,22 @@ impl<'a> Parser<'a> {
                         && (matches!(self.peek().kind, TokKind::RBrace)
                             || matches!(self.peek().kind, TokKind::Semi)
                                 && matches!(self.peek2().kind, TokKind::RBrace)) => {}
+                    // A bare foreign loop word left over from another
+                    // language computes nothing: it is a word Jet does not
+                    // spell that way. Keep the rejection, drop the false
+                    // unused-value claim (D-S14-PAUSE: no teaching alias,
+                    // only an honest statement-position error).
+                    Expr::Ident(word, span)
+                        if matches!(
+                            word.as_str(),
+                            Syntax::FOREIGN_FOR
+                                | Syntax::FOREIGN_WHILE
+                                | Syntax::FOREIGN_CONTINUE
+                                | Syntax::FOREIGN_DO
+                        ) =>
+                    {
+                        return Err(Self::foreign_loop_word_diagnostic(word, *span));
+                    }
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
