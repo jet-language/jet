@@ -1052,9 +1052,15 @@ impl TraitRegistry {
             Item::Enum(e) => (e.name.as_str(), &e.type_params),
             _ => return false,
         };
+        let recursive_support = |name: &str, checked_trait: &str| {
+            if name == owner && checked_trait == trait_name {
+                Some(true)
+            } else {
+                foreign_supports(name, checked_trait)
+            }
+        };
         let supports = |ty: &Type| {
-            matches!(ty, Type::Named(name) if name == owner)
-                || self.auto_derive_type_ready(ty, trait_name, type_params, foreign_supports)
+            self.auto_derive_type_ready(ty, trait_name, type_params, &recursive_support)
         };
         match item {
             Item::Struct(s) => s

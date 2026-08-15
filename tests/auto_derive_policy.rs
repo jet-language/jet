@@ -364,6 +364,39 @@ fn run() {}
 }
 
 #[test]
+fn recursive_container_dependencies_derive_without_approving_blocked_nominals() {
+    let bundle = loaded_project(
+        "recursive_containers",
+        "",
+        r#"
+struct OptionalNode { next: OptionalNode? }
+struct ListNode { children: [ListNode] }
+struct MapNode { children: [String:MapNode] }
+
+#!Printable
+struct NoPrint { value: Int }
+struct Blocked { child: NoPrint? }
+
+fn run() {}
+"#,
+    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    for name in ["OptionalNode", "ListNode", "MapNode"] {
+        assert!(facts.auto_printable.contains(name), "{name}");
+        assert!(facts.auto_debug.contains(name), "{name}");
+        assert!(facts.auto_encode.contains(name), "{name}");
+        assert!(facts.auto_decode.contains(name), "{name}");
+    }
+    for name in ["OptionalNode", "ListNode"] {
+        assert!(facts.auto_equatable.contains(name), "{name}");
+    }
+    assert!(!facts.auto_equatable.contains("MapNode"));
+    assert!(!facts.auto_printable.contains("Blocked"));
+    let _ = checked_bundle(bundle);
+}
+
+#[test]
 fn project_refusal_is_a_default_fact_and_explicit_codable_still_wins() {
     let bundle = loaded_project(
         "project_refusal_fact",

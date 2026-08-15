@@ -690,6 +690,34 @@ derive T.TypeName {
         ));
     }
 
+    #[test]
+    fn derive_body_rejects_nested_impl_but_generate_keeps_item_blocks() {
+        let source = r#"
+derive T.Debug {
+    impl Thing.Debug {
+        fn debug(self) => String :: "nested"
+    }
+}
+"#;
+        let (toks, lex_errors) = lex(source);
+        assert!(lex_errors.is_empty(), "lex errors: {lex_errors:?}");
+        let diagnostics = parse(&toks).expect_err("a derive body must not repeat its impl header");
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+        assert_eq!(diagnostics[0].code, "E0003");
+
+        program(
+            r#"
+fn build(b: BuildContext) {
+    b.generate("made") {
+        impl Thing.Debug {
+            fn debug(self) => String :: "generated"
+        }
+    }
+}
+"#,
+        );
+    }
+
     /// D-CONC-SPAWN1=D: `task work()` parses as a scoped spawn call.
     #[test]
     fn task_keyword_callable_body_parses_as_spawn() {

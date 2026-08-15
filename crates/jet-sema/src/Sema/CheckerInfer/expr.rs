@@ -3305,15 +3305,37 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // Inline-module members are local nominals with a mangled
+                // semantic identity, not foreign imports. Resolve that identity
+                // here so every later tier sees a local struct literal and never
+                // asks the foreign-import table to rediscover it.
+                let code_module_type = import_ns.as_ref().and_then(|namespace| {
+                    self.code_modules.get(namespace).map(|module| {
+                        jet_foundation::Names::member_name(module, type_name)
+                    })
+                });
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type
                 // that owns heap data (directly or transitively) allocates.
-                Some(self.check_struct_lit(
+                let mut resolved = self.check_struct_lit(
                     type_name,
                     type_args,
                     import_ns.as_deref(),
                     fields,
                     *span,
-                ))
+                );
+                if let Some(canonical) = code_module_type {
+                    resolved = match resolved {
+                        Type::Named(_) => Type::Named(canonical.clone()),
+                        Type::Apply { args, .. } => Type::Apply {
+                            name: canonical.clone(),
+                            args,
+                        },
+                        other => other,
+                    };
+                    *type_name = canonical;
+                    *import_ns = None;
+                }
+                Some(resolved)
             }
             Expr::EnumLit {
                 type_name,

@@ -833,6 +833,7 @@ fn run() { value :: identity<Int, String>(1) }
     assert!(!arity.what.is_empty() && !arity.why.is_empty() && !arity.fix.is_empty());
 
     let wrong_bound = r#"
+#!Comparable
 struct NotComparable { value: Int }
 fn choose<T: Comparable>(value: ^T) => T { return value }
 fn run() {

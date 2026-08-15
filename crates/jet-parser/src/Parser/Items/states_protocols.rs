@@ -416,6 +416,15 @@ impl<'a> Parser<'a> {
             let (trait_name, trait_span) = self.expect_ident("after `.` in `derive T.Trait`")?;
             self.expect(TokKind::LBrace, "after the trait name in `derive T.Trait`")?;
             let body = self.derive_body_items()?;
+            if let Some(span) = Self::derive_nested_impl_span(&body) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("`derive {type_param}.{trait_name}` already names its implementation"),
+                    "a derive provider body is the member list; a nested `impl` repeats the target and trait".to_string(),
+                    "remove the `impl` wrapper and keep its members directly in the derive body".to_string(),
+                    Some(span),
+                ));
+            }
             let end = self.toks[self.pos - 1].span.end;
             Ok(crate::AST::DeriveDef {
                 trait_name,
@@ -423,6 +432,22 @@ impl<'a> Parser<'a> {
                 type_param,
                 body,
                 span: Span::new(start, end),
+            })
+        }
+
+        fn derive_nested_impl_span(
+            body: &[crate::AST::DeriveBodyItem],
+        ) -> Option<Span> {
+            body.iter().find_map(|body_item| match body_item {
+                crate::AST::DeriveBodyItem::Item(item) => match item.as_ref() {
+                    crate::AST::Item::Impl(implementation) => Some(implementation.span),
+                    crate::AST::Item::ErrorConv(conversion) => Some(conversion.from_span),
+                    _ => None,
+                },
+                crate::AST::DeriveBodyItem::Loop { body, .. } => {
+                    Self::derive_nested_impl_span(body)
+                }
+                crate::AST::DeriveBodyItem::Stmt(_) => None,
             })
         }
 
