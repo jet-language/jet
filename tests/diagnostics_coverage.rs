@@ -257,14 +257,18 @@ fn registered_code_rows() -> Vec<(String, usize)> {
 }
 
 #[test]
-fn diagnostic_code_identity_accepts_numeric_and_named_error_and_lint_ids() {
+fn diagnostic_code_identity_accepts_every_numeric_and_named_prefix() {
     use jet_foundation::Diagnostics::Severity;
 
     for (code, severity) in [
         ("E0043", Severity::Error),
         ("E-CALL-VALUE", Severity::Error),
+        ("R0801", Severity::Error),
+        ("R-NAMED-PROBE", Severity::Error),
         ("L0302", Severity::Lint),
         ("L-NAMED-PROBE", Severity::Lint),
+        ("W0410", Severity::Lint),
+        ("W-NAMED-PROBE", Severity::Lint),
     ] {
         assert_eq!(
             jet_foundation::Registry::diagnostic_code_severity(code),
@@ -272,11 +276,11 @@ fn diagnostic_code_identity_accepts_numeric_and_named_error_and_lint_ids() {
             "{code} must keep its leading-letter severity identity"
         );
     }
-    for code in ["", "E", "L", "W0001", "X-NAMED"] {
+    for code in ["", "E", "L", "R", "W", "X0001", "X-NAMED"] {
         assert_eq!(
             jet_foundation::Registry::diagnostic_code_severity(code),
             None,
-            "{code:?} is not an E/L diagnostic identity"
+            "{code:?} is not an E/L/R/W diagnostic identity"
         );
     }
     for row in jet_foundation::Registry::diagnostic_rows() {
