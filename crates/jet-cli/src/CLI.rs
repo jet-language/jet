@@ -238,7 +238,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
     NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
     NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
-    NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit [--advisory-db <path>]", summary: "Inspect implicit read-view copies or check dependencies", handler: HandlerKey::Audit, also_canonical_top_level: false },
+    NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: false },
     NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
     NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
     NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
@@ -500,7 +500,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fix",
-        summary: "Apply safe automatic fixes",
+        summary: "Apply safe automatic fixes, including `fix memory`",
         headline: false,
         actions: &[],
         exhaustive: false,

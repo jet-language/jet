@@ -439,6 +439,26 @@ pub fn runtime_or_exit<T>(result: Result<T, Fault>) -> T {
 }
 
 fn trace_promotion(id: ObjectId, site: PromotionSite) -> Result<(), Fault> {
+    let repairs = [
+        "own the value directly",
+        "represent identity-bearing links as Id<T>",
+        "use Pool<T> when the lifetime is bounded",
+    ];
+    let _ = jet_foundation::MemSentry::jet_memory_ledger_record(
+        jet_foundation::MemSentry::MemoryLedgerWitness {
+            kind: "gc",
+            code: "gc",
+            source: site.source,
+            span_start: site.span_start,
+            span_end: site.span_end,
+            byte_spans: !site.source.starts_with('<'),
+            scope: site.scope,
+            provenance: site.policy_provenance,
+            detail: site.reason,
+            expected: None,
+            repairs: &repairs,
+        },
+    );
     let Some(trace) = TRACE
         .get_or_init(|| TraceState::from_env().map(Mutex::new))
         .as_ref()

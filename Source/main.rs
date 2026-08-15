@@ -27,6 +27,7 @@ mod CmdDossier;
 mod CmdInspect;
 mod CmdExpand;
 mod CmdGc;
+mod CmdMemory;
 mod CmdImpact;
 mod CmdImport;
 mod CmdPerf;
@@ -1375,6 +1376,9 @@ fn main() {
     if cmd == "dev" || raw.iter().any(|arg| arg == "--observe") {
         std::env::set_var("JET_OBSERVE", "1");
     }
+    // Card #1895: every executed runtime tier inherits one project-scoped,
+    // cross-run witness ledger path. Recording stays observational.
+    CmdMemory::configure_ledger();
     if raw.iter().any(|arg| arg == "--gc-trace") {
         CmdGc::configure_trace();
     }
@@ -1491,6 +1495,10 @@ fn main() {
 
     // Commands with no required positional target.
     match cmd {
+        "fix" if args.get(1).map(String::as_str) == Some("memory") => {
+            CmdMemory::fix(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
+            return;
+        }
         "live" => {
             let pid = args
                 .get(1)
@@ -1875,6 +1883,10 @@ fn main() {
             return;
         }
         "audit" => {
+            if raw.get(1).map(String::as_str) == Some("memory") {
+                CmdMemory::audit(&raw[2..], mode);
+                return;
+            }
             if raw.get(1).map(String::as_str) == Some("copies") {
                 run_copy_audit(&raw[2..], mode.json);
                 return;

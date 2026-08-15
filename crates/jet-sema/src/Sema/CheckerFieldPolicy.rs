@@ -20,15 +20,10 @@
 //!      "computed" and routes every `Expr::Field` read of it to a call of
 //!      this method instead of a struct member access.
 //!
-//! Known v1 gap (not a soundness issue — see below): the rewrite in step 2
-//! walks every `Expr` shape `expr_refs_name` (Captures.rs) also walks,
-//! EXCEPT it does not descend into a lambda body or an if-expression's
-//! statement block. A sibling-field reference in one of those positions is
-//! simply left as a bare `Ident` — sema's ordinary name resolution then
-//! reports it as an unknown name (never a silent miscompile: nothing reaches
-//! codegen that rustc could reject, I2 holds). Cycle detection has the same
-//! boundary (`expr_refs_name`'s own `Lambda(_) => false`), so this can't hide
-//! a cycle through a lambda either.
+//! The rewrite descends through statement-bearing value expressions as well as
+//! their final value, so dependency extraction and the synthesized getter see
+//! the same sibling reads. Lambda bodies keep their own lexical name scope and
+//! therefore resolve captures through the ordinary lambda checker.
 
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
@@ -204,8 +199,8 @@ fn self_field(receiver: &str, name: &str, span: Span) -> Expr {
     )
 }
 
-/// Mirrors `Captures::expr_refs_name`'s coverage exactly (same Lambda/
-/// if-block boundary) — see the module doc for why that boundary is safe.
+/// Mirrors the ordinary expression walk, including statement-bearing
+/// value expressions. Lambdas keep their separate lexical scope.
 /// `receiver` is the ident every sibling-field `Ident` gets rewritten onto
 /// (`self` for a computed-field getter; D-VALIDATE1 reuses this with
 /// `value` for a synthesized `validate` function's rule expressions).
@@ -252,7 +247,9 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
                 rewrite_field_refs(note, names, receiver);
             }
         }
-        Expr::OptField { base, .. } => rewrite_field_refs(base, names, receiver),
+        Expr::MemberSpread { base, .. } | Expr::OptField { base, .. } => {
+            rewrite_field_refs(base, names, receiver)
+        }
         Expr::MethodCall { receiver: recv, args, .. } => {
             rewrite_field_refs(recv, names, receiver);
             for a in args {
@@ -273,6 +270,10 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
                 rewrite_field_refs(start, names, receiver);
                 rewrite_field_refs(end, names, receiver);
             }
+        }
+        Expr::Range { start, end, .. } => {
+            rewrite_field_refs(start, names, receiver);
+            rewrite_field_refs(end, names, receiver);
         }
         Expr::ListLit(elems, _) => {
             for e in elems {
@@ -346,15 +347,20 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
         }
         Expr::If {
             cond,
+            then_body,
             then_value,
+            else_body,
             else_value,
             ..
         } => {
-            // Known v1 gap (see module doc): `then_body`/`else_body` are not
-            // walked — a sibling-field reference in a `let` there surfaces as
-            // an ordinary unknown-name sema error, not a miscompile.
             rewrite_field_refs(cond, names, receiver);
+            for stmt in then_body {
+                stmt.for_each_expr_mut(|expr| rewrite_field_refs(expr, names, receiver));
+            }
             rewrite_field_refs(then_value, names, receiver);
+            for stmt in else_body {
+                stmt.for_each_expr_mut(|expr| rewrite_field_refs(expr, names, receiver));
+            }
             rewrite_field_refs(else_value, names, receiver);
         }
         Expr::Paren(inner, _) => rewrite_field_refs(inner, names, receiver),

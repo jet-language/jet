@@ -7,6 +7,8 @@
 //! or policy.
 
 use std::cell::{Cell, RefCell};
+use std::io::Write as IOWrite;
+use std::path::PathBuf;
 use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
 
 #[derive(Clone)]
@@ -27,6 +29,133 @@ struct Allocation {
 
 static ALLOCATIONS: OnceLock<Mutex<Vec<Allocation>>> = OnceLock::new();
 static HARDENED: AtomicBool = AtomicBool::new(false);
+const MAX_MEMORY_LEDGER_BYTES: u64 = 4 * 1024 * 1024;
+static MEMORY_LEDGER_LOCK: Mutex<()> = Mutex::new(());
+
+/// One exercised runtime witness for `jet audit memory` (card #1895).
+///
+/// This source is a Foundation Prelude part: AOT embeds it verbatim and the
+/// hosted tiers call it directly, so ledger persistence has one meaning.
+pub struct MemoryLedgerWitness<'a> {
+    pub kind: &'a str,
+    pub code: &'a str,
+    pub source: &'a str,
+    pub span_start: u64,
+    pub span_end: u64,
+    pub byte_spans: bool,
+    pub scope: &'a str,
+    pub provenance: &'a str,
+    pub detail: &'a str,
+    pub expected: Option<&'a str>,
+    pub repairs: &'a [&'a str],
+}
+
+fn memory_ledger_path() -> Option<PathBuf> {
+    std::env::var_os("JET_MEMORY_LEDGER")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|root| root.join(".jet").join("memory").join("ledger-v1.jsonl"))
+        })
+}
+
+fn memory_ledger_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+/// Append one bounded JSON-lines row. Ledger I/O is observational: a failed
+/// write never changes the program's memory meaning or suppresses its fault.
+pub fn jet_memory_ledger_record(witness: MemoryLedgerWitness<'_>) -> Result<(), String> {
+    let Some(path) = memory_ledger_path() else {
+        return Ok(());
+    };
+    let _guard = MEMORY_LEDGER_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    match std::fs::symlink_metadata(parent) {
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            return Err("memory ledger directory is not a real directory".to_string());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create memory ledger directory: {error}"))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                    .map_err(|error| format!("cannot secure memory ledger directory: {error}"))?;
+            }
+        }
+        Err(error) => return Err(format!("cannot inspect memory ledger directory: {error}")),
+    }
+    let existing = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err("memory ledger path is not a regular file".to_string());
+        }
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(format!("cannot inspect memory ledger: {error}")),
+    };
+    let repairs = witness
+        .repairs
+        .iter()
+        .map(|repair| format!("\"{}\"", memory_ledger_escape(repair)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let expected = witness
+        .expected
+        .map(|value| format!("\"{}\"", memory_ledger_escape(value)))
+        .unwrap_or_else(|| "null".to_string());
+    let row = format!(
+        "{{\"schema\":\"jet.memory.ledger\",\"version\":1,\"kind\":\"{}\",\"code\":\"{}\",\"source\":\"{}\",\"span_start\":{},\"span_end\":{},\"byte_spans\":{},\"scope\":\"{}\",\"provenance\":\"{}\",\"detail\":\"{}\",\"expected\":{},\"repairs\":[{}]}}\n",
+        memory_ledger_escape(witness.kind),
+        memory_ledger_escape(witness.code),
+        memory_ledger_escape(witness.source),
+        witness.span_start,
+        witness.span_end,
+        witness.byte_spans,
+        memory_ledger_escape(witness.scope),
+        memory_ledger_escape(witness.provenance),
+        memory_ledger_escape(witness.detail),
+        expected,
+        repairs,
+    );
+    if existing.saturating_add(row.len() as u64) > MAX_MEMORY_LEDGER_BYTES {
+        return Err("memory ledger exceeds its 4 MiB safety limit".to_string());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .map_err(|error| format!("cannot open memory ledger: {error}"))?;
+    file.write_all(row.as_bytes())
+        .and_then(|()| file.flush())
+        .map_err(|error| format!("cannot append memory ledger: {error}"))
+}
 
 thread_local! {
     static GATE: RefCell<Option<Gate>> = const { RefCell::new(None) };
@@ -242,7 +371,21 @@ pub fn jet_sentry_check(
         })
     }?;
     let name = gate_name(&gate);
-    Some(JetSentryFault {
+    let repairs: &[&str] = match code_detail.0 {
+        "R0802" => &[
+            "move the raw access before the storage is released",
+            "replace the raw pointer with an owned value",
+        ],
+        "R0803" => &[
+            "derive an aligned pointer from the live allocation",
+            "use the typed memory operation instead of raw address arithmetic",
+        ],
+        _ => &[
+            "derive the pointer from live storage inside this gate",
+            "remove the raw access",
+        ],
+    };
+    let fault = JetSentryFault {
         code: code_detail.0,
         file: gate.file,
         line: gate.line,
@@ -250,5 +393,19 @@ pub fn jet_sentry_check(
         operation: operation.to_string(),
         obligation: obligation.to_string(),
         detail: code_detail.1,
-    })
+    };
+    let _ = jet_memory_ledger_record(MemoryLedgerWitness {
+        kind: "sentry",
+        code: fault.code,
+        source: &fault.file,
+        span_start: u64::from(fault.line),
+        span_end: u64::from(fault.line),
+        byte_spans: false,
+        provenance: "source #Unsafe gate",
+        scope: &fault.gate,
+        detail: &fault.detail,
+        expected: None,
+        repairs,
+    });
+    Some(fault)
 }
