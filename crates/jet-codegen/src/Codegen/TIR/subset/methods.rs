@@ -97,6 +97,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_ref().is_some_and(|name| {
         cx.current_type_params.borrow().contains(name.as_str())
             || cx.trait_names.contains(name)
+            || crate::Generics::is_builtin_trait(name)
     }) && matches!(
         method,
         "read"
