@@ -7,6 +7,12 @@ mod native {
     use crate::Diagnostics::{Diagnostic, Span};
     use crate::Comptime::Diagnostics::unsupported;
 
+    #[allow(unexpected_cfgs)]
+    mod job {
+        include!("../../../jet-codegen/src/Prelude/Job.rs");
+    }
+    use job::jet_args_source_program_name;
+
     trait JetShow {
         fn jet_show(&self) -> String;
     }

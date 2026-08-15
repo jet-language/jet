@@ -13,6 +13,29 @@ pub struct JetJobEntry {
     pub invoke: fn(&str, &[String]),
 }
 
+fn jet_args_program_name(prog: &str) -> String {
+    if prog.is_empty() {
+        return "program".to_string();
+    }
+    std::path::Path::new(prog)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(prog)
+        .to_string()
+}
+
+/// Normalize a source-file argv[0] to the name used by its built program.
+pub(crate) fn jet_args_source_program_name(prog: &str) -> String {
+    let (program, suffix) = prog.split_once(' ').unwrap_or((prog, ""));
+    let name = jet_args_program_name(program);
+    let source = name.strip_suffix(".jet").unwrap_or(&name);
+    if suffix.is_empty() {
+        source.to_string()
+    } else {
+        format!("{source} {suffix}")
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum JetJobSelection {
     Ordinary,

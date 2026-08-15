@@ -14,6 +14,7 @@ use crate::Marshal::alloc_string;
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
     use super::{CLIValueKind, Concurrency};
+    use crate::Job::jet_args_source_program_name;
 
     trait JetShow {
         fn jet_show(&self) -> String;
@@ -144,7 +145,7 @@ mod runtime {
     }
 }
 
-pub(crate) use runtime::jet_args_source_program_name as program_name;
+use crate::Job::jet_args_source_program_name;
 
 use runtime::{
     empty_spec, flag, flag_set, flag_short, help_text, option, option_val, parse, positional,
@@ -445,7 +446,7 @@ fn build_spec(
     version: Option<&str>,
     prog: &str,
 ) -> Spec {
-    let mut spec = empty_spec(&program_name(prog));
+    let mut spec = empty_spec(&jet_args_source_program_name(prog));
     if let Some(description) = description {
         spec = runtime::description(spec, description);
     }
@@ -509,7 +510,7 @@ fn build_command_spec(
     );
     let mut commands = Vec::new();
     for command in &schema.commands {
-        let nested_prog = format!("{} {}", program_name(prog), command.name);
+        let nested_prog = format!("{} {}", jet_args_source_program_name(prog), command.name);
         let nested = build_spec(
             &command.inputs,
             command.description.as_deref(),

@@ -30,7 +30,6 @@ fn with_program_allocator<R>(
     jet_codegen::program_allocator::jet_with_host_program_allocator(cap_bytes, run).0
 }
 pub mod Job {
-    use crate::CLI::program_name as jet_args_source_program_name;
     include!("../../jet-codegen/src/Prelude/Job.rs");
 }
 

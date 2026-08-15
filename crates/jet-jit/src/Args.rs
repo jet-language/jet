@@ -8,6 +8,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
     use super::Concurrency;
+    use crate::Job::jet_args_source_program_name;
     use crate::Marshal::{alloc_string, clone_string, result_ok};
 
     trait JetShow {
@@ -368,7 +369,6 @@ host_fns! {
     parsed_positional: "jet_jit_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
     parsed_subcommand: "jet_jit_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
 }
-
 
 
 
