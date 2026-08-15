@@ -5,7 +5,6 @@ mod tir_support;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use jet_rt::__gc::{AutomaticRoot, PromotionSite};
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -177,29 +176,43 @@ fn missing_memory_ledger_is_stable_e2112() {
 #[test]
 fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
     let root = common::unique_tmp("jet_memory_gc_feed");
-    let ledger_path = root.join("ledger.jsonl");
     std::fs::create_dir_all(&root).unwrap();
-    std::env::set_var("JET_MEMORY_LEDGER", &ledger_path);
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/memory/gc_cyclic.jet");
+    let source = source.to_str().unwrap();
 
-    let site = PromotionSite {
-        source: "main.jet",
-        span_start: 4,
-        span_end: 5,
-        scope: "run",
-        policy_provenance: "package #Policy(gc)",
-        reason: "stored graph",
-        type_name: "Int",
-        bytes: 8,
-    };
-    let first = AutomaticRoot::promote(7_i64, site).unwrap();
-    assert_eq!(first.read(|value| *value).unwrap(), 7);
-    let second = AutomaticRoot::promote(9_i64, site).unwrap();
-    assert_eq!(second.read(|value| *value).unwrap(), 9);
+    let first = run(&root, &["run", source]);
+    assert!(
+        first.status.success(),
+        "first GC run failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let ledger_path = root.join(".jet/memory/ledger-v1.jsonl");
+    let first_ledger = std::fs::read_to_string(&ledger_path).unwrap();
+    let first_rows = first_ledger.lines().count();
+    assert!(first_rows > 0, "the exercised GC run wrote no witnesses");
+    assert!(first_ledger.lines().all(|row| {
+        row.contains("\"kind\":\"gc\"")
+            && row.contains("\"provenance\":\"")
+    }));
 
-    std::env::remove_var("JET_MEMORY_LEDGER");
-    let witness = std::fs::read_to_string(&ledger_path).unwrap();
-    assert!(witness.contains("\"kind\":\"gc\""));
-    assert!(witness.contains("\"provenance\":\"package #Policy(gc)\""));
-    assert_eq!(witness.lines().count(), 2);
+    let second = run(&root, &["run", source]);
+    assert!(
+        second.status.success(),
+        "second GC run failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let persisted = std::fs::read_to_string(&ledger_path).unwrap();
+    assert_eq!(persisted.lines().count(), first_rows * 2);
+
+    let audit = run(&root, &["audit", "memory", "--json"]);
+    assert!(
+        audit.status.success(),
+        "memory audit failed: {}",
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit = String::from_utf8_lossy(&audit.stdout);
+    assert!(audit.contains("\"coverage\":\"exercised runs only\""));
+    assert!(audit.contains(&format!("\"witnesses\":{}", first_rows * 2)));
     let _ = std::fs::remove_dir_all(root);
 }
