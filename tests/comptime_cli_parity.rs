@@ -179,6 +179,94 @@ fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
 }
 
 #[test]
+fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = root.join("examples/features/tooling/build_entry_discovery");
+    let scratch = common::Scratch::new("build_entry_discovery_parity");
+    for relative in [
+        "workspace.jet",
+        "package.jet",
+        "run.jet",
+        "tools/build_entry.jet",
+        "packages/foundation/package.jet",
+        "packages/foundation/run.jet",
+        "packages/foundation/tools/build.jet",
+        "packages/app/package.jet",
+        "packages/app/run.jet",
+    ] {
+        let destination = scratch.join(relative);
+        fs::create_dir_all(destination.parent().unwrap())
+            .expect("create build-entry fixture directory");
+        fs::copy(source.join(relative), destination)
+            .unwrap_or_else(|error| panic!("copy build-entry fixture `{relative}`: {error}"));
+    }
+    let expected = fs::read(
+        root.join("examples/features/expected/tooling/build_entry_discovery.out"),
+    )
+    .expect("read build-entry golden");
+
+    let named = run_jet(
+        &["build", "foundation"],
+        &scratch.path,
+        &scratch.join("cache/named"),
+    );
+    assert!(
+        named.status.success(),
+        "`jet build foundation` failed:\n{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    assert!(
+        scratch
+            .join("packages/foundation/.jet/generated/foundation/foundation_marker.jet")
+            .is_file(),
+        "the named depth-one member build did not run"
+    );
+
+    let workspace = run_jet(
+        &["build"],
+        &scratch.path,
+        &scratch.join("cache/workspace"),
+    );
+    assert!(
+        workspace.status.success(),
+        "workspace build failed:\n{}",
+        String::from_utf8_lossy(&workspace.stderr)
+    );
+
+    let release = run_jet(
+        &["run", "--release", "run.jet"],
+        &scratch.path,
+        &scratch.join("cache/release"),
+    );
+    let default = run_jet(
+        &["run", "run.jet"],
+        &scratch.path,
+        &scratch.join("cache/default"),
+    );
+    let interpreted = run_jet(
+        &["dev", "run.jet", "--interpret", "--watch=off"],
+        &scratch.path,
+        &scratch.join("cache/interpreted"),
+    );
+    for (tier, output) in [
+        ("release", &release),
+        ("default", &default),
+        ("dev interpreter", &interpreted),
+    ] {
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{tier} build-entry example failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout, expected,
+            "{tier} build-entry output differs from the checked-in golden"
+        );
+    }
+}
+
+#[test]
 fn fact_plane_runs_through_aot_jit_and_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("fact_plane_parity");

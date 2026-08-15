@@ -932,24 +932,14 @@ impl PackageFacts {
                 Err(error) => return Err(error),
             }
         }
-        let files = self.source_files_checked(resolver)?;
-        let result = if parts.len() == 1 {
+        if parts.len() == 1 {
             let matches = self
-                .discover_function_entries_from_files(
-                    resolver,
-                    &files,
-                    parts[0],
-                    false,
-                    false,
-                )?
-                .into_iter()
-                .map(|(file, _)| file)
-                .filter(|file| file.relative.components().count() == 1)
-                .map(|file| file.path.clone())
-                .collect::<Vec<_>>();
-            (matches.len() == 1)
-                .then(|| matches.into_iter().next().unwrap())
-        } else {
+                .discover_function_entries_checked(resolver, parts[0], false, false)?;
+            return Ok((matches.len() == 1)
+                .then(|| matches.into_iter().next().unwrap().0));
+        }
+        let files = self.source_files_checked(resolver)?;
+        let result = {
             let Some(sources) = parse_sources(&files) else {
                 return Ok(None);
             };
@@ -3618,6 +3608,23 @@ outputs: .{ app: .Executable.{ entry: serve } }"#,
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
             Some(dir.join("run.jet"))
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn output_entry_override_resolves_one_package_function() {
+        let dir = temp_dir("output-entry-override");
+        std::fs::write(dir.join("launch.jet"), "fn launch() { print(1) }\n").unwrap();
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: launch } }"#,
+            "package.jet",
+        )
+        .unwrap();
+        assert_eq!(
+            facts.resolve_run_entry(&dir).unwrap(),
+            Some(dir.join("launch.jet"))
         );
         std::fs::remove_dir_all(dir).ok();
     }
