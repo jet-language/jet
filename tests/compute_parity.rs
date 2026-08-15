@@ -174,6 +174,44 @@ fn run() {
 }
 
 #[test]
+fn matrix_shape_measures_match_or_diagnose_inner_sides() {
+    let matching = r#"
+use core.compute as compute
+
+fn accept_3_by_2(value: Matrix<3, 2>) {}
+
+fn run() {
+    left :: compute.matrix(3, 4, 1.0) ?? panic("left")
+    right :: compute.matrix(4, 2, 1.0) ?? panic("right")
+    product :: left * right ?? panic("product")
+    accept_3_by_2(product)
+}
+"#;
+    jet::compile(matching).expect("3x4 multiplied by 4x2 must produce Matrix<3, 2>");
+
+    let mismatched = r#"
+use core.compute as compute
+
+fn run() {
+    left :: compute.matrix(3, 4, 1.0) ?? panic("left")
+    right :: compute.matrix(5, 2, 1.0) ?? panic("right")
+    product :: left * right
+}
+"#;
+    let diagnostics =
+        jet::compile(mismatched).expect_err("matrix inner measures 4 and 5 must not match");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E2512"
+                && diagnostic.what.contains("inner sides")
+                && diagnostic.what.contains('4')
+                && diagnostic.what.contains('5')
+        }),
+        "the matrix mismatch must teach the differing inner measures: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn compute_broadcast_ufunc_fuses_indexing_and_arithmetic() {
     let source = r#"
 use core.compute as compute

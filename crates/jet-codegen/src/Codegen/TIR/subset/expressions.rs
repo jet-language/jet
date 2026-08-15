@@ -257,6 +257,18 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let is_regex_literal_ctor = !locals.contains(&c.name)
                 && c.name == Syntax::TYPE_REGEX
                 && !cx.type_names.contains(&c.name);
+            // D-TYPE2-UNCERT1=A: sema types the canonical lowercase
+            // `measurement(value, uncertainty: u)` constructor. Lowering maps
+            // that source spelling to the one internal Measurement Core route.
+            let is_measurement = c.name == "measurement"
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() == 2
+                && matches!(
+                    c.resolved_ret.as_ref(),
+                    Some(Type::Apply { name, args })
+                        if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float]
+                );
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
@@ -300,6 +312,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || is_typed_text_ctor
                 || is_checked_text_wrap
                 || is_regex_literal_ctor
+                || is_measurement
                 || is_extern
                 || is_unqual_inline
                 || is_unqual_file)
