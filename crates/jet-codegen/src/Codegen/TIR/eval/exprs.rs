@@ -459,19 +459,31 @@ pub fn tir_place_address_key(expr: &TExpr) -> String {
     }
 }
 
-/// jet-jit shares this for tier-identical address identity.
-pub fn stable_place_address(key: &str) -> i64 {
+fn stable_address_parts(parts: &[&[u8]]) -> i64 {
     let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in key.as_bytes() {
-        hash ^= u64::from(*byte);
+    for byte in parts.iter().flat_map(|part| part.iter().copied()) {
+        hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
     let addr = (hash as i64).wrapping_abs();
-    if addr == 0 {
-        1
-    } else {
-        addr
-    }
+    if addr == 0 { 1 } else { addr }
+}
+
+/// jet-jit shares this for tier-identical address identity.
+pub fn stable_place_address(key: &str) -> i64 {
+    stable_address_parts(&[key.as_bytes()])
+}
+
+/// One computed-field memo slot identity shared by JIT getter probes and
+/// dependency-write invalidation. Streaming the segments avoids allocating a
+/// formatted key while preserving the established `memo::<owner>::<field>` bytes.
+pub fn stable_memo_field_slot(owner: &str, field: &str) -> i64 {
+    stable_address_parts(&[
+        b"memo::",
+        owner.as_bytes(),
+        b"::",
+        field.as_bytes(),
+    ])
 }
 
 fn sentry_layout(ty: &Type) -> (usize, usize) {

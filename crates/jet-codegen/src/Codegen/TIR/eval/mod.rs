@@ -198,7 +198,7 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
     }
 }
 
-pub use exprs::{stable_place_address, tir_place_address_key};
+pub use exprs::{stable_memo_field_slot, stable_place_address, tir_place_address_key};
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)

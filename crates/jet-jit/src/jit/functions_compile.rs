@@ -265,7 +265,13 @@ fn define_cli_adapter(
 }
 
 fn memo_slot(tir: &TFunc, field: &str) -> i64 {
-    jet_codegen::Codegen::TIR::stable_place_address(&format!("memo::{}::{field}", tir.name))
+    let owner = match &tir.kind {
+        TFuncKind::Method { owner_type, .. } => {
+            owner_type.base_name().unwrap_or(tir.name.as_str())
+        }
+        _ => tir.name.as_str(),
+    };
+    TIR::stable_memo_field_slot(owner, field)
 }
 
 /// Build the one ABI thunk used by the shared OptionLift2 Prelude operation.

@@ -282,9 +282,7 @@ impl LowerCtx<'_, '_> {
         for memo in self.meta.memo_dependents(owner, source) {
             let slot = self.b.ins().iconst(
                 types::I64,
-                jet_codegen::Codegen::TIR::stable_place_address(&format!(
-                    "memo::{owner}::{memo}"
-                )),
+                TIR::stable_memo_field_slot(owner, memo),
             );
             self.b.ins().call(func_ref, &[record, slot]);
         }
