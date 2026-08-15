@@ -81,10 +81,11 @@ pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Op
         ("Value", "fields", 0) => Some(Type::List(Box::new(Type::Named("Field".to_string())))),
         ("Field", "name", 0) => Some(Type::String),
         ("Field", "value", 0) => Some(Type::Named("Value".to_string())),
+        ("TypeInfo" | "FieldInfo" | "MethodInfo", "has_marker", 1) => Some(Type::Bool),
         _ => None,
     }
 }
 
 pub fn is_reflect_type_name(name: &str) -> bool {
-    matches!(name, "Value" | "Field")
+    matches!(name, "Value" | "Field" | "TypeInfo" | "FieldInfo" | "MethodInfo")
 }
