@@ -109,6 +109,7 @@ pub(crate) mod json_rt {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    jet_datatree_decode_helpers!();
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSON.rs");
@@ -117,8 +118,16 @@ pub(crate) mod json_rt {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs");
 
     /// JIT marshalling adapter for the Prelude exact-Int decoder.
+    pub fn jet_int_from_i64(value: i64) -> i64 {
+        crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value))
+    }
+
     pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
         crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(value))
+    }
+
+    pub fn jet_int_to_i64(value: i64) -> Option<i64> {
+        crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(value))
     }
 
     /// D-JSON3 coerce walk — same as `jet_std_json_coerce_walk` (MathRandomTime.rs).
@@ -223,6 +232,9 @@ const DT_TEXT: i64 = crate::types_meta::PRELUDE_DATATREE_TEXT;
 const DT_BYTES: i64 = crate::types_meta::PRELUDE_DATATREE_BYTES;
 const DT_ARRAY: i64 = crate::types_meta::PRELUDE_DATATREE_ARRAY;
 const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DATATREE_OBJECT;
+// Private adapter tags: these carriers never escape a typed JSON decode.
+const DT_NUMBER: i64 = -1;
+const DT_TYPED_TEXT: i64 = -2;
 
 fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -245,6 +257,14 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
         json_rt::DataTree::Bool(b) => alloc_dt_record(DT_BOOL, i64::from(*b)),
         json_rt::DataTree::Int(n) => alloc_dt_record(DT_INT, *n),
         json_rt::DataTree::Float(f) => alloc_dt_record(DT_FLOAT, f.to_bits() as i64),
+        json_rt::DataTree::Number(text) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text.clone()));
+            alloc_dt_record(DT_NUMBER, sid)
+        }
+        json_rt::DataTree::TypedText(text) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text.clone()));
+            alloc_dt_record(DT_TYPED_TEXT, sid)
+        }
         json_rt::DataTree::Text(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s.clone()));
             alloc_dt_record(DT_TEXT, sid)
@@ -302,7 +322,7 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
                     let f = rt.heap.record_get_float(handle, 1).unwrap_or(0.0);
                     Some((disc, 0i64, None, None, None, Some(f)))
                 }
-                DT_TEXT => {
+                DT_TEXT | DT_NUMBER | DT_TYPED_TEXT => {
                     let payload = rt.heap.record_get_int(handle, 1)?;
                     let s = rt.heap.clone_string(payload).unwrap_or_default();
                     Some((disc, payload, Some(s), None, None, None))
@@ -350,6 +370,8 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
         DT_INT => Some(json_rt::DataTree::Int(payload)),
         DT_FLOAT => Some(json_rt::DataTree::Float(float_val.unwrap_or(0.0))),
         DT_TEXT => Some(json_rt::DataTree::Text(text.unwrap_or_default())),
+        DT_NUMBER => Some(json_rt::DataTree::Number(text.unwrap_or_default())),
+        DT_TYPED_TEXT => Some(json_rt::DataTree::TypedText(text.unwrap_or_default())),
         DT_ARRAY => {
             let items = child_handles.unwrap_or_default();
             Some(json_rt::DataTree::Array(
@@ -1083,6 +1105,9 @@ fn datatree_to_xml_value(tree: &json_rt::DataTree) -> Result<jet_foundation::Xml
         json_rt::DataTree::Null => Ok(Value::Null),
         json_rt::DataTree::Bool(b) => Ok(Value::Bool(*b)),
         json_rt::DataTree::Int(n) => Ok(Value::Int(*n)),
+        json_rt::DataTree::Number(_) | json_rt::DataTree::TypedText(_) => {
+            Err("internal JSON carrier escaped typed decode".to_string())
+        }
         json_rt::DataTree::Text(s) => Ok(Value::Text(s.clone())),
         json_rt::DataTree::Array(xs) => Ok(Value::Array(
             xs.iter()
@@ -1309,6 +1334,9 @@ fn cbor_datatree_to_ct(value: &json_rt::DataTree) -> CtValue {
         json_rt::DataTree::Int(value) => variant("Int", Some(CtValue::Int(*value))),
         json_rt::DataTree::Float(value) => {
             variant("Float", Some(CtValue::Float(CtFloat::f64(*value))))
+        }
+        json_rt::DataTree::Number(_) | json_rt::DataTree::TypedText(_) => {
+            unreachable!("internal JSON carrier escaped typed decode")
         }
         json_rt::DataTree::Text(value) => variant("Text", Some(CtValue::Str(value.clone()))),
         json_rt::DataTree::Bytes(value) => CtValue::Bytes(value.clone()),
@@ -1929,33 +1957,33 @@ extern "C" fn jet_jit_codec_encode(kind: i64, value: i64) -> i64 {
     alloc_datatree(&tree)
 }
 
-fn typed_json_text(text: &str) -> &str {
-    jet_foundation::JSONNumber::json_typed_text_text(text).unwrap_or(text)
-}
 
 extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode("", "invalid DataTree");
     };
     match (kind, tree) {
-        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_date_decode(typed_json_text(&text)) {
+        (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text))
+        | (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::TypedText(text)) => {
+            match codec_rt::jet_codec_date_decode(&text) {
                 Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
                     crate::Time::time_rt::JetDate::new(year, month, day),
                 )) as u64),
                 Err(error) => result_err_decode("", &format!("expected Date: {error}")),
             }
         }
-        (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_local_time_decode(typed_json_text(&text)) {
+        (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text))
+        | (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::TypedText(text)) => {
+            match codec_rt::jet_codec_local_time_decode(&text) {
                 Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
                     crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
                 )) as u64),
                 Err(error) => result_err_decode("", &format!("expected LocalTime: {error}")),
             }
         }
-        (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_datetime_decode(typed_json_text(&text)) {
+        (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text))
+        | (CODEC_KIND_DATETIME, json_rt::DataTree::TypedText(text)) => {
+            match codec_rt::jet_codec_datetime_decode(&text) {
                 Ok((secs, nanos)) => result_ok(crate::Time::push(TimeValue::DateTime(
                     crate::Time::time_rt::JetDateTime::from_timestamp_ns(secs, nanos),
                 )) as u64),
@@ -1965,41 +1993,33 @@ extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         (CODEC_KIND_DURATION, json_rt::DataTree::Int(ns)) => {
             result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
         }
-        (CODEC_KIND_DURATION, json_rt::DataTree::Text(text)) => {
-            let decoded = if let Some(raw) =
-                jet_foundation::JSONNumber::json_typed_number_text(&text)
-            {
-                jet_foundation::JSONNumber::json_exact_integer_text(raw).and_then(|value| {
+        (CODEC_KIND_DURATION, json_rt::DataTree::Number(text))
+        | (CODEC_KIND_DURATION, json_rt::DataTree::Text(text)) => {
+            let decoded = jet_foundation::JSONNumber::json_exact_integer_text(&text)
+                .and_then(|value| {
                     value
                         .parse::<i64>()
                         .map_err(|_| "Duration is outside the I64 range".to_string())
-                })
-            } else if let Some(raw) =
-                jet_foundation::JSONNumber::json_typed_text_text(&text)
-            {
-                Err(format!("expected Duration, found text {:?}", raw))
-            } else {
-                text.parse::<i64>()
-                    .map_err(|_| "Duration is outside the I64 range".to_string())
-            };
+                });
             match decoded {
                 Ok(ns) => result_ok(codec_rt::jet_codec_duration_decode(ns) as u64),
                 Err(error) => result_err_decode("", &error),
             }
         }
+        (CODEC_KIND_DURATION, json_rt::DataTree::TypedText(text)) => {
+            result_err_decode("", &format!("expected Duration, found text {:?}", text))
+        }
+        (CODEC_KIND_DECIMAL, json_rt::DataTree::Number(text)) => {
+            match jet_foundation::Numeric::CtDecimal::from_json_number(&text) {
+                Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
+                Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
+            }
+        }
+        (CODEC_KIND_DECIMAL, json_rt::DataTree::TypedText(text)) => {
+            result_err_decode("", &format!("expected Decimal, found text {:?}", text))
+        }
         (CODEC_KIND_DECIMAL, json_rt::DataTree::Text(text)) => {
-            let decoded = if let Some(raw) =
-                jet_foundation::JSONNumber::json_typed_number_text(&text)
-            {
-                jet_foundation::Numeric::CtDecimal::from_json_number(raw)
-            } else if let Some(raw) =
-                jet_foundation::JSONNumber::json_typed_text_text(&text)
-            {
-                Err(format!("expected Decimal, found text {:?}", raw))
-            } else {
-                codec_rt::jet_codec_decimal_decode_text(&text)
-            };
-            match decoded {
+            match codec_rt::jet_codec_decimal_decode_text(&text) {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
             }

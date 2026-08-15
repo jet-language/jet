@@ -887,10 +887,10 @@ impl jet_std::JSONReader {
                     message,
                 ));
             }
-            let value = jet_std::json_typed_number(text);
+            let number = text.to_string();
             self.release_item_heap(bytes.capacity());
             drop(bytes);
-            return Ok(jet_std::DataEvent::Text(value));
+            return Ok(jet_std::DataEvent::Number(number));
         }
         if !text.contains(['.', 'e', 'E']) {
             if let Ok(value) = text.parse::<i64>() {
@@ -922,12 +922,7 @@ impl jet_std::JSONReader {
                 self.offset -= 1;
                 self.total -= 1;
                 self.column -= 1;
-                let text = self.read_string()?;
-                Ok(jet_std::DataEvent::Text(if self.typed_numbers {
-                    jet_std::json_typed_text(&text)
-                } else {
-                    text
-                }))
+                Ok(jet_std::DataEvent::Text(self.read_string()?))
             }
             b'[' => {
                 if self.frames.len() as i64 >= self.limits.max_depth { return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset - 1, self.line, self.column.saturating_sub(1), format!("max_depth {} exceeded", self.limits.max_depth))); }
@@ -1389,7 +1384,7 @@ impl jet_std::JSONWriter {
                 self.canonical_emit(&object)?;
                 self.canonical_complete_value()
             }
-            jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode Bytes; encode bytes as Text explicitly")),
+            jet_std::DataEvent::Bytes(_) | jet_std::DataEvent::Number(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "internal JSON carriers cannot be written as DataEvent values")),
             jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JCS cannot encode a non-finite Float")),
             jet_std::DataEvent::Int(value) if (value as f64) as i128 != value as i128 => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text")),
             value => {
@@ -1441,7 +1436,7 @@ impl jet_std::JSONWriter {
             }
             jet_std::DataEvent::ArrayEnd => match self.frames.last().copied() { Some(JetJSONWriteFrame::Array { .. }) => { self.ensure_total(1)?; self.write_bytes(b"]")?; self.frames.pop(); Ok(()) }, _ => Err(self.state_error("ArrayEnd does not match an open array")) },
             jet_std::DataEvent::ObjectEnd => match self.frames.last().copied() { Some(JetJSONWriteFrame::ObjectKey { .. }) => { self.ensure_total(1)?; self.write_bytes(b"}")?; self.frames.pop(); Ok(()) }, Some(JetJSONWriteFrame::ObjectValue) => Err(self.state_error("object key has no value")), _ => Err(self.state_error("ObjectEnd does not match an open object")) },
-            jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode Bytes; encode bytes as Text explicitly")),
+            jet_std::DataEvent::Bytes(_) | jet_std::DataEvent::Number(_) => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "internal JSON carriers cannot be written as DataEvent values")),
             jet_std::DataEvent::Float(value) if !value.is_finite() => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.total, 1, self.total + 1, "JSON cannot encode a non-finite Float")),
             value => {
                 if matches!(value, jet_std::DataEvent::ArrayStart | jet_std::DataEvent::ObjectStart)
@@ -1784,6 +1779,13 @@ impl jet_std::JSONLReader {
                     if !heap.charge_decoded(value.len()) { return Err(self.limit_error(false)); }
                     self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Text(value))
                 }
+                jet_std::DataEvent::Number(_) => Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    self.json.offset,
+                    self.json.line,
+                    self.json.column,
+                    "JSONL tokenizer produced an internal number carrier",
+                )),
                 jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(
                     jet_std::EncodingErrorKind::State,
                     self.json.offset,
@@ -1918,6 +1920,17 @@ fn jet_jsonl_tree_size(
             error.path = path.to_string();
             return Err(error);
         }
+        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+            let mut error = jet_encoding_error(
+                jet_std::EncodingErrorKind::State,
+                0,
+                1,
+                1,
+                "internal JSON carrier escaped typed decode",
+            );
+            error.path = path.to_string();
+            return Err(error);
+        }
         jet_std::DataTree::Text(text) => text.len(),
         jet_std::DataTree::Bytes(_) => {
             let mut error = jet_encoding_error(
@@ -1988,6 +2001,15 @@ fn jet_jsonl_wire_size(
         jet_std::DataTree::Int(value) => Ok(value.to_string().len()),
         jet_std::DataTree::Float(value) => Ok(value.to_string().len()),
         jet_std::DataTree::Text(value) => checked_sum(&[writer.quoted_len(value)?, 2]),
+        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => Err(
+            jet_encoding_error(
+                jet_std::EncodingErrorKind::State,
+                writer.total,
+                1,
+                writer.total + 1,
+                "internal JSON carrier escaped typed decode",
+            ),
+        ),
         jet_std::DataTree::Bytes(_) => Err(jet_encoding_error(
             jet_std::EncodingErrorKind::Unsupported,
             writer.total,
@@ -2027,6 +2049,15 @@ fn jet_jsonl_write_tree(
         jet_std::DataTree::Bool(value) => writer.write_event(jet_std::DataEvent::Bool(*value)),
         jet_std::DataTree::Int(value) => writer.write_event(jet_std::DataEvent::Int(*value)),
         jet_std::DataTree::Float(value) => writer.write_event(jet_std::DataEvent::Float(*value)),
+        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => Err(
+            jet_encoding_error(
+                jet_std::EncodingErrorKind::State,
+                writer.total,
+                1,
+                writer.total + 1,
+                "internal JSON carrier escaped typed decode",
+            ),
+        ),
         jet_std::DataTree::Text(value) => writer.write_event(jet_std::DataEvent::Text(value.clone())),
         jet_std::DataTree::Bytes(value) => writer.write_event(jet_std::DataEvent::Bytes(value.clone())),
         jet_std::DataTree::Array(items) => {
@@ -3761,6 +3792,15 @@ fn jet_enc_json_canonical_tree(
             }
             Ok(jet_json_jcs_number(*f).into_bytes())
         }
+        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => Err(
+            jet_encoding_error(
+                jet_std::EncodingErrorKind::State,
+                0,
+                1,
+                1,
+                "internal JSON carrier escaped typed decode",
+            ),
+        ),
         jet_std::DataTree::Text(s) => Ok(jet_json_canonical_quote_text(s)),
         jet_std::DataTree::Bytes(_) => Err(jet_encoding_error(
             jet_std::EncodingErrorKind::Unsupported,

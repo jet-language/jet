@@ -203,6 +203,9 @@
                 DataTree::Bool(b) => b.to_string(),
                 DataTree::Int(n) => n.to_string(),
                 DataTree::Float(f) => format!("{:?}", f),
+                DataTree::Number(_) | DataTree::TypedText(_) => {
+                    unreachable!("internal JSON carrier escaped typed decode")
+                }
                 DataTree::Text(s) => super::quote_json(s),
                 DataTree::Bytes(bs) => {
                     let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();

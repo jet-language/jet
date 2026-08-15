@@ -372,23 +372,18 @@ impl __jet_Decode for f32 {
 impl __jet_Decode for jet_std::JetDecimal {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Text(s) => {
-                let parsed = if let Some(raw) =
-                    crate::jet_json_number::json_typed_number_text(s)
-                {
-                    jet_std::JetDecimal::from_json_number(raw)
-                } else if let Some(raw) =
-                    crate::jet_json_number::json_typed_text_text(s)
-                {
-                    return Err(jet_std::FieldError::one(format!(
-                        "expected Decimal, found text {:?}",
-                        raw
-                    )));
-                } else {
-                    jet_codec_decimal_decode_text(s)
-                };
-                parsed.map_err(|e| {
-                    jet_std::FieldError::one(format!("expected Decimal: {e}"))
+            jet_std::DataTree::Number(text) => {
+                jet_std::JetDecimal::from_json_number(text).map_err(|error| {
+                    jet_std::FieldError::one(format!("expected Decimal: {error}"))
+                })
+            }
+            jet_std::DataTree::TypedText(text) => Err(jet_std::FieldError::one(format!(
+                "expected Decimal, found text {:?}",
+                text
+            ))),
+            jet_std::DataTree::Text(text) => {
+                jet_codec_decimal_decode_text(text).map_err(|error| {
+                    jet_std::FieldError::one(format!("expected Decimal: {error}"))
                 })
             }
             jet_std::DataTree::Int(n) => jet_codec_decimal_decode_int(*n)

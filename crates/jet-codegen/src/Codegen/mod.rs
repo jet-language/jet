@@ -676,6 +676,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
+    "\njet_datatree_decode_helpers!();\n",
     "\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
     include_str!("../Prelude/LocalCell.rs"),
     "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n// JET_VETTED_UNSAFE_END: jet_cell\n",

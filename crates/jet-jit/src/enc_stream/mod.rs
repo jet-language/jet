@@ -391,6 +391,9 @@ pub(crate) mod runtime {
             jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
             jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
             jet_std::DataTree::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+            jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+                Err("internal JSON carrier escaped typed decode".to_string())
+            }
             jet_std::DataTree::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
             jet_std::DataTree::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
                 values
@@ -922,6 +925,9 @@ fn ambient_event_value(value: runtime::jet_std::DataEvent) -> CtValue {
             "Float",
             Some(CtValue::Float(jet_codegen::AST::CtFloat::f64(value))),
         ),
+        runtime::jet_std::DataEvent::Number(_) => {
+            unreachable!("internal JSON number carrier escaped typed decode")
+        }
         runtime::jet_std::DataEvent::Text(value) => ("Text", Some(CtValue::Str(value))),
         runtime::jet_std::DataEvent::Bytes(value) => ("Bytes", Some(CtValue::Bytes(value))),
         runtime::jet_std::DataEvent::ArrayStart => ("ArrayStart", None),
@@ -941,6 +947,9 @@ fn ambient_tree_value(value: runtime::jet_std::DataTree) -> CtValue {
     let (variant, arg) = match value {
         runtime::jet_std::DataTree::Null => ("Null", None),
         runtime::jet_std::DataTree::Bool(value) => ("Bool", Some(CtValue::Bool(value))),
+        runtime::jet_std::DataTree::Number(_) | runtime::jet_std::DataTree::TypedText(_) => {
+            unreachable!("internal JSON carrier escaped typed decode")
+        }
         runtime::jet_std::DataTree::Int(value) => ("Int", Some(CtValue::Int(value))),
         runtime::jet_std::DataTree::Float(value) => (
             "Float",
@@ -1870,6 +1879,12 @@ fn to_stream_tree(tree: &super::Encoding::json_rt::DataTree) -> runtime::jet_std
         super::Encoding::json_rt::DataTree::Bool(b) => runtime::jet_std::DataTree::Bool(*b),
         super::Encoding::json_rt::DataTree::Int(n) => runtime::jet_std::DataTree::Int(*n),
         super::Encoding::json_rt::DataTree::Float(f) => runtime::jet_std::DataTree::Float(*f),
+        super::Encoding::json_rt::DataTree::Number(text) => {
+            runtime::jet_std::DataTree::Number(text.clone())
+        }
+        super::Encoding::json_rt::DataTree::TypedText(text) => {
+            runtime::jet_std::DataTree::TypedText(text.clone())
+        }
         super::Encoding::json_rt::DataTree::Text(s) => runtime::jet_std::DataTree::Text(s.clone()),
         super::Encoding::json_rt::DataTree::Bytes(b) => runtime::jet_std::DataTree::Bytes(b.clone()),
         super::Encoding::json_rt::DataTree::Array(items) => {
@@ -1970,6 +1985,12 @@ fn from_stream_tree(tree: &runtime::jet_std::DataTree) -> super::Encoding::json_
         runtime::jet_std::DataTree::Bool(b) => super::Encoding::json_rt::DataTree::Bool(*b),
         runtime::jet_std::DataTree::Int(n) => super::Encoding::json_rt::DataTree::Int(*n),
         runtime::jet_std::DataTree::Float(f) => super::Encoding::json_rt::DataTree::Float(*f),
+        runtime::jet_std::DataTree::Number(text) => {
+            super::Encoding::json_rt::DataTree::Number(text.clone())
+        }
+        runtime::jet_std::DataTree::TypedText(text) => {
+            super::Encoding::json_rt::DataTree::TypedText(text.clone())
+        }
         runtime::jet_std::DataTree::Text(s) => super::Encoding::json_rt::DataTree::Text(s.clone()),
         runtime::jet_std::DataTree::Bytes(b) => super::Encoding::json_rt::DataTree::Bytes(b.clone()),
         runtime::jet_std::DataTree::Array(items) => {
@@ -2064,6 +2085,7 @@ fn pack_data_event(ev: runtime::jet_std::DataEvent) -> i64 {
             let _ = rt.heap.record_set_float(h, 1, f);
             h
         }),
+        Number(_) => unreachable!("internal JSON number carrier escaped typed decode"),
         Text(s) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
             disc("Text") | (sid << 8)

@@ -459,6 +459,9 @@ fn jet_std_json_render_canonical(d: &jet_std::DataTree) -> String {
             jet_std::DataTree::Bool(b) => b.to_string(),
             jet_std::DataTree::Int(n) => n.to_string(),
             jet_std::DataTree::Float(f) => format!("{:?}", f),
+            jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+                unreachable!("internal JSON carrier escaped typed decode")
+            }
             jet_std::DataTree::Text(s) => jet_quote_json_local(s),
             jet_std::DataTree::Bytes(bs) => {
                 format!("[{}]", bs.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","))

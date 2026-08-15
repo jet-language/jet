@@ -85,18 +85,12 @@ fn from_typed_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValu
         jet_foundation::EncodingJson::Value::Bool(value) => {
             json_variant("Bool", Some(CtValue::Bool(value)))
         }
-        jet_foundation::EncodingJson::Value::Number(value) => json_variant(
-            "Text",
-            Some(CtValue::Str(
-                jet_foundation::JSONNumber::json_typed_number(&value),
-            )),
-        ),
-        jet_foundation::EncodingJson::Value::Text(value) => json_variant(
-            "Text",
-            Some(CtValue::Str(
-                jet_foundation::JSONNumber::json_typed_text(&value),
-            )),
-        ),
+        jet_foundation::EncodingJson::Value::Number(value) => {
+            json_variant("Number", Some(CtValue::Str(value)))
+        }
+        jet_foundation::EncodingJson::Value::Text(value) => {
+            json_variant("TypedText", Some(CtValue::Str(value)))
+        }
         jet_foundation::EncodingJson::Value::Array(values) => json_variant(
             "Array",
             Some(CtValue::List(

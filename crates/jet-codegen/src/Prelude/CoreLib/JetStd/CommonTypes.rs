@@ -144,7 +144,7 @@
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DataEvent {
-        Null, Bool(bool), Int(i64), Float(f64), Text(String), Bytes(Vec<u8>),
+        Null, Bool(bool), Int(i64), Float(f64), Number(String), Text(String), Bytes(Vec<u8>),
         ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd,
     }
     // D-ENC-CBOR-SURFACE1=A: whole-value CBOR policy and stable typed errors.

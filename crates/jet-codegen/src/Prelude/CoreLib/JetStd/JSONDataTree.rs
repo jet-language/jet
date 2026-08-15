@@ -29,6 +29,8 @@
             DataTree::Bool(b) => b.to_string(),
             DataTree::Int(n) => format!("{}", n),
             DataTree::Float(f) => format!("{:?}", f),
+            DataTree::Number(text) => text.clone(),
+            DataTree::TypedText(text) => quote_json(text),
             DataTree::Text(s) => quote_json(s),
             DataTree::Bytes(bs) => {
                 let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
@@ -138,12 +140,8 @@
         match value {
             crate::jet_encoding_json::Value::Null => DataTree::Null,
             crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
-            crate::jet_encoding_json::Value::Number(value) => {
-                DataTree::Text(crate::jet_json_number::json_typed_number(&value))
-            }
-            crate::jet_encoding_json::Value::Text(value) => {
-                DataTree::Text(crate::jet_json_number::json_typed_text(&value))
-            }
+            crate::jet_encoding_json::Value::Number(value) => DataTree::Number(value),
+            crate::jet_encoding_json::Value::Text(value) => DataTree::TypedText(value),
             crate::jet_encoding_json::Value::Array(values) => DataTree::Array(
                 values
                     .into_iter()

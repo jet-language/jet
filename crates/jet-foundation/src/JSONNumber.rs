@@ -6,24 +6,6 @@
 
 pub const JSON_NUMBER_MAX_DIGITS: usize = 1_000_000;
 pub const JSON_NUMBER_MAX_EXPONENT: i64 = 1_000_000;
-pub const JSON_TYPED_NUMBER_MARKER: &str = "\0jet.json.number\0";
-pub const JSON_TYPED_TEXT_MARKER: &str = "\0jet.json.text\0";
-
-pub fn json_typed_number_text(value: &str) -> Option<&str> {
-    value.strip_prefix(JSON_TYPED_NUMBER_MARKER)
-}
-
-pub fn json_typed_text_text(value: &str) -> Option<&str> {
-    value.strip_prefix(JSON_TYPED_TEXT_MARKER)
-}
-
-pub fn json_typed_number(value: &str) -> String {
-    format!("{JSON_TYPED_NUMBER_MARKER}{value}")
-}
-
-pub fn json_typed_text(value: &str) -> String {
-    format!("{JSON_TYPED_TEXT_MARKER}{value}")
-}
 
 pub fn validate_json_number(text: &str) -> Result<(), String> {
     let digits = text

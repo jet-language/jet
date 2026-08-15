@@ -29,6 +29,8 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
         DataTree::Bool(value) => value.to_string(),
         DataTree::Int(value) => value.to_string(),
         DataTree::Float(value) => format!("{:?}", value),
+        DataTree::Number(text) => text.clone(),
+        DataTree::TypedText(text) => quote_json(text),
         DataTree::Text(value) => quote_json(value),
         DataTree::Bytes(values) => format!(
             "[{}]",

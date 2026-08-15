@@ -6,6 +6,8 @@ pub fn datatree_kind(tag: &str) -> &'static str {
         "Bool" => "Bool",
         "Int" => "Int",
         "Float" => "Float",
+        "Number" => "number",
+        "TypedText" => "Text",
         "Text" => "Text",
         "Bytes" => "Bytes",
         "Array" => "a list",

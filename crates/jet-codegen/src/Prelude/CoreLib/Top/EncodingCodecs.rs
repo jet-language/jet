@@ -78,6 +78,9 @@ fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pu
         jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
         jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
         jet_std::DataTree::Int(value) => Ok(crate::jet_xml_pull::Value::Int(*value)),
+        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+            Err("internal JSON carrier escaped typed decode".to_string())
+        }
         jet_std::DataTree::Text(value) => Ok(crate::jet_xml_pull::Value::Text(value.clone())),
         jet_std::DataTree::Array(values) => Ok(crate::jet_xml_pull::Value::Array(
             values
@@ -333,6 +336,9 @@ fn jet_cbor_value(value: &jet_std::DataTree) -> crate::jet_cbor_kernel::Value {
         jet_std::DataTree::Bool(value) => crate::jet_cbor_kernel::Value::Bool(*value),
         jet_std::DataTree::Int(value) => crate::jet_cbor_kernel::Value::Int(*value),
         jet_std::DataTree::Float(value) => crate::jet_cbor_kernel::Value::Float(*value),
+        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
+            unreachable!("internal JSON carrier escaped typed decode")
+        }
         jet_std::DataTree::Text(value) => crate::jet_cbor_kernel::Value::Text(value.clone()),
         jet_std::DataTree::Bytes(value) => crate::jet_cbor_kernel::Value::Bytes(value.clone()),
         jet_std::DataTree::Array(values) => crate::jet_cbor_kernel::Value::Array(

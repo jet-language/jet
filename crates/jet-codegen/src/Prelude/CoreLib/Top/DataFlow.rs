@@ -575,8 +575,11 @@ fn jet_data_json_fold_from_event(
             jet_std::DataEvent::Float(v) => {
                 push(&mut frames, &mut root, jet_std::DataTree::Float(v))?
             }
-            jet_std::DataEvent::Text(v) => {
-                push(&mut frames, &mut root, jet_std::DataTree::Text(v))?
+            jet_std::DataEvent::Number(text) => {
+                push(&mut frames, &mut root, jet_std::DataTree::Number(text))?
+            }
+            jet_std::DataEvent::Text(text) => {
+                push(&mut frames, &mut root, jet_std::DataTree::TypedText(text))?
             }
             jet_std::DataEvent::Bytes(v) => {
                 push(&mut frames, &mut root, jet_std::DataTree::Bytes(v))?
