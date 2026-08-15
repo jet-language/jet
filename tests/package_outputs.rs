@@ -339,6 +339,10 @@ fn computed_build_contribution_records_lock_and_matches_explain_golden() {
 /// the next action's declared output, so the graph has no build order.
 /// `alpha` waits on `gamma`, `gamma` waits on `beta`, `beta` waits on
 /// `alpha`.
+///
+/// The actions declare no capabilities, so this package reaches graph
+/// validation without an `#Impure` gate or an execution grant, and the cycle
+/// is rejected before any action is spawned.
 const ACTION_CYCLE_BUILD: &str = r#"fn build(b: BuildContext) => BuildPlan ? {
     alpha :: b.action("alpha", ["gamma.stamp"], ["alpha.stamp"], ["sh", "-c", "true"], [])?
     beta :: b.action("beta", ["alpha.stamp"], ["beta.stamp"], ["sh", "-c", "true"], [])?
@@ -366,6 +370,15 @@ fn action_cycle_package(tag: &str) -> common::Scratch {
     scratch
 }
 
+/// Run one command that must reject the cyclic graph, and return the single
+/// `E3502` line that names the chain.
+///
+/// Only the programmable build path evaluates `fn build` and validates the
+/// graph it returns (`jet build`, and `jet inspect graph` for the
+/// no-execution variant). The default `jet run` lens compiles and runs the
+/// selected runtime program straight through the JIT — `run_compile_cmd`
+/// hands it to `Interpreter::run_jit_once_*`, which only seeds build facts —
+/// so `jet run` never walks a build graph and can never observe this fault.
 fn cycle_diagnostic(scratch: &common::Scratch, args: &[&str]) -> String {
     let out = Command::new(jet_bin())
         .args(args)
@@ -393,7 +406,7 @@ fn cycle_diagnostic(scratch: &common::Scratch, args: &[&str]) -> String {
 #[test]
 fn build_action_dependency_cycle_reports_the_full_chain() {
     let scratch = action_cycle_package("build-action-cycle");
-    let reported = cycle_diagnostic(&scratch, &["run", "run.jet"]);
+    let reported = cycle_diagnostic(&scratch, &["build", "run.jet"]);
     assert!(
         reported.contains(ACTION_CYCLE_CHAIN),
         "the action cycle must be named in traversal order:\n{reported}"
@@ -401,21 +414,28 @@ fn build_action_dependency_cycle_reports_the_full_chain() {
 }
 
 /// The chain has to be snapshot-stable: one graph renders one text, run after
-/// run, and the same text on every execution tier. A traversal that inherited
-/// hash order would drift here.
+/// run, under the release profile, and on the inspection path that orders the
+/// graph without executing it. A traversal that inherited hash order would
+/// drift here, and a second renderer on one of those paths would show up as a
+/// different line.
 #[test]
 fn build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers() {
     let scratch = action_cycle_package("build-action-cycle-stable");
-    let first = cycle_diagnostic(&scratch, &["run", "run.jet"]);
-    let second = cycle_diagnostic(&scratch, &["run", "run.jet"]);
-    let built = cycle_diagnostic(&scratch, &["build", "run.jet"]);
+    let first = cycle_diagnostic(&scratch, &["build", "run.jet"]);
+    let second = cycle_diagnostic(&scratch, &["build", "run.jet"]);
+    let release = cycle_diagnostic(&scratch, &["build", "--release", "run.jet"]);
+    let inspected = cycle_diagnostic(&scratch, &["inspect", "graph", "run.jet"]);
     assert!(
         first.contains(ACTION_CYCLE_CHAIN),
-        "jet run must name the cycle chain:\n{first}"
+        "jet build must name the cycle chain:\n{first}"
     );
     assert_eq!(first, second, "the cycle chain must not vary between runs");
     assert_eq!(
-        first, built,
-        "jet build must name the same cycle chain as jet run"
+        first, release,
+        "the release profile must name the same cycle chain as the dev profile"
+    );
+    assert_eq!(
+        first, inspected,
+        "graph inspection must name the same cycle chain as an executing build"
     );
 }

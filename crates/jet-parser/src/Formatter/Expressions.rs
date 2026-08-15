@@ -2024,6 +2024,27 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
             }
             match &lam.body {
+                // D-CONC-SPAWN1=D: `task expr` and `task { expr }` are two
+                // authored spellings of one child. `task_surface_expr` folds a
+                // brace body whose whole content is a tail expression into
+                // `LambdaBody::Expr`, so the body variant alone cannot tell the
+                // two apart; printing the expression bare deletes the authored
+                // braces from the program. Ask the source, exactly as an
+                // `if`-expression branch does.
+                crate::AST::LambdaBody::Expr(expr) if self.value_was_braced(expr) => {
+                    self.write("{");
+                    if !self.try_inline_value_block(&[], expr) {
+                        self.newline();
+                        self.with_trailing_comment_limit(lam.span.end, |f| {
+                            f.with_indent(|f| {
+                                f.emit_leading(expr.span().start);
+                                f.fmt_expr(expr, Prec::OrFallback);
+                                f.emit_trailing(expr.span().end);
+                            });
+                        });
+                        self.end_block();
+                    }
+                }
                 crate::AST::LambdaBody::Expr(expr) => self.fmt_expr(expr, Prec::OrFallback),
                 crate::AST::LambdaBody::Block(stmts) => {
                     self.write("{");

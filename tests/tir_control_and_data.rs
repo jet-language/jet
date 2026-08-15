@@ -113,7 +113,7 @@ fn run() {
 /// stop renderer, including source and scalar-local context.
 #[test]
 fn jit_or_fallback_panic_keeps_rich_context() {
-    let src = r#"use core.term as io
+    let src = r#"use core.process as process
 fn run() {
     count :: process.argv().len()
     missing :: process.argv().get(count + 1)
@@ -130,8 +130,8 @@ fn run() {
         "panic fallback deoptimized: {stderr}"
     );
     assert!(
-        stderr.contains("Stop [E3001]: missing argument")
-            && stderr.contains("jit_fallback_panic.jet:5 in run()")
+        stderr.contains("Stop [E3001]: `panic: missing argument`")
+            && stderr.contains("jit_fallback_panic.jet:5 in run")
             && stderr.contains("print(missing ?? panic(\"missing argument\"))")
             && stderr.contains("count = "),
         "panic fallback lost rich context: {stderr}"
@@ -171,7 +171,7 @@ fn run() {
         assert_eq!(code, 70, "{tier}: out={stdout} err={stderr}");
         assert!(stdout.is_empty(), "{tier}: {stdout}");
         assert!(
-            stderr.contains("Stop [E3001]: index miss")
+            stderr.contains("Stop [E3001]: `panic: index miss`")
                 && stderr.contains("print(grid[9])")
                 && stderr.contains("in run"),
             "{tier}: {stderr}"
@@ -292,7 +292,7 @@ fn run() {
     values := [10, 20, 30, 40, 50]
     band :: 1..<4
     window :: values[band]
-    print(window)
+    print(~window)
     edit :: &values[band]
     edit[1] = 99
     print(values)
@@ -324,7 +324,7 @@ fn shout(s: String) => String {
 }
 fn run() {
     n :: 7
-    parity :: if ((n % 2) == 0) { \"even\" } else { \"odd\" }
+    parity :: if ((n % 2) == 0) -> \"even\" else -> \"odd\"
     print(shout(parity))
 }
 ";
@@ -756,7 +756,7 @@ fn run() {
     }
     print(total)
     xs :: [10, 20, 30, 40, 50, 60, 70, 80]
-    print(xs[band])
+    print(~xs[band])
 }
 ";
     let (code, stdout) = build_and_run("tir_range_values", src);
@@ -846,7 +846,7 @@ fn yielding_and_result_loops_compile_and_run() {
 fn find(xs: [Int]) => Int {
     found :: loop {
         loop x, xs {
-            if x > 2 break(found, x)
+            if x > 2 -> break(found, x)
         }
         break -1
     }
@@ -905,7 +905,9 @@ fn counted_init_exit() => Int {
         loop i := (loop {
             break(result, 14)
             break 0
-        }); i < 1; i++ {}
+        }), i < 1 {
+            i++
+        }
         break 0
     }
     result
@@ -938,17 +940,17 @@ fn value_if_exit() => Int {
 fn run() {
     xs :: [Int].{ 1, 2, 3, 4 }
     prefix :: loop x, xs -> {
-        if x > 3 break
+        if x > 3 -> break
         x * 2
     }
     rows :: loop x, xs, y, [10, 20] -> {
-        if x == 2 && y == 20 break
+        if x == 2 && y == 20 -> break
         x + y
     }
     outer :: loop x, xs {
         ignored :: loop {
-            if x == 1 next(outer)
-            if x == 2 break(outer)
+            if x == 1 -> next(outer)
+            if x == 2 -> break(outer)
             break 0
         }
         print(ignored)
@@ -973,9 +975,11 @@ fn run() {
     );
 }
 
-/// D-LOOP-HEADER2/D-LOOP-ADVANCE2/D-LOOP-CONTROLWORD1: every loop header uses
-/// semicolon clauses; source/stride expressions run once and `next` enters the
-/// target loop's advancement edge.
+/// D-LOOP-COMMA1=A/D-LOOP-ADVANCE2/D-LOOP-CONTROLWORD1: every multi-clause loop
+/// header separates its clauses with commas, source/stride expressions run once,
+/// and `next` enters the target loop's advancement edge. D-LOOP-HEADER3=D retired
+/// the C-style counter header, so mutable state advances in the body and a
+/// counted walk uses a source range.
 #[test]
 fn unified_loop_headers_stride_and_next_edges() {
     if !have_rustc() {
@@ -998,7 +1002,7 @@ fn run() {
         if item == 0 { next }
     }
 
-    outer := : loop i.{ 0; i < 3; i += 1 { }
+    outer :: loop i, 0..<3 {
         loop {
             if i < 2 { next(outer) }
             break

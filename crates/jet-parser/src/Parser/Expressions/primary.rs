@@ -765,6 +765,13 @@ impl<'a> Parser<'a> {
             } else {
                 Vec::new()
             };
+            // A brace body whose whole content is one tail expression folds
+            // into `LambdaBody::Expr` so every tier sees one task-value shape.
+            // That fold erases the authored braces from the AST: `task { e }`
+            // and `task e` become the same body. The formatter must not print
+            // the folded body bare — it recovers the authored spelling from the
+            // source token before the body (`value_was_braced` in
+            // Formatter/Expressions.rs).
             let (body, body_span) = if matches!(self.peek().kind, TokKind::LBrace) {
                 let open = self.bump().span;
                 let body_start = self.pos;
