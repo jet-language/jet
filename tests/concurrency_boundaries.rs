@@ -101,7 +101,7 @@ fn cross(cell: Cell<Int>) {
 }
 fn run() {}
 "#,
-        "E1111",
+        "E1102",
     );
 }
 
@@ -355,6 +355,41 @@ fn run() {
 }
 
 #[test]
+fn task_and_parallel_writes_use_one_registered_rejection_shape() {
+    let task = jet::compile(
+        r#"
+fn run() {
+    count := 0
+    worker :: task { count += 1 }
+    worker.join() ?? panic("task failed")
+}
+"#,
+    )
+    .expect_err("task write must be rejected")
+    .into_iter()
+    .find(|diagnostic| diagnostic.code == "E1101")
+    .expect("task write must use E1101");
+    let parallel = jet::compile(
+        r#"
+fn run() {
+    seen := [Int].{}
+    values :: [1, 2, 3]
+    values.para_map((n: Int) => { seen.push(n) })
+}
+"#,
+    )
+    .expect_err("parallel write must be rejected")
+    .into_iter()
+    .find(|diagnostic| diagnostic.code == "E1101")
+    .expect("parallel write must use E1101");
+
+    assert_eq!(task.why, parallel.why);
+    assert_eq!(task.fix, parallel.fix);
+    assert!(task.what.contains("task capture"));
+    assert!(parallel.what.contains("parallel worker"));
+}
+
+#[test]
 fn mutable_view_cannot_cross_a_channel_boundary() {
     assert_rejected(
         r#"
@@ -430,8 +465,8 @@ fn run() {
     for (method, source) in cases {
         let codes = error_codes(source);
         assert!(
-            codes.iter().any(|code| code == "E1111"),
-            "{method} must reject mutable captures with E1111, got {codes:?}"
+            codes.iter().any(|code| code == "E1101"),
+            "{method} must reject mutable captures with E1101, got {codes:?}"
         );
     }
 }

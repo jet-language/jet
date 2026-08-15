@@ -153,8 +153,8 @@ fn safe_kernel_rejects_effectful_bodies_before_codegen() {
     )
     .expect_err("a safe kernel must not lower an effectful body");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E1130"),
-        "missing E1130: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E1102"),
+        "missing E1102: {diagnostics:?}"
     );
 }
 

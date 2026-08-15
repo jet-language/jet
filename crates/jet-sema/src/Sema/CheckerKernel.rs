@@ -8,6 +8,7 @@
 
 use crate::AST::{AccessConvention, Binding, Expr, Func, KernelMode, KernelProof, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::SendCrossing;
 
 const SAFE_COMPUTE_CALLS: &[&str] = &[
     "abs",
@@ -80,6 +81,18 @@ impl<'a> super::Checker<'a> {
         {
             Some(KernelFailure {
                 obligation: "read-only, monomorphic parameters",
+                span: marker.span,
+            })
+        } else if f
+            .params
+            .iter()
+            .any(|param| self.crossing_problem(&param.ty, SendCrossing::Kernel, true).is_some())
+            || f.return_type
+                .as_ref()
+                .is_some_and(|ty| self.crossing_problem(ty, SendCrossing::Kernel, true).is_some())
+        {
+            Some(KernelFailure {
+                obligation: "sendable kernel boundary values",
                 span: marker.span,
             })
         } else if f
@@ -225,9 +238,9 @@ impl<'a> super::Checker<'a> {
 
 fn kernel_failure(obligation: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
-        "E1130",
-        format!("safe `#Kernel(.parallel)` cannot prove {obligation}"),
-        "a safe kernel needs a sema proof for bounds, aliasing, captures, races, barriers, and control flow before TIR".to_string(),
+        "E1102",
+        format!("`#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove {obligation}"),
+        "a safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before TIR".to_string(),
         "use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary".to_string(),
         Some(span),
     )

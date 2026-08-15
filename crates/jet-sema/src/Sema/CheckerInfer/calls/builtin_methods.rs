@@ -1,10 +1,9 @@
 use crate::AST::{Call, CallArg, Expr, StrPart, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::substitute_type;
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
-use crate::Sema::Checker;
+use crate::Sema::{Checker, SendCrossing, SendProblemKind, SendabilityProblem};
 use crate::Sema::CheckerCoreLib::{unit_ty, wrong_core_arity};
 use crate::Sema::Diagnostics::{is_cloneable, suggest_field, type_fix_hint, type_is_copy};
 use crate::Syntax;
@@ -270,135 +269,15 @@ impl<'a> Checker<'a> {
             Some(ret)
         }
 
-        fn para_type_is_transferable(&self, ty: &Type) -> bool {
-            fn transferable(
-                checker: &Checker<'_>,
-                ty: &Type,
-                owner_hint: Option<usize>,
-                seen: &mut HashSet<(usize, String)>,
-            ) -> bool {
-                // D-DATARACE1=C: reactive handles are lock-ordered Arc and may cross
-                // parallel adapters; `#Local` pins are rejected at capture time.
-                if checker.sendability_problem(ty, true).is_some() {
-                    return false;
-                }
-                match ty {
-                    Type::Fn { .. } | Type::TraitObject(_) => false,
-                    Type::List(inner)
-                    | Type::Shared(inner)
-                    | Type::Option(inner)
-                    | Type::Tagged { inner, .. } => transferable(checker, inner, owner_hint, seen),
-                    Type::Result { ok, err } => transferable(checker, ok, owner_hint, seen)
-                        && transferable(checker, err, owner_hint, seen),
-                    Type::Map { key, value, .. } => transferable(checker, key, owner_hint, seen)
-                        && transferable(checker, value, owner_hint, seen),
-                    Type::Tuple(fields) => fields
-                        .iter()
-                        .all(|(_, field_ty)| transferable(checker, field_ty, owner_hint, seen)),
-                    Type::FixedList { elem, .. } => transferable(checker, elem, owner_hint, seen),
-                    Type::Named(name) | Type::Apply { name, .. } => {
-                        let args = match ty {
-                            Type::Apply { args, .. } => args.as_slice(),
-                            _ => &[],
-                        };
-                        if !args
-                            .iter()
-                            .all(|arg| transferable(checker, arg, owner_hint, seen))
-                        {
-                            return false;
-                        }
-                        let (import_ns, leaf) = name
-                            .rsplit_once('.')
-                            .map_or((None, name.as_str()), |(alias, leaf)| (Some(alias), leaf));
-                        let hinted_owner = owner_hint.filter(|&owner| {
-                            if owner == checker.module_idx {
-                                checker.registry.contains(leaf)
-                            } else {
-                                checker
-                                    .modules
-                                    .and_then(|modules| modules.get(owner))
-                                    .is_some_and(|module| module.registry.contains(leaf))
-                            }
-                        });
-                        let Some(owner) = hinted_owner
-                            .or_else(|| checker.struct_owner_module(leaf, import_ns))
-                        else {
-                            return true;
-                        };
-                        let key = (owner, leaf.to_string());
-                        if !seen.insert(key.clone()) {
-                            return true;
-                        }
-                        let (registry, trait_reg) = if owner == checker.module_idx {
-                            (checker.registry, checker.trait_reg)
-                        } else {
-                            let Some(module) = checker
-                                .modules
-                                .and_then(|modules| modules.get(owner))
-                            else {
-                                return false;
-                            };
-                            (&module.registry, &module.trait_reg)
-                        };
-                        let subst = registry
-                            .type_alias(leaf)
-                            .map(|(params, _)| params)
-                            .or_else(|| trait_reg.struct_params.get(leaf).map(Vec::as_slice))
-                            .unwrap_or(&[])
-                            .iter()
-                            .zip(args.iter())
-                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                            .collect();
-                        let safe = match registry.types.get(leaf) {
-                            Some(crate::Sema::TypeDef::Struct { fields, .. }) => fields.iter().all(
-                                |(_, _, field_ty)| {
-                                    let actual = trait_reg.instantiate_type(field_ty, &subst);
-                                    transferable(checker, &actual, Some(owner), seen)
-                                },
-                            ),
-                            Some(crate::Sema::TypeDef::Enum { variants, .. }) => variants
-                                .values()
-                                .all(|(_, payload)| match payload {
-                                    crate::AST::VariantPayload::Unit => true,
-                                    crate::AST::VariantPayload::Single(payload, _) => {
-                                        let actual = trait_reg.instantiate_type(payload, &subst);
-                                        transferable(checker, &actual, Some(owner), seen)
-                                    }
-                                    crate::AST::VariantPayload::Named(fields) => fields.iter().all(
-                                        |field| {
-                                            let actual =
-                                                trait_reg.instantiate_type(&field.ty, &subst);
-                                            transferable(checker, &actual, Some(owner), seen)
-                                        },
-                                    ),
-                                }),
-                            Some(crate::Sema::TypeDef::Alias { target, .. }) => {
-                                let actual = substitute_type(target, &subst);
-                                transferable(checker, &actual, Some(owner), seen)
-                            }
-                            Some(crate::Sema::TypeDef::Distinct { base, .. }) => {
-                                transferable(checker, base, Some(owner), seen)
-                            }
-                            None => true,
-                        };
-                        seen.remove(&key);
-                        safe
-                    }
-                    _ => true,
-                }
-            }
-            transferable(self, ty, None, &mut HashSet::new())
-        }
-
         fn reject_para_type(&mut self, role: &str, ty: &Type, span: Span) {
-            if !self.para_type_is_transferable(ty) {
-                self.diags.push(Diagnostic::error(
-                    "E1111",
-                    format!("parallel {role} cannot use `{}` across workers", ty.name()),
-                    "parallel collection workers may only share or transfer thread-safe owned values".to_string(),
-                    "copy the data into a plain owned value, or keep this operation sequential".to_string(),
-                    Some(span),
-                ));
+            if let Some(problem) = self.crossing_problem(ty, SendCrossing::ParallelWorker, true) {
+                self.report_unsendable(
+                    &format!("parallel {role}"),
+                    ty,
+                    problem,
+                    SendCrossing::ParallelWorker,
+                    span,
+                );
             }
         }
 
@@ -407,23 +286,21 @@ impl<'a> Checker<'a> {
                 if matches!(expr, Expr::Ident(name, _) if self.funcs.contains_key(name)) {
                     return;
                 }
-                self.diags.push(Diagnostic::error(
-                    "E1111",
-                    "parallel callback does not expose worker-sharing facts".to_string(),
-                    "stored or imported callbacks may hide captures that are not safe to share between workers".to_string(),
-                    "pass a top-level function or write the callback directly as a lambda".to_string(),
-                    Some(expr.span()),
-                ));
+                self.report_unsendable(
+                    "parallel callback",
+                    &Type::Named("callback".to_string()),
+                    SendabilityProblem {
+                        root: None,
+                        path: Vec::new(),
+                        kind: SendProblemKind::ClosureCaptures,
+                    },
+                    SendCrossing::ParallelWorker,
+                    expr.span(),
+                );
                 return;
             };
             for name in &lam.meta.mut_captures {
-                self.diags.push(Diagnostic::error(
-                    "E1111",
-                    format!("parallel callback cannot change captured `{name}`"),
-                    "parallel workers need private accumulator state; changing caller-owned state would race or require a hidden merge rule".to_string(),
-                    "return the extra data, use `.para_partition(...)`, or use `.para_fold(seed, step, merge)`".to_string(),
-                    Some(lam.span),
-                ));
+                self.report_concurrent_write(name, "parallel worker", lam.span);
             }
 
             let params = lam.params.iter().map(|param| param.name.clone()).collect::<HashSet<_>>();
@@ -448,9 +325,9 @@ impl<'a> Checker<'a> {
                 }
                 let captured = self
                     .lookup(&name)
-                    .map(|info| (info.ty.clone(), self.sendability_for(&name)))
-                    .or_else(|| self.consts.get(&name).cloned().map(|ty| (ty, true)));
-                let Some((ty, sendable)) = captured else { continue };
+                    .map(|info| info.ty.clone())
+                    .or_else(|| self.consts.get(&name).cloned());
+                let Some(ty) = captured else { continue };
                 if let Some(info) = self.lookup(&name) {
                     if info.reactive_local && super::super::is_reactive_handle_ty(&ty) {
                         self.diags.push(Diagnostic::error(
@@ -476,15 +353,19 @@ impl<'a> Checker<'a> {
                 if super::super::is_reactive_handle_ty(&ty) {
                     self.note_reactive_upgrade(&name, &ty, "parallel");
                 }
-                if !sendable || self.is_view(&name) || !self.para_type_is_transferable(&ty)
-                {
-                    self.diags.push(Diagnostic::error(
-                        "E1111",
-                        format!("parallel callback cannot share captured `{name}`"),
-                        "this capture is not safe to read from several worker threads".to_string(),
-                        "copy plain owned data into the callback, or keep this operation sequential".to_string(),
-                        Some(lam.span),
-                    ));
+                if let Some(problem) = self.crossing_problem_for_name(
+                    &name,
+                    &ty,
+                    SendCrossing::ParallelWorker,
+                    true,
+                ) {
+                    self.report_unsendable(
+                        &name,
+                        &ty,
+                        problem,
+                        SendCrossing::ParallelWorker,
+                        lam.span,
+                    );
                 }
             }
         }

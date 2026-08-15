@@ -10,7 +10,7 @@
 //! | plane | fact | where the walker lives |
 //! |---|---|---|
 //! | [`Binding`] | everything a declaration says about a name | `CheckerCore` |
-//! | [`Sendability`] | whether a value may cross a task boundary | ownership prover |
+//! | [`Sendability`] | whether a value may cross a concurrent boundary | ownership prover |
 //! | [`Frozen`] | freeze site that proved a value deeply immutable | ownership prover |
 //! | [`Narrow`] | a binding refined by a proven test (D-FLOWTYPE1) | `CheckerCore` |
 //! | [`Moved`] | the use that gave a place away | `CheckerOwnership` |

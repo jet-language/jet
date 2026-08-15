@@ -1625,6 +1625,9 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
         SendProblemKind::ClosureCaptures => {
             "the closure holds captures that are not sendable".to_string()
         }
+        SendProblemKind::CallableValue => {
+            "a function value carries executable state, not a worker data value".to_string()
+        }
         SendProblemKind::TraitValue(name) => {
             format!(
                 "`{}` is a trait value, so the compiler cannot prove which concrete value crosses this boundary",

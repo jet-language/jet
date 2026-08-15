@@ -67,7 +67,7 @@ fn run() {
 "#;
     let diags = jet::compile(mutable_capture).expect_err("mutable parallel capture must fail");
     assert_eq!(
-        diags.iter().filter(|diag| diag.code == "E1111").count(),
+        diags.iter().filter(|diag| diag.code == "E1101").count(),
         1,
         "{diags:#?}"
     );
@@ -80,7 +80,7 @@ fn run() {
 }
 "#;
     let diags = jet::compile(borrowed_capture).expect_err("borrowed parallel capture must fail");
-    assert!(diags.iter().any(|diag| diag.code == "E1111"), "{diags:#?}");
+    assert!(diags.iter().any(|diag| diag.code == "E1102"), "{diags:#?}");
 
     let hidden_capture = r#"
 fn run() {
@@ -90,7 +90,7 @@ fn run() {
 }
 "#;
     let diags = jet::compile(hidden_capture).expect_err("stored parallel callback must fail");
-    assert!(diags.iter().any(|diag| diag.code == "E1111"), "{diags:#?}");
+    assert!(diags.iter().any(|diag| diag.code == "E1102"), "{diags:#?}");
 
     for (role, source) in [
         (
@@ -143,7 +143,7 @@ fn run() {
         let diags = jet::compile(source)
             .expect_err("function-typed worker values must fail in sema");
         assert!(
-            diags.iter().any(|diag| diag.code == "E1111"),
+            diags.iter().any(|diag| diag.code == "E1102"),
             "function {role} must stop before rustc: {diags:#?}"
         );
     }

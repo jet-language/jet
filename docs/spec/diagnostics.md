@@ -737,8 +737,8 @@ renumbered, and no new `W` code may be allocated.
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
 | E1335 | sema/jetpack | an environment integration or package-generation provider fact is conflicting, lossy, or invalid (D-ENV-INTEGRATIONS1/D-JPK-PROFILE1) |
 | E1336 | jetpack | an environment image cannot project a service or verified package output (D-ENV-IMAGE1) |
-| E1101 | sema  | task capture needs ownership              |
-| E1102 | sema  | value crossing task/channel boundary is not sendable |
+| E1101 | sema  | concurrent capture needs ownership (D-CONC-CROSS1) |
+| E1102 | sema  | value crossing a concurrent boundary is not sendable (D-CONC-CROSS1) |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
 | E1104 | sema  | `#Layout(c)` struct contains a growable field (D-REPRC1) |
 | E1105 | sema  | `#Layout(packed)` / `#Layout(align(N))` not yet supported (D-REPRC1 reserved) |
@@ -747,9 +747,9 @@ renumbered, and no new `W` code may be allocated.
 | E1108 | sema  | list method not yet supported on a `#Layout(columnar)` list (D-SOA1) |
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
 | E1110 | sema  | `task` has no lexical or parameter task group, uses the wrong lexical group, or lets `TaskGroup` escape (D-CONC-SPAWN1, D-TASKGROUP-PARAM1) |
-| E1111 | sema  | a parallel collection adapter captures mutable state or crosses a worker boundary with a non-shareable value (D-PARCAPTURE1=D) |
+| E1111 | sema  | *retired by D-CONC-CROSS1; parallel crossings use E1101/E1102* |
 | E1112 | sema  | a task combinator has no task branch (D-CONCSELECT1) |
-| E1130 | sema/parse | `#Kernel(.parallel)` has a duplicate marker or its body cannot satisfy the safe-kernel proof obligations (D-COMPUTE-KERNEL-SURFACE1=B) |
+| E1130 | sema/parse | *retired by D-CONC-CROSS1; kernel proof crossings use E1102 and duplicate markers use E0003* |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.math.random.bytes` output used in a crypto context — `core.math.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2301 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference return spelling `-> &T` remains absent; invalid named-view returns use E2305/E2307) |
@@ -1118,8 +1118,8 @@ CLI.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1101 | A spawned task captures a value it does not own, or two task-group children borrow one place. | Tasks run concurrently and may outlive the scope that created them; shared mutable state is not allowed. A group joins its children, so it may lend borrowed places (D-TASKBORROW1=A) — but only where it can prove the places never overlap. | Give it to the task (`^`), snapshot it (`freeze`), or share/lock it (`Shared`) for deliberate shared mutation. Between group children, borrow separate fields or constant indexes. |
-| E1102 | A value crossing a `task` or `Sender.send` boundary is not sendable. | Task and channel boundaries move owned data between threads. A view, trait value, mutable capture, or borrowed closure cannot cross. | Send plain owned data, make an ordinary owned copy when permitted, or use `Shared<T>` for deliberate shared state. |
+| E1101 | `{value}` cannot cross the `{boundary}` boundary: the value writes shared state | the `{boundary}` boundary can run concurrently with its owner; {reason} | give it with `^`, freeze it with `freeze`, or share it with `Shared` |
+| E1102 | A value crossing a task, channel, parallel-worker, or safe-kernel boundary is not sendable. | Concurrent boundaries move owned data between workers. A view, trait value, mutable capture, borrowed closure, or thread-confined cell cannot cross. | Send plain owned data, make an ordinary owned copy when permitted, or use `Shared<T>` for deliberate shared state. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
 | E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`. |
 | E1104 | `#Layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#Layout(c)` if C interop is not required. |
@@ -1128,17 +1128,17 @@ CLI.
 | E1108 | A list method (e.g. `.map`, `.filter`, `.sort`, `.pop`, `.remove`, `.get`) was called on a `#Layout(columnar)` list. | v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled. | Drop `#Layout(columnar)` from the struct to use the full list API, or rewrite the operation with indexing and a loop. |
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
 | E1110 | `task` has no lexical or parameter task group, uses the wrong lexical group, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical `task.group` or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Write `task work()` in the active group, or pass the group to `fn helper(group: TaskGroup)`; do not store or capture it. |
-| E1111 | A `para_*` callback changes captured state, hides capture facts, or its items, captures, or results cannot safely cross worker boundaries. | Parallel workers run without a hidden shared-mutation or merge rule; their callbacks, inputs, and outputs must expose thread-safe owned values. | Write the callback inline or use a top-level function; return extra data, use `para_partition`/`para_fold`, copy into plain owned data, or keep the operation sequential. |
+| E1111 | *retired by D-CONC-CROSS1; parallel crossings use E1101/E1102* | the registered sema rule applies here | follow the guidance for E1111 |
 | E1112 | `{method}` needs at least one task branch | a task combinator must have a child to join or select | write {method} {{ work() }} with one or more branches |
 | E1113 | `{name}` cannot {action}; it was frozen at {freeze_site} | `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot. | create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional |
 | E1114 | `freeze` cannot snapshot `{ty}`: {reason} | A frozen value must be an owned cloneable value with no shared handle, resource, function, trait value, or mutable view inside it. | use `^` to give the owned value to the task, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value |
 
-### E1130 — safe kernel proof (D-COMPUTE-KERNEL-SURFACE1=B)
+### E1130 — retired safe-kernel proof code (D-CONC-CROSS1)
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `#Kernel(.parallel)` cannot prove `{obligation}` ``. | A safe kernel must carry sema facts for bounds, aliasing, captures, races, barrier uniformity, and control flow before TIR. The shipped subset is read-only, effect-free, straight-line code over checked Core compute operations. | Keep parameters read-only, remove effects/provider calls, and use the checked expression subset; put raw device code behind its typed `#Unsafe("reason")` boundary. |
-| a function has more than one `#Kernel` marker. | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
+| *retired; kernel proof crossings use E1102* | Safe-kernel refusal is part of the concurrent crossing family. | Follow E1102 at the kernel boundary. |
+| *retired; duplicate markers use E0003* | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
 | L1101 | A `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged only by joining it. | Join it with `.join()`, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Write `task work()` or use `task.all { work_a(), work_b() }`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |

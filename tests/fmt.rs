@@ -1279,6 +1279,11 @@ fn fmt_concurrency_spellings_that_parse_today() {
 
 fn open() {
     pair :: channel<Int>(capacity: 8)
+    frozen :: freeze(1)
+    task.group g {
+        child :: task ^frozen { frozen }
+        child.join() ?? 0
+    }
 }
 "#;
     let once = jet::format_source(src).expect("parseable concurrency spellings should format");
@@ -1294,6 +1299,8 @@ fn open() {
         "loop value, rx",
         ".Panicked(\"boom\")",
         "channel<Int>(capacity: 8)",
+        "freeze(1)",
+        "task ^frozen",
     ] {
         assert!(once.contains(spelling), "fmt dropped {spelling:?}:\n{once}");
     }

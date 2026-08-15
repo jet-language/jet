@@ -320,7 +320,7 @@ impl<'a> Checker<'a> {
                 what,
                 "a task.group runs its children at the same time, so two children may borrow one place only when the compiler can prove the places never overlap"
                     .to_string(),
-                "give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock; in a group, borrow separate fields or constant indexes"
+                "give it with `^`, freeze it with `freeze`, or share it with `Shared`; in a group, borrow separate fields or constant indexes"
                     .to_string(),
                 Some(span),
             ));
@@ -374,7 +374,7 @@ impl<'a> Checker<'a> {
                 "a task.group joins its children at the end of the block, so `{lent}` stays borrowed until `{group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads"
             ),
             format!(
-                "do this after the `{group}` block ends, give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock"
+                "do this after the `{group}` block ends, give it with `^`, freeze it with `freeze`, or share it with `Shared`"
             ),
             Some(span),
         ));
@@ -421,7 +421,7 @@ impl<'a> Checker<'a> {
                 "`{lent}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes"
             ),
             format!(
-                "read `{read_name}` after the `{group}` block ends, snapshot the value with `freeze`, or use `Shared`/a lock"
+                "read `{read_name}` after the `{group}` block ends, give it with `^`, freeze it with `freeze`, or share it with `Shared`"
             ),
             Some(expr.span()),
         ));

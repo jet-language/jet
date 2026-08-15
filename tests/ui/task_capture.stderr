@@ -1,10 +1,10 @@
-Error [E1101]: `count` is a mutable value — the new task might outlive this scope
+Error [E1101]: `count` cannot cross the `task capture` boundary: the value writes shared state
   --> tests/ui/task_capture.jet:3:15
     |
   3 |     t :: task {
     |               ^
- Why: tasks run concurrently; changing an outer binding inside a task would make ownership unclear
- Fix: give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock for deliberate shared mutation
+ Why: the `task capture` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
+ Fix: give it with `^`, freeze it with `freeze`, or share it with `Shared`
 
 Error [E0402]: this call can fail and nothing checks it
   --> tests/ui/task_capture.jet:6:7

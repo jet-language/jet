@@ -4525,7 +4525,51 @@ impl<'a> Checker<'a> {
         closure_taken: bool,
     ) -> Option<SendabilityProblem> {
         let mut seen = HashSet::new();
-        self.sendability_problem_inner(ty, closure_taken, &mut seen)
+        self.sendability_problem_inner(ty, closure_taken, false, &mut seen)
+    }
+
+    /// D-CONC-CROSS1=A: every concurrent boundary asks the same ownership
+    /// prover. Parallel workers and safe kernels additionally reject callable
+    /// values even when the caller could otherwise consume the closure.
+    pub(crate) fn crossing_problem(
+        &self,
+        ty: &Type,
+        crossing: SendCrossing,
+        closure_taken: bool,
+    ) -> Option<SendabilityProblem> {
+        let mut seen = HashSet::new();
+        let strict_callable = matches!(crossing, SendCrossing::ParallelWorker | SendCrossing::Kernel);
+        self.sendability_problem_inner(ty, closure_taken, strict_callable, &mut seen)
+    }
+
+    /// D-FACT-OWN1 / D-MEMPROVENANCE3: a crossing query includes the
+    /// prover-supplied flow fact and the view/fixed-backing provenance of the
+    /// binding. No boundary keeps a private view or sendability checker.
+    pub(crate) fn crossing_problem_for_name(
+        &self,
+        name: &str,
+        ty: &Type,
+        crossing: SendCrossing,
+        closure_taken: bool,
+    ) -> Option<SendabilityProblem> {
+        if self.is_view(name) || self.is_string_view(name) {
+            return Some(SendabilityProblem {
+                root: None,
+                path: Vec::new(),
+                kind: SendProblemKind::ViewBorrow,
+            });
+        }
+        let fact_ty = self.lookup(name).map_or(ty, |info| &info.ty);
+        let problem = self.crossing_problem(fact_ty, crossing, closure_taken);
+        if problem.is_none() && !self.sendability_for(name) {
+            Some(SendabilityProblem {
+                root: None,
+                path: Vec::new(),
+                kind: SendProblemKind::ClosureCaptures,
+            })
+        } else {
+            problem
+        }
     }
 
     pub(crate) fn type_contains_local_cell(&self, ty: &Type) -> bool {
@@ -4837,28 +4881,33 @@ impl<'a> Checker<'a> {
         &self,
         ty: &Type,
         closure_taken: bool,
+        strict_callable: bool,
         seen: &mut HashSet<String>,
     ) -> Option<SendabilityProblem> {
         match ty {
             Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => None,
             Type::IntN { .. } | Type::Float32 | Type::InlineRange { .. } => None,
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-                self.sendability_problem_inner(inner, true, seen)
+                self.sendability_problem_inner(inner, true, strict_callable, seen)
             }
             Type::Map { key, value, .. } => self
-                .sendability_problem_inner(key, true, seen)
-                .or_else(|| self.sendability_problem_inner(value, true, seen)),
+                .sendability_problem_inner(key, true, strict_callable, seen)
+                .or_else(|| self.sendability_problem_inner(value, true, strict_callable, seen)),
             Type::Result { ok, err } => self
-                .sendability_problem_inner(ok, true, seen)
-                .or_else(|| self.sendability_problem_inner(err, true, seen)),
+                .sendability_problem_inner(ok, true, strict_callable, seen)
+                .or_else(|| self.sendability_problem_inner(err, true, strict_callable, seen)),
             Type::Fn { .. } => {
-                if closure_taken {
+                if closure_taken && !strict_callable {
                     None
                 } else {
                     Some(SendabilityProblem {
                         root: None,
                         path: Vec::new(),
-                        kind: SendProblemKind::ClosureNeedsTake,
+                        kind: if strict_callable {
+                            SendProblemKind::CallableValue
+                        } else {
+                            SendProblemKind::ClosureNeedsTake
+                        },
                     })
                 }
             }
@@ -4893,7 +4942,7 @@ impl<'a> Checker<'a> {
                 })
             }
             Type::Named(name) if is_type_var_name(name) || core_type_known(name) => None,
-            Type::Named(name) => self.named_sendability_problem(name, &[], seen),
+            Type::Named(name) => self.named_sendability_problem(name, &[], strict_callable, seen),
             Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_GUARD => {
                 Some(SendabilityProblem {
                     root: None,
@@ -4907,7 +4956,7 @@ impl<'a> Checker<'a> {
                 if matches!(name.as_str(), "Task" | "Channel" | "Sender") =>
             {
                 args.iter()
-                    .find_map(|arg| self.sendability_problem_inner(arg, true, seen))
+                    .find_map(|arg| self.sendability_problem_inner(arg, true, strict_callable, seen))
             }
             // D-LOCALCELL1=A: local cells and every guard derived from them retain
             // single-threaded runtime borrow state. They cannot cross any task,
@@ -4938,7 +4987,9 @@ impl<'a> Checker<'a> {
                     kind: SendProblemKind::ViewBorrow,
                 })
             }
-            Type::Apply { name, args } => self.named_sendability_problem(name, args, seen),
+            Type::Apply { name, args } => {
+                self.named_sendability_problem(name, args, strict_callable, seen)
+            }
             Type::TraitObject(names) => Some(SendabilityProblem {
                 root: None,
                 path: Vec::new(),
@@ -4946,15 +4997,19 @@ impl<'a> Checker<'a> {
             }),
             Type::Tuple(fields) => fields
                 .iter()
-                .find_map(|(_, t)| self.sendability_problem_inner(t, true, seen)),
-            Type::FixedList { elem, .. } => self.sendability_problem_inner(elem, true, seen),
+                .find_map(|(_, t)| self.sendability_problem_inner(t, true, strict_callable, seen)),
+            Type::FixedList { elem, .. } => {
+                self.sendability_problem_inner(elem, true, strict_callable, seen)
+            }
             Type::Tagged { inner, .. } => {
-                self.sendability_problem_inner(inner, closure_taken, seen)
+                self.sendability_problem_inner(inner, closure_taken, strict_callable, seen)
             }
             Type::Union(members) => members
                 .iter()
-                .find_map(|m| self.sendability_problem_inner(m, closure_taken, seen)),
-            Type::Quantity { base, .. } => self.sendability_problem_inner(base, closure_taken, seen),
+                .find_map(|m| self.sendability_problem_inner(m, closure_taken, strict_callable, seen)),
+            Type::Quantity { base, .. } => {
+                self.sendability_problem_inner(base, closure_taken, strict_callable, seen)
+            }
             Type::ComputeDim(_) => None,
         }
     }
@@ -4963,6 +5018,7 @@ impl<'a> Checker<'a> {
         &self,
         name: &str,
         args: &[Type],
+        strict_callable: bool,
         seen: &mut HashSet<String>,
     ) -> Option<SendabilityProblem> {
         if !seen.insert(name.to_string()) {
@@ -4970,6 +5026,12 @@ impl<'a> Checker<'a> {
         }
         let subst = if args.is_empty() {
             HashMap::new()
+        } else if let Some((params, _)) = self.registry.type_alias(name) {
+            params
+                .iter()
+                .zip(args.iter())
+                .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                .collect()
         } else {
             self.struct_subst(name, args)
         };
@@ -4977,7 +5039,9 @@ impl<'a> Checker<'a> {
             Some(TypeDef::Struct { fields, .. }) => {
                 for (field_name, _, field_ty) in fields {
                     let actual_ty = self.trait_reg.instantiate_type(field_ty, &subst);
-                    if let Some(problem) = self.sendability_problem_inner(&actual_ty, true, seen) {
+                    if let Some(problem) =
+                        self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+                    {
                         return Some(prepend_send_path(name, field_name, problem));
                     }
                 }
@@ -4989,11 +5053,11 @@ impl<'a> Checker<'a> {
                         VariantPayload::Unit => None,
                         VariantPayload::Single(ty, _) => {
                             let actual_ty = self.trait_reg.instantiate_type(ty, &subst);
-                            self.sendability_problem_inner(&actual_ty, true, seen)
+                            self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
                         }
                         VariantPayload::Named(fields) => fields.iter().find_map(|field| {
                             let actual_ty = self.trait_reg.instantiate_type(&field.ty, &subst);
-                            self.sendability_problem_inner(&actual_ty, true, seen)
+                            self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
                                 .map(|p| prepend_send_path(name, &field.name, p))
                         }),
                     };
@@ -5003,8 +5067,15 @@ impl<'a> Checker<'a> {
                 }
                 None
             }
-            // D-DIST1: distinct types wrap a scalar; they are always Send.
-            Some(TypeDef::Distinct { .. }) | Some(TypeDef::Alias { .. }) | None => None,
+            Some(TypeDef::Distinct { base, .. }) => {
+                let actual_ty = self.trait_reg.instantiate_type(base, &subst);
+                self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+            }
+            Some(TypeDef::Alias { target, .. }) => {
+                let actual_ty = self.trait_reg.instantiate_type(target, &subst);
+                self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+            }
+            None => None,
         };
         seen.remove(name);
         found
@@ -5043,6 +5114,18 @@ impl<'a> Checker<'a> {
         if !self.reactive_upgrades.iter().any(|existing| existing == &line) {
             self.reactive_upgrades.push(line);
         }
+    }
+
+    /// D-CONC-CROSS1=A / D-CONC-FREEZE1=A: one ownership refusal at every
+    /// concurrent write boundary. The registered row supplies the same
+    /// What/Why/Fix shape for task and parallel-worker captures.
+    pub(crate) fn report_concurrent_write(&mut self, value: &str, boundary: &str, span: Span) {
+        let reason = "the write would race with the owner or require a hidden merge rule";
+        self.diags.push(Diagnostic::from_row(
+            "E1101",
+            &[("value", value), ("boundary", boundary), ("reason", reason)],
+            Some(span),
+        ));
     }
 
     pub(crate) fn report_unsendable(
@@ -5087,6 +5170,24 @@ impl<'a> Checker<'a> {
                     value_text, type_name
                 )
             }
+            (SendCrossing::ParallelWorker, SendProblemKind::ViewBorrow) => {
+                format!(
+                    "{} cannot cross a parallel worker boundary — it is a view that does not live long enough",
+                    value_text
+                )
+            }
+            (SendCrossing::ParallelWorker, _) => {
+                format!(
+                    "{} can't cross a parallel worker boundary because `{}` isn't sendable",
+                    value_text, type_name
+                )
+            }
+            (SendCrossing::Kernel, _) => {
+                format!(
+                    "{} can't cross the safe kernel worker boundary because `{}` isn't sendable",
+                    value_text, type_name
+                )
+            }
             (SendCrossing::InterruptCallback, _) => {
                 format!(
                     "{} can't be registered as an interrupt callback because `{}` isn't sendable",
@@ -5096,6 +5197,11 @@ impl<'a> Checker<'a> {
         };
         let why = if matches!(crossing, SendCrossing::InterruptCallback) {
             "core.sys.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe".to_string()
+        } else if matches!(crossing, SendCrossing::ParallelWorker | SendCrossing::Kernel) {
+            format!(
+                "{}; this concurrent boundary moves owned values between workers",
+                describe_sendability_problem(&problem)
+            )
         } else {
             format!(
                 "{}; tasks and channels move owned values between threads",
@@ -5117,6 +5223,12 @@ impl<'a> Checker<'a> {
             (true, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state"
             }
+            (true, SendCrossing::ParallelWorker) => {
+                "create the `Cell<T>` inside each worker, or use `Shared<T>` for synchronized state"
+            }
+            (true, SendCrossing::Kernel) => {
+                "pass an owned sendable value to the kernel, or keep the local cell outside the kernel"
+            }
             (true, SendCrossing::InterruptCallback) => {
                 "pass a named function, or capture only owned sendable values in the callback"
             }
@@ -5125,6 +5237,12 @@ impl<'a> Checker<'a> {
             }
             (false, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "give the task plain owned data, or rebuild the value as an owned copy before spawning"
+            }
+            (false, SendCrossing::ParallelWorker) => {
+                "copy plain owned data into the worker, or keep this operation sequential"
+            }
+            (false, SendCrossing::Kernel) => {
+                "use a read-only effect-free kernel over checked Core compute values"
             }
             (false, SendCrossing::InterruptCallback) => {
                 "pass a named function, or capture only owned sendable values in the callback"

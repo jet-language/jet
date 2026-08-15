@@ -179,9 +179,9 @@ use std::collections::HashSet;
                     }
                     let cap = self
                         .lookup(name)
-                        .map(|i| (i.ty.clone(), self.sendability_for(name), i.param_conv))
-                        .or_else(|| self.consts.get(name).map(|t| (t.clone(), true, None)));
-                    let Some((cap_ty, cap_sendable, cap_conv)) = cap else {
+                        .map(|i| (i.ty.clone(), i.param_conv))
+                        .or_else(|| self.consts.get(name).map(|t| (t.clone(), None)));
+                    let Some((cap_ty, cap_conv)) = cap else {
                         continue;
                     };
                     if self.interrupt_callback_depth > 0 {
@@ -388,18 +388,7 @@ use std::collections::HashSet;
                         && !shared_capture
                         && (mut_caps.contains(name) || mutable_capture)
                     {
-                        self.diags.push(Diagnostic::error(
-                            "E1101",
-                            format!(
-                                "`{}` is a mutable value — the new task might outlive this scope",
-                                name
-                            ),
-                            "tasks run concurrently; changing an outer binding inside a task would make ownership unclear"
-                                .to_string(),
-                            "give it to the task with `^`, snapshot it with `freeze`, or use `Shared`/a lock for deliberate shared mutation"
-                                .to_string(),
-                            Some(lam.span),
-                        ));
+                        self.report_concurrent_write(name, "task capture", lam.span);
                         continue;
                     }
                     if self.is_task_spawn {
@@ -413,17 +402,12 @@ use std::collections::HashSet;
                         // more than a `View<T>` can (I2: this must be caught here,
                         // never surface as a real rustc lifetime rejection).
                         let moves_capture = taken || !cloneable;
-                        let problem = if !cap_sendable {
-                            self.sendability_problem(&cap_ty, moves_capture).or_else(|| {
-                                Some(SendabilityProblem {
-                                    root: None,
-                                    path: Vec::new(),
-                                    kind: SendProblemKind::ClosureCaptures,
-                                })
-                            })
-                        } else {
-                            self.sendability_problem(&cap_ty, moves_capture)
-                        };
+                        let problem = self.crossing_problem_for_name(
+                            name,
+                            &cap_ty,
+                            SendCrossing::TaskCapture,
+                            moves_capture,
+                        );
                         if let Some(problem) = problem {
                             self.report_unsendable(
                                 name,

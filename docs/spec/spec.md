@@ -2474,7 +2474,8 @@ external effects explicit and synchronization-safe.
 
 Sema rejects ordinary mutable captures, stored/imported callbacks whose capture
 facts are hidden, and values that cannot be safely shared or transferred between
-workers as **E1111**. Inline lambdas and top-level functions expose the required
+workers as **E1101** for shared writes and **E1102** for values the crossing
+prover cannot send. Inline lambdas and top-level functions expose the required
 facts. Function-typed items, results, and fold accumulators are not transferable
 worker values and are rejected before code generation. There is no hidden
 serialization or implicit capture merge; callers

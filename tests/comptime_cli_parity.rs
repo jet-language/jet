@@ -4,8 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const TIER_PARITY_STEMS: [&str; 6] = [
+const TIER_PARITY_STEMS: [&str; 7] = [
     "cli/subcommands",
+    "concurrency/freeze_capture",
     "comptime/embed",
     "comptime/embed_bytes",
     "comptime/find",

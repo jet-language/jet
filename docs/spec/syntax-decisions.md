@@ -2185,7 +2185,7 @@ D-COROUTINE1's handle surface; D-CONC-FAIL1=A is the later retirement ruling.
 2026-08-06, card #1505)*: sendability is a registered fact about a type. One
 prover handles task captures, parallel adapters, kernels, cells, and fixed
 backings. Each rejection names what cannot cross, the boundary, and the fix.
-E1111 and the kernel wording join the E1101/E1102 family. The semantics
+E1111 is tombstoned, and the kernel wording joins the E1101/E1102 family. The semantics
 ratified by D-PARCAPTURE1 and the kernel decisions stay unchanged; this
 decision amends their prover and diagnostic implementation only.
 
@@ -3853,7 +3853,7 @@ callbacks fail concurrently, the original failure at the lowest source index
 wins; no partial result or accumulator escapes, while external effects already
 performed are not rolled back. Sema rejects mutable captures, function-typed
 items/results/accumulators, and other non-shareable/non-transferable worker
-values as E1111; stored/imported callbacks are rejected when their capture facts
+values as E1101/E1102 under D-CONC-CROSS1; stored/imported callbacks are rejected when their capture facts
 are unavailable, rather than silently serializing or inventing a capture merge.
 Adaptive fidelity is a manual runtime-global knob:
 `core.perf.Perf.fidelity()`, `default_fidelity()`, `override_fidelity(v)?`,

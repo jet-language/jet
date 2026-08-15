@@ -1208,6 +1208,7 @@ mod view_fact_graph_tests {
 pub(crate) enum SendProblemKind {
     ClosureNeedsTake,
     ClosureCaptures,
+    CallableValue,
     TraitValue(String),
     ThreadConfined(String),
     ViewBorrow,
@@ -1225,6 +1226,8 @@ pub(crate) enum SendCrossing {
     TaskCapture,
     TaskResult,
     ChannelSend,
+    ParallelWorker,
+    Kernel,
     InterruptCallback,
 }
 

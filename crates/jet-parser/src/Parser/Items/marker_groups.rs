@@ -1311,7 +1311,7 @@ impl<'a> Parser<'a> {
                     Syntax::MARKER_KERNEL => {
                         if function.kernel.is_some() {
                             return Err(Diagnostic::error(
-                                "E1130",
+                                "E0003",
                                 "a function may have only one `#Kernel` marker".to_string(),
                                 "the kernel mode is a single declaration, not a stack of execution policies".to_string(),
                                 "keep one `#Kernel(.parallel)` marker".to_string(),
