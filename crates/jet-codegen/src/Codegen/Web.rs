@@ -57,6 +57,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/ViewCopy.js"),
     "\n",
+    include_str!("../Prelude/Core/Values.js"),
+    "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
     "\n",
     include_str!("../Prelude/Core/InlineRange.js"),
@@ -7892,12 +7894,34 @@ fn tir_js_string(
     funcs: &[FuncWeb],
     file_prefix: Option<&str>,
 ) -> Result<String, ()> {
-    if parts.iter().any(|p| matches!(p, TIR::TStrPart::Interp(_, _))) {
+    if parts.iter().any(|part| matches!(part, TIR::TStrPart::Interp(_, _))) {
         let mut out = String::from("`");
-        for part in parts { match part { TIR::TStrPart::Lit(s) => out.push_str(s), TIR::TStrPart::Interp(e, _) => out.push_str(&format!("${{{}}}", tir_js_expr(e, funcs, file_prefix)?)) } }
-        out.push('`'); Ok(out)
+        for part in parts {
+            match part {
+                TIR::TStrPart::Lit(text) => out.push_str(text),
+                TIR::TStrPart::Interp(value, _) => {
+                    let is_float = matches!(&value.ty, Type::Float | Type::Float32);
+                    let rendered = tir_js_expr(value, funcs, file_prefix)?;
+                    if is_float {
+                        out.push_str(&format!("${{jet_float_display({rendered})}}"));
+                    } else {
+                        out.push_str(&format!("${{{rendered}}}"));
+                    }
+                }
+            }
+        }
+        out.push('`');
+        Ok(out)
     } else {
-        Ok(json_quote(&parts.iter().filter_map(|p| if let TIR::TStrPart::Lit(s) = p { Some(s.as_str()) } else { None }).collect::<String>()))
+        Ok(json_quote(
+            &parts
+                .iter()
+                .filter_map(|part| match part {
+                    TIR::TStrPart::Lit(text) => Some(text.as_str()),
+                    TIR::TStrPart::Interp(_, _) => None,
+                })
+                .collect::<String>(),
+        ))
     }
 }
 
