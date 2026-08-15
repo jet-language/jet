@@ -3622,12 +3622,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
-                let qualified = cx.foreign_type_identity(alias, type_name).unwrap_or_else(|| {
-                    jet_foundation::ice!(
-                        None,
-                        "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
-                    )
-                });
+                let qualified = if cx.code_modules.contains(alias) {
+                    // Inline-module instance members are local generated nominals.
+                    // Their qualified source spelling is never a foreign identity.
+                    jet_foundation::Names::member_name(alias, type_name)
+                } else {
+                    cx.foreign_type_identity(alias, type_name).unwrap_or_else(|| {
+                        jet_foundation::ice!(
+                            None,
+                            "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
+                        )
+                    })
+                };
                 return TExpr {
                     ty: if type_args.is_empty() {
                         Type::Named(qualified)

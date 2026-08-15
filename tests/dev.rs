@@ -7000,10 +7000,12 @@ fn run() {
 
 #[test]
 fn generic_modules_full_example_matches_resident_jit_and_aot() {
-    assert_cranelift_three_way(
-        "examples/features/modules/generic_modules.jet",
-        "modules/generic_modules",
-    );
+    let dir = common::unique_tmp("jet_generic_modules_full_example");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("generic_modules.jet");
+    fs::copy("examples/features/modules/generic_modules.jet", &file).unwrap();
+    assert_cranelift_three_way(file.to_str().unwrap(), "modules/generic_modules");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
