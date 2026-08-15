@@ -167,7 +167,20 @@ fn emit_track_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> 
         .iter()
         .map(|(name, value)| {
             let field = core_struct_field_rust_name(cx, ty, name)?;
-            Some(format!("{field}: {}", value.serialize()))
+            let value = if name == "source" {
+                match value {
+                    crate::AST::CtValue::Present(value) => {
+                        format!("Some({})", value.serialize())
+                    }
+                    crate::AST::CtValue::Failed(crate::AST::CtReport::Clean(_)) => {
+                        "None".to_string()
+                    }
+                    _ => return None,
+                }
+            } else {
+                value.serialize()
+            };
+            Some(format!("{field}: {value}"))
         })
         .collect::<Option<Vec<_>>>()?;
     Some(format!("{} {{ {} }}", cx.rust_type(ty), parts.join(", ")))
