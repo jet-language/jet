@@ -1345,6 +1345,25 @@ fn notify(ready: Bool) =[Net]=> () {
     }
 
     #[test]
+    fn adjacent_call_result_has_the_registered_call_value_fix() {
+        let src = "fn run() { make()() }\n";
+        let (tokens, lex_diagnostics) = lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("an adjacent call result must be rejected");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E-CALL-VALUE")
+            .expect("E-CALL-VALUE");
+        assert_eq!(
+            diagnostic
+                .edit
+                .as_ref()
+                .map(|edit| edit.new_text.as_str()),
+            Some(".call")
+        );
+    }
+
+    #[test]
     fn retired_s14_teaching_is_paused() {
         const RETIRED_CODES: &[&str] = &[
             "E0008", "E0012", "E0013", "E0014", "E0015", "E0016", "E0017", "E0018",

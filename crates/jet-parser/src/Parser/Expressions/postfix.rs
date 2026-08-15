@@ -201,9 +201,9 @@ impl<'a> Parser<'a> {
                         if is_adjacent_call_result(&expr) {
                             let mut diagnostic = Diagnostic::error(
                                 "E-CALL-VALUE",
-                                "function values use `.call(…)`, not the retired adjacent-call form"
+                                "a function value is invoked with the retired adjacent-call spelling"
                                     .to_string(),
-                                "named functions use `f(…)`; a returned or stored function value uses `.call(…)` so the value and invocation stay explicit"
+                                "named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B)"
                                     .to_string(),
                                 "write `callee.call(…)`".to_string(),
                                 Some(open),

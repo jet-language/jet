@@ -477,9 +477,10 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn retired_function_body(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0065",
-                "this function uses the retired `=` body marker".to_string(),
-                "`::` separates a one-line function body; `=` fills a slot inside a definition".to_string(),
-                "replace `=` with `::`".to_string(),
+                "This function uses the retired `=` body marker.".to_string(),
+                "`::` separates a one-line function body; `=` fills a slot inside a definition."
+                    .to_string(),
+                "Replace `=` with `::`; `jet fmt` applies this fix.".to_string(),
                 Some(span),
             )
         }

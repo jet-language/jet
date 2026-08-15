@@ -5,7 +5,20 @@ impl<'a> Parser<'a> {
     /// statement binding. Keep the source subject in `Binding::init`; the
     /// refutable pattern and fallback stay together in the binding target so
     /// sema and every execution tier consume one canonical operation.
-    pub(crate) fn try_refutable_test_binding(&self, expr: Expr) -> Option<Binding> {
+    pub(crate) fn try_refutable_test_binding(
+        &self,
+        expr: Expr,
+    ) -> Result<Binding, Expr> {
+        let names = match &expr {
+            Expr::OrFallback { value, .. } => match value.as_ref() {
+                Expr::PatternTest { pattern, .. } => pattern.binding_names(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        if names.is_empty() {
+            return Err(expr);
+        }
         let Expr::OrFallback {
             value,
             fallback,
@@ -13,7 +26,7 @@ impl<'a> Parser<'a> {
             ..
         } = expr
         else {
-            return None;
+            unreachable!("a refutable test binding must have a fallback")
         };
         let Expr::PatternTest {
             subject,
@@ -21,13 +34,9 @@ impl<'a> Parser<'a> {
             span: pattern_span,
         } = *value
         else {
-            return None;
+            unreachable!("a refutable test binding must test a pattern")
         };
-        let names = pattern.binding_names();
-        if names.is_empty() {
-            return None;
-        }
-        Some(Binding {
+        Ok(Binding {
             mutable: false,
             markers: Vec::new(),
             reactive_upgrade: false,

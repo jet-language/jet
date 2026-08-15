@@ -238,12 +238,11 @@ impl<'a> Parser<'a> {
     pub(super) fn teach_control_braces(&mut self, body: &str, span: Span) {
         self.diags.push(Diagnostic::error(
             "E0372",
-            format!("this `{body}` body needs braces"),
-            "braces make the body's boundary visible to readers, editors, and the compiler"
+            format!("This `{body}` body needs braces."),
+            "Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler."
                 .to_string(),
-            format!(
-                "write `-> statement` for one statement, or wrap the body in `{{ ... }}`; `jet fmt` applies this fix"
-            ),
+            "Write `-> statement` for one statement, or wrap the body in `{ ... }`; `jet fmt` applies this fix."
+                .to_string(),
             Some(span),
         ));
     }
