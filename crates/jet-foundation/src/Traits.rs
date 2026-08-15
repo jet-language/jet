@@ -847,6 +847,20 @@ impl TraitRegistry {
                 }
                 return;
             };
+            let owner_type = self
+                .struct_params
+                .get(type_name)
+                .or_else(|| self.enum_params.get(type_name))
+                .map_or_else(
+                    || Type::Named(type_name.to_string()),
+                    |params| Type::Apply {
+                        name: type_name.to_string(),
+                        args: params
+                            .iter()
+                            .map(|param| Type::Named(param.name.clone()))
+                            .collect(),
+                    },
+                );
             let self_ok = method.params.first().is_some_and(|param| {
                 param.name == Syntax::KW_SELF
                     && param.convention == AccessConvention::Read
@@ -855,7 +869,7 @@ impl TraitRegistry {
             });
             let rhs_ok = method.params.get(1).is_some_and(|param| {
                 param.convention == AccessConvention::Read
-                    && param.ty == Type::Named(type_name.to_string())
+                    && param.ty == owner_type
                     && !param.variadic
                     && param.default.is_none()
             });
@@ -865,7 +879,7 @@ impl TraitRegistry {
                     method.return_type
                         == Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
                 }
-                _ => method.return_type == Some(Type::Named(type_name.to_string())),
+                _ => method.return_type.as_ref() == Some(&owner_type),
             };
             if methods.len() != 1
                 || !self_ok
