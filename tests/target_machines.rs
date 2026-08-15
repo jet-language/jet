@@ -114,6 +114,11 @@ fn no_os_allocator_and_core_limits_are_data_errors() {
         required: RuntimeLayer::Alloc,
         available: RuntimeLayer::Core
     }));
+    machine.allocator = AllocatorPolicy::Counting {
+        cap: Some(ByteSize::mib(8)),
+    };
+    let errors = machine.validate(&TargetMachineUse::default());
+    assert!(errors.contains(&TargetMachineError::HostedAllocatorRequiresOs));
 }
 
 #[test]

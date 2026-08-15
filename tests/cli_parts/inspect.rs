@@ -160,3 +160,36 @@ fn source_policy_spelling_is_rejected_with_teaching_diagnostic() {
         .join("\n");
     check_snapshot("inspect_guarantees_source_policy.txt", &format!("{teaching}\n"));
 }
+
+#[test]
+fn inspect_dossier_snapshots_program_allocator_fact() {
+    let dir = isolated_cwd("inspect_dossier_program_allocator");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"allocator_dossier\"\nversion: \"0.1.0\"\nallocator: mem.Counting.over(mem.Heap, cap: 2.gb)\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.jet"), "fn run() { print(\"ok\") }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "dossier", "main.jet", "run", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8(output.stdout).unwrap();
+    let allocator = json
+        .split_once("\"program_allocator\":")
+        .and_then(|(_, tail)| tail.split_once(",\"performance_budgets\""))
+        .map(|(allocator, _)| allocator)
+        .expect("dossier must project the program allocator before performance budgets");
+    check_snapshot(
+        "inspect_dossier_program_allocator.json",
+        &format!("{{\"program_allocator\":{allocator}}}\n"),
+    );
+}

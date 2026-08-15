@@ -26,8 +26,9 @@ pub struct JetProgramAllocatorFacts {
 }
 
 /// A system-heap wrapper whose policy is atomically replaceable between hosted
-/// runs. Every allocation carries private metadata so a block allocated under
-/// one policy can be released safely after the previous policy is restored.
+/// runs. Hidden-default allocation delegates to System with the caller's exact
+/// layout and no prefix. Only selected-wrapper allocations enter the private,
+/// allocation-free tracker, so blocks remain safe across policy restoration.
 pub struct JetProgramAllocator {
     mode: std::sync::atomic::AtomicU8,
     cap_bytes: std::sync::atomic::AtomicUsize,
@@ -207,100 +208,152 @@ impl JetProgramAllocator {
     }
 }
 
-#[repr(C)]
-struct JetProgramAllocationHeader {
-    total_bytes: usize,
-    alignment: usize,
-    requested_bytes: usize,
-    tracked: usize,
-}
-
-fn jet_program_allocation_layout(
-    layout: std::alloc::Layout,
-) -> Option<(std::alloc::Layout, usize)> {
-    let metadata = std::mem::size_of::<JetProgramAllocationHeader>()
-        .checked_add(std::mem::size_of::<usize>())?;
-    let mask = layout.align().checked_sub(1)?;
-    let offset = metadata.checked_add(mask)? & !mask;
-    let total = offset.checked_add(layout.size().max(1))?;
-    let alignment = layout
-        .align()
-        .max(std::mem::align_of::<JetProgramAllocationHeader>());
-    Some((std::alloc::Layout::from_size_align(total, alignment).ok()?, offset))
-}
-
 // JET_VETTED_UNSAFE_BEGIN: program_allocator
+struct JetProgramAllocationNode {
+    ptr: *mut u8,
+    requested_bytes: usize,
+    next: *mut JetProgramAllocationNode,
+}
+
+struct JetProgramAllocationTracker {
+    head: *mut JetProgramAllocationNode,
+}
+
+// SAFETY: the raw links are read or written only while the tracker mutex is
+// held. Allocation/deallocation of tracker nodes bypasses the global allocator
+// and goes straight to System, so bookkeeping cannot recurse.
+unsafe impl Send for JetProgramAllocationTracker {}
+
+static JET_PROGRAM_ALLOCATION_TRACKER: std::sync::Mutex<JetProgramAllocationTracker> =
+    std::sync::Mutex::new(JetProgramAllocationTracker {
+        head: std::ptr::null_mut(),
+    });
+static JET_PROGRAM_TRACKED_ALLOCATIONS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+unsafe fn jet_track_program_allocation(ptr: *mut u8, requested_bytes: usize) -> bool {
+    use std::sync::atomic::Ordering;
+
+    let node_layout = std::alloc::Layout::new::<JetProgramAllocationNode>();
+    let node = unsafe {
+        std::alloc::GlobalAlloc::alloc(&std::alloc::System, node_layout)
+            .cast::<JetProgramAllocationNode>()
+    };
+    if node.is_null() {
+        return false;
+    }
+    let mut tracker = JET_PROGRAM_ALLOCATION_TRACKER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    unsafe {
+        node.write(JetProgramAllocationNode {
+            ptr,
+            requested_bytes,
+            next: tracker.head,
+        });
+    }
+    tracker.head = node;
+    JET_PROGRAM_TRACKED_ALLOCATIONS.fetch_add(1, Ordering::Release);
+    true
+}
+
+unsafe fn jet_untrack_program_allocation(ptr: *mut u8) -> Option<usize> {
+    use std::sync::atomic::Ordering;
+
+    if JET_PROGRAM_TRACKED_ALLOCATIONS.load(Ordering::Acquire) == 0 {
+        return None;
+    }
+    let mut tracker = JET_PROGRAM_ALLOCATION_TRACKER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut previous = std::ptr::null_mut::<JetProgramAllocationNode>();
+    let mut current = tracker.head;
+    while !current.is_null() {
+        let node = unsafe { &*current };
+        if node.ptr == ptr {
+            if previous.is_null() {
+                tracker.head = node.next;
+            } else {
+                unsafe { (*previous).next = node.next };
+            }
+            let requested_bytes = node.requested_bytes;
+            drop(tracker);
+            unsafe {
+                std::alloc::GlobalAlloc::dealloc(
+                    &std::alloc::System,
+                    current.cast::<u8>(),
+                    std::alloc::Layout::new::<JetProgramAllocationNode>(),
+                );
+            }
+            JET_PROGRAM_TRACKED_ALLOCATIONS.fetch_sub(1, Ordering::Release);
+            return Some(requested_bytes);
+        }
+        previous = current;
+        current = node.next;
+    }
+    None
+}
+
+fn jet_program_allocation_is_tracked(ptr: *mut u8) -> bool {
+    use std::sync::atomic::Ordering;
+
+    if JET_PROGRAM_TRACKED_ALLOCATIONS.load(Ordering::Acquire) == 0 {
+        return false;
+    }
+    let tracker = JET_PROGRAM_ALLOCATION_TRACKER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut current = tracker.head;
+    while !current.is_null() {
+        let node = unsafe { &*current };
+        if node.ptr == ptr {
+            return true;
+        }
+        current = node.next;
+    }
+    false
+}
+
 unsafe impl std::alloc::GlobalAlloc for JetProgramAllocator {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
         let requested = layout.size().max(1);
         let Some(tracked) = self.reserve(requested) else {
             return std::ptr::null_mut();
         };
-        let Some((storage_layout, offset)) = jet_program_allocation_layout(layout) else {
+        let ptr = unsafe { std::alloc::GlobalAlloc::alloc(&std::alloc::System, layout) };
+        if ptr.is_null() {
             if tracked {
                 self.release(requested);
             }
+            return ptr;
+        }
+        if tracked && !unsafe { jet_track_program_allocation(ptr, requested) } {
+            unsafe { std::alloc::GlobalAlloc::dealloc(&std::alloc::System, ptr, layout) };
+            self.release(requested);
             return std::ptr::null_mut();
-        };
-        // SAFETY: `storage_layout` is valid and is paired with the exact same
-        // layout in `dealloc` below.
-        let base =
-            unsafe { std::alloc::GlobalAlloc::alloc(&std::alloc::System, storage_layout) };
-        if base.is_null() {
-            if tracked {
-                self.release(requested);
-            }
-            return base;
         }
-        let header = JetProgramAllocationHeader {
-            total_bytes: storage_layout.size(),
-            alignment: storage_layout.align(),
-            requested_bytes: requested,
-            tracked: usize::from(tracked),
-        };
-        // SAFETY: the metadata prefix was included in `offset`, the base has
-        // header alignment, and the returned pointer has the caller's alignment.
-        unsafe {
-            base.cast::<JetProgramAllocationHeader>().write(header);
-            base.add(offset - std::mem::size_of::<usize>())
-                .cast::<usize>()
-                .write_unaligned(offset);
-            base.add(offset)
-        }
+        ptr
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: std::alloc::Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
         if ptr.is_null() {
             return;
         }
-        // SAFETY: every pointer returned by this allocator has the offset word
-        // immediately before it and a header at the recovered base.
-        let offset = unsafe {
-            ptr.sub(std::mem::size_of::<usize>())
-                .cast::<usize>()
-                .read_unaligned()
-        };
-        let base = unsafe { ptr.sub(offset) };
-        let header = unsafe { base.cast::<JetProgramAllocationHeader>().read() };
-        if header.tracked != 0 {
-            self.release(header.requested_bytes);
+        if let Some(requested) = unsafe { jet_untrack_program_allocation(ptr) } {
+            self.release(requested);
         }
-        let storage_layout = std::alloc::Layout::from_size_align(
-            header.total_bytes,
-            header.alignment,
-        )
-        .expect("program allocator stored an invalid layout");
-        // SAFETY: `base` came from System with this exact stored layout.
-        unsafe {
-            std::alloc::GlobalAlloc::dealloc(&std::alloc::System, base, storage_layout)
-        };
+        unsafe { std::alloc::GlobalAlloc::dealloc(&std::alloc::System, ptr, layout) };
     }
 
     unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
-        // SAFETY: delegation preserves the GlobalAlloc contract.
+        use std::sync::atomic::Ordering;
+        if self.mode.load(Ordering::Acquire) == JET_PROGRAM_ALLOCATOR_SYSTEM {
+            return unsafe {
+                std::alloc::GlobalAlloc::alloc_zeroed(&std::alloc::System, layout)
+            };
+        }
         let ptr = unsafe { self.alloc(layout) };
         if !ptr.is_null() {
-            // SAFETY: `ptr` owns at least `layout.size()` writable bytes.
             unsafe { ptr.write_bytes(0, layout.size()) };
         }
         ptr
@@ -312,6 +365,11 @@ unsafe impl std::alloc::GlobalAlloc for JetProgramAllocator {
         layout: std::alloc::Layout,
         new_size: usize,
     ) -> *mut u8 {
+        if !jet_program_allocation_is_tracked(ptr) {
+            return unsafe {
+                std::alloc::GlobalAlloc::realloc(&std::alloc::System, ptr, layout, new_size)
+            };
+        }
         let Ok(new_layout) = std::alloc::Layout::from_size_align(new_size, layout.align()) else {
             return std::ptr::null_mut();
         };
@@ -320,8 +378,6 @@ unsafe impl std::alloc::GlobalAlloc for JetProgramAllocator {
         if new_ptr.is_null() {
             return new_ptr;
         }
-        // SAFETY: both blocks are live and non-overlapping; copy only the
-        // smaller initialized extent, then release the original block.
         unsafe {
             std::ptr::copy_nonoverlapping(ptr, new_ptr, layout.size().min(new_size));
             self.dealloc(ptr, layout);

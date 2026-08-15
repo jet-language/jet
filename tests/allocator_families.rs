@@ -739,6 +739,40 @@ fn main() {
 }
 
 #[test]
+fn program_allocator_default_blocks_survive_counting_swap_without_tracking() {
+    if !common::have_rustc() {
+        return;
+    }
+    let ran = compile_program_allocator_harness(
+        r#"
+use std::alloc::{GlobalAlloc, Layout};
+
+fn main() {
+    let allocator = allocator::JetProgramAllocator::system();
+    let layout = Layout::from_size_align(32, 16).unwrap();
+    let default_block = unsafe { GlobalAlloc::alloc(&allocator, layout) };
+    assert!(!default_block.is_null());
+    assert_eq!(allocator.facts().allocations, 0);
+
+    let previous = allocator.configure_counting(64);
+    let counted_block = unsafe { GlobalAlloc::alloc(&allocator, layout) };
+    assert!(!counted_block.is_null());
+    assert_eq!(allocator.facts().live_bytes, 32);
+    unsafe { GlobalAlloc::dealloc(&allocator, default_block, layout) };
+    assert_eq!(allocator.facts().live_bytes, 32);
+
+    allocator.restore(previous);
+    unsafe { GlobalAlloc::dealloc(&allocator, counted_block, layout) };
+    assert_eq!(allocator.facts().live_bytes, 0);
+    println!("ok");
+}
+"#,
+    );
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
+}
+
+#[test]
 fn program_allocator_example_matches_aot_jit_and_interpreter() {
     if !common::have_rustc() {
         return;
