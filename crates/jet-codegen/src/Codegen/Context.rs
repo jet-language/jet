@@ -3186,7 +3186,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.policy_declarations = bundle.modules[module_idx].policy_declarations.clone();
-    populate_cx_guarantee_facts(cx, bundle, module_idx);
+    populate_cx_module_facts(cx, bundle, module_idx);
     cx.core_archive_source = bundle
         .modules
         .iter()
@@ -3231,14 +3231,21 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.package_edition = bundle.edition.clone();
 }
 
-/// Carry the package-only guarantee facts into one module's codegen context.
-/// The dependency ownership projection uses the same longest-root rule as the
-/// sema effect-budget path; no emitter reparses package metadata.
-pub(crate) fn populate_cx_guarantee_facts(
+/// Carry authoritative module ownership and package-only guarantee facts into
+/// one codegen context. The name ledger owns declarations because loaded
+/// dependency items may also be present in a module's merged item list. The
+/// dependency ownership projection uses the same longest-root rule as sema.
+pub(crate) fn populate_cx_module_facts(
     cx: &mut Cx,
     bundle: &ProgramBundle,
     module_idx: usize,
 ) {
+    cx.local_type_names.retain(|name| {
+        bundle
+            .name_ledger
+            .declaration(module_idx, name)
+            .is_some()
+    });
     cx.package_hardened = bundle.package_guarantees.harden;
     let Some(module) = bundle.modules.get(module_idx) else {
         cx.dependency_fenced = false;
