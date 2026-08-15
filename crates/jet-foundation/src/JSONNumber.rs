@@ -69,7 +69,7 @@ pub fn json_decimal_lexeme(s: &str) -> Result<(bool, Vec<u8>, u32), String> {
             let exponent = body[index + 1..]
                 .parse::<i64>()
                 .map_err(|_| "decimal exponent is out of range".to_string())?;
-            Ok((&body[..index], exponent))
+            Ok::<(&str, i64), String>((&body[..index], exponent))
         })
         .transpose()?
         .unwrap_or((body, 0));
