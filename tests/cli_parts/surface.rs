@@ -533,7 +533,12 @@ fn coverage_help_matches_instrumentation() {
             String::from_utf8_lossy(&completion.stderr)
         );
         let script = String::from_utf8_lossy(&completion.stdout);
-        assert!(script.contains("--coverage"), "{shell} omitted --coverage");
+        let coverage_flag = if shell == "fish" {
+            "-l coverage"
+        } else {
+            "--coverage"
+        };
+        assert!(script.contains(coverage_flag), "{shell} omitted {coverage_flag}");
         if matches!(shell, "fish" | "zsh") {
             assert!(script.contains(COVERAGE_HELP), "{shell}: {script}");
         }
