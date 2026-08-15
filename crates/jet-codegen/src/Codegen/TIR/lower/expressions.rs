@@ -2342,7 +2342,38 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             let lhs = lower_expr(l, cx, env);
-            let rhs = lower_expr(r, cx, env);
+            let mut rhs = lower_expr(r, cx, env);
+            // A leading-dot enum literal gets its owner from the other operand's
+            // resolved type. Keep that canonical owner through lowering: the
+            // same leaf can be declared locally and by an imported module.
+            let expected_enum = match &lhs.ty {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name.clone()),
+                _ => None,
+            };
+            if let (
+                Some(expected_enum),
+                Expr::EnumLit {
+                    leading_dot: true,
+                    ..
+                },
+                TExprKind::EnumLit {
+                    enum_type,
+                    variant,
+                    ..
+                },
+            ) = (expected_enum, r.as_ref(), &mut rhs.kind)
+            {
+                let same_nominal_leaf = crate::Codegen::nominal_leaf(enum_type)
+                    == crate::Codegen::nominal_leaf(&expected_enum);
+                let expected_owns_variant = cx
+                    .enum_variants
+                    .get(&expected_enum)
+                    .is_some_and(|variants| variants.iter().any(|(name, _)| name == variant));
+                if same_nominal_leaf && expected_owns_variant {
+                    *enum_type = expected_enum;
+                    rhs.ty = lhs.ty.clone();
+                }
+            }
             // D-TYPE2-MEASURE1=A: Matrix multiplication carries the composed
             // outer measures in TIR while the shared compute Prelude owns the
             // one fallible runtime operation.
