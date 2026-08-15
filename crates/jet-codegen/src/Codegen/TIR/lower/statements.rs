@@ -1868,6 +1868,48 @@ fn lower_refutable_fallback(
         }
     }
 }
+
+/// Before body sema, a comptime fragment still carries a contextual return
+/// head as an unowned enum literal. Project it onto the existing Option/Result
+/// AST nodes from the function's declared return type, then let their ordinary
+/// lowering own the carrier representation on every tier.
+fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type>) -> Option<Expr> {
+    if !super::is_eval_fragment() {
+        return None;
+    }
+    let Expr::EnumLit {
+        type_name,
+        variant,
+        args,
+        leading_dot,
+        span,
+    } = expr
+    else {
+        return None;
+    };
+    if !type_name.is_empty() {
+        return None;
+    }
+    match (expected, variant.as_str(), args.as_slice()) {
+        (
+            Some(Type::Result { .. }),
+            Syntax::LIT_OK,
+            [crate::AST::EnumLitArg::Positional(value)],
+        ) if *leading_dot => Some(Expr::Ok(Box::new(value.clone()), *span)),
+        (
+            Some(Type::Result { .. }),
+            Syntax::LIT_ERR,
+            [crate::AST::EnumLitArg::Positional(value)],
+        ) if *leading_dot => Some(Expr::Err(Box::new(value.clone()), *span)),
+        (
+            Some(Type::Option(_)),
+            Syntax::LIT_VALUE,
+            [crate::AST::EnumLitArg::Positional(value)],
+        ) => Some(Expr::Present(Box::new(value.clone()), *span)),
+        (Some(Type::Option(_)), Syntax::LIT_NULL, []) => Some(Expr::Absent(*span)),
+        _ => None,
+    }
+}
 #[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
@@ -2858,7 +2900,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             }))
         }
         Stmt::Return(Some(e), _) => {
-            let mut value = lower_owned_expr(e, cx, env);
+            let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
+            let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(e), cx, env);
             if let Some(want) = &env.ret_ty {
                 value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
             }
