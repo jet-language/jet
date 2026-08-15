@@ -816,6 +816,12 @@ impl Cx {
     }
 
     pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
+        // A bare source name resolves to a local nominal before any imported
+        // type with the same leaf. Imported shapes are keyed by their canonical
+        // identity in `type_names`, so this rejects only a real local shadow.
+        if alias.is_empty() && self.type_names.contains(leaf) {
+            return None;
+        }
         let rust_mod = if alias.is_empty() {
             None
         } else {
