@@ -50,6 +50,14 @@ field in a typed `Value` and adds display text only as a view. AOT, resident JIT
 and the interpreter therefore preserve the same names, types, and nested value
 shape instead of maintaining a second string-field model.
 
+The runtime-retained subset is exact: stored field names and order, typed field
+values, the leaf type name, the canonical type path, and display text. Runtime
+reflection does not retain markers, visibility, source spans, methods, type
+parameters, layout facts, or other compile-time facts. Those facts guide code
+generation and have no runtime use. A non-struct value keeps its type name, path,
+and display text, but its field list is empty. This makes `reflect.of` a read-only
+snapshot, not a dynamic type registry.
+
 ## Compiler crate map
 
 D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root

@@ -5852,13 +5852,20 @@ fn assert_network_http_browser_three_way(file: &str, stem: &str) {
 }
 
 #[test]
-fn reflection_value_matches_interpreter_jit_and_aot() {
+fn reflection_value_matches_interpreter_jit_aot_and_jet_run() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
     let _guard = dev_diff_lock().lock().unwrap();
     let stem = "reflection/reflect-value";
-    assert_data_pipelines_parsing_three_way(&example_path(stem), stem);
+    let file = example_path(stem);
+    assert_data_pipelines_parsing_three_way(&file, stem);
+    let cli_run = run_cli_default_resident("run", &file, "reflection_value_cli_run");
+    assert_eq!(
+        cli_run,
+        golden_program_output(stem),
+        "default `jet run` drifted from reflection golden output"
+    );
 }
 
 #[test]
