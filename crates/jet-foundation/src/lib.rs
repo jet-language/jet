@@ -19,6 +19,7 @@ pub mod Generics;
 pub mod generated;
 pub mod JitBackend;
 pub mod JSON;
+pub mod JSONNumber;
 pub mod EncodingErrors;
 pub mod EncodingJson;
 #[allow(unused_imports)]

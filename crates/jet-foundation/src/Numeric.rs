@@ -3,6 +3,7 @@
 
 use crate::Syntax;
 use crate::AST::{Expr, Marker, Type};
+use crate::JSONNumber::{json_decimal_lexeme, json_exact_integer_text};
 
 pub const MONEY_LINT_NAMES: &[&str] =
     &["price", "cost", "amount", "fee", "balance", "tax"];
@@ -236,6 +237,12 @@ impl CtBigInt {
         }
         acc.negative = negative && !(acc.limbs.len() == 1 && acc.limbs[0] == 0);
         Ok(acc)
+    }
+
+    /// Project one JSON number token into the arbitrary-precision default
+    /// `Int` carrier without passing through `Float`.
+    pub fn from_json_number(s: &str) -> Result<Self, String> {
+        Self::from_str(&json_exact_integer_text(s)?)
     }
 
     /// Parse one source integer literal. The lexer keeps the original spelling
@@ -888,48 +895,30 @@ pub struct CtDecimal {
 
 impl CtDecimal {
     pub fn from_str(s: &str) -> Result<Self, String> {
-        let t = s.trim();
-        if t.is_empty() {
+        if s.trim().is_empty() {
             return Err("empty Decimal string".to_string());
         }
-        let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
-            (true, rest)
-        } else if let Some(rest) = t.strip_prefix('+') {
-            (false, rest)
-        } else {
-            (false, t)
-        };
-        let parts: Vec<&str> = body.split('.').collect();
-        if parts.len() > 2 {
+        if s.contains('e') || s.contains('E') {
             return Err(format!("invalid Decimal string `{s}`"));
         }
-        let (int_part, frac_part) = (parts[0], parts.get(1).copied().unwrap_or(""));
-        if int_part.is_empty() && frac_part.is_empty() {
-            return Err(format!("invalid Decimal string `{s}`"));
-        }
-        if !int_part.chars().all(|c| c.is_ascii_digit())
-            || !frac_part.chars().all(|c| c.is_ascii_digit())
-        {
-            return Err(format!("invalid Decimal string `{s}`"));
-        }
-        let mut digits: Vec<u8> = int_part
-            .chars()
-            .chain(frac_part.chars())
-            .map(|c| c as u8 - b'0')
-            .collect();
-        while digits.len() > 1 && digits.first() == Some(&0) {
-            digits.remove(0);
-        }
-        if digits.is_empty() {
-            digits.push(0);
-        }
-        let scale = frac_part.len() as u32;
+        let (negative, digits, scale) = json_decimal_lexeme(s)?;
         Ok(CtDecimal {
             negative,
             digits,
             scale,
         }
         .normalize())
+    }
+
+    /// Project one JSON number token into an exact base-10 value. Unlike the
+    /// ordinary constructor, this keeps the token's written scale.
+    pub fn from_json_number(s: &str) -> Result<Self, String> {
+        let (negative, digits, scale) = json_decimal_lexeme(s)?;
+        Ok(CtDecimal {
+            negative,
+            digits,
+            scale,
+        })
     }
 
     fn normalize(mut self) -> Self {
@@ -1084,7 +1073,6 @@ impl CtDecimal {
             negative,
             digits: digits.bytes().map(|b| b - b'0').collect(),
             scale,
-        }
-        .normalize())
+        })
     }
 }
