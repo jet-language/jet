@@ -1781,8 +1781,8 @@ try {
             "{stem} lost source-line context:\n{stdout}"
         );
         assert!(
-            stdout.contains("Why: the call stack exceeded Jet's safe runtime limit")
-                && stdout.contains("Fix: end the recursion or make progress toward a base case"),
+            stdout.contains("Why: The call stack kept growing without reaching a safe return.")
+                && stdout.contains("Fix: End the recursion or make progress toward a base case."),
             "{stem} lost canonical E3012 policy:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
