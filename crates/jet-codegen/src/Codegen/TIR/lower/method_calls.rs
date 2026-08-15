@@ -5391,13 +5391,17 @@ fn lower_method_call_impl(
                         .and_then(|value| value.div(&destination.scale))
                         .expect("sema validated unit offset");
                     let measured_scale_uncertainty = |fact: &crate::Codegen::UnitFact| {
-                        match &fact.scale_provenance {
-                            crate::AST::UnitScaleProvenance::Measured {
-                                standard_uncertainty,
-                                ..
-                            } => Some(*standard_uncertainty / unit_ratio_as_f64(&fact.scale).abs()),
-                            _ => None,
-                        }
+                        let crate::AST::UnitScaleProvenance::Measured {
+                            standard_uncertainty,
+                            ..
+                        } = &fact.scale_provenance
+                        else {
+                            return None;
+                        };
+                        let standard_uncertainty = standard_uncertainty.parse::<f64>().ok()?;
+                        let scale = unit_ratio_as_f64(&fact.scale).abs();
+                        (scale.is_finite() && scale > 0.0)
+                            .then_some(standard_uncertainty.abs() / scale)
                     };
                     let source_relative = measured_scale_uncertainty(source);
                     let destination_relative = measured_scale_uncertainty(destination);
@@ -5417,7 +5421,7 @@ fn lower_method_call_impl(
                         (mode, Box::new(lower_expr(&args[2].expr, cx, env)))
                     });
                     return TExpr {
-                        ty: resolved_ret.clone().unwrap_or_else(|| {
+                        ty: resolved_ret.cloned().unwrap_or_else(|| {
                             if fallible {
                                 Type::Result {
                                     ok: Box::new(Type::Float),
