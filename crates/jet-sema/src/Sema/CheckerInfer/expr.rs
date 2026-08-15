@@ -2835,7 +2835,7 @@ impl<'a> Checker<'a> {
                 let copy_ty = owned_type_for_read_view(&inner_t).unwrap_or_else(|| inner_t.clone());
                 let resource = self.is_resource_type(&inner_t);
                 if resource
-                    || (!type_is_copy(&inner_t) && !is_cloneable(&copy_ty, self.registry))
+                    || (!type_is_copy(&inner_t) && !self.is_cloneable_type(&copy_ty))
                 {
                     let cell_guard = matches!(
                         &inner_t,

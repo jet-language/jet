@@ -818,7 +818,7 @@ fn run() {
     print(envelope < ImportedEnvelope.{ badge: library.Badge.{ value: 10 } })
     wire :: json.to_string(envelope)
     print(wire)
-    decoded :: json.decode<ImportedEnvelope>(wire)?
+    decoded :: json.decode<ImportedEnvelope>(wire) ?? panic("decode")
     print(decoded == envelope)
 
     map :: MapEnvelope.{ values: [String:Int].{ "one": 1 } }
