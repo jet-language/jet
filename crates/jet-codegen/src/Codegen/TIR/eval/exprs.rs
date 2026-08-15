@@ -5696,6 +5696,23 @@ impl<'a> EvalCtx<'a> {
                 unreachable!("if expression bypassed its evaluator continuation")
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
+                // Fallible allocation observes the hosted program allocator and
+                // fault policy at run time. Implicit constant folding must
+                // decline rather than baking the compiler process's system heap
+                // result into TIR before the checked allocator fact is installed.
+                if !self.runtime_execution
+                    && matches!(
+                        op,
+                        crate::Codegen::TIR::TBuiltinOp::ListTryNew
+                            | crate::Codegen::TIR::TBuiltinOp::ListTryWithCapacity
+                            | crate::Codegen::TIR::TBuiltinOp::TryPush
+                            | crate::Codegen::TIR::TBuiltinOp::TryReserve
+                            | crate::Codegen::TIR::TBuiltinOp::TryInsertMap
+                            | crate::Codegen::TIR::TBuiltinOp::TryStringPush
+                    )
+                {
+                    return Err(unsupported("fallible allocation at compile time", self.span()));
+                }
                 let is_tensor = recv.ty.is_compute_tensor_family();
                 if matches!(
                     op,
