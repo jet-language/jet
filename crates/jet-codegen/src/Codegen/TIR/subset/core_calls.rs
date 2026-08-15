@@ -5,11 +5,13 @@ use crate::Codegen::TIR::lambda_in_subset;
 use std::collections::HashSet;
 
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
-/// covered set is exactly the **type-monomorphic** core calls — those whose full
-/// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.
-/// That table is the authoritative total source: its return type gives the node's
-/// total `ty` (for `?`-unwrap and binding inference), and `emit_tir_core_call` has a
-/// matching emit arm for every one of these.
+/// covered set is the **type-monomorphic** core calls. A call that is a row in the
+/// foundation Core-call registry is decided by that row's own `TIR_SUBSET`
+/// projection bit; every other call key falls back to `Sema::core_fixed_sig`,
+/// whose full signature (param conventions + return type) is fixed. Either
+/// source is total: the resolved return type gives the node's total `ty` (for
+/// `?`-unwrap and binding inference), and `emit_tir_core_call` has a matching
+/// emit arm for every covered key.
 ///
 /// Gating on `core_fixed_sig(...).is_some()` cleanly EXCLUDES the deferred calls:
 ///   - **closure-taking** (`http.serve`, `scope.guard`) — not in the
@@ -25,61 +27,41 @@ use std::collections::HashSet;
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
-    // D-DEP-ARCHIVE1=A: archive calls use the dependency-free FFI bridge and
-    // their typed emitter, not the generic direct-symbol registry projection.
-    if module == "core.archive"
-        && crate::Sema::core_fixed_sig(module, method).is_some()
-    {
+    // Plain Core calls are rows in the foundation registry, and the row's own
+    // TIR_SUBSET projection bit is the entire decision for a registry key. A row
+    // that genuinely has no TIR lowering drops that bit in the table; nothing
+    // here may veto a row on a fact that belongs to another tier.
+    //
+    // This lookup used to also require `row.has_direct_symbol()` — an AOT-only
+    // fact (`aot_direct`). Because the lookup returns early, every row that
+    // deliberately keeps a typed AOT emitter instead of a direct Prelude symbol
+    // (`time.new`/`today`/`parse`/`from_timestamp`, `compute.set`, `ui.box`,
+    // `time.parse_time`, `encoding.xml.decode`/`decode_bytes`, the
+    // `crypto.expert` calls, the `crypto.__*` field extracts) was reported as
+    // out of subset, which took the whole enclosing function out of TIR and off
+    // the resident JIT even though every tier had a lowering for it. Coverage is
+    // a TIR fact; the AOT projection is read by `emit_plain_core_call` alone.
+    //
+    // Argument expressions and resolved value types are checked by the callers
+    // below; this lookup owns the call-key coverage decision.
+    if let Some(row) = crate::Syntax::core_call(module, method) {
+        return row.coverage.contains(crate::Syntax::CoreCallCoverage::TIR_SUBSET);
+    }
+    // c109 Phase 18: `mem.address_of` is not a registry row — it has a bespoke
+    // sema return type and Rust expression — so it needs its own admission here.
+    // The enclosing `#Unsafe` gate is checked by the statement and expression
+    // subset walkers; this only admits its total call shape. `volatile_read` and
+    // `volatile_write` ARE registry rows and ride the lookup above.
+    if module == "core.mem" && method == "address_of" {
         return true;
     }
-    // D-CRYPTO-API1=A: expert crypto calls have total fixed signatures and a
-    // typed CoreCall emitter, but their registry rows intentionally do not
-    // advertise a beginner direct symbol. The expert import and #Unsafe gate
-    // are sema-owned; keep this coverage decision on the same fixed signature.
-    if module == "core.crypto.expert" && crate::Sema::core_fixed_sig(module, method).is_some() {
-        return true;
-    }
-    // The AOT emitter uses the typed `JetLocalTime::parse` expression, while
-    // the resident JIT has an explicit Result<LocalTime, String> adapter.
-    // Keep this special route out of the generic direct-symbol table.
-    if module == "core.time" && method == "parse_time" {
-        return true;
-    }
-    // D-UITREE1=A: `ui.box` has a typed AOT emitter and a dedicated resident-JIT
-    // symbol, but intentionally no direct AOT registry symbol. It is still a
-    // complete TIR core call, so coverage follows the emitter here.
-    if module == "core.ui" && method == "box" {
-        return true;
-    }
-    // c109 Phase 18: low-level pointer operations have bespoke sema return
-    // types and Rust expressions, so their registry rows are not direct AOT
-    // symbols. The enclosing `#Unsafe` gate is checked by the statement and
-    // expression subset walkers; this only admits their total call shapes.
-    if module == "core.mem"
-        && matches!(method, "address_of" | "volatile_read" | "volatile_write")
-    {
-        return true;
-    }
-    // D-ENCXML-PROJECTION1=A: typed XML decode is a total Prelude call whose
-    // target comes from sema's resolved return type rather than a direct-symbol
-    // registry row. The emitter and all tiers use that same target metadata.
-    if module == "core.encoding.xml" && matches!(method, "decode" | "decode_bytes") {
-        return true;
-    }
-    // D-SHAPE-DURATION1=A: duration constructors are Prelude calls with a
-    // unit selected by the method name, not direct registry symbols. Their
-    // fixed integer argument and Result type are already resolved by sema.
+    // D-SHAPE-DURATION1=A: duration constructors are Prelude calls with a unit
+    // selected by the method name, and they are not registry rows. Their fixed
+    // integer argument and Result type are already resolved by sema.
     if module == "core.time"
         && matches!(method, "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours")
     {
         return true;
-    }
-    // Plain Core calls are rows in the foundation registry. Their argument
-    // expressions and resolved value types are checked by the callers below;
-    // this lookup owns the call-key coverage decision.
-    if let Some(row) = crate::Syntax::core_call(module, method) {
-        return row.coverage.contains(crate::Syntax::CoreCallCoverage::TIR_SUBSET)
-            && row.has_direct_symbol();
     }
     if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
     {
@@ -181,12 +163,6 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // Prelude call. Its return is String and its named `over:` label is
     // already checked by sema; no closure or host policy remains for TIR.
     if matches!(module, "app" | "core.web") && method == "sync" {
-        return true;
-    }
-    // D-TIMEDEPTH1=A: civil-time constructors. NOT in `core_fixed_sig`.
-    if module == "core.time"
-        && matches!(method, "new" | "today" | "parse" | "from_timestamp")
-    {
         return true;
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
