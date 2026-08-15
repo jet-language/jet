@@ -1019,6 +1019,19 @@ fn push_corelib_prelude_body(
         // MIME kernel. AOT already embeds that kernel as the preceding part.
         out.push_str(part.strip_prefix("    include!(\"Mime.rs\");\n\n").unwrap_or(part));
     }
+    // #1451: `Prelude/CommandSuite.rs` is an unconditional kernel part in the
+    // loop above, so `jet_std::jet_test_suite_run` always exists. The TIR
+    // emitter spells the `suite.run()` handle op unqualified at crate root and
+    // never consults `used_core`: a program that only *receives* a `TestSuite`
+    // (the `fn test` override body, which `--show-default` leaves in the
+    // program as ordinary user code) reaches the runner without ever calling
+    // `core.testing`. Gating these root adapters on `needs_fs_runtime` emitted
+    // that call without its definition — rustc E0425 on generated code, an I2
+    // compiler bug. So the adapters are pinned to the kernel part that defines
+    // them: the harness carries `#![allow(warnings)]`, eight unused forwarders
+    // cost nothing, and a definition that is never gated cannot drift from an
+    // ungated use again (same fix shape as `push_package_edition`).
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs"));
     // D-CONC-FAIL1=A: the typed child-failure value lives in the optional
     // JetStd kernel, so emit its root value traits only beside that kernel.
     // Programs without Core runtime reachability must not name `jet_std`.
@@ -1260,7 +1273,6 @@ fn push_corelib_prelude_body(
         if !omit_testing_shared {
             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         }
-        out.push_str(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs"));
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
@@ -2570,6 +2582,32 @@ mod tests {
         assert!(
             !compute_out.contains("JetHTTPServer") && !compute_out.contains("struct JetBrowser"),
             "compute-only Core must not emit HTTP/Browser templates"
+        );
+    }
+
+    /// #1451: the `suite.run()` / `suite.result` handle ops are emitted
+    /// unqualified at crate root and are not gated on `used_core` — a
+    /// `fn test(suite: TestSuite)` body reaches them with no `core.testing`
+    /// call anywhere. Every root adapter those ops can name must therefore be
+    /// emitted beside the `Prelude/CommandSuite.rs` kernel part that defines
+    /// its callee, for any Core-reaching program. Re-gating them reintroduces
+    /// rustc E0425 on generated code (I2).
+    #[test]
+    fn command_suite_root_adapters_are_never_gated() {
+        // Deliberately a `used_core` set with no testing, args, process or
+        // files surface: that is what `--show-default` compiles for a file
+        // whose only suite contact is an unused `fn test(suite: TestSuite)`.
+        let no_testing = HashSet::from(["core.compute::zeros".to_string()]);
+        let mut out = String::new();
+        push_corelib_prelude(&mut out, &no_testing, false);
+        // The whole root fragment, not a symbol list: the `jet_std` kernel
+        // defines same-named `pub fn`s, so a name check would pass even with
+        // the root adapters gated away.
+        assert!(
+            out.contains(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs")),
+            "the crate-root suite adapters must ship with the kernel part that \
+             defines their callees; the handle-op call site names them with no \
+             `used_core` guard"
         );
     }
 
