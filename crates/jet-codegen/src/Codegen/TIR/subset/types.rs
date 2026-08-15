@@ -607,6 +607,17 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
     if is_type_var_param_ty(ty, cx) {
         return true;
     }
+    // D-UNIONTYPE1=A: a fallible error payload may be the generated anonymous
+    // union that `?` widens into. Every member uses the same covered payload
+    // representation, so excluding the union would orphan an otherwise-covered
+    // callee and force its caller into whole-program interpretation.
+    if let Type::Union(members) = ty {
+        return !members.is_empty()
+            && members
+                .iter()
+                .all(|member| fallible_payload_covered(member, cx));
+    }
+
     if let Type::Named(n) = ty {
         if n == "Unit" {
             return true;
