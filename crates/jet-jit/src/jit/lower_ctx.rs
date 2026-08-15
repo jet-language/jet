@@ -517,6 +517,42 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// Retype a sema-proved-dead edge's placeholder to the slot it flows into.
+    ///
+    /// `dead_edge_zero` above reads the placeholder expression's own type, and
+    /// for `Unreachable` that type is always `Unit`: TIR stamps it there
+    /// (`Codegen/TIR/lower/expressions.rs`, `.../statements.rs`) because every
+    /// other tier treats the node as diverging — AOT emits `unreachable!()`,
+    /// whose `!` coerces into any slot. Cranelift has no bottom type, so
+    /// `clif_ty(Unit)` is `None` and `dead_edge_zero` falls back to the
+    /// historical `iconst.i64 0`, the exact value it was added to remove. The
+    /// block parameter is the only place the real type is known, so the retype
+    /// belongs at the edge rather than at the placeholder.
+    ///
+    /// Only a dead tail is retyped. A live value whose CLIF type disagrees with
+    /// its slot is a real lowering defect and must keep failing the verifier
+    /// loudly instead of being silently coerced.
+    fn typed_dead_edge(&mut self, value: Value, tail: &TExpr, want: types::Type) -> Value {
+        if self.b.func.dfg.value_type(value) == want || !Self::is_dead_edge_tail(tail) {
+            return value;
+        }
+        if want == types::F64 {
+            self.b.ins().f64const(0.0)
+        } else {
+            self.b.ins().iconst(want, 0)
+        }
+    }
+
+    /// A tail expression whose value can never be read: sema proved the arm
+    /// unreachable (E0307 exhaustive dispatch), or `Todo` stops the program
+    /// before the merge is reached.
+    fn is_dead_edge_tail(expr: &TExpr) -> bool {
+        matches!(
+            &expr.kind,
+            TExprKind::Unreachable { .. } | TExprKind::Todo { .. }
+        )
+    }
+
     /// Lower a plain Core row through the resident host symbol derived from
     /// the same foundation record used by AOT. Special calls keep their
     /// existing typed lowering below; a missing host candidate is therefore a
@@ -778,26 +814,47 @@ impl LowerCtx<'_, '_> {
                     let equal = self.bool_from_icmp(IntCC::Equal, actual, expected);
                     matches_variant = self.b.ins().bor(matches_variant, equal);
                 }
-                let Some(PatSlot::Range { lo, hi }) = bindings.first() else {
-                    return Ok(matches_variant);
-                };
-                let payload_ty = self
+                // Every payload slot carries its own range test, so walk the
+                // whole binding list. `bindings.first()` only ever tested slot
+                // 0, and silently returned the bare variant test for a range in
+                // any later slot — `.Values(_, 10..19)` then answered the arm
+                // for every `Values`, a wrong answer with no diagnostic. The
+                // interpreter (`bind_slots`) and AOT (`tir_range_guard`, which
+                // enumerates the slots and joins the guards with `&&`) already
+                // do this; the JIT was the sole outlier.
+                let payload_types = self
                     .meta
                     .enum_variant_payload_types(enum_name, variant)
-                    .and_then(|types| types.first())
-                    .cloned()
-                    .unwrap_or(Type::Int);
-                let payload = if heap {
-                    self.unpack_enum_heap_payload(subject, &payload_ty)?
-                } else {
-                    self.unpack_enum_scalar(subject, &payload_ty)?
-                };
-                let lo = self.b.ins().iconst(types::I64, *lo);
-                let hi = self.b.ins().iconst(types::I64, *hi);
-                let ge = self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, payload, lo);
-                let le = self.bool_from_icmp(IntCC::SignedLessThanOrEqual, payload, hi);
-                let in_range = self.b.ins().band(ge, le);
-                Ok(self.b.ins().band(matches_variant, in_range))
+                    .map(|types| types.to_vec())
+                    .unwrap_or_default();
+                let mut condition = matches_variant;
+                for (slot, binding) in bindings.iter().enumerate() {
+                    let PatSlot::Range { lo, hi } = binding else {
+                        continue;
+                    };
+                    let payload_ty = payload_types.get(slot).cloned().unwrap_or(Type::Int);
+                    let payload = if heap {
+                        self.unpack_enum_heap_payload_at(subject, &payload_ty, slot)?
+                    } else if slot == 0 {
+                        self.unpack_enum_scalar(subject, &payload_ty)?
+                    } else {
+                        // The scalar carrier packs one payload beside the disc
+                        // byte, so a later slot has nowhere to live. Any variant
+                        // with more than one payload already takes the heap
+                        // carrier, so this is a compiler defect, not a program
+                        // error: name it instead of reading slot 0 again.
+                        return Err(format!(
+                            "jit enum range slot {slot} has no scalar carrier: `{enum_name}::{variant}`"
+                        ));
+                    };
+                    let lo = self.b.ins().iconst(types::I64, *lo);
+                    let hi = self.b.ins().iconst(types::I64, *hi);
+                    let ge = self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, payload, lo);
+                    let le = self.bool_from_icmp(IntCC::SignedLessThanOrEqual, payload, hi);
+                    let in_range = self.b.ins().band(ge, le);
+                    condition = self.b.ins().band(condition, in_range);
+                }
+                Ok(condition)
             }
             _ => Err("jit enum arm is not a supported pattern".to_string()),
         }
@@ -12949,6 +13006,7 @@ impl LowerCtx<'_, '_> {
                     let then_val = self.lower_stmts_scoped_value(then_body, then_value)?;
                     let then_reaches_merge = then_val.is_some();
                     if let Some(then_val) = then_val {
+                        let then_val = self.typed_dead_edge(then_val, then_value, ret_ty);
                         self.b.ins().jump(merge_block, &[then_val]);
                     }
 
@@ -12957,6 +13015,7 @@ impl LowerCtx<'_, '_> {
                     let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
                     let else_reaches_merge = else_val.is_some();
                     if let Some(else_val) = else_val {
+                        let else_val = self.typed_dead_edge(else_val, else_value, ret_ty);
                         self.b.ins().jump(merge_block, &[else_val]);
                     }
 
@@ -18001,6 +18060,9 @@ impl LowerCtx<'_, '_> {
                         let set_s = self
                             .module
                             .declare_func_in_func(self.host.struct_set_str, self.b.func);
+                        let set_f = self
+                            .module
+                            .declare_func_in_func(self.host.struct_set_f64, self.b.func);
                         let zero = self.b.ins().iconst(types::I64, 0);
                         let disc_v = self.b.ins().iconst(types::I64, disc);
                         self.b.ins().call(set_i, &[handle, zero, disc_v]);
@@ -18015,6 +18077,16 @@ impl LowerCtx<'_, '_> {
                                 Some(ty) if ty == types::I64 => payload,
                                 Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
                                 Some(ty) if ty == types::I32 => self.b.ins().sextend(types::I64, payload),
+                                // A Float slot rides the record's float pair,
+                                // the same one `pack_enum_scalar` writes for a
+                                // boxed Float payload and the same one
+                                // `unpack_enum_heap_payload_at` reads back.
+                                // Widening it into the integer pair would be
+                                // read as a different number.
+                                Some(ty) if ty == types::F64 => {
+                                    self.b.ins().call(set_f, &[handle, idx, payload]);
+                                    continue;
+                                }
                                 _ => {
                                     return Err(format!(
                                         "jit enum named payload field unsupported: {:?}",
@@ -28354,7 +28426,8 @@ impl LowerCtx<'_, '_> {
         if then_reaches_merge {
             let then_val = self.lower_expr(then_value)?;
             if !self.dead {
-                if ret_ty.is_some() {
+                if let Some(ret_clif) = ret_ty {
+                    let then_val = self.typed_dead_edge(then_val, then_value, ret_clif);
                     self.b.ins().jump(merge_block, &[then_val]);
                 } else {
                     self.b.ins().jump(merge_block, &[]);
@@ -28385,7 +28458,8 @@ impl LowerCtx<'_, '_> {
         if else_reaches_merge {
             let else_val = self.lower_expr(else_value)?;
             if !self.dead {
-                if ret_ty.is_some() {
+                if let Some(ret_clif) = ret_ty {
+                    let else_val = self.typed_dead_edge(else_val, else_value, ret_clif);
                     self.b.ins().jump(merge_block, &[else_val]);
                 } else {
                     self.b.ins().jump(merge_block, &[]);
@@ -28494,7 +28568,8 @@ impl LowerCtx<'_, '_> {
         if then_reaches_merge {
             let then_val = self.lower_expr(then_value)?;
             if !self.dead {
-                if ret_ty.is_some() {
+                if let Some(ret_clif) = ret_ty {
+                    let then_val = self.typed_dead_edge(then_val, then_value, ret_clif);
                     self.b.ins().jump(merge_block, &[then_val]);
                 } else {
                     self.b.ins().jump(merge_block, &[]);
@@ -28524,7 +28599,8 @@ impl LowerCtx<'_, '_> {
         if else_reaches_merge {
             let else_val = self.lower_expr(else_value)?;
             if !self.dead {
-                if ret_ty.is_some() {
+                if let Some(ret_clif) = ret_ty {
+                    let else_val = self.typed_dead_edge(else_val, else_value, ret_clif);
                     self.b.ins().jump(merge_block, &[else_val]);
                 } else {
                     self.b.ins().jump(merge_block, &[]);
@@ -28596,6 +28672,7 @@ impl LowerCtx<'_, '_> {
         )?;
         let then_reaches_merge = then_val.is_some();
         if let Some(then_val) = then_val {
+            let then_val = self.typed_dead_edge(then_val, then_value, ret_ty);
             self.b.ins().jump(merge_block, &[then_val]);
         }
         for (key, old_var, old_ty) in bound {
@@ -28622,6 +28699,7 @@ impl LowerCtx<'_, '_> {
         let else_val = self.lower_stmts_scoped_value(else_body, else_value)?;
         let else_reaches_merge = else_val.is_some();
         if let Some(else_val) = else_val {
+            let else_val = self.typed_dead_edge(else_val, else_value, ret_ty);
             self.b.ins().jump(merge_block, &[else_val]);
         }
 
