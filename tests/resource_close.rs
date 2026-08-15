@@ -162,7 +162,7 @@ fn run() {
     assert_eq!(ran.stdout, b"body\nauto panic\n");
     let stderr = String::from_utf8_lossy(&ran.stderr);
     assert_eq!(stderr.matches("Stop [E3001]").count(), 1, "{stderr}");
-    assert!(stderr.contains("Stop [E3001]: panic: stop"), "{stderr}");
+    assert!(stderr.contains("Stop [E3001]: `panic: stop` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values."), "{stderr}");
 }
 
 #[test]
