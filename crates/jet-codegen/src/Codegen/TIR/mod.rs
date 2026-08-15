@@ -1410,7 +1410,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 &s.name,
                                 &cx,
                                 &implementation.trait_name,
-                            ) {
+                            ) && !(implementation.compiler_generated
+                                && tir_covers_compiler_derive_method(method, &cx))
+                            {
                                 continue;
                             }
                             let mut lowered = lower_trait_method(
@@ -1448,7 +1450,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 &e.name,
                                 &cx,
                                 &implementation.trait_name,
-                            ) {
+                            ) && !(implementation.compiler_generated
+                                && tir_covers_compiler_derive_method(method, &cx))
+                            {
                                 continue;
                             }
                             let mut lowered = lower_trait_method(

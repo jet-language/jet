@@ -2325,7 +2325,10 @@ pub(crate) fn emit_trait_impl(
         .methods
         .iter()
         .map(|method| {
-            if !TIR::tir_covers_trait_method(method, type_name, cx, &block.trait_name) {
+            if !TIR::tir_covers_trait_method(method, type_name, cx, &block.trait_name)
+                && !(block.compiler_generated
+                    && TIR::tir_covers_compiler_derive_method(method, cx))
+            {
                 jet_foundation::ice!(
                     None,
                     "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",

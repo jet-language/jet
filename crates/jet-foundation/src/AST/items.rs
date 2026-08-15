@@ -834,6 +834,8 @@ pub struct TraitImplBlock {
     pub trait_name: String,
     pub trait_span: Span,
     pub methods: Vec<Func>,
+    /// Compiler-owned structural derive; its signature is generated, not parsed.
+    pub compiler_generated: bool,
     /// D-LIB2: `type Name = ConcreteType;` associated type implementations.
     pub assoc_type_impls: Vec<(String, Span, Type)>,
 }

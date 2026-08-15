@@ -566,6 +566,7 @@ fn specialize_struct(
                     )
                 })
                 .collect(),
+            compiler_generated: block.compiler_generated,
             assoc_type_impls: block
                 .assoc_type_impls
                 .iter()
@@ -682,6 +683,7 @@ fn specialize_enum(
                     )
                 })
                 .collect(),
+            compiler_generated: block.compiler_generated,
             assoc_type_impls: block
                 .assoc_type_impls
                 .iter()

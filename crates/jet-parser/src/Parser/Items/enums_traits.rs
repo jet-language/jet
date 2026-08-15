@@ -465,6 +465,7 @@ impl<'a> Parser<'a> {
                 trait_name,
                 trait_span,
                 methods,
+                compiler_generated: false,
                 assoc_type_impls,
             })
         }

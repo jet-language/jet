@@ -426,6 +426,7 @@ fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
             trait_name,
             trait_span: implementation.trait_span.unwrap_or(implementation.type_span),
             methods: implementation.methods,
+            compiler_generated: true,
             assoc_type_impls: implementation.assoc_type_impls,
         });
     } else {

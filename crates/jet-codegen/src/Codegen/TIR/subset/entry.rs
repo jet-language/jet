@@ -239,3 +239,15 @@ pub(crate) fn tir_covers_trait_method(
     // trait method that assigns `self` / `self.field` is now covered like any other.
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
+
+/// Compiler-generated structural derives have a fixed signature owned by the
+/// derive builder. Their body still passes the ordinary TIR statement gate.
+pub(crate) fn tir_covers_compiler_derive_method(f: &Func, cx: &Cx) -> bool {
+    if !f.type_params.is_empty() {
+        return false;
+    }
+    let mut locals: HashSet<String> = f.params.iter().map(|param| param.name.clone()).collect();
+    f.body
+        .iter()
+        .all(|statement| stmt_in_subset(statement, cx, &mut locals))
+}
