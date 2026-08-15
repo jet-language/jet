@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1975,
-    "rev": 37401,
+    "rev": 37458,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1865,7 +1865,7 @@
       "title": "M04 · User derives and comptime",
       "goal": "Rules that record facts or add code, derive bodies as real code, checked text blocks, one effect model at both stages, comptime values everywhere. The derives/reflection pillar. Depends on M03.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:09:59.090Z"
     },
     {
@@ -80175,7 +80175,7 @@
       "priority": "P1",
       "plan": "Scope: D-JSON-EXACTNUM1=A. DataTree keeps its ratified Int/Float meaning (crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs, render_datatree_json line 17); a typed Decimal or BigInt decode target reads the original JSON number token text directly, before any Float conversion, so exact values never round-trip through binary64. One tokenizer feeds two destinations: the existing DataTree builder, and a typed visitor path for Decimal/BigInt fields. json.canonical(json.parse(text)?)? keeps its one-call D-JSONCANON1 contract unchanged (do not amend it, per option A vs B). Blocked on #1394 (edition-2027 DataTree/Codable split) -- #1394 owns creating the edition-2027 tokenizer entry point; do not build a second one against the frozen edition-2026 crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs (its JSONParser/JSON enum at lines 95-296 stay byte-frozen per #1394's own plan step 2).\n\nSEQUENCING AMENDMENT (this audit, 2026-08-06): D-TYPE2-NUM1=A (ratified) folds BigInt into Int -- \"the number tower: one grid, and BigInt folds into Int\" -- and #1436 (D-INTBIG1=A, also ratified) is the card that makes default Int arbitrary-precision. As of this audit, crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:811 still defines a standalone JetBigInt struct and #1436's own criteria are all open (BigInt has not yet folded into Int in the tree). Building this card's typed-visitor path against JetBigInt today is correct FOR NOW, but becomes throwaway/rework once #1436 lands and JetBigInt retires. To avoid two homes for the same exact-integer decode work: block this card on #1436 in addition to #1394, and when both have landed, the \"BigInt decode target\" in every step below means the arbitrary-precision default Int, not a surviving JetBigInt type. If owner sequencing forces this card to ship before #1436, implement against JetBigInt as scoped below but file the Int retarget as a plain implementation follow-up (no new decision needed -- D-TYPE2-NUM1 already settled the direction).\n\nApproach (execute after #1394 AND #1436 land, per the amendment above):\n1. Confirm the exact-number gap first: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs 'impl user_Decode for jet_std::JetDecimal' (line ~202-210) currently only accepts DataTree::Text and DataTree::Int, erroring on DataTree::Float -- meaning a fractional JSON number decoded into a dynamic tree first cannot reach Decimal at all today. Locate #1394's edition-2027 equivalent decode path and confirm the same gap exists there before patching it.\n2. In #1394's edition-2027 tokenizer, add a typed visitor mode alongside the DataTree builder: when the destination field is JetDecimal (crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs) or the exact-integer destination (post-#1436: the default arbitrary-precision Int; pre-#1436: JetBigInt, CommonTypes.rs line ~800), the number token's raw text (mantissa, optional fraction, optional exponent) feeds JetDecimal::from_str / the integer parser directly -- never through DataTree::Float. Whole-value decode (json.decode<T>) and stream decode share the same tokenizer and visitor.\n3. Extend crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs user_Decode impls for JetDecimal and the exact-integer destination to accept the typed-visitor projection path in addition to their current Text/Int cases.\n4. Define errors per the ballot: target mismatch (schema expects Decimal/exact-integer but token is non-numeric), overflow (only meaningful pre-#1436, since arbitrary-precision Int has no overflow per D-INTBIG1), non-finite input (NaN/Infinity are not valid JSON tokens -- confirm this is already rejected), unsupported canonical output (a Decimal/exact-integer value that cannot round-trip through json.canonical's existing Int/Float contract), and configured limits (digit count / exponent range) -- reuse the existing EncodingError kind vocabulary in crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs rather than inventing a new error type.\n5. Hostile test coverage in tests/encoding_corpus.rs and tests/encoding_parity.rs: exponent forms (1e30, 1E-5), scale (12.340 keeps trailing zero, 100 stays whole), large integers beyond i64/i128, adjacent-precision values (0.1 vs 0.10 vs 1e-1), streaming decode, and whole-value decode. Add Python differential fixtures matching json.loads(payload, parse_float=Decimal, parse_int=int) per the ballot's Python comparison.\n6. Prove parity across comptime, interpreter, JIT, and AOT per I9 -- the typed visitor is Prelude-only logic (crates/jet-codegen/src/Prelude/**), so AOT emit, jet-jit, and jet-comptime must call the same Prelude decode symbol, not re-implement number parsing.\n7. docs/spec/encoding-decisions.md and docs/reference/core-library.md: document the exact-number model and its error kinds, naming Int (not BigInt) as the exact-integer destination if #1436 has landed by then.\n8. docs/spec/syntax-decisions.md or docs/spec/encoding-decisions.md decision log: append the dated D-JSON-EXACTNUM1=A entry, and cross-reference D-TYPE2-NUM1=A if the exact-integer destination was retargeted to Int.\nProof (post-#1394 and post-#1436, targeted, not full suite):\n- scripts/agent/jet-env cargo test --test encoding_corpus -- decimal bigint json\n- scripts/agent/jet-env cargo test --test encoding_parity -- json\n- scripts/agent/jet-env cargo test --test golden -- <new example name>\n- scripts/agent/jet-env jet run examples/features/<new-example>.jet (I9 parity across AOT/JIT/interpreter)\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs, crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs, tests/encoding_corpus.rs, tests/encoding_parity.rs, docs/spec/encoding-decisions.md, docs/reference/core-library.md, examples/features/**. Do not touch crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs (edition-2026 frozen).",
       "blockedBy": [
-        "#1436"
+        "c04czzvb"
       ],
       "assignee": null,
       "log": [
@@ -80307,7 +80307,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.596Z",
-      "updated": "2026-08-14T05:52:21.727Z",
+      "updated": "2026-08-15T12:30:57.450Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 340
     },
@@ -83133,11 +83133,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: D-CALLVALUE1=B. Any call result requires a chained .call(...) to invoke again; ')(' directly after a call is a parse error with a fix-it inserting '.call'. Function-typed values gain a builtin .call(...) member; a struct member literally named 'call' shadows it. Direct calls on plain names/fields/index/lambdas are unchanged. Out of scope: D-CALLVALUE1 options A/C/D, autodiff (#1428-1436).\nApproach:\n1. crates/jet-parser/src/Parser/Expressions/postfix.rs: in the postfix call loop, when '(' follows an already-built Call node, stop building a second Call directly; emit the new E0xxx diagnostic (docs/spec/diagnostics.md 'Adding a diagnostic', next free code near the E09xx call family) with a fix-it that inserts '.call' before the parens, mirroring the retired_callable_arrow teaching pattern in crates/jet-parser/src/Parser/Statements/conditionals.rs:104-128.\n2. crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs: give every function-typed receiver a builtin 'call' member whose signature mirrors the callee's parameter/return contract; resolve struct member lookup first so a user field/method named 'call' wins (same precedence pattern already used for builtin collection methods).\n3. Lower '.call' identically at every tier per I9: crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs (AOT/JIT shared TIR lower), crates/jet-jit/src/jit/lower_ctx.rs if JIT has a separate lowering path, and crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs (interpreter/comptime). '.call(args)' lowers to the same underlying call-of-value the parser used to accept directly -- no new runtime semantics, so verify all three tiers already share one lowering before adding tier-specific code.\n4. crates/jet-parser/src/Formatter/Items.rs (or Expressions formatter): print the retained '.call' node; add a fmt STABILITY case in tests/fmt.rs using assert_fmt_stable.\n5. Register the diagnostic in docs/spec/diagnostics.md and add tests/ui/<code>_call_result_not_called.jet + .stderr snapshot (pattern: tests/ui/E0927_unknown_marker_function.jet).\n6. editors/tree-sitter/grammar.js, editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/grammars: regenerate via 'jet self devtools grammars' (Source/CmdDevTools.rs) so '.call' highlights as a builtin member; do not hand-edit generated output.\n7. Source/LSP/Features.rs: add 'call' to member-completion for function-typed receivers.\n8. Add/extend an example under examples/features/ (a function returning a function, invoked via .call) with golden output in examples/features/expected/; prove it under both jet build and jet run per I9.\n9. docs/spec/syntax-decisions.md: append a dated D-CALLVALUE1=B decision-log entry following the existing '**YYYY-MM-DD -- D-ID=Outcome**: ...' format at the end of the Decision log section, naming the implementing card.\nProof:\n- scripts/agent/jet-env cargo test --test diagnostic_snapshots -- call_result (new E-code fixture)\n- scripts/agent/jet-env cargo test --test fmt -- call_value (new stability case)\n- scripts/agent/jet-env cargo test --test grammar\n- scripts/agent/jet-env cargo test --test golden -- <new example name>\n- scripts/agent/jet-env jet run examples/features/<new-or-updated-example>.jet (I9: AOT + jet run agree; interpreter path exercised if deopt reachable)\nOwned paths: crates/jet-parser/src/Parser/Expressions/postfix.rs, crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs, crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs, crates/jet-jit/src/jit/lower_ctx.rs, crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs, crates/jet-parser/src/Formatter/Items.rs, Source/LSP/Features.rs, editors/**, docs/spec/diagnostics.md, docs/spec/syntax-decisions.md, tests/ui/*, tests/fmt.rs, examples/features/**.",
       "blockedBy": [],
-      "assignee": "Luna",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-14",
@@ -83174,56 +83174,56 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T10:57:38.717Z"
+          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs:117-120 registers METHOD_CALL = \"call\" under D-CALLVALUE1=B, including the rule that a struct member named call shadows it.",
+          "at": "2026-08-15T15:22:44.360Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T10:57:38.717Z"
+          "evidence": "docs/spec/syntax-decisions.md:289-291 and :7004-7006 record D-CALLVALUE1=B: the retired )( form is rejected with E-CALL-VALUE and a function-value projection lowers through the shared callable path on every tier. Cross-referenced at docs/spec/spec.md:2121-2122.",
+          "at": "2026-08-15T15:22:44.772Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T10:57:38.717Z"
+          "evidence": "cargo test --test grammar = 45 passed 0 failed, including editor_grammars_match_generated_sections. editors/tree-sitter/grammar.js:1268 names the canonical function-value .call in method_call_expr; no new production was needed, and the generated grammar matches.",
+          "at": "2026-08-15T15:22:45.210Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T10:57:38.717Z"
+          "evidence": "Builder proof at master 85e9ac98b: cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots) after reconciling 122 drifted fixtures corpus-wide. tests/ui/E-CALL-VALUE_call_result_not_called.stderr and .fixed.jet are present, with the row registered at crates/jet-codegen/src/Prelude/Diagnostics.jet:459 and mirrored in docs/spec/diagnostic-rows.md:462.",
+          "at": "2026-08-15T15:22:45.630Z"
         },
         {
           "n": 5,
           "text": "A named example under examples/features/ calling a returned function value via .call, with byte-identical golden output in examples/features/expected/, proven under both jet build (AOT) and jet run (JIT); scripts/agent/jet-env cargo test --test golden -- <name> passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:22:56.656Z"
+          "evidence": "examples/features/functions/returned_function_call.jet exercises both add.call(2) and make_adder(1).call(2) with golden expected/functions/returned_function_call.out. Builder proof: cargo test --test tir_control_and_data returned_function_call_example_matches_all_execution_tiers -- --exact = 1 passed 0 failed, which compares AOT, default run and the interpreter.",
+          "at": "2026-08-15T15:22:46.848Z"
         },
         {
           "n": 6,
           "text": "The old ')(' double-call shape is rejected everywhere: rg for a synthetic ')(' fixture returns the new diagnostic code, not a silent parse; tests/ui/<code>_call_result_not_called.jet + .stderr snapshot exists and scripts/agent/jet-env cargo test --test diagnostic_snapshots passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:22:58.285Z"
+          "evidence": "Parser rejects the retired )( at crates/jet-parser/src/Parser/Expressions/postfix.rs:202-206 with the fix-it asserted at Parser/mod.rs:1382-1387; sema projects the builtin only when no user call member shadows it (CheckerInfer/calls/method_calls.rs:2119-2123); TIR lowers through Syntax::INTERNAL_CALL_VALUE at Codegen/TIR/lower/method_calls.rs:997-1000. Builder proof at master 85e9ac98b: cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots) after reconciling 122 drifted fixtures corpus-wide. cargo test --test fmt = 186 passed 0 failed and cargo test --test fmt_project = 27 passed 0 failed. Reaching that required three formatter fixes this run: the --simplify identity guard was comparing plain-fmt output against the author's source and ICEd on 35 files (051001405); Expr::span() is an anchor not an extent, so the task-body brace recovery inspected the wrong byte (1709f9ff6); and the formatter printed a type body's parallel vectors back to back, rewriting any type whose fn preceded an in-body impl, while dropping assoc_type_impls entirely (85e9ac98b).",
+          "at": "2026-08-15T15:22:48.149Z"
         },
         {
           "n": 7,
@@ -83242,10 +83242,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T10:54:53.602Z",
-      "updated": "2026-08-14T16:13:44.340Z",
+      "updated": "2026-08-15T15:22:58.173Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 720,
-      "claimedAt": "2026-08-14T13:35:12.623Z"
+      "completedAt": "2026-08-15T15:22:58.173Z"
     },
     {
       "id": "c0kw5dh0",
@@ -84236,11 +84236,11 @@
         {
           "n": 5,
           "text": "Fixed-width and FFI boundary conversions range-check with a real diagnostic (snapshot); wrapping_* and saturating_* methods exist on fixed-width types with targeted tests",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:54.061Z"
+          "evidence": "Orchestrator builder verification at master 051001405 (.claude/worktrees/builder): cargo test --test numops = 12 passed 0 failed, including generic_add_bound_keeps_checked_overflow and generic_div_bound_keeps_source_location, which now report the Jet operator file and line instead of <built-in Add>:0; cargo test --test numeric_widening = 13 passed 0 failed, including bare_whole_literals_take_the_minimal_width_before_operator_join. Fixed-width and FFI-boundary range checks hold: the cffi guard test and the four E1003 literal snapshots are unchanged, and the wrapping_/saturating_ opt-ins do not trap (overflow_opt_ins_do_not_trap, fixed_width_overflow_methods_do_not_trap).",
+          "at": "2026-08-15T13:35:10.807Z"
         },
         {
           "n": 6,
@@ -84270,7 +84270,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.858Z",
-      "updated": "2026-08-14T14:31:51.341Z",
+      "updated": "2026-08-15T13:35:10.808Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 320
     },
@@ -85862,7 +85862,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: D-BENCH-PARITY1 outcome B. jet bench accepts the same targets jet test already does: a file, a directory (walked recursively), or a project, plus --filter for region names by name. Benches still always run one at a time, serially, for timing integrity. Assertion-only test flags (--shuffle, --coverage, --update-snapshots) stay test-only. Multi-file output is one line per region plus a per-file heading; --json emits one record per region. A standing rule pins the two commands together going forward: future runner-surface changes apply to both or name an explicit carve-out. Out of scope: the fn bench(suite) override itself (#1451, recommended to land after this card so it reuses this card's discovery/filter pass instead of duplicating it).\n\nApproach:\n1. Port the existing TestRunOpts shape (Source/CmdCompile.rs :1207-1218: update_snapshots, coverage, filter: Option<String>, shuffle_seed: Option<u64>, serial: bool) into a bench-only options struct in Source/CmdDevTools.rs — only filter and an implicit always-serial flag apply to bench; coverage/update_snapshots/shuffle_seed are test-only per the ratified carve-out and must not appear on the bench struct.\n2. Port collect_test_files_recursive (Source/CmdCompile.rs :1273-1289, skips build/ and dot-dirs) into Source/CmdDevTools.rs (or a shared helper both files call, if that's the smaller diff — prefer a shared helper under Source/ so #1452's standing \"future changes apply to both\" rule has one place to change) and reuse it for bench's directory walk.\n3. Source/CmdDevTools.rs run_bench (:2447-2530): replace the single-file-only fn run_bench(file: &str, mode: OutputMode) with a directory/project-aware entry point mirroring Source/CmdCompile.rs run_test_opts's dir branch (:1242-1268) — p.is_dir() walks recursively via the shared helper, sorts paths, benches every file, aggregates a summary.\n4. Add --filter to Source/main.rs's bench argument parsing (today minimal, no flag-parsing block comparable to test's at :2069-2110) — thread it to jet::has_bench_blocks / run_bench_regions (Source/CmdDevTools.rs :2532-2551) the same way JET_TEST_FILTER threads to the generated test harness (Source/CmdCompile.rs :1367-1369), matching region names post-discovery.\n5. Bare-entry / project-root resolution: Source/main.rs (:1996-2010, resolve_bare_entry(\"test\",...) vs the partial bare_bench_entry) — extend bench's bare-entry path to the same directory/project walk as test's, not just a single resolved file.\n6. Multi-file output: one line per region plus a per-file heading (per the ratified technical note, to avoid filter-name collisions across files) — path-qualify region names in both human and --json output.\n7. --json: one record per region (mirror whatever shape jet test --json already emits per test, adjusted for bench's timing fields).\n8. Explicitly do NOT add --shuffle, --coverage, --update-snapshots to bench — these are named test-only in the ratified text; if the CLI flag parser is shared code, gate them behind the command (test vs bench) rather than deleting the parser.\n9. docs/spec/syntax-decisions.md: add \"D-BENCH-PARITY1=B — bench runner parity with test\" log entry documenting the standing pairing rule for future runner changes, so the next agent who touches jet test's target resolution knows to check bench too (and vice versa).\n\nProof:\n- scripts/agent/jet-env cargo test --test jet_test (must stay green — this card must not regress test's own behavior while sharing helpers)\n- new scripts/agent/jet-env cargo test --test jet_bench (add this test file mirroring tests/jet_test.rs's directory/filter coverage, since none exists today)\n- scripts/agent/jet-env jet bench examples/features/ (manual smoke: directory target, was previously an error)\n- scripts/agent/jet-env jet bench examples/features/ --filter=<a-real-region-name> (manual smoke: name selection, was previously unsupported)\n- scripts/agent/jet-env jet bench . --json (manual smoke: one record per region across the project)\n- scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-update-snapshots\" Source/CmdDevTools.rs (zero hits — confirms the test-only carve-out held)\n\nOwned paths: Source/CmdDevTools.rs, Source/CmdCompile.rs (shared helper extraction only), Source/main.rs, tests/jet_bench.rs (new), docs/spec/syntax-decisions.md.\n",
       "blockedBy": [],
@@ -85903,65 +85903,65 @@
         {
           "n": 1,
           "text": "new tests/jet_bench.rs mirrors tests/jet_test.rs directory/filter coverage; scripts/agent/jet-env cargo test --test jet_bench passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:43:20.712Z"
+          "evidence": "Builder proof at master c697a15a8 (.claude/worktrees/builder): cargo test --test jet_bench = 5 passed 0 failed. tests/jet_bench.rs carries jet_bench_directory_recurses_and_filter_selects_regions and jet_bench_json_has_one_release_profile_record_per_region, mirroring the test runner's directory/filter coverage.",
+          "at": "2026-08-15T15:37:55.310Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env jet bench examples/features/ (directory target) and jet bench examples/features/ --filter=<a-real-region-name> both succeed, where today both error/are unsupported",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:43:24.550Z"
+          "evidence": "Directory walk and --filter are wired through BenchRunOpts.filter (Source/CmdDevTools.rs:2911) and Source/main.rs:2350/:2532. Builder proof at master c697a15a8 (.claude/worktrees/builder): the directory-target and filter cases are exercised green by jet_bench_directory_recurses_and_filter_selects_regions and by tests/cli_parts/runtime.rs:703 bench_targets_filter_and_json_match_test_runner_contract.",
+          "at": "2026-08-15T15:37:55.718Z"
         },
         {
           "n": 3,
           "text": "scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-update-snapshots\" Source/CmdDevTools.rs returns zero hits, confirming the test-only flag carve-out held",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:43:29.092Z"
+          "evidence": "Static sweep of Source/CmdDevTools.rs for --shuffle, --coverage and --update-snapshots returns zero hits: those flags live on TestRunOpts (Source/CmdCompile.rs:1702-1703) and never on BenchRunOpts, so the test-only carve-out held.",
+          "at": "2026-08-15T15:37:56.139Z"
         },
         {
           "n": 4,
           "text": "scripts/agent/jet-env cargo test --test jet_test stays green after the shared-helper extraction (no regression to test target resolution)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:43:34.808Z"
+          "evidence": "Builder proof at master c697a15a8 (.claude/worktrees/builder): cargo test --test jet_test = 36 passed 0 failed. Closing this required two real fixes. Four fuzz/property tests were failing with rustc E0425 on generated code (an I2 violation) because __JET_PACKAGE_EDITION was hand-spelled in three of the four harness emitters and the fourth, fuzz, emitted the three uses and no definition; the CoreLib kernel that carries those uses ships whenever a program mentions any default Int, so every non-trivial fixture tripped it. One helper now emits it for all four. Separately jet bench collapsed the harness child's program-stop 70 into USER_ERROR 1, which is why jet_bench_failure_is_not_reported_as_timing failed; the child exit code is now relayed.",
+          "at": "2026-08-15T15:37:56.554Z"
         },
         {
           "n": 5,
           "text": "docs/spec/syntax-decisions.md has a D-BENCH-PARITY1=B log entry documenting the standing test/bench pairing rule",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:43:38.909Z"
+          "evidence": "docs/spec/syntax-decisions.md:2777-2782 records the standing test/bench pairing rule.",
+          "at": "2026-08-15T15:37:56.971Z"
         },
         {
           "n": 6,
           "text": "tests/cli_parts/runtime.rs adds bench_targets_filter_and_json_match_test_runner_contract, and tests/cli_parts/surface.rs adds test_and_bench_help_keep_shared_runner_flags_paired; cargo test --test cli_runtime --test cli_surface passes with human and JSON snapshots for directory, project, --filter, and per-file output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:22.042Z"
+          "evidence": "Both named tests exist and pass: tests/cli_parts/runtime.rs:703 bench_targets_filter_and_json_match_test_runner_contract and tests/cli_parts/surface.rs:492 test_and_bench_help_keep_shared_runner_flags_paired. Builder proof at master c697a15a8 (.claude/worktrees/builder): cargo test --test cli_surface = 45 passed 0 failed; cargo test --test cli_runtime = 27 passed with the single remaining failure being the unrelated #1451 command-override harness defect, which touches neither bench targets nor shared runner flags.",
+          "at": "2026-08-15T15:37:57.402Z"
         },
         {
           "n": 7,
           "text": "tests/comptime_cli_parity.rs compares the user-visible bench help and selected-region output for examples/features/tooling/bench_target/main.jet with the AOT path, using examples/features/expected/tooling/bench_target.out as the named golden; the bytes and exit status match.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:22.471Z"
+          "evidence": "tests/comptime_cli_parity.rs:641-693 benchmark_cli_help_and_selected_region_keep_aot_golden_contract compares bench help and the selected region for examples/features/tooling/bench_target/ against examples/features/expected/tooling/bench_target.out. Builder proof at master c697a15a8 (.claude/worktrees/builder): that test passes; the two comptime_cli_parity failures in the same suite are the #1451 override harness and a separate tier-parity stem, neither of which is this contract.",
+          "at": "2026-08-15T15:37:57.828Z"
         }
       ],
       "refs": [],
@@ -85973,9 +85973,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:21:44.499Z",
-      "updated": "2026-08-14T10:49:06.609Z",
+      "updated": "2026-08-15T15:37:58.406Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 810
+      "workOrder": 810,
+      "completedAt": "2026-08-15T15:37:58.406Z"
     },
     {
       "id": "c0b6szun",
@@ -86106,7 +86107,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implements the reconciled body-rule slate, newest ruling first: D-ONELINE-BODY1=B (2026-08-10, this card) — a one-line function body binds with :: like every other definition; the arrow sends a head to a body, so guards, if-arms and loops keep ->. D-CHOOSE-FNBODY1=A (2026-08-07, card #1651) states the same function law and is absorbed here from folded card #1812. D-BODY-ARROW1=B (2026-08-05) survives for the non-function half: effect-only if bodies gain the one-line arrow (retiring the E0071 rejection at crates/jet-parser/src/Parser/Statements/conditionals.rs:94-117), a brace block opens on the next line when the form does not fit one line, and = retires from bodies to mean values and slot-fills only (parser one-line = body path: crates/jet-parser/src/Parser/Items/functions_params.rs:147-160; formatter emission: crates/jet-parser/src/Formatter/Items.rs:635-647). Statement-position loop arrows are card #1453 (D-LOOP-STMT-ARROW1=C), not this card. Migrate the whole in-repo corpus (examples, tests, docs, snapshots) in the same change, delete the old spellings, give each retired form one teaching diagnostic with a jet fix, and prove I9 parity: parser, sema, TIR, AOT, default jet run, interpreter agree; formatter round-trips; grammars regenerate.",
       "blockedBy": [],
@@ -86137,47 +86138,47 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:50:11.630Z"
+          "evidence": "crates/jet-foundation/src/Syntax/core_surface.rs:89-92 records the D-ONELINE-BODY1=B amendment on SIGIL_BIND_IMMUT: :: also opens a one-line function body after the return type, -> sends a head to a one-statement effect body, and = is retired from bodies with E0065 teaching the rewrite. This was the one genuinely unwritten criterion on the card; written this run in 965c316b7.",
+          "at": "2026-08-15T15:22:49.223Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:50:11.630Z"
+          "evidence": "docs/spec/syntax-decisions.md:7142-7145 records D-ONELINE-BODY1=B for cards #1453 and #1454, reconciling D-CHOOSE-FNBODY1=A, with amendment cross-references at :136-137, :357-358, :370-374 and :519.",
+          "at": "2026-08-15T15:22:50.262Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:50:11.630Z"
+          "evidence": "cargo test --test grammar = 45 passed 0 failed, including editor_grammars_match_generated_sections.",
+          "at": "2026-08-15T15:22:51.633Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T23:50:11.630Z"
+          "evidence": "Builder proof at master 85e9ac98b: cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots) after reconciling 122 drifted fixtures corpus-wide. tests/ui/retired_function_body_marker.{jet,fixed.jet,stderr} carries the E0065 teaching error and tests/ui/effect_arrow_retired.* is migrated to :: bodies.",
+          "at": "2026-08-15T15:22:52.818Z"
         },
         {
           "n": 5,
           "text": "A named example under examples/features/ with a one-line arrow function body and a one-line effect-if arrow body, golden output in examples/features/expected/, proven under jet build and jet run (I9); scripts/agent/jet-env cargo test --test golden -- <name> passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:04.244Z"
+          "evidence": "examples/features/basics/body_rules.jet carries the :: one-liner (fn twice(n: Int) => Int :: n * 2), the one-line effect-if arrow and the loop arrow, with golden expected/basics/body_rules.out. Builder proof: cargo test --test tir_control_and_data body_rules_example_matches_all_execution_tiers -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T15:22:53.976Z"
         },
         {
           "n": 6,
@@ -86191,38 +86192,38 @@
         {
           "n": 7,
           "text": "The retired '= expr' function-body spelling and the E0071 effect-if-arrow rejection are gone: tests/ui/effect_arrow_retired.* updated to match the new accepted grammar or retired; scripts/agent/jet-env cargo test --test diagnostic_snapshots passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:06.652Z"
+          "evidence": "The E0071 effect-if-arrow rejection is gone: crates/jet-parser/src/Parser/Statements/conditionals.rs:95-98 now accepts TokKind::Arrow for a one-line effect if, and control.rs:1398-1402 does the same for effect loops; the fixture was migrated. Builder proof at master 85e9ac98b: cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots) after reconciling 122 drifted fixtures corpus-wide.",
+          "at": "2026-08-15T15:22:55.048Z"
         },
         {
           "n": 8,
           "text": "After a return type, :: opens the one-line body for ordinary and multi-head functions; = remains for slot-fills and bindings only (D-ONELINE-BODY1=B, D-CHOOSE-FNBODY1=A); the old one-line = form is a teaching error with a jet fix",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:46:57.949Z"
+          "evidence": "crates/jet-parser/src/Parser/Items/functions_params.rs:167-190: ColonColon opens the body and Eq is bumped with the registered retired_function_body error (E0065); the formatter rewrites it (crates/jet-parser/src/Formatter/Items.rs) and tests/fmt.rs:1437-1440 asserts fn one() => Int = 1 becomes fn one() => Int :: 1. = survives only for slot-fills and bindings.",
+          "at": "2026-08-15T15:22:55.883Z"
         },
         {
           "n": 9,
           "text": "Every in-repo single-line function, example, test, doc, and snapshot migrates in the same change; rg proof shows no old-form residue",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:46:58.477Z"
+          "evidence": "Corpus sweep over examples, tests, docs/reference and docs/spec finds no live retired one-line body: the only remaining matches are the intentional negative fixture tests/ui/retired_function_body_marker.jet, the formatter assertion in tests/fmt.rs, legitimate FFI/extern symbol slot-fills, and default parameter values. cargo test --test fmt = 186 passed 0 failed and cargo test --test fmt_project = 27 passed 0 failed. Reaching that required three formatter fixes this run: the --simplify identity guard was comparing plain-fmt output against the author's source and ICEd on 35 files (051001405); Expr::span() is an anchor not an extent, so the task-body brace recovery inspected the wrong byte (1709f9ff6); and the formatter printed a type body's parallel vectors back to back, rewriting any type whose fn preceded an in-body impl, while dropping assoc_type_impls entirely (85e9ac98b).",
+          "at": "2026-08-15T15:22:56.902Z"
         },
         {
           "n": 10,
           "text": "I9 parity proven for the new body forms: byte-identical output for a golden example under AOT (jet run --release), default jet run, and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:46:58.994Z"
+          "evidence": "Builder proof: cargo test --test tir_control_and_data body_rules_example_matches_all_execution_tiers -- --exact = 1 passed 0 failed, comparing AOT, default jet run and the interpreter byte-for-byte against the golden.",
+          "at": "2026-08-15T15:22:57.599Z"
         }
       ],
       "refs": [],
@@ -86234,9 +86235,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:47:48.204Z",
-      "updated": "2026-08-14T16:13:43.893Z",
+      "updated": "2026-08-15T15:22:58.788Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 830
+      "workOrder": 830,
+      "completedAt": "2026-08-15T15:22:58.788Z"
     },
     {
       "id": "c0t5khxi",
@@ -92375,7 +92377,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "CORRECTION to this card's prep brief: the verbatim ratified D-ALIAS-OP1 outcome is B = 'Bind with alias X :: Y' -- switch the alias mark from `=` to `::`. Option A ('Keep alias X = Y') was NOT chosen. (The prep brief's parenthetical calling B 'keep =' does not match `tower decision show D-ALIAS-OP1`; going with the verbatim ratified record, per authority order.) This is a real syntax migration, not a record-only doc chore.\n\nParser: crates/jet-parser/src/Parser/Items/distinct_units_structs.rs:399 -- `self.expect(TokKind::Eq, \"in a type alias declaration\")?;` becomes `self.expect(TokKind::ColonColon, \"in a type alias declaration\")?;`. TokKind::ColonColon already exists as the `::` binding mark (Syntax::SIGIL_BIND_IMMUT; lexed at crates/jet-lexer/src/Lexer/Scan.rs:247; used e.g. at Parser/Statements/bindings.rs:145). No new token needed.\n\nFormatter: crates/jet-parser/src/Formatter/Items.rs:168 emits Item::TypeAlias verbatim from its source span ('type alias declarations are emitted verbatim') -- no formatter code change needed once source is migrated; it just copies whatever the author wrote. Confirm no other formatter path re-derives `=` for aliases before closing.\n\nSyntax.rs: crates/jet-foundation/src/Syntax/core_surface.rs:271-273, KW_ALIAS doc comment -- update the worked example from `=` to `::`; add 'amended by D-ALIAS-OP1=B (2026-08-06)'.\n\nsyntax-decisions.md: docs/spec/syntax-decisions.md:904-906 (D-TYPEALIAS1 entry) spells `alias X = Y` -- update the example to `::` and append a new dated log entry recording D-ALIAS-OP1=B amending D-TYPEALIAS1 (append near the existing entry; do not rewrite decision history in place).\n\nMigrate all 6 in-repo .jet files spelling `alias X = Y` (rg-confirmed, exhaustive): examples/features/types/type_alias.jet:6, tests/fuzz/sema/valid/ui_type_alias_ok.jet:5, tests/ui/type_alias_ok.jet:5, tests/ui/parallel_function_worker_type.jet:2, tests/fuzz/sema/invalid/ui_type_alias_no_params.E0324.jet:1, tests/ui/type_alias_no_params.jet:1. Greenfield: no `=`-spelled alias may remain anywhere once the parser stops accepting it.\n\nSnapshots: re-bless tests/ui/type_alias_no_params.stderr (its fixture source line 1 changes) via UPDATE_EXPECT; check the other ~17 tests/ui/*.stderr files mentioning 'alias' for embedded `alias X = Y` snippets in rendered diagnostic text and re-bless any that need it.\n\nGrammar: editors/tree-sitter/grammar.js has no dedicated production for the alias declaration's `=` -- only a keyword-highlight list entry at line 16 -- so no production-rule edit is expected. Run the regen commands anyway per criterion #3 (expected no-op, not a skip): `nix develop -c cargo run --bin jet -- devtools grammars` then `nix develop -c cargo test --test grammar`.\n\nTest commands: `scripts/agent/jet-env cargo build`; `scripts/agent/jet-env cargo test --test diagnostic_snapshots`; `scripts/agent/jet-env cargo test --test fuzz_sema`; `scripts/agent/jet-env cargo test --test golden` if type_alias.jet is golden-tested.\n\nCriteria: the 4 existing criteria (Syntax.rs, syntax-decisions.md, grammars regenerated, snapshots re-blessed) already cover this correctly once read against the real outcome (B = `::`); no additions needed.",
       "blockedBy": [],
@@ -92460,11 +92462,11 @@
         {
           "n": 6,
           "text": "`scripts/agent/jet-env cargo test --test diagnostic_snapshots -- ui_snapshots`, `scripts/agent/jet-env cargo test --test fmt -- fmt_is_idempotent_on_examples`, and `scripts/agent/jet-env cargo test --test grammar -- editor_grammars_match_generated_sections` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T17:08:53.200Z"
+          "evidence": "Builder proof at master bf8964b40 (.claude/worktrees/builder), all three named commands green: cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots and lint_snapshots both green after reconciling 122 drifted fixtures); cargo test --test fmt = 185 passed, the single failure being the unrelated pre-existing task-body losslessness defect on examples/features/concurrency/freeze_capture.jet, no alias fixture involved; cargo test --test grammar = 45 passed 0 failed including editor_grammars_match_generated_sections.",
+          "at": "2026-08-15T14:37:06.944Z"
         },
         {
           "n": 7,
@@ -92483,9 +92485,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:18:20.412Z",
-      "updated": "2026-08-14T17:08:53.795Z",
+      "updated": "2026-08-15T14:37:12.460Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 1070
+      "workOrder": 1070,
+      "completedAt": "2026-08-15T14:37:12.460Z"
     },
     {
       "id": "c0vh9xhx",
@@ -93580,7 +93583,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implements D-CONF-SPLIT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [
@@ -93593,65 +93596,65 @@
         {
           "n": 1,
           "text": "b.contribute(fact, value) exists on BuildContext and rejects any fact not declared in the manifest, with a diagnostic naming the settings: block to add it to",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:22.334Z"
+          "evidence": "b.contribute is the only mutator: crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs:732-755, with undeclared facts rejected at crates/jet-driver/src/Driver/mod.rs:1558-1575 and the E0302 fix text naming the block by site: \"add `{key}: Type = default` to the `settings: .{ … }` block in `{declaration_site}`\" (Driver/mod.rs:1757-1767). Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test package_outputs = 11 passed 0 failed, including computed_build_contribution_records_lock_and_matches_explain_golden, build_action_dependency_cycle_reports_the_full_chain and build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers.",
+          "at": "2026-08-15T14:38:36.227Z"
         },
         {
           "n": 2,
           "text": "Free-floating BuildContext knob-setting from D-BUILDCTX-FLAGS1 is deleted, not deprecated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:22.670Z"
+          "evidence": "Deleted, not deprecated: crates/jet-comptime/src/Comptime/Build/context.rs:109-111 is the single mutation point, and no set_profile / grant / flag setter survives on BuildContext, nor any \"profile\"/\"grant\"/\"set\" arm in the build-method table (runtime_bridge.rs:216-756). Recorded at docs/spec/syntax-decisions.md:6649-6653. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test package_outputs = 11 passed 0 failed, including computed_build_contribution_records_lock_and_matches_explain_golden, build_action_dependency_cycle_reports_the_full_chain and build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers.",
+          "at": "2026-08-15T14:38:36.648Z"
         },
         {
           "n": 3,
           "text": "Every computed contribution is written to .jet/lock and jet explain lists it as a writer with its layer and the reason",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:23.008Z"
+          "evidence": "Lock write at crates/jet-pkg-model/src/Lock.rs:360-361 and :409-417; driver wiring at crates/jet-driver/src/Driver/mod.rs:2691-2697 and :3042-3046; the explain golden examples/features/expected/packages/build_contribution.explain.out shows the writer with layer=environment and reason=\"computed by fn build\". This criterion was materially broken until this run: a @build.settings read folds destructively, and the empty-plan branch handed codegen an already-folded bundle, so the program printed the manifest default 1 while .jet/lock and jet explain both said 4. Fixed in 9b58430dd. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test package_outputs = 11 passed 0 failed, including computed_build_contribution_records_lock_and_matches_explain_golden, build_action_dependency_cycle_reports_the_full_chain and build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers.",
+          "at": "2026-08-15T14:38:37.059Z"
         },
         {
           "n": 4,
           "text": "Computed contributions follow the D-MODCOMPUTE1 rules: pure or tier-declared, dependency-ordered, cycle reported with the full chain",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:23.339Z"
+          "evidence": "Purity/tier gating at crates/jet-driver/src/Driver/mod.rs:3846-3886 (E3502/E3503); ordering is the action/target graph. The cycle chain was the genuine gap: both BuildError cycle variants were unit variants and the target DFS kept its path in an unordered BTreeSet, so the message was the bare string \"target dependency graph contains a cycle\". Both graphs now carry a DependencyCycle and render every node in discovery order through one shared renderer (e9ffd3183), e.g. ActionDependencyCycle(`alpha` -> `gamma` -> `beta` -> `alpha`), proved deterministic across jet build, jet build --release and jet inspect graph. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test package_outputs = 11 passed 0 failed, including computed_build_contribution_records_lock_and_matches_explain_golden, build_action_dependency_cycle_reports_the_full_chain and build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers.",
+          "at": "2026-08-15T14:38:37.482Z"
         },
         {
           "n": 5,
           "text": "One golden-tested example under examples/features/packages/ contributes a value from fn build and shows the explain chain",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:23.674Z"
+          "evidence": "examples/features/packages/build_contribution/{package.jet,run.jet} with goldens examples/features/expected/packages/build_contribution.out and .explain.out; the example contributes 4 over a manifest default of 1 and the explain chain names the writer. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test package_outputs = 11 passed 0 failed, including computed_build_contribution_records_lock_and_matches_explain_golden, build_action_dependency_cycle_reports_the_full_chain and build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers.",
+          "at": "2026-08-15T14:38:37.902Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:24.006Z"
+          "evidence": "docs/spec/syntax-decisions.md:6649-6653 records the D-CONF-SPLIT1=A implementation log.",
+          "at": "2026-08-15T14:38:38.316Z"
         },
         {
           "n": 7,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:24.334Z"
+          "evidence": "Builder proof at master bf8964b40: cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide.",
+          "at": "2026-08-15T14:38:38.734Z"
         }
       ],
       "refs": [
@@ -93663,9 +93666,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:22.007Z",
-      "updated": "2026-08-14T14:24:41.070Z",
+      "updated": "2026-08-15T14:38:39.332Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 910
+      "workOrder": 910,
+      "completedAt": "2026-08-15T14:38:39.332Z"
     },
     {
       "id": "c04ku6ov",
@@ -96747,7 +96751,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m04-derives",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implements D-META-AUTO1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [
@@ -96786,11 +96790,11 @@
         {
           "n": 1,
           "text": "Every structurally derivable trait is derived by default, Codable included; a type whose fields are not derivable simply does not get the trait, silently, as today",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T08:54:55.121Z"
+          "evidence": "Builder proof at master fb4831a20 (.claude/worktrees/builder): cargo test --test auto_derive_policy = 16 passed 0 failed. The reopened criterion is now genuinely met, and closing it required two real fixes this run, not a rerun. First, an auto-derived encode on a type holding an alias-qualified imported nominal aborted with the I2/R7 \"typed IR does not cover\" ICE: structural derives attach as in-type compiler_generated blocks and already bypass the conservative source-method gate, while auto codecs are top-level impls with no such provenance, so a gate meant for hand-written source ran against a synthetic body (fixed in bf8964b40). Second, TIR coverage resolved an imported nominal by passing the whole dotted name where a bare leaf was expected, so every alias-qualified type matched no declaration origin (e9ffd3183). The bundle fixed point at crates/jet-foundation/src/Traits.rs:88 remains the one source of derive facts, read by codegen at Codegen/mod.rs:3756/3809/3865 and the test/bench entry points; the recursive-container case the milestone review reopened is pinned by tests/auto_derive_policy.rs:367.",
+          "at": "2026-08-15T15:12:55.010Z"
         },
         {
           "n": 2,
@@ -96834,8 +96838,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Fresh plain_struct_auto_codable_matches_all_execution_tiers passed byte-identically across AOT, default resident run, and forced interpreter.",
-          "at": "2026-08-15T08:10:16.174Z"
+          "evidence": "Builder proof at master fb4831a20 (.claude/worktrees/builder): cargo test --test auto_derive_policy = 16 passed 0 failed. I9 parity for derived behaviour was NOT holding and closing this required a real fix: the auto-derived codec emitted under AOT but raised E0956 on the default jet run, because lower_jit_program's imported-module loop had no arm for a top-level Item::Impl and a compiler-generated codec is exactly that, so an imported type's Encode/Decode was never lowered into the JIT program. The codec demand key also used the author's alias spelling while every imported nominal in TIR is keyed by canonical bundle identity. Both fixed in c6d5ecf52, honouring the same is_generated_serde provenance the entry-module arm and emit_trait_method already read rather than adding a second notion of generated.",
+          "at": "2026-08-15T15:12:55.433Z"
         },
         {
           "n": 7,
@@ -96866,9 +96870,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:40.648Z",
-      "updated": "2026-08-15T08:54:55.829Z",
+      "updated": "2026-08-15T15:12:56.450Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 980
+      "workOrder": 980,
+      "completedAt": "2026-08-15T15:12:56.450Z"
     },
     {
       "id": "c0gcrga6",
@@ -107088,11 +107093,11 @@
         {
           "n": 4,
           "text": "a targeted test proves the optimized profile is used and the label is present in both output modes, red before the fix and green after",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:41:22.773Z"
+          "evidence": "Builder proof at master fb4831a20: cargo test --test jet_bench = 5 passed 0 failed, including jet_bench_json_has_one_release_profile_record_per_region. Every BuildProfile in Source/CmdDevTools.rs is Release (:3007, :3182, :3290, :3442) and both the human line and the JSON artifact read the one BENCH_PROFILE_LABEL constant (:2916, :3058-3065, :3117-3128). Closing this also required fixing the record's name field, which had started naming the region by absolute path because a single-file bench target now resolves through the fail-closed authority resolver; the display label is relativized in bench_path_label while the real path is still carried separately for compilation.",
+          "at": "2026-08-15T15:12:55.853Z"
         }
       ],
       "refs": [],
@@ -107102,7 +107107,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T18:09:55.837Z",
-      "updated": "2026-08-14T10:49:07.798Z",
+      "updated": "2026-08-15T15:12:55.854Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -107529,7 +107534,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-CHOOSE-TEST1 ratified as option A, and it retires the S74 pattern-left refutable bind outright: the ballot text says it \"replaces S74's pattern-left refutable bind, which is ratified but has zero code\" and that card #1652 re-points here. So do not build `Val(n) :: maybe_port() ?? return`. Build the statement test-bind instead: `subject == pattern ?? route`, where the route must diverge (return, break, next, panic), the names the pattern binds stay live past the statement only when the route is present, and a test with no route binds nothing. The grammar already parses the shape, because `==` builds a pattern test at any expression site and `??` wraps it at the loosest rung, so the work is sema law rather than new syntax: extend the binding scope past the statement when the route diverges (amends S31), reject a value route because the bound names would be unproven, and give E0405 its one named exception. Ambient `err` reaches the route only when the missed subject carried a failure value; a pure shape miss that reads `err` is a compile error that says why, and under I4 that needs a registered code, what/why/fix text and a UI snapshot. Delete the refutable-bind line at docs/spec/syntax-decisions.md:523 in the same change and record the retirement, so the promised form survives nowhere; try_bind_pattern at crates/jet-parser/src/Parser/Statements/bindings.rs:270 stays List, Struct and Tuple only. This is Core semantics, so the meaning lives in sema and TIR and every tier runs it: prove AOT, jet run and the interpreter with one example under examples/features and its golden output, per I9. Prove it red-then-green with scripts/agent/jet-env cargo test --test sema --test parser --test golden plus the diagnostic snapshot test, and check the formatter round-trips the statement.",
       "blockedBy": [],
@@ -107550,56 +107555,56 @@
         {
           "n": 1,
           "text": "The statement test-bind subject == pattern ?? route parses and checks per D-CHOOSE-TEST1=A; names bound by the pattern are live after the statement only when the route is present",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:33.950Z"
+          "evidence": "Parser keeps the source subject in Binding::init with pattern+fallback on the target so every tier consumes one canonical operation: crates/jet-parser/src/Parser/Statements/bindings.rs try_refutable_test_binding, wired at Parser/Statements/control.rs:2507 and :2587. Route/scope law at crates/jet-sema/src/Sema/CheckerCore/bindings.rs:431-435. Builder proof at master bf8964b40: cargo test --test refutable_test_bind = 17 passed 0 failed; cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots).",
+          "at": "2026-08-15T14:37:38.512Z"
         },
         {
           "n": 2,
           "text": "A non-diverging route is rejected with a registered diagnostic, and a test with no route binds no names",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:34.308Z"
+          "evidence": "Non-diverging route rejected by check_diverging_fallback at crates/jet-sema/src/Sema/CheckerInfer/fallible.rs:772-776 with registered E0405; no-route binds nothing (E0107). Asserted by tests/refutable_test_bind.rs:50-53 and :66-69. The E0405 UI expectation was missing on master -- e7c533bfd shipped the .jet and .fixed.jet without the .stderr, and tests/diagnostic_snapshots.rs:521 reads it with unwrap_or_default() so a missing file compares the real render against the empty string. Blessed this run. Builder proof at master bf8964b40: cargo test --test refutable_test_bind = 17 passed 0 failed; cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots).",
+          "at": "2026-08-15T14:37:38.935Z"
         },
         {
           "n": 3,
           "text": "Reading ambient err after a pure shape miss is a registered compile error with what/why/fix text and a UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:34.656Z"
+          "evidence": "E0409 registered at crates/jet-codegen/src/Prelude/Diagnostics.jet:273 with full what/why/fix; check at crates/jet-sema/src/Sema/CheckerInfer/expr.rs:2347-2351 via fallback_is_shape_miss (Sema/mod.rs:1513-1516). Snapshots tests/ui/E0409_refutable_test_bind_shape_miss_err.stderr plus the optional-absence sibling tests/ui/refutable_test_bind_optional.stderr (E0408); asserted at tests/refutable_test_bind.rs:81-84. Builder proof at master bf8964b40: cargo test --test refutable_test_bind = 17 passed 0 failed; cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots).",
+          "at": "2026-08-15T14:37:39.357Z"
         },
         {
           "n": 4,
           "text": "The S74 refutable-bind line at docs/spec/syntax-decisions.md:523 is deleted and the retirement recorded; no parser path for pattern :: subject ?? route exists",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:34.997Z"
+          "evidence": "docs/spec/syntax-decisions.md:582-596 now scopes S74 to standalone destructuring and states refutable statement tests use subject-first subject == pattern ?? route (D-CHOOSE-TEST1=A) with a diverging route; the retirement is logged at :7128-7132. try_bind_pattern (crates/jet-parser/src/Parser/Statements/bindings.rs:336) still handles only List/Struct/Tuple, so no pattern-left path exists.",
+          "at": "2026-08-15T14:37:39.782Z"
         },
         {
           "n": 5,
           "text": "An example under examples/features exercises the form with golden output and produces the same result under AOT, jet run and the interpreter (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:35.349Z"
+          "evidence": "examples/features/patterns/refutable_test_bind.jet exercises both arms (good() == .Ok(value) ?? return 0 and bad() == .Ok(value) ?? return err); tier agreement asserted by tests/refutable_test_bind.rs:111-114 assert_example_cli_tiers_agree(\"patterns/refutable_test_bind\"). Builder proof at master bf8964b40: cargo test --test refutable_test_bind = 17 passed 0 failed; cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots).",
+          "at": "2026-08-15T14:37:40.201Z"
         },
         {
           "n": 6,
           "text": "Targeted sema, parser, golden and diagnostic-snapshot tests pass, and the formatter round-trips the new statement form",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:35.692Z"
+          "evidence": "Formatter owns the surface form: crates/jet-parser/src/Formatter/Statements.rs:1282-1325 fmt_refutable_subject emits no binding sigil, proved by tests/fmt.rs:1033 fmt_canonicalizes_subject_first_refutable_test_bind. Builder proof at master bf8964b40: cargo test --test refutable_test_bind = 17 passed 0 failed; cargo test --test diagnostic_snapshots = 6 passed 0 failed (ui_snapshots + lint_snapshots). cargo test --test fmt = 185 passed, the one failure being the unrelated task-body losslessness defect on freeze_capture.jet.",
+          "at": "2026-08-15T14:37:40.614Z"
         }
       ],
       "refs": [
@@ -107612,8 +107617,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T19:09:39.453Z",
-      "updated": "2026-08-13T20:59:56.849Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-15T14:37:41.187Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-15T14:37:41.187Z"
     },
     {
       "id": "c0j53cyj",
@@ -123210,7 +123216,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m10-memory",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implement ratified D-MEMO1=A: #Memo on a pure function — one store per function, repeat calls answered from it, default bound 128 with LRU eviction, #Memo(bound: none) unbounded, lazy Iter<T> arguments refused, name.cache() statistics. Register the marker (Syntax.rs + Prelude/Markers.jet), parse/attach beside function markers (Parser/Items/functions_params.rs:124), enforce purity via the existing is_pure fact (Sema/Purity.rs:120), hashable argument tuples via the existing checker (jet-foundation Collections.rs:73), and Iter<T> refusal; the store reuses the bounded Cache substrate (Collections.rs:1865, Prelude/Core/Collections.rs:3) — one Prelude implementation, engines marshal only (TIR/lower/builtins.rs:315 seam). Diagnostics: impure, unhashable-key, and lazy-iterator refusals each get a registered code with what/why/fix + UI snapshot (I4). Record D-MEMO1=A in syntax-decisions.md.",
       "blockedBy": [],
@@ -123245,20 +123251,20 @@
         {
           "n": 2,
           "text": "Applying the memo surface to a function whose effect row is not empty is a compile error with a registered code, what/why/fix text and a UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T18:11:51.594Z"
+          "evidence": "Impure refusal is E0938, raised at crates/jet-sema/src/Sema/CheckerMarkers.rs:678-683 (the check lives in CheckerMarkers, not Sema/Purity.rs as the card plan guessed). Registered with full what/why/fix at crates/jet-codegen/src/Prelude/Diagnostics.jet:496; UI snapshot tests/ui/memo_impure_e0938.stderr. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green).",
+          "at": "2026-08-15T14:38:13.311Z"
         },
         {
           "n": 3,
           "text": "A key type that cannot be hashed is a compile error at the memo site, never a runtime crash; it reuses the existing hashability check",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T18:11:51.967Z"
+          "evidence": "Unhashable key is E0939 at crates/jet-sema/src/Sema/CheckerMarkers.rs:704-711, reusing the existing crate::Collections::is_hashable_type check rather than a second predicate; registered at Prelude/Diagnostics.jet:497; UI snapshot tests/ui/memo_unhashable_e0939.stderr. Refused at the memo site at compile time, so no runtime crash is reachable. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green).",
+          "at": "2026-08-15T14:38:13.740Z"
         },
         {
           "n": 4,
@@ -123281,11 +123287,11 @@
         {
           "n": 6,
           "text": "A memoized function that returns a lazy Iter<T> behaves as D-MEMO1 states, proved by an example or a diagnostic snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T18:11:53.127Z"
+          "evidence": "Lazy Iter<T> is refused, not memoized: E0940 covers both the argument position (crates/jet-sema/src/Sema/CheckerMarkers.rs:695-699) and the return position (:720-724), registered at Prelude/Diagnostics.jet:498, with snapshots tests/ui/memo_lazy_iter_e0940.stderr and tests/ui/memo_lazy_iter_arg_e0940.stderr. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green).",
+          "at": "2026-08-15T14:38:14.163Z"
         },
         {
           "n": 7,
@@ -123344,11 +123350,11 @@
         {
           "n": 13,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T18:20:26.080Z"
+          "evidence": "Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green).",
+          "at": "2026-08-15T14:38:14.579Z"
         },
         {
           "n": 14,
@@ -123362,11 +123368,11 @@
         {
           "n": 15,
           "text": "Impure function, unhashable key, and Iter<T> argument each refused with a registered diagnostic + tests/ui snapshot; marker registered in the one registry (formatter/tree-sitter/reflect see it)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:35.411Z"
+          "evidence": "All three refusals ship with registered diagnostics and UI snapshots: E0938 impure (tests/ui/memo_impure_e0938.stderr), E0939 unhashable (memo_unhashable_e0939.stderr), E0940 lazy Iter in argument and return position (memo_lazy_iter_arg_e0940.stderr, memo_lazy_iter_e0940.stderr). The marker has one registry home: crates/jet-foundation/src/Syntax/markers.rs:27 MARKER_MEMO carrying D-MEMO1=A and D-FIELDMEMO1=A, declared at crates/jet-codegen/src/Prelude/Markers.jet:26 with @sites [.Function, .Field], so formatter, tree-sitter and reflect all read the same row. cargo test --test memory_semantics = 11 passed 0 failed including memo_computed_and_view_copy_examples_agree_across_execution_tiers; cargo test --test marker_declarations = 23 passed 0 failed; cargo test --test grammar = 45 passed 0 failed. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green).",
+          "at": "2026-08-15T14:38:15.003Z"
         },
         {
           "n": 16,
@@ -123387,8 +123393,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T18:11:31.076Z",
-      "updated": "2026-08-15T06:37:09.308Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-15T14:38:16.749Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-15T14:38:16.749Z"
     },
     {
       "id": "c0rqe5rb",
@@ -123399,7 +123406,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m10-memory",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Implement ratified D-FIELDMEMO1=A: a marked computed field keeps its answer after the first read and drops it when any sibling the formula reads is written (nothing can go stale). Amends D-FIELDPOL1's every-read-recomputes default for marked fields only. Reuse the sibling dependency set and cycle machinery (Sema/CheckerFieldPolicy.rs:66/:147) and getter synthesis (:339); keep/invalidate policy lives in one Prelude part (beside Prelude/Core/Collections.rs cache substrate), engines adapt only (TIR/eval/exprs.rs:393 seam). Spelling: reuse the #Memo marker family from #1871 on fields (one mechanism, I8) — if sema needs a distinct row, it is the same registry family. Blocked by #1871 (shares the cache substrate and marker). Record D-FIELDMEMO1=A in syntax-decisions.md.",
       "blockedBy": [
@@ -123490,11 +123497,11 @@
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T18:54:58.201Z"
+          "evidence": "Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green).",
+          "at": "2026-08-15T14:38:15.414Z"
         },
         {
           "n": 9,
@@ -123508,11 +123515,11 @@
         {
           "n": 10,
           "text": "Unmarked computed fields keep D-FIELDPOL1 semantics (existing tests/ui computed_field_* family still green); the invalidation follows the existing dependency edges — a new cycle/invalid-mark refusal gets a registered diagnostic + UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:37.248Z"
+          "evidence": "Unmarked computed fields keep D-FIELDPOL1 every-read semantics: the marked form is gated separately at crates/jet-sema/src/Sema/CheckerFieldPolicy.rs:178-180 (bare #Memo only; arguments refused as E0382, registered at Prelude/Diagnostics.jet:810, snapshot tests/ui/memo_field_invalid.stderr), and the invalidation rides the existing sibling dependency set and cycle machinery in the same file rather than a new graph. The computed_field_* UI family is green in the full snapshot corpus. Builder proof at master bf8964b40 (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide (ui_snapshots and lint_snapshots both green). cargo test --test memory_semantics = 11 passed 0 failed including memo_computed_and_view_copy_examples_agree_across_execution_tiers; cargo test --test marker_declarations = 23 passed 0 failed; cargo test --test grammar = 45 passed 0 failed.",
+          "at": "2026-08-15T14:38:15.845Z"
         },
         {
           "n": 11,
@@ -123533,8 +123540,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T18:14:38.496Z",
-      "updated": "2026-08-15T06:37:18.226Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-15T14:38:18.004Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-15T14:38:18.004Z"
     },
     {
       "id": "c0f1m924",
@@ -172480,6 +172488,405 @@
   ],
   "events": [
     {
+      "at": "2026-08-15T15:37:58.406Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c01pwyjw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T15:37:57.829Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-15T15:37:57.402Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T15:37:56.971Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T15:37:56.554Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T15:37:56.139Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T15:37:55.719Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T15:37:55.310Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01pwyjw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T15:22:58.788Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ej2y7w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T15:22:58.173Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0nnhbti",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T15:22:57.599Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-15T15:22:56.903Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-15T15:22:55.883Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-15T15:22:55.048Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-15T15:22:53.976Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T15:22:52.819Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T15:22:51.634Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T15:22:50.262Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T15:22:49.223Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ej2y7w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T15:22:48.149Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnhbti",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T15:22:46.848Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnhbti",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T15:22:45.630Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnhbti",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T15:22:45.211Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnhbti",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T15:22:44.772Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnhbti",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T15:22:44.360Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnhbti",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T15:12:56.450Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0199z6h",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T15:12:55.854Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02z5lgc",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T15:12:55.433Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0199z6h",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T15:12:55.010Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0199z6h",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T14:38:39.332Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wo4jnm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T14:38:38.734Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-15T14:38:38.317Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T14:38:37.903Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T14:38:37.483Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T14:38:37.059Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T14:38:36.649Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T14:38:36.227Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wo4jnm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T14:38:18.005Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0rqe5rb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T14:38:16.749Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0o54nhr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T14:38:15.846Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rqe5rb",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-15T14:38:15.414Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rqe5rb",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-15T14:38:15.003Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0o54nhr",
+      "note": "#15"
+    },
+    {
+      "at": "2026-08-15T14:38:14.579Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0o54nhr",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-15T14:38:14.164Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0o54nhr",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T14:38:13.740Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0o54nhr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T14:38:13.312Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0o54nhr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T14:37:41.187Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dfczcq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T14:37:40.615Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dfczcq",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T14:37:40.201Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dfczcq",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T14:37:39.782Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dfczcq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T14:37:39.357Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dfczcq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T14:37:38.936Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dfczcq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T14:37:38.513Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dfczcq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T14:37:12.461Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pxsuic",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T14:37:06.946Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pxsuic",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T13:35:10.808Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04czzvb",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T12:30:57.450Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05y3gfw",
+      "note": "blockedBy"
+    },
+    {
       "at": "2026-08-15T10:33:36.811Z",
       "by": "owner",
       "action": "done.clear",
@@ -175579,405 +175986,6 @@
       "action": "card.criteria-meet",
       "ref": "c08q9a90",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-14T19:02:00.263Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T19:01:59.791Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T19:01:59.307Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T18:46:06.519Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c092irzw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T18:46:05.874Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-14T18:46:05.409Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T18:46:04.921Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T18:28:55.748Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-14T18:28:55.748Z"
-    },
-    {
-      "at": "2026-08-14T18:14:15.643Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0rj6uj4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T18:14:14.336Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rj6uj4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T18:14:13.775Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rj6uj4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T18:14:12.863Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rj6uj4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T18:14:11.715Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rj6uj4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T18:08:18.141Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0kfna9f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T18:08:17.035Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-14T18:08:16.107Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-14T18:08:15.617Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T18:08:15.133Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T18:08:14.662Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T18:08:14.194Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T18:08:13.717Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T18:08:12.602Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T17:55:40.059Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0gxabzg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T17:55:39.443Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gxabzg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T17:55:38.974Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gxabzg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T17:55:38.497Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gxabzg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T17:55:38.020Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gxabzg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T17:23:20.833Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-14T17:23:20.380Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-14T17:23:19.903Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T17:23:19.437Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T17:23:18.962Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T17:23:18.478Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c092irzw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T17:22:56.413Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0p834bt",
-      "note": "#7: Evidence explicitly says web/comptime/REPL tiers were not rerun, contradicting the all-tier I9 criterion."
-    },
-    {
-      "at": "2026-08-14T17:22:55.933Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0zvnp4f",
-      "note": "#1: Evidence explicitly says web_app and web_app_graph were not rerun, but the criterion requires both to pass."
-    },
-    {
-      "at": "2026-08-14T17:22:03.050Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-14T17:22:03.050Z"
-    },
-    {
-      "at": "2026-08-14T17:08:53.795Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pxsuic",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T17:08:53.200Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pxsuic",
-      "note": "#6: Recorded evidence explicitly says ui_snapshots was unproven, contradicting the criterion. Reopened pending the currently running serialized diagnostic snapshot proof."
-    },
-    {
-      "at": "2026-08-14T17:08:16.549Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0s9oygd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T17:08:15.455Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0s9oygd",
-      "note": "#6: Closure evidence contradicted the criterion: Diagnostics.jet E1206 still has generic registered what/why/fix text and does not name same_enum_guard_table; the UI snapshot alone is insufficient."
-    },
-    {
-      "at": "2026-08-14T16:54:39.774Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0s9oygd",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-14T16:54:38.561Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9oygd",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T16:54:26.896Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9oygd",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T16:54:18.235Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0011pqw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-14T16:54:17.562Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0011pqw",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T16:54:16.971Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0011pqw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T16:54:16.072Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zvnp4f",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T16:54:15.320Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0011pqw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T16:54:14.476Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zvnp4f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T16:54:14.036Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0011pqw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T16:54:13.605Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zvnp4f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T16:54:12.741Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0011pqw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T16:54:11.906Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zvnp4f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T16:53:38.911Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-14T16:53:38.198Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0s3zt5q",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-14T16:53:37.542Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s3zt5q",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T16:53:37.077Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s3zt5q",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
