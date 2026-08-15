@@ -9,7 +9,7 @@ use crate::AST::{
     SwitchArm, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod Comptime;
 mod Units;
