@@ -25,7 +25,9 @@
 // `authority: { trust: }` and `policy: { lints: }` block names (jet-driver already depends on
 // Sema transitively through jet-codegen, so this adds nothing new to its
 // build graph — it is the compiler's checker, not Jetpack's engine).
-pub use jet_sema::{Diagnostics, Lexer, Parser, Policy, Sema, Syntax, AST, SHA256};
+pub use jet_sema::{
+    Diagnostics, Lexer, Parser, Policy, Sema, Syntax, TargetMachine, AST, SHA256,
+};
 
 pub mod AdaBind;
 pub mod Authority;

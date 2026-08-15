@@ -504,7 +504,7 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         ),
         PackageParseError::BadAllocatorPolicy { detail } => Diagnostic::error(
             "E1206",
-            "invalid hosted program allocator",
+            "invalid hosted program allocator".to_string(),
             detail.clone(),
             "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`".to_string(),
             None,
