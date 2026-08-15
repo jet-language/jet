@@ -1595,7 +1595,7 @@ fn run() {
     assert!(!node.status.success(), "a reached stop must fail the JS process");
     let stderr = String::from_utf8_lossy(&node.stderr);
     assert!(
-        stderr.contains("Stop [E3010]: the list has 1 items, so position 9 doesn't exist"),
+        stderr.contains("Stop [E3010]: `the list has 1 items, so position 9 doesn't exist` — with Jet file and line."),
         "missing shared stop text:\n{stderr}"
     );
     assert!(
@@ -1603,8 +1603,8 @@ fn run() {
         "missing Jet source location:\n{stderr}"
     );
     assert!(
-        stderr.contains("Why: the operation has no valid result for these operands")
-            && stderr.contains("Fix: check the operands before the operation, or use a checked operation"),
+        stderr.contains("Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data.")
+            && stderr.contains("Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome."),
         "missing shared why/fix:\n{stderr}"
     );
     assert!(!stderr.contains("thread 'main' panicked"), "raw host panic leaked:\n{stderr}");
@@ -1665,13 +1665,13 @@ try {
         assert!(stdout.contains("code=E3011"), "{stem}:\n{stdout}");
         assert!(
             stdout.contains(&format!(
-                "Stop [E3011]: #Todo at {shown}:3 — expected Int"
+                "Stop [E3011]: `#Todo at {shown}:3 — expected Int`"
             )),
             "{stem} lost the canonical Todo frame:\n{stdout}"
         );
         assert!(
-            stdout.contains("Why: a #Todo hole was reached at runtime")
-                && stdout.contains("Fix: implement this code before running it"),
+            stdout.contains("Why: This code is deliberately incomplete and reached a running program.")
+                && stdout.contains("Fix: Implement the missing code before running the program."),
             "{stem} lost the canonical Todo why/fix:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
