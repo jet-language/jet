@@ -2,7 +2,7 @@ use super::actions_policy::{
     ActionCache, ActionKind, ActionSpec, BuildCapability, BuildPolicy, BuildResourcePool, LegacyWrapperSpec,
 };
 use super::context::BuildContext;
-use super::errors_keys::BuildError;
+use super::errors_keys::{dependency_cycle_text, BuildError};
 use super::handles::{
     ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, SigningIdentityId,
     TargetId, TargetRef, ToolchainHandle, ToolchainId,
@@ -988,8 +988,8 @@ fn build_error_text(error: &BuildError) -> String {
         BuildError::GeneratedModuleCycle { module, path } => format!(
             "E3511: generation rounds form a cycle: `{module}` and `{path}` have two producers"
         ),
-        BuildError::TargetDependencyCycle => "target dependency graph contains a cycle".to_string(),
-        BuildError::ActionDependencyCycle => "action dependency graph contains a cycle".to_string(),
+        BuildError::TargetDependencyCycle(cycle) => dependency_cycle_text("target", cycle),
+        BuildError::ActionDependencyCycle(cycle) => dependency_cycle_text("action", cycle),
         other => format!("{other:?}"),
     }
 }

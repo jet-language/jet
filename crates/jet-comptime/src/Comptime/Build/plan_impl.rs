@@ -1,6 +1,9 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePoolSpec};
 use super::cache_cas::{ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest};
-use super::errors_keys::{BuildError, canonical_action_key, canonical_effective_action_key};
+use super::errors_keys::{
+    canonical_action_key, canonical_effective_action_key, stalled_cycle, target_cycle_error,
+    BuildError,
+};
 use super::execution_helpers::{
     action_pools, cache_status_reason, collect_target_actions, default_resource_pools,
     execution_metrics, execution_stages,
@@ -94,10 +97,10 @@ impl BuildPlan {
     pub fn selected_action_ids(&self) -> Result<BTreeSet<ActionId>, BuildError> {
         let mut selected = BTreeSet::new();
         if let Some(default) = self.default {
-            collect_target_actions(self, default.id, &mut BTreeSet::new(), &mut selected)?;
+            collect_target_actions(self, default.id, &mut Vec::new(), &mut selected)?;
         } else {
             for target in &self.targets {
-                collect_target_actions(self, target.id, &mut BTreeSet::new(), &mut selected)?;
+                collect_target_actions(self, target.id, &mut Vec::new(), &mut selected)?;
             }
         }
         let prereqs = self.action_prereqs()?;
@@ -117,13 +120,14 @@ impl BuildPlan {
         fn collect(
             plan: &BuildPlan,
             id: TargetId,
-            visiting: &mut BTreeSet<TargetId>,
+            visiting: &mut Vec<TargetId>,
             seen: &mut BTreeSet<String>,
             out: &mut Vec<BuildPath>,
         ) -> Result<(), BuildError> {
-            if !visiting.insert(id) {
-                return Err(BuildError::TargetDependencyCycle);
+            if visiting.contains(&id) {
+                return Err(target_cycle_error(plan, visiting, id));
             }
+            visiting.push(id);
             let target = plan.targets.get(id.0).ok_or(BuildError::UnknownTarget(id))?;
             for source in &target.sources {
                 if seen.insert(source.as_str().to_string()) {
@@ -133,16 +137,16 @@ impl BuildPlan {
             for dep in &target.deps {
                 collect(plan, dep.id, visiting, seen, out)?;
             }
-            visiting.remove(&id);
+            visiting.pop();
             Ok(())
         }
         let mut out = Vec::new();
         let mut seen = BTreeSet::new();
         if let Some(default) = self.default {
-            collect(self, default.id, &mut BTreeSet::new(), &mut seen, &mut out)?;
+            collect(self, default.id, &mut Vec::new(), &mut seen, &mut out)?;
         } else {
             for target in &self.targets {
-                collect(self, target.id, &mut BTreeSet::new(), &mut seen, &mut out)?;
+                collect(self, target.id, &mut Vec::new(), &mut seen, &mut out)?;
             }
         }
         Ok(out)
@@ -316,7 +320,18 @@ impl BuildPlan {
                 .cloned()
                 .collect::<Vec<_>>();
             if ready.is_empty() {
-                return Err(BuildError::ActionDependencyCycle);
+                return Err(BuildError::ActionDependencyCycle(stalled_cycle(
+                    &remaining,
+                    |package: &String| {
+                        dependencies_by_package
+                            .get(package)
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                            .collect()
+                    },
+                    |package: &String| format!("compile-package:{package}"),
+                )));
             }
             for package in ready {
                 remaining.remove(&package);
@@ -701,7 +716,7 @@ impl BuildPlan {
     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
         let selected = self.selected_action_ids()?;
         let prereqs = self.action_prereqs_for(&selected)?;
-        let stages = execution_stages(&prereqs)?;
+        let stages = execution_stages(self, &prereqs)?;
         let action_targets = self.action_targets();
         let nodes = self
             .actions
@@ -745,7 +760,7 @@ impl BuildPlan {
     ) -> Result<BuildExecutionReport, BuildError> {
         let selected = self.selected_action_ids()?;
         let prereqs = self.action_prereqs_for(&selected)?;
-        let stages = execution_stages(&prereqs)?;
+        let stages = execution_stages(self, &prereqs)?;
         let mut supplied = BTreeMap::new();
         for (action, outcome) in outcomes {
             if action.context != self.context || action.id.0 >= self.actions.len() {
@@ -891,7 +906,7 @@ impl BuildPlan {
         for target in &self.targets {
             let mut deps = BTreeSet::new();
             for dep in &target.deps {
-                collect_target_actions(self, dep.id, &mut BTreeSet::new(), &mut deps)?;
+                collect_target_actions(self, dep.id, &mut Vec::new(), &mut deps)?;
             }
             for action in &target.actions {
                 out.entry(action.id)

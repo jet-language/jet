@@ -87,8 +87,158 @@ pub enum BuildError {
     DuplicateGeneratedModuleName(String),
     DuplicateGeneratedModulePath(String),
     GeneratedModuleCycle { module: String, path: String },
-    TargetDependencyCycle,
-    ActionDependencyCycle,
+    TargetDependencyCycle(DependencyCycle),
+    ActionDependencyCycle(DependencyCycle),
+}
+
+/// One dependency cycle, in the order the graph walk found it: every node
+/// from the first repeated node back to itself.
+///
+/// The chain *is* the diagnostic — a cycle is only actionable when the whole
+/// loop is named — so `Debug` prints the chain instead of a field list.
+/// Reporters render `BuildError` both through `build_error_text` and through
+/// `{error:?}`, and both must name every node.
+#[derive(Clone, PartialEq, Eq)]
+pub struct DependencyCycle(Vec<String>);
+
+impl DependencyCycle {
+    /// Node names in traversal order. The first name repeats as the last.
+    pub fn nodes(&self) -> &[String] {
+        &self.0
+    }
+
+    /// The rendered loop: `` `a` -> `b` -> `a` ``.
+    pub fn chain(&self) -> String {
+        self.0
+            .iter()
+            .map(|node| format!("`{node}`"))
+            .collect::<Vec<_>>()
+            .join(" -> ")
+    }
+}
+
+impl std::fmt::Debug for DependencyCycle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.chain())
+    }
+}
+
+/// Diagnostic text for one dependency cycle: the whole loop, why the graph
+/// cannot be built, and the one edit that removes it. The target graph and
+/// the action graph are two call sites of the same fault, so they share this
+/// wording instead of each spelling out its own.
+pub(super) fn dependency_cycle_text(kind: &str, cycle: &DependencyCycle) -> String {
+    format!(
+        "{kind} dependency graph contains a cycle: {}; a cycle has no build order, so no {kind} in it can ever start; remove one dependency from that chain",
+        cycle.chain()
+    )
+}
+
+/// The cycle a depth-first walk just closed: the traversal stack from the
+/// first visit of `repeated` through to `repeated` again.
+pub(super) fn closed_cycle<N: Copy + PartialEq>(
+    stack: &[N],
+    repeated: N,
+    name: impl Fn(N) -> String,
+) -> DependencyCycle {
+    let start = stack.iter().position(|node| *node == repeated).unwrap_or(0);
+    DependencyCycle(
+        stack[start..]
+            .iter()
+            .copied()
+            .chain(std::iter::once(repeated))
+            .map(name)
+            .collect(),
+    )
+}
+
+/// The cycle left behind when a topological sort stalls. A stalled sort has
+/// no traversal stack to read, so the residual graph is walked again here.
+/// `remaining` is ordered and every node's prerequisites are sorted before
+/// they are followed, so one graph always renders one chain.
+pub(super) fn stalled_cycle<N: Ord + Clone>(
+    remaining: &BTreeSet<N>,
+    dependencies: impl Fn(&N) -> Vec<N>,
+    name: impl Fn(&N) -> String,
+) -> DependencyCycle {
+    let mut settled = BTreeSet::new();
+    for node in remaining {
+        let mut stack = Vec::new();
+        if let Some(cycle) = walk_stalled(node, remaining, &dependencies, &mut stack, &mut settled)
+        {
+            return DependencyCycle(cycle.iter().map(&name).collect());
+        }
+    }
+    // Unreachable for a real stall: every remaining node still waits on a
+    // remaining prerequisite, so the residual graph holds a cycle. Name the
+    // stuck nodes rather than nothing if a caller ever stalls for another
+    // reason.
+    DependencyCycle(remaining.iter().map(&name).collect())
+}
+
+fn walk_stalled<N: Ord + Clone>(
+    node: &N,
+    remaining: &BTreeSet<N>,
+    dependencies: &impl Fn(&N) -> Vec<N>,
+    stack: &mut Vec<N>,
+    settled: &mut BTreeSet<N>,
+) -> Option<Vec<N>> {
+    if settled.contains(node) {
+        return None;
+    }
+    if let Some(start) = stack.iter().position(|entry| entry == node) {
+        let mut cycle = stack[start..].to_vec();
+        cycle.push(node.clone());
+        return Some(cycle);
+    }
+    stack.push(node.clone());
+    let mut prerequisites = dependencies(node);
+    prerequisites.sort();
+    for prerequisite in &prerequisites {
+        if !remaining.contains(prerequisite) {
+            continue;
+        }
+        if let Some(cycle) = walk_stalled(prerequisite, remaining, dependencies, stack, settled) {
+            return Some(cycle);
+        }
+    }
+    stack.pop();
+    settled.insert(node.clone());
+    None
+}
+
+/// The target graph closed a loop at `repeated` while `stack` was being
+/// walked. Names come from the plan so the message reads in user terms.
+pub(super) fn target_cycle_error(
+    plan: &BuildPlan,
+    stack: &[TargetId],
+    repeated: TargetId,
+) -> BuildError {
+    BuildError::TargetDependencyCycle(closed_cycle(stack, repeated, |target: TargetId| {
+        plan.targets
+            .get(target.0)
+            .map(|target| target.name.clone())
+            .unwrap_or_else(|| format!("target#{}", target.0))
+    }))
+}
+
+/// The action graph stalled with `remaining` unordered. Names come from the
+/// plan so the message reads in user terms.
+pub(super) fn action_cycle_error(
+    plan: &BuildPlan,
+    remaining: &BTreeSet<ActionId>,
+    prerequisites: &BTreeMap<ActionId, Vec<ActionId>>,
+) -> BuildError {
+    BuildError::ActionDependencyCycle(stalled_cycle(
+        remaining,
+        |action: &ActionId| prerequisites.get(action).cloned().unwrap_or_default(),
+        |action: &ActionId| {
+            plan.actions
+                .get(action.0)
+                .map(|action| action.name.clone())
+                .unwrap_or_else(|| format!("action#{}", action.0))
+        },
+    ))
 }
 
 pub(super) fn canonical_action_key(

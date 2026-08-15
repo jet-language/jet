@@ -4,7 +4,7 @@ use super::actions_policy::{
     LegacyWrapperKind, PolicyExplanation, PolicySetting,
 };
 use super::cache_cas::ContentDigest;
-use super::errors_keys::{BuildError, NameKind};
+use super::errors_keys::{closed_cycle, BuildError, NameKind};
 use super::handles::{
     ActionHandle, ActionId, AssetBundleTarget, BenchTarget, DocTarget, ExecutableTarget,
     GeneratedModuleHandle, GeneratedModuleId, InstallTarget, LibraryTarget, PackageTarget,
@@ -503,19 +503,23 @@ impl BuildContext {
             target_indices: &BTreeMap<String, usize>,
             existing_targets: &HashSet<String>,
             states: &mut [u8],
+            visiting: &mut Vec<usize>,
             order: &mut Vec<usize>,
         ) -> Result<(), BuildError> {
             match states[index] {
                 2 => return Ok(()),
                 1 => {
+                    let cycle =
+                        closed_cycle(visiting, index, |node: usize| targets[node].name.clone());
                     return Err(BuildError::PackagedPlugin(format!(
-                        "packaged plugin target dependency cycle at `{}`",
-                        targets[index].name
-                    )))
+                        "packaged plugin target dependency cycle: {}",
+                        cycle.chain()
+                    )));
                 }
                 _ => {}
             }
             states[index] = 1;
+            visiting.push(index);
             for dependency in &targets[index].deps {
                 if let Some(&dependency_index) = target_indices.get(dependency) {
                     visit_packaged_target(
@@ -524,6 +528,7 @@ impl BuildContext {
                         target_indices,
                         existing_targets,
                         states,
+                        visiting,
                         order,
                     )?;
                 } else if !existing_targets.contains(dependency) {
@@ -533,10 +538,12 @@ impl BuildContext {
                     )));
                 }
             }
+            visiting.pop();
             states[index] = 2;
             order.push(index);
             Ok(())
         }
+        let mut target_visiting = Vec::new();
         for index in 0..wire.targets.len() {
             visit_packaged_target(
                 index,
@@ -544,6 +551,7 @@ impl BuildContext {
                 &target_indices,
                 &self.target_names,
                 &mut target_states,
+                &mut target_visiting,
                 &mut target_order,
             )?;
         }

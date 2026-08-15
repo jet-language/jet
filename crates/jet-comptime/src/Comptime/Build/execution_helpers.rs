@@ -1,6 +1,6 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildResourcePool, BuildResourcePoolSpec};
 use super::cache_cas::{ActionCacheStatus, CacheHitReason, CacheMissReason};
-use super::errors_keys::BuildError;
+use super::errors_keys::{action_cycle_error, target_cycle_error, BuildError};
 use super::handles::{ActionId, TargetId};
 use super::plan_graph::{BuildExecutionMetrics, BuildExecutionStage, BuildPlan};
 use std::collections::{BTreeMap, BTreeSet};
@@ -51,6 +51,7 @@ pub(super) fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
 }
 
 pub(super) fn execution_stages(
+    plan: &BuildPlan,
     prereqs: &BTreeMap<ActionId, Vec<ActionId>>,
 ) -> Result<Vec<BuildExecutionStage>, BuildError> {
     let mut remaining = prereqs.keys().copied().collect::<BTreeSet<_>>();
@@ -69,7 +70,7 @@ pub(super) fn execution_stages(
             })
             .collect::<Vec<_>>();
         if ready.is_empty() {
-            return Err(BuildError::ActionDependencyCycle);
+            return Err(action_cycle_error(plan, &remaining, prereqs));
         }
         for action in &ready {
             remaining.remove(action);
@@ -110,12 +111,13 @@ pub(super) fn execution_metrics(
 pub(super) fn collect_target_actions(
     plan: &BuildPlan,
     target: TargetId,
-    visiting: &mut BTreeSet<TargetId>,
+    visiting: &mut Vec<TargetId>,
     out: &mut BTreeSet<ActionId>,
 ) -> Result<(), BuildError> {
-    if !visiting.insert(target) {
-        return Err(BuildError::TargetDependencyCycle);
+    if visiting.contains(&target) {
+        return Err(target_cycle_error(plan, visiting, target));
     }
+    visiting.push(target);
     let target_ref = plan
         .targets
         .get(target.0)
@@ -124,6 +126,44 @@ pub(super) fn collect_target_actions(
         collect_target_actions(plan, dep.id, visiting, out)?;
     }
     out.extend(target_ref.actions.iter().map(|action| action.id));
-    visiting.remove(&target);
+    visiting.pop();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::context::BuildContext;
+    use super::super::errors_keys::BuildError;
+    use super::super::handles::TargetRef;
+    use super::super::targets::TargetSpec;
+
+    /// #1522 criterion 4: a target cycle is reported as the whole loop, in
+    /// the order the walk found it.
+    ///
+    /// `fn build` cannot express this — a target dependency needs a target
+    /// handle, and a handle only exists once its target is registered — so
+    /// the loop is closed on the finished plan. The detection and rendering
+    /// under test are the ones every `selected_action_ids` caller reaches.
+    #[test]
+    fn target_dependency_cycle_names_every_node_in_traversal_order() {
+        let mut context = BuildContext::new();
+        let core = context.add_library("core", TargetSpec::new()).unwrap();
+        let app = context
+            .add_executable("app", TargetSpec::new().with_dep(core))
+            .unwrap();
+        let mut plan = context.plan_with_default(app).unwrap();
+        plan.targets[core.id().0].deps.push(TargetRef::from(app));
+
+        match plan.selected_action_ids().unwrap_err() {
+            BuildError::TargetDependencyCycle(cycle) => {
+                assert_eq!(
+                    cycle.nodes().to_vec(),
+                    vec!["app", "core", "app"],
+                    "the cycle must be the walked path, not the visited set"
+                );
+                assert_eq!(cycle.chain(), "`app` -> `core` -> `app`");
+            }
+            other => panic!("a cyclic target graph must report a target cycle: {other:?}"),
+        }
+    }
 }

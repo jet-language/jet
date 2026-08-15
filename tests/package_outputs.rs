@@ -334,3 +334,88 @@ fn computed_build_contribution_records_lock_and_matches_explain_golden() {
         String::from_utf8_lossy(&locked.stderr)
     );
 }
+
+/// A three-node action cycle declared by `fn build`: every action consumes
+/// the next action's declared output, so the graph has no build order.
+/// `alpha` waits on `gamma`, `gamma` waits on `beta`, `beta` waits on
+/// `alpha`.
+const ACTION_CYCLE_BUILD: &str = r#"fn build(b: BuildContext) => BuildPlan ? {
+    alpha :: b.action("alpha", ["gamma.stamp"], ["alpha.stamp"], ["sh", "-c", "true"], [])?
+    beta :: b.action("beta", ["alpha.stamp"], ["beta.stamp"], ["sh", "-c", "true"], [])?
+    gamma :: b.action("gamma", ["beta.stamp"], ["gamma.stamp"], ["sh", "-c", "true"], [])?
+    app :: b.add_executable("app", ["run.jet"], [alpha, beta, gamma])?
+    return b.plan(app)
+}
+
+fn run() {
+    print("unreachable")
+}
+"#;
+
+/// The one ordered chain the three-node cycle above must always render.
+const ACTION_CYCLE_CHAIN: &str = "`alpha` -> `gamma` -> `beta` -> `alpha`";
+
+fn action_cycle_package(tag: &str) -> common::Scratch {
+    let scratch = common::Scratch::new(tag);
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"build_cycle_demo\"\nversion: \"0.1.0\"\n",
+    )
+    .expect("write cycle package manifest");
+    fs::write(scratch.join("run.jet"), ACTION_CYCLE_BUILD).expect("write cycle build entry");
+    scratch
+}
+
+fn cycle_diagnostic(scratch: &common::Scratch, args: &[&str]) -> String {
+    let out = Command::new(jet_bin())
+        .args(args)
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap_or_else(|error| panic!("jet {args:?} should execute: {error}"));
+    assert!(
+        !out.status.success(),
+        "a cyclic build graph must be rejected by jet {args:?}:\n{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    stderr
+        .lines()
+        .find(|line| line.contains("build plan is invalid"))
+        .unwrap_or_else(|| {
+            panic!("jet {args:?} must reject the cyclic graph as an invalid plan:\n{stderr}")
+        })
+        .to_string()
+}
+
+/// Card #1522 criterion 4: a build dependency cycle is reported with the full
+/// chain, not as a bare "there is a cycle" or as one arbitrary member.
+#[test]
+fn build_action_dependency_cycle_reports_the_full_chain() {
+    let scratch = action_cycle_package("build-action-cycle");
+    let reported = cycle_diagnostic(&scratch, &["run", "run.jet"]);
+    assert!(
+        reported.contains(ACTION_CYCLE_CHAIN),
+        "the action cycle must be named in traversal order:\n{reported}"
+    );
+}
+
+/// The chain has to be snapshot-stable: one graph renders one text, run after
+/// run, and the same text on every execution tier. A traversal that inherited
+/// hash order would drift here.
+#[test]
+fn build_dependency_cycle_chain_is_deterministic_across_runs_and_tiers() {
+    let scratch = action_cycle_package("build-action-cycle-stable");
+    let first = cycle_diagnostic(&scratch, &["run", "run.jet"]);
+    let second = cycle_diagnostic(&scratch, &["run", "run.jet"]);
+    let built = cycle_diagnostic(&scratch, &["build", "run.jet"]);
+    assert!(
+        first.contains(ACTION_CYCLE_CHAIN),
+        "jet run must name the cycle chain:\n{first}"
+    );
+    assert_eq!(first, second, "the cycle chain must not vary between runs");
+    assert_eq!(
+        first, built,
+        "jet build must name the same cycle chain as jet run"
+    );
+}

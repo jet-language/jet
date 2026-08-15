@@ -403,11 +403,21 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
 }
 
 /// Resolve a user nominal through the one canonical codegen import map.
+///
+/// A nominal reaches the coverage predicate in one of three source spellings:
+/// already canonical (`open_dep::Badge`), alias-qualified exactly as written
+/// (`library.Badge`, `vendor.Token`), or bare (`Token`). `cx.foreign_types` is
+/// keyed only by the canonical bundle identity, so all three MUST go through
+/// `imported_type_metadata_name` — the one resolver that splits an alias off a
+/// qualified name, keeps a bare local nominal local, and refuses an ambiguous
+/// leaf. Feeding a whole dotted name in as if it were a leaf resolves nothing,
+/// which silently drops every alias-qualified imported type out of the covered
+/// subset (I3: coverage reads the bundle-resolved origin, never re-derives it).
 pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
     if let Some(module) = cx.foreign_types.get(name) {
         return Some(module.as_str());
     }
-    let identity = cx.foreign_type_identity("", name)?;
+    let identity = cx.imported_type_metadata_name(name)?;
     cx.foreign_types.get(&identity).map(String::as_str)
 }
 
