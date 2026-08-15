@@ -263,12 +263,46 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
 }
 
 #[test]
-fn computed_build_contribution_explain_shows_writer_chain() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/build_contribution");
+fn computed_build_contribution_records_lock_and_matches_explain_golden() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = root.join("examples/features/packages/build_contribution");
+    let scratch = common::Scratch::new("build-contribution");
+    for file in ["package.jet", "run.jet"] {
+        fs::copy(fixture.join(file), scratch.join(file))
+            .unwrap_or_else(|error| panic!("copy build contribution {file}: {error}"));
+    }
+
+    let run = Command::new(jet_bin())
+        .args(["run", "run.jet"])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("computed build contribution should execute");
+    assert!(
+        run.status.success(),
+        "computed build contribution failed:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(run.stdout, b"4\n");
+
+    let lock = fs::read_to_string(scratch.join(".jet/lock"))
+        .expect("computed contribution must write the unified lock");
+    let lock = jet::Lock::parse(&lock).expect("computed contribution lock must parse");
+    let record = lock
+        .build_contributions
+        .iter()
+        .find(|record| record.key == "Build.Settings.cache_slots")
+        .expect("computed contribution writer must be recorded");
+    assert_eq!(record.package, "build_contribution_demo");
+    assert_eq!(record.value, "Int(4)");
+    assert_eq!(record.scope, "function");
+    assert_eq!(record.layer, "environment");
+    assert_eq!(record.source, "build_contribution_demo::build");
+    assert_eq!(record.reason, "computed by fn build");
+
     let explain = Command::new(jet_bin())
         .args(["explain", "build.settings.cache_slots", "run.jet"])
-        .current_dir(&dir)
+        .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
         .expect("computed build contribution explain should execute");
@@ -277,10 +311,26 @@ fn computed_build_contribution_explain_shows_writer_chain() {
         "computed build contribution explain failed:\n{}",
         String::from_utf8_lossy(&explain.stderr)
     );
-    let explanation = String::from_utf8_lossy(&explain.stdout);
-    assert!(explanation.contains("Build.Settings.cache_slots = 4"));
-    assert!(explanation.contains("package.jet:settings.cache_slots (default)"));
-    assert!(explanation.contains("[effective] environment / function 4"));
-    assert!(explanation.contains("build_contribution_demo::build"));
-    assert!(explanation.contains("reason=computed by fn build"));
+    let expected = fs::read(
+        root.join("examples/features/expected/packages/build_contribution.explain.out"),
+    )
+    .expect("read computed contribution explain golden");
+    assert_eq!(explain.stdout, expected);
+
+    let changed = fs::read_to_string(scratch.join("run.jet"))
+        .expect("read computed contribution source")
+        .replace("\"cache_slots\", 4", "\"cache_slots\", 5");
+    fs::write(scratch.join("run.jet"), changed).expect("change computed contribution");
+    let locked = Command::new(jet_bin())
+        .args(["run", "--locked", "run.jet"])
+        .current_dir(&scratch.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("locked computed contribution should execute");
+    assert!(!locked.status.success());
+    assert!(
+        String::from_utf8_lossy(&locked.stderr).contains("E3512"),
+        "locked writer drift must name E3512:\n{}",
+        String::from_utf8_lossy(&locked.stderr)
+    );
 }
