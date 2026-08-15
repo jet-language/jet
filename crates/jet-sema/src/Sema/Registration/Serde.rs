@@ -305,6 +305,41 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
     // well so the clone receives the same checked codec bodies as production.
     inject_anonymous_union_items(items);
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+    expand_builtin_serde_items_with_auto_here(items, &auto, diags);
+}
+
+pub(crate) fn expand_builtin_serde_items_with_auto(
+    items: &mut Vec<Item>,
+    auto: &crate::Traits::TraitRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for item in items.iter_mut() {
+        if let Item::CodeModule(module) = item {
+            if let Some(body) = &mut module.body {
+                expand_builtin_serde_items_with_auto(body, auto, diags);
+            }
+        }
+    }
+    inject_anonymous_union_items(items);
+    expand_builtin_serde_items_with_auto_here(items, auto, diags);
+}
+
+fn expand_builtin_serde_items_with_auto_here(
+    items: &mut Vec<Item>,
+    auto: &crate::Traits::TraitRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let existing_generated = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Impl(implementation) = item else {
+                return None;
+            };
+            implementation
+                .is_generated_serde
+                .then(|| (implementation.type_name.clone(), implementation.trait_name.clone()))
+        })
+        .collect::<std::collections::HashSet<_>>();
     let mut generated_items = Vec::new();
     let snapshot = items.clone();
     for item in &snapshot {
@@ -359,6 +394,16 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             _ => {}
         }
     }
+    generated_items.retain(|item| {
+        let Item::Impl(implementation) = item else {
+            return true;
+        };
+        !implementation.is_generated_serde
+            || !existing_generated.contains(&(
+                implementation.type_name.clone(),
+                implementation.trait_name.clone(),
+            ))
+    });
     let generated_items = match crate::Comptime::expand_generated_items(generated_items) {
         Ok(items) => items,
         Err(diagnostic) => {

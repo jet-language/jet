@@ -1537,9 +1537,47 @@ fn check_bundle_opts_for_output_inner(
             }
         }
     }
+    // D-META-AUTO1: the bundle projection is the canonical answer for local
+    // shapes that contain imported nominal types. The early item-local pass
+    // handles explicit requests and declarations produced while processing one
+    // module; complete any missing structural implementations from this shared
+    // fixed point before body checking and codegen consume the finished AST.
     let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle, &name_ledger);
-    for (state, auto_derives) in states.iter_mut().zip(&bundle_auto_derives) {
-        state.trait_reg.merge_auto_derives(auto_derives);
+    for idx in 0..states.len() {
+        let auto_derives = &bundle_auto_derives[idx];
+        states[idx].trait_reg.merge_auto_derives(auto_derives);
+
+        let module = &mut bundle.modules[idx];
+        super::super::Registration::expand_builtin_derive_items_with_auto(
+            &mut module.items,
+            auto_derives,
+            &mut diags,
+        );
+        for item in &module.items {
+            if let Item::Func(function) = item {
+                if !states[idx].funcs.contains_key(&function.name) {
+                    register_func_item(
+                        function,
+                        &mut states[idx],
+                        &mut diags,
+                        !module.no_prelude,
+                    );
+                }
+            }
+        }
+
+        let serde_item_start = module.items.len();
+        super::super::Registration::expand_builtin_serde_items_with_auto(
+            &mut module.items,
+            auto_derives,
+            &mut diags,
+        );
+        register_generated_union_enums(&module.items, &mut states[idx], &mut diags);
+        register_impl_methods(
+            &module.items[serde_item_start..],
+            &mut states[idx].registry,
+            &mut diags,
+        );
     }
     bundle.comptime_inputs.extend(top_level_embed_inputs);
     diags.extend(super::super::BudgetSpecs::validate_bundle(bundle));

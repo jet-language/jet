@@ -18,8 +18,13 @@ pub(crate) use Items::{
     register_const, register_distinct, register_enum, register_impl_methods, register_struct,
     register_type_alias, register_type_methods, resolve_comptime_declaration_values,
 };
-pub(super) use Derives::expand_builtin_derive_items;
-pub(crate) use Serde::{expand_builtin_serde_items, inject_anonymous_union_items};
+pub(super) use Derives::{
+    expand_builtin_derive_items, expand_builtin_derive_items_with_auto,
+};
+pub(crate) use Serde::{
+    expand_builtin_serde_items, expand_builtin_serde_items_with_auto,
+    inject_anonymous_union_items,
+};
 
 fn is_void_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)

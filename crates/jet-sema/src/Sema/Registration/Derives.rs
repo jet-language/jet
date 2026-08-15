@@ -12,6 +12,14 @@ pub(in super::super) fn expand_builtin_derive_items(
     diags: &mut Vec<Diagnostic>,
 ) {
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+    expand_builtin_derive_items_with_auto(items, &auto, diags);
+}
+
+pub(in super::super) fn expand_builtin_derive_items_with_auto(
+    items: &mut Vec<Item>,
+    auto: &crate::Traits::TraitRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
     let invalid_distinct_names: std::collections::HashSet<String> = items
         .iter()
         .filter_map(|item| {

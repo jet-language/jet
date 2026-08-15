@@ -791,10 +791,12 @@ fn run() {
         r#"
 use dep as vendor
 use open_dep as library
+use core.encoding.json as json
 
 struct Token { value: Int }
 struct LocalEnvelope { token: Token }
 struct DependencyEnvelope { token: vendor.Token }
+struct ImportedEnvelope { badge: library.Badge }
 struct MapEnvelope { values: [String:Int] }
 struct UnionEnvelope { value: Int | String }
 
@@ -808,6 +810,16 @@ fn run() {
     print(badge)
     print("{badge:Debug}")
     print(badge == library.Badge.{ value: 9 })
+
+    envelope :: ImportedEnvelope.{ badge: library.Badge.{ value: 9 } }
+    print(envelope)
+    print("{envelope:Debug}")
+    print(envelope == ImportedEnvelope.{ badge: library.Badge.{ value: 9 } })
+    print(envelope < ImportedEnvelope.{ badge: library.Badge.{ value: 10 } })
+    wire :: json.to_string(envelope)
+    print(wire)
+    decoded :: json.decode<ImportedEnvelope>(wire)?
+    print(decoded == envelope)
 
     map :: MapEnvelope.{ values: [String:Int].{ "one": 1 } }
     print(map)
@@ -852,6 +864,7 @@ fn run() {
         assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
         assert!(!selected.contains("vendor.Token"), "{selected:?}");
         assert!(selected.contains(&badge_identity), "{selected:?}");
+        assert!(selected.contains("ImportedEnvelope"), "{selected:?}");
     }
     // Anonymous unions support structural equality, but there is no total
     // ordering between members of different types.
@@ -862,6 +875,9 @@ fn run() {
     assert!(!comparable.contains("DependencyEnvelope"), "{comparable:?}");
     assert!(!comparable.contains("vendor.Token"), "{comparable:?}");
     assert!(comparable.contains(&badge_identity), "{comparable:?}");
+    assert!(comparable.contains("ImportedEnvelope"), "{comparable:?}");
+    assert!(app_facts.auto_encode.contains("ImportedEnvelope"));
+    assert!(app_facts.auto_decode.contains("ImportedEnvelope"));
     assert!(app_facts.auto_printable.contains("MapEnvelope"));
     assert!(app_facts.auto_debug.contains("MapEnvelope"));
     assert!(!app_facts.auto_equatable.contains("MapEnvelope"));
@@ -887,6 +903,12 @@ Token { value: 7 }\n\
 true\n\
 Badge { value: 9 }\n\
 Badge { value: 9 }\n\
+true\n\
+ImportedEnvelope { badge: Badge { value: 9 } }\n\
+ImportedEnvelope { badge: Badge { value: 9 } }\n\
+true\n\
+true\n\
+{\"badge\":{\"value\":9}}\n\
 true\n\
 MapEnvelope { values: [:\"one\": 1] }\n\
 MapEnvelope { values: [:\"one\": 1] }\n\
