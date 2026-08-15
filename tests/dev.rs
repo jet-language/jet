@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 mod common;
@@ -29,6 +29,61 @@ const DEV_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
 fn dev_diff_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Acquire a harness mutex whose guarded value CANNOT be left half-written by an
+/// unwind, and say out loud when the lock was already poisoned.
+///
+/// Every dev test serializes on `dev_diff_lock`, so one test that unwinds while
+/// holding it poisons the lock for the whole binary. With `.lock().unwrap()`
+/// each later test then dies with a bare `PoisonError { .. }` reported at *its
+/// own* line, so a single real defect manufactures an unbounded run of false
+/// failures — the same slander the old abort-on-first-failure behavior produced.
+///
+/// `PoisonError::into_inner()` is sound at these sites because the guarded value
+/// has no multi-step invariant to break: `dev_diff_lock` guards `()`, the work
+/// queues are only ever `pop_front`ed under the guard, and the report vectors are
+/// only ever `push`ed. `VecDeque::pop_front` and `Vec::push` either complete or
+/// do nothing, so no torn state can outlive an unwind.
+///
+/// The poison flag is deliberately NOT cleared: every later acquisition keeps
+/// tagging its test as post-cascade. This changes attribution only — the calling
+/// test still stands or falls on its own assertions.
+fn lock_recovered<'a, T>(lock: &'a Mutex<T>, what: &str) -> MutexGuard<'a, T> {
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!(
+                "note: cascade, not a fresh defect — `{what}` was poisoned by an EARLIER panic \
+                 in this test binary. The guard holds no partially written state, so it is \
+                 recovered and this test keeps its own verdict; fix the first panic of the run."
+            );
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Read a worker-collected report the caller is about to assert on.
+///
+/// `into_inner()` is WRONG here. Poison means a worker thread unwound while
+/// holding the report, so the row that is missing is exactly the row that would
+/// have failed the test, and `assert!(report.is_empty())` over a recovered
+/// report can go GREEN across a real defect. Fail instead, name the cascade, and
+/// print the rows that survived so the first panic stays visible.
+fn judged_report<'a>(lock: &'a Mutex<Vec<String>>, what: &str) -> MutexGuard<'a, Vec<String>> {
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            let partial = poisoned.into_inner();
+            panic!(
+                "cascade, not a fresh defect: `{what}` was poisoned — a worker of this test \
+                 unwound while holding the report, so it is incomplete and cannot be judged \
+                 (an absent row reads as success). {} row(s) survived:\n{}",
+                partial.len(),
+                partial.join("\n\n")
+            )
+        }
+    }
 }
 
 fn skip_if_cranelift_host_unsupported() -> bool {
@@ -873,7 +928,9 @@ fn run_dev_default_battery_parallel(
                 .spawn(move || {
                     let mut stats = DevBatteryStats::default();
                     loop {
-                        let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
+                        let Some((i, stem)) =
+                            lock_recovered(&jobs, "dev default work queue").pop_front()
+                        else {
                             break;
                         };
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -881,9 +938,7 @@ fn run_dev_default_battery_parallel(
                         }));
                         match result {
                             Ok(next) => stats.add(next),
-                            Err(payload) => failures
-                                .lock()
-                                .unwrap()
+                            Err(payload) => lock_recovered(&failures, "dev default failure report")
                                 .push(format!("{stem}: {}", panic_message(payload))),
                         }
                     }
@@ -897,7 +952,7 @@ fn run_dev_default_battery_parallel(
     for handle in handles {
         stats.add(handle.join().expect("dev default worker panicked outside harness"));
     }
-    let failures = failures.lock().unwrap();
+    let failures = judged_report(&failures, "dev default failure report");
     assert!(
         failures.is_empty(),
         "dev default parity failures:\n{}",
@@ -994,7 +1049,9 @@ fn run_interpreter_battery_parallel(
                 .spawn(move || {
                     let mut stats = DevBatteryStats::default();
                     loop {
-                        let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
+                        let Some((i, stem)) =
+                            lock_recovered(&jobs, "interpreter work queue").pop_front()
+                        else {
                             break;
                         };
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1002,9 +1059,7 @@ fn run_interpreter_battery_parallel(
                         }));
                         match result {
                             Ok(next) => stats.add(next),
-                            Err(payload) => failures
-                                .lock()
-                                .unwrap()
+                            Err(payload) => lock_recovered(&failures, "interpreter failure report")
                                 .push(format!("{stem}: {}", panic_message(payload))),
                         }
                     }
@@ -1018,7 +1073,7 @@ fn run_interpreter_battery_parallel(
     for handle in handles {
         stats.add(handle.join().expect("interpreter worker panicked outside harness"));
     }
-    let failures = failures.lock().unwrap();
+    let failures = judged_report(&failures, "interpreter failure report");
     assert!(
         failures.is_empty(),
         "interpreter parity failures:\n{}",
@@ -1033,7 +1088,7 @@ fn run_interpreter_battery_parallel(
 /// the coverage can't quietly shrink.
 #[test]
 fn interpreter_matches_compiled_binary() {
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping jet dev differential battery");
@@ -1066,7 +1121,7 @@ fn dev_default_matches_compiled_binary() {
     let handle = std::thread::Builder::new()
         .name("dev-default-battery".into())
         .spawn(|| {
-            let _guard = dev_diff_lock().lock().unwrap();
+            let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
             let have_rustc = have_rustc();
             if !have_rustc {
                 eprintln!(
@@ -1654,7 +1709,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
                     break;
                 }
                 if let Some(got) = last {
-                    failures.lock().unwrap().push(format!(
+                    lock_recovered(&failures, "panic-hook drift report").push(format!(
                         "run {worker}/{iteration}: expected {expected:?}, got {got:?}"
                     ));
                 }
@@ -1664,7 +1719,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     for worker in workers {
         worker.join().expect("panic-hook regression worker panicked");
     }
-    let failures = failures.lock().unwrap();
+    let failures = judged_report(&failures, "panic-hook drift report");
     assert!(
         failures.is_empty(),
         "caught task panic stderr drifted:\n{}",
@@ -1911,7 +1966,7 @@ fn value_loop_named_routes_match_interpreter_default_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let dir = common::unique_tmp("jet_dev_value_loop_routes");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("value_loop_routes.jet");
@@ -1978,7 +2033,7 @@ fn string_field_compound_append_matches_interpreter_default_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let dir = common::unique_tmp("jet_dev_string_field_compound");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("string_field_compound.jet");
@@ -2668,7 +2723,7 @@ fn dev_default_socket_echo_reports_jit_gap() {
 
 #[test]
 fn dev_default_tls_peer_identity_matches_aot_and_interpreter() {
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_tls_peer_identity_parity_{}",
         std::process::id()
@@ -3458,7 +3513,7 @@ fn default_err_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let file = "examples/features/errors/default_err_edge.jet";
     let expected_stderr = fs::read_to_string(
         "examples/features/expected/errors/default_err_edge.err.out",
@@ -3507,7 +3562,7 @@ fn exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let file = "examples/features/text/bigint.jet";
     let expected = ProgramOutput::ran(golden_stdout("text/bigint"), String::new(), 0);
 
@@ -3555,7 +3610,7 @@ fn type_alias_example_matches_golden_on_all_execution_tiers() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let file = "examples/features/types/type_alias.jet";
     let expected = ProgramOutput::ran(golden_stdout("types/type_alias"), String::new(), 0);
 
@@ -3594,7 +3649,7 @@ fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let file = "examples/features/io/archive.jet";
     let expected = ProgramOutput::ran(golden_stdout("io/archive"), String::new(), 0);
 
@@ -3646,7 +3701,7 @@ fn progress_reporter_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let file = "examples/features/io/progress.jet";
     let expected = ProgramOutput::ran(golden_stdout("io/progress"), String::new(), 0);
 
@@ -3707,7 +3762,7 @@ fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let file = "examples/features/collections/set.jet";
     let expected = ProgramOutput::ran(golden_stdout("collections/set"), String::new(), 0);
 
@@ -5039,7 +5094,7 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "basics/bare_lambda_param",
         "basics/callbacks",
@@ -5105,7 +5160,7 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "comptime/comptime_if",
         "comptime/comptime_table",
@@ -5166,7 +5221,7 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "collections/index_hook",
         "collections/iter_hook",
@@ -5306,7 +5361,7 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "crypto/auth_tokens",
         "crypto/crypto_envelope",
@@ -5361,7 +5416,7 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "net/browser_bidi_profiles",
         "net/email_dkim",
@@ -5422,7 +5477,7 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "concurrency/deadline_context",
         "concurrency/detached_task",
@@ -5475,7 +5530,7 @@ fn ui_and_web_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "ui/events",
         "ui/layout_basic",
@@ -5867,7 +5922,7 @@ fn reflection_value_matches_interpreter_jit_aot_and_jet_run() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stem = "reflection/reflect-value";
     let file = example_path(stem);
     assert_data_pipelines_parsing_three_way(&file, stem);
@@ -5884,7 +5939,7 @@ fn typed_fact_reads_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stem = "reflection/fact_reads";
     assert_data_pipelines_parsing_three_way(&example_path(stem), stem);
 }
@@ -5899,7 +5954,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         // #1223 — data pipelines / schemas
         "tooling/data_analysis",
@@ -6093,7 +6148,7 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "cli/positionals",
         "cli/subcommands",
@@ -6157,7 +6212,7 @@ fn core_os_examples_match_interpreter_jit_and_aot() {
 }
 
 fn core_os_examples_match_interpreter_jit_and_aot_inner() {
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     for stem in ["io/os_facts", "io/os_process_control"] {
         assert_io_cli_terminal_time_three_way(&example_path(stem), stem);
     }
@@ -6391,7 +6446,7 @@ fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "lowlevel/ffi",
         "lowlevel/freestanding",
@@ -6704,7 +6759,7 @@ fn uninit_fixed_mutating_borrow_matches_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 use core.mem
 
@@ -6845,7 +6900,7 @@ fn shared_scalar_edit_matches_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn run() {
     value :: Shared.new(0)
@@ -6904,7 +6959,7 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     for stem in ["comptime/comptime_core", "comptime/comptime_tiers"] {
         let file = example_path(stem);
         let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
@@ -7024,7 +7079,7 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stem = "memory/place_windows";
     let file = example_path(stem);
     let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
@@ -7060,7 +7115,7 @@ fn fixed_width_integers_match_interpreter_resident_jit_default_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn i8_id(value: I8) -> I8 { return value }
 fn i16_id(value: I16) -> I16 { return value }
@@ -7265,7 +7320,7 @@ fn fixed_width_signed_remainder_overflow_traps_across_tiers() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn remainder(value: I8, divisor: I8) => I8 {
     return value % divisor
@@ -7337,7 +7392,7 @@ fn fixed_width_and_plain_int_remainder_zero_traps_across_tiers() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let cases = [
         (
             "fixed_width",
@@ -7464,7 +7519,7 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let cases = [
         (
             "shl_negative",
@@ -7602,7 +7657,7 @@ fn numeric_singleton_splits_match_resident_jit_and_aot_without_fallback() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn run() {
     values := [1.5, 2.5, 3.5]
@@ -8015,7 +8070,7 @@ fn cranelift_three_way_differential_battery() {
 }
 
 fn cranelift_three_way_differential_battery_inner() {
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     if skip_if_cranelift_host_unsupported() {
         return;
     }
@@ -8362,17 +8417,17 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
             std::thread::Builder::new()
                 .name(format!("corpus-gate-{worker}"))
                 .spawn(move || loop {
-                    let Some(stem) = jobs.lock().unwrap().pop_front() else {
+                    let Some(stem) = lock_recovered(&jobs, "corpus gate work queue").pop_front()
+                    else {
                         break;
                     };
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         classify_corpus_stem(&stem, &dir, worker, have_rustc)
                     }));
                     match result {
-                        Ok(record) => records.lock().unwrap().push(record),
-                        Err(payload) => failures
-                            .lock()
-                            .unwrap()
+                        Ok(record) => lock_recovered(&records, "corpus gate record set")
+                            .push(record),
+                        Err(payload) => lock_recovered(&failures, "corpus gate failure report")
                             .push(format!("{stem}: {}", panic_message(payload))),
                     }
                 })
@@ -8382,13 +8437,27 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
     for handle in handles {
         handle.join().expect("corpus gate worker panicked");
     }
-    let failures = failures.lock().unwrap();
+    let failures = judged_report(&failures, "corpus gate failure report");
     assert!(
         failures.is_empty(),
         "corpus gate classification failures:\n{}",
         failures.join("\n")
     );
-    let mut records = records.lock().unwrap().clone();
+    // NOT `into_inner()`: poison here means a worker unwound while holding the
+    // record set, so the classification is missing stems. Every ledger
+    // cross-check downstream compares this set against `tests/jit_gaps.txt` and
+    // `tests/jit_corpus_gate.txt`, and an absent stem silently drops a conflict —
+    // a partial corpus would read as agreement. Fail with the cause named.
+    let mut records = match records.lock() {
+        Ok(records) => records.clone(),
+        Err(poisoned) => panic!(
+            "cascade, not a fresh defect: the corpus gate record set was poisoned — a worker \
+             unwound while holding it, so the classification is incomplete ({} stem(s) \
+             recorded) and no ledger cross-check may be judged against it; fix the first \
+             panic of the run",
+            poisoned.into_inner().len()
+        ),
+    };
     records.sort_by(|left, right| left.stem.cmp(&right.stem));
     records
 }
@@ -9163,7 +9232,7 @@ fn value_position_enum_patterns_match_all_execution_tiers() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     for stem in [
         "tooling/branch_dispatch_bench",
         "types/enum_dot",
@@ -10017,7 +10086,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
 // retired E2201 coverage gap.
 #[test]
 fn hand_written_codec_dev_tier_matches_native_shape() {
-    let _guard = dev_diff_lock().lock().unwrap();
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     const SRC: &str = r#"
 use core.encoding.json as json
 
@@ -10459,7 +10528,7 @@ fn tower_1754_collection_parity_focus() {
         return;
     }
     with_jit_test_scope(|| {
-        let _guard = dev_diff_lock().lock().unwrap();
+        let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
         for stem in [
             "collections/iter_adapters",
             "collections/iter_tools_audit",
