@@ -1925,8 +1925,8 @@ try {
             "{stem} lost the contract source location:\n{stdout}"
         );
         assert!(
-            stdout.contains("Why: a runtime contract condition evaluated false")
-                && stdout.contains("Fix: satisfy the contract or update it"),
+            stdout.contains("Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime.")
+                && stdout.contains("Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result)."),
             "{stem} lost the canonical contract why/fix:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
