@@ -18,7 +18,7 @@ use crate::Comptime::{
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
 use super::builtins::eval_builtin;
-use super::handles::eval_handle_with_type_and_sink;
+use super::handles::{eval_handle_with_type_and_sink, reflect_value_carrier};
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
     materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
@@ -4515,7 +4515,7 @@ impl<'a> EvalCtx<'a> {
     /// and comptime `T.reflect()` read; storage fields never become the field
     /// name source.
     fn reflect_value(&self, value: CtValue, ty: &Type) -> CtValue {
-        handles::reflect_value_carrier(
+        reflect_value_carrier(
             &value,
             Some(ty),
             Some(&self.reflection_fields),
