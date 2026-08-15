@@ -33,7 +33,11 @@ fn run() {
     if files.exists(temp) -> files.remove(temp) ?? panic("cleanup")
     write_file(Path.from(temp), "ambient") ?? panic("write_file")
     print("prelude: file_exists: {file_exists(temp)}")
-    print("prelude: read_file String: {read_file(temp) ?? return}")
-    print("prelude: read_file Path: {read_file(Path.from(temp)) ?? return}")
-    files.remove(temp) ?? return
+    // D-FAIL-EXIT1=A: `fn run()` is fallible by default, so its miss route
+    // carries the failure value the entry contract owes.
+    text_from_string :: read_file(temp) ?? return Err("read_file String failed")
+    print("prelude: read_file String: {text_from_string}")
+    text_from_path :: read_file(Path.from(temp)) ?? return Err("read_file Path failed")
+    print("prelude: read_file Path: {text_from_path}")
+    files.remove(temp) ?? return Err("cleanup failed")
 }
