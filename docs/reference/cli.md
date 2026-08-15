@@ -24,3 +24,17 @@ Run a job with `jet run app.jet -- seed_data`. Cross-job dependencies are ordina
 
 In a workspace, use `jet jobs -p member` to list jobs for one member.
 A bare `jet jobs` names the members when the choice is ambiguous.
+
+## Build provenance
+
+Jet folds these build facts to constants before runtime:
+
+- `@build.stamp.git` is the commit hash. It has a `-dirty` suffix when the worktree has changes.
+- `@build.stamp.dirty` states whether the worktree has changes.
+- `@build.stamp.toolchain` is the Jet version.
+- `@build.stamp.at` is the timestamp stored in `.jet/lock`.
+
+`@build.stamp.at` records the history of the lock file. It is not the time when Jet built the binary.
+A locked build replays all four values from `.jet/lock` and does not read the clock or probe Git.
+
+Run `jet explain @build.stamp.at <file>` to see the writer chain.

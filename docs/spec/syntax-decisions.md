@@ -6704,6 +6704,13 @@ in `.jet/lock`; a locked rebuild does not read the wall clock. Repository state
 is a Tier-1 locked input under D-CTEFFECT1. The timestamp describes lock
 history, not source or binary build time.
 
+**2026-08-15 — D-CONF-STAMP1=B implementation log** *(card #1525)*: the four
+stamp values are rows on the shared build-fact plane and fold before TIR
+lowering. The unified lock owns the one Git, toolchain, and clock capture.
+Later builds replay that stamp without host probes. The checked-in lock,
+`build_stamp.jet` golden, three-tier parity case, and byte-identical rebuild
+case are the proof surface.
+
 **D-CONF-WORD1=A — one meaning for the word `profile`** *(ratified 2026-08-06,
 card #1526)*:
 
