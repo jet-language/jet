@@ -464,6 +464,7 @@ struct ExprProbeState {
     callable_tail_block_depth: Option<usize>,
     module_arg_expr_depth: Option<usize>,
     allow_lowercase_leading_dot: bool,
+    derive_template_depth: usize,
     policy_declarations_len: usize,
     applied_rules_len: usize,
     rule_facts_len: usize,
@@ -486,6 +487,7 @@ impl ExprProbeState {
             callable_tail_block_depth: parser.callable_tail_block_depth,
             module_arg_expr_depth: parser.module_arg_expr_depth,
             allow_lowercase_leading_dot: parser.allow_lowercase_leading_dot,
+            derive_template_depth: parser.derive_template_depth,
             policy_declarations_len: parser.policy_declarations.len(),
             applied_rules_len: parser.applied_rules.len(),
             rule_facts_len: parser.rule_facts.len(),
@@ -507,6 +509,7 @@ impl ExprProbeState {
         parser.callable_tail_block_depth = self.callable_tail_block_depth;
         parser.module_arg_expr_depth = self.module_arg_expr_depth;
         parser.allow_lowercase_leading_dot = self.allow_lowercase_leading_dot;
+        parser.derive_template_depth = self.derive_template_depth;
         parser
             .policy_declarations
             .truncate(self.policy_declarations_len);

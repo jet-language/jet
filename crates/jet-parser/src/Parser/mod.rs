@@ -649,6 +649,47 @@ mod s61_tests {
         );
     }
 
+    /// D-META-CODE1: a compile-time name in a derive return type is a typed
+    /// hole until expansion, not a fact-in-type diagnostic at definition time.
+    #[test]
+    fn derive_generic_type_holes_stay_in_the_template_ast() {
+        let p = program(
+            r#"
+derive T.TypeName {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn get_value(self) => @param :: ~self.value
+    fn type_name(self) => String :: T.@name
+}
+"#,
+        );
+        let derive = p
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::UserDerive(derive) => Some(derive),
+                _ => None,
+            })
+            .expect("user derive");
+        let function = derive
+            .body
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::DeriveBodyItem::Item(item) => match item.as_ref() {
+                    crate::AST::Item::Func(function) if function.name == "get_value" => {
+                        Some(function)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("generic derive function");
+        assert!(matches!(
+            &function.return_type,
+            Some(crate::AST::Type::Named(name)) if name == "@param"
+        ));
+    }
+
     /// D-CONC-SPAWN1=D: `task work()` parses as a scoped spawn call.
     #[test]
     fn task_keyword_callable_body_parses_as_spawn() {
