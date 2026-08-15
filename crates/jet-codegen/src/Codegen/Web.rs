@@ -2860,6 +2860,9 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
+    // I9: Wasm receives the same generated active-runtime-row projection as
+    // native standalone AOT. The adapter owns no diagnostic table.
+    super::push_embedded_outcome(&mut out);
     if super::core_usage_matches(&bundle.used_core, &["core.math"]) {
         // I9: Wasm calls the same scalar math Prelude as AOT, JIT, and the
         // interpreter. This is an adapter inclusion, not a second kernel.
@@ -7842,10 +7845,6 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_web_duration_from_float(value: f64, scale: i64) -> Result<i64, JetRangeError> {\n",
     "    jet_duration_kernel_from_float(value, scale).ok_or_else(|| JetRangeError { reason: jet_duration_kernel_float_error_reason().to_string() })\n",
     "}\n\n",
-    // D-FAIL-CARRIER1=A: the very same carrier file the native prelude puts
-    // first, so `T?` and `T ? E` mean one thing on the web tier too.
-    include_str!("../../../jet-foundation/src/Outcome.rs"),
-    "\n",
     include_str!("../Prelude/Core/Contracts.rs"),
     "\n",
     "fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {\n",

@@ -558,9 +558,9 @@ impl DiagnosticRow {
             );
         }
         RenderedDiagnostic {
-            what: render_template(self.what, holes),
-            why: render_template(self.why, holes),
-            fix: render_template(self.fix, holes),
+            what: crate::Outcome::jet_render_diagnostic_template(self.what, holes),
+            why: crate::Outcome::jet_render_diagnostic_template(self.why, holes),
+            fix: crate::Outcome::jet_render_diagnostic_template(self.fix, holes),
         }
     }
 }
@@ -832,51 +832,6 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
         };
     }
     panic!("unknown structured diagnostic fix `{value}` in {line}");
-}
-
-fn render_template(template: &str, holes: &[(&str, &str)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'{' && bytes.get(index + 1) == Some(&b'{') {
-            out.push('{');
-            index += 2;
-            continue;
-        }
-        if bytes[index] == b'}' && bytes.get(index + 1) == Some(&b'}') {
-            out.push('}');
-            index += 2;
-            continue;
-        }
-        if bytes[index] == b'{' {
-            if let Some(close_offset) = template[index + 1..].find('}') {
-                let close = index + 1 + close_offset;
-                let name = &template[index + 1..close];
-                if !name.is_empty()
-                    && name
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                {
-                    let value = holes
-                        .iter()
-                        .find(|entry| entry.0 == name)
-                        .map(|entry| entry.1)
-                        .unwrap_or_else(|| panic!("missing diagnostic template hole `{name}`"));
-                    out.push_str(value);
-                    index = close + 1;
-                    continue;
-                }
-            }
-        }
-        let character = template[index..]
-            .chars()
-            .next()
-            .expect("template index is on a character boundary");
-        out.push(character);
-        index += character.len_utf8();
-    }
-    out
 }
 
 /// A row field whose text itself contains backticks is written as a markdown

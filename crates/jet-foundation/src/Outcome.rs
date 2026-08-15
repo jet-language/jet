@@ -423,6 +423,96 @@ pub struct JetRuntimeDiagnostic {
     pub exit_code: i32,
 }
 
+/// One active runtime row projected into a standalone Prelude. The host
+/// wrapper below adapts Foundation's RegistryRow to this self-contained shape;
+/// AOT and Wasm emit the same shape from the active Registry rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JetRuntimeDiagnosticRow {
+    pub code: &'static str,
+    pub what: &'static str,
+    pub why: &'static str,
+    pub fix: &'static str,
+    pub template_holes: &'static [&'static str],
+}
+
+impl JetRuntimeDiagnosticRow {
+    fn render(self, holes: &[(&str, &str)]) -> (String, String, String) {
+        for &(name, _) in holes {
+            assert!(
+                self.template_holes.iter().any(|hole| *hole == name),
+                "diagnostic `{}` has no template hole `{name}`",
+                self.code
+            );
+            assert_eq!(
+                holes.iter().filter(|entry| entry.0 == name).count(),
+                1,
+                "diagnostic `{}` receives template hole `{name}` more than once",
+                self.code
+            );
+        }
+        for &name in self.template_holes {
+            assert!(
+                holes.iter().any(|entry| entry.0 == name),
+                "diagnostic `{}` is missing template hole `{name}`",
+                self.code
+            );
+        }
+
+        (
+            jet_render_diagnostic_template(self.what, holes),
+            jet_render_diagnostic_template(self.why, holes),
+            jet_render_diagnostic_template(self.fix, holes),
+        )
+    }
+}
+
+/// Fill one registered diagnostic template without treating replacement text
+/// as a second template. Escaped braces remain literal.
+pub fn jet_render_diagnostic_template(template: &str, holes: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'{' && bytes.get(index + 1) == Some(&b'{') {
+            out.push('{');
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'}' && bytes.get(index + 1) == Some(&b'}') {
+            out.push('}');
+            index += 2;
+            continue;
+        }
+        if bytes[index] == b'{' {
+            if let Some(close_offset) = template[index + 1..].find('}') {
+                let close = index + 1 + close_offset;
+                let name = &template[index + 1..close];
+                if !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                {
+                    let value = holes
+                        .iter()
+                        .find(|entry| entry.0 == name)
+                        .map(|entry| entry.1)
+                        .unwrap_or_else(|| panic!("missing diagnostic template hole `{name}`"));
+                    out.push_str(value);
+                    index = close + 1;
+                    continue;
+                }
+            }
+        }
+        let character = template[index..]
+            .chars()
+            .next()
+            .expect("template index is on a character boundary");
+        out.push(character);
+        index += character.len_utf8();
+    }
+    out
+}
+
 /// Shared wording for a checked list position. Collection adapters marshal
 /// the length and index here; they do not own the user-facing text.
 pub fn jet_list_bounds_message(len: impl std::fmt::Display, index: i64) -> String {
@@ -472,7 +562,8 @@ pub const JET_RUNTIME_STACK_LIMIT: usize = 6;
 /// The source location is data supplied by an execution tier. The active row,
 /// report shape, and breach exit code live here so AOT, JIT, and TIR cannot
 /// drift into separate panic printers.
-pub fn jet_render_runtime_stop(
+pub fn jet_render_runtime_stop_from_row(
+    row: Option<JetRuntimeDiagnosticRow>,
     code: &'static str,
     file: &str,
     line: u32,
@@ -483,7 +574,7 @@ pub fn jet_render_runtime_stop(
     message: &str,
     locals: &str,
 ) -> JetRuntimeDiagnostic {
-    let Some(row) = crate::Registry::active_runtime_diagnostic(code) else {
+    let Some(row) = row else {
         let what = format!("runtime diagnostic `{code}` is not an active runtime row");
         let why = "Jet could not resolve this stop through the active diagnostic registry";
         let fix = "report this as a Jet compiler or host defect";
@@ -494,7 +585,7 @@ pub fn jet_render_runtime_stop(
             why: why.to_string(),
             fix: fix.to_string(),
             rendered: format!("Internal error: {what}\n Why: {why}\n Fix: {fix}\n"),
-            exit_code: crate::ExitCodes::ICE,
+            exit_code: 101,
         };
     };
 
@@ -518,14 +609,14 @@ pub fn jet_render_runtime_stop(
             (*hole, value)
         })
         .collect::<Vec<_>>();
-    let rendered_row = row.render(&holes);
+    let (row_what, row_why, row_fix) = row.render(&holes);
     let what = if code == "E3005" {
         message.to_string()
     } else {
-        rendered_row.what
+        row_what
     };
-    let why = rendered_row.why;
-    let fix = rendered_row.fix;
+    let why = row_why;
+    let fix = row_fix;
 
     let mut rendered = format!("Stop [{code}]: {what}\n");
     if !file.is_empty() {
@@ -569,6 +660,33 @@ pub fn jet_render_runtime_stop(
         exit_code: 70,
     }
 }
+
+// JET_HOST_RUNTIME_STOP_BEGIN
+/// Foundation-side adapter. Embedded Preludes strip only this wrapper and
+/// append a generated lookup over the active Registry rows.
+pub fn jet_render_runtime_stop(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    message: &str,
+    locals: &str,
+) -> JetRuntimeDiagnostic {
+    let row = crate::Registry::active_runtime_diagnostic(code).map(|row| JetRuntimeDiagnosticRow {
+        code: row.code,
+        what: row.what,
+        why: row.why,
+        fix: row.fix,
+        template_holes: row.template_holes,
+    });
+    jet_render_runtime_stop_from_row(
+        row, code, file, line, fn_name, src_line, col, caret_len, message, locals,
+    )
+}
+// JET_HOST_RUNTIME_STOP_END
 
 /// D-MEM-SENTRY1: shared wording for a runtime memory witness. The source
 /// location and gate facts come from the engine; report copy and exit policy

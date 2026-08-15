@@ -3733,6 +3733,7 @@ host_fns! {
 
 #[cfg(test)]
 mod host_fns_tests {
+    use crate::resident::fresh_runtime;
     use super::new_jit_module;
     use crate::host_fns_audit;
 
@@ -3773,5 +3774,25 @@ mod host_fns_tests {
             "registered JIT host symbols that no `host_fns!` table declares/imports \
              (dead registration, not the single listing #1633 requires): {registered_not_declared:?}"
         );
+    }
+
+    #[test]
+    fn arbitrary_helper_panic_is_ice_not_runtime_stop() {
+        let mut runtime = fresh_runtime();
+        let payload = std::panic::catch_unwind(|| std::panic::panic_any("helper fault"))
+            .expect_err("test seam must provide an arbitrary helper panic");
+        let message = payload
+            .downcast_ref::<&'static str>()
+            .copied()
+            .unwrap_or("unknown helper fault");
+
+        runtime.set_host_fault(message);
+
+        assert_eq!(runtime.exit_code, Some(101));
+        assert_eq!(runtime.trapped.as_deref(), Some("helper fault"));
+        assert!(!runtime.stderr.contains("E3001"));
+        assert!(!runtime.stderr.contains("E3010"));
+        assert!(!runtime.stderr.contains("E3011"));
+        assert!(!runtime.stderr.contains("E3012"));
     }
 }

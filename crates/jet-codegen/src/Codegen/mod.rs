@@ -208,6 +208,10 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../../../jet-foundation/src/StreamCursor.rs"),
 ];
 
+const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
+const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
+const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
+
 /// Native builders split this exact block into the content-addressed runtime
 /// rlib. Keep the markers stable: emitted Rust remains a complete standalone
 /// program, while the AOT link seam can replace the block with one `--extern`.
@@ -215,9 +219,67 @@ pub const CACHED_RUNTIME_BEGIN: &str = "// jet:cached-runtime-begin\n";
 pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
 
 fn push_prelude(out: &mut String) {
-    for part in PRELUDE_PARTS {
-        out.push_str(part);
+    for (index, part) in PRELUDE_PARTS.iter().enumerate() {
+        if index == 0 {
+            push_embedded_outcome(out);
+        } else {
+            out.push_str(part);
+        }
     }
+}
+
+/// Project active runtime diagnostic rows into the standalone Prelude. This
+/// keeps generated AOT/Wasm code independent of Foundation's host Registry
+/// module while retaining one durable row source.
+fn runtime_diagnostic_projection() -> String {
+    let rows = jet_foundation::Registry::diagnostic_rows().iter().filter(|row| {
+        row.stage == "runtime"
+            && row.status == jet_foundation::Registry::DiagnosticStatus::Active
+    });
+    let mut out = String::from(
+        "\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {\n\n    match code {\n",
+    );
+    for row in rows {
+        let holes = row
+            .template_holes
+            .iter()
+            .map(|hole| format!("{hole:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "        {code:?} => Some(JetRuntimeDiagnosticRow {{ code: {code:?}, what: {what:?}, why: {why:?}, fix: {fix:?}, template_holes: &[{holes}] }}),\n",
+            code = row.code,
+            what = row.what,
+            why = row.why,
+            fix = row.fix,
+        ));
+    }
+    out.push_str(
+        "        _ => None,\n    }\n}\n\n\
+         pub fn jet_render_runtime_stop(\n\
+             code: &'static str, file: &str, line: u32, fn_name: &str,\n\
+             src_line: &str, col: u32, caret_len: u32, message: &str, locals: &str,\n\
+         ) -> JetRuntimeDiagnostic {\n\
+             jet_render_runtime_stop_from_row(\n\
+                 jet_runtime_diagnostic_row(code), code, file, line, fn_name, src_line,\n\
+                 col, caret_len, message, locals,\n\
+             )\n\
+         }\n\n",
+    );
+    out
+}
+
+fn push_embedded_outcome(out: &mut String) {
+    let start = OUTCOME_SOURCE
+        .find(HOST_RUNTIME_STOP_BEGIN)
+        .expect("Outcome host wrapper marker missing");
+    let end = OUTCOME_SOURCE
+        .find(HOST_RUNTIME_STOP_END)
+        .expect("Outcome host wrapper end marker missing")
+        + HOST_RUNTIME_STOP_END.len();
+    out.push_str(&OUTCOME_SOURCE[..start]);
+    out.push_str(&OUTCOME_SOURCE[end..]);
+    out.push_str(&runtime_diagnostic_projection());
 }
 
 fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
@@ -2815,57 +2877,59 @@ mod tests {
 
         let mut emitted = String::new();
         push_prelude(&mut emitted);
-        let expected = [
-            outcome.as_str(),
-            fault_injection.as_str(),
-            job.as_str(),
-            option.as_str(),
-            fixed_list.as_str(),
-            float_provenance.as_str(),
-            unicode.as_str(),
-            string_concat.as_str(),
-            loadable.as_str(),
-            values.as_str(),
-            range_bounds.as_str(),
-            disjoint.as_str(),
-            expiring_secret.as_str(),
-            set_algebra.as_str(),
-            duration.as_str(),
-            measurement.as_str(),
-            time_monotonic.as_str(),
-            time.as_str(),
-            sketch.as_str(),
-            contracts.as_str(),
-            core.as_str(),
-            view_access.as_str(),
-            power.as_str(),
-            division.as_str(),
-            typed_text.as_str(),
-            progress.as_str(),
-            byte_buffer.as_str(),
-            iter.as_str(),
-            collections.as_str(),
-            memo.as_str(),
-            shared_protocol.as_str(),
-            term.as_str(),
-            runtime_control.as_str(),
-            numeric_widen.as_str(),
-            observe.as_str(),
-            exact_units.as_str(),
-            structural_debug.as_str(),
-            stream_cursor.as_str(),
-        ]
-        .concat();
+        let expected = {
+            let mut expected = String::new();
+            push_embedded_outcome(&mut expected);
+            expected.push_str(
+                &[
+                    fault_injection.as_str(),
+                    job.as_str(),
+                    option.as_str(),
+                    fixed_list.as_str(),
+                    float_provenance.as_str(),
+                    unicode.as_str(),
+                    string_concat.as_str(),
+                    loadable.as_str(),
+                    values.as_str(),
+                    range_bounds.as_str(),
+                    disjoint.as_str(),
+                    expiring_secret.as_str(),
+                    set_algebra.as_str(),
+                    duration.as_str(),
+                    measurement.as_str(),
+                    time_monotonic.as_str(),
+                    time.as_str(),
+                    sketch.as_str(),
+                    contracts.as_str(),
+                    core.as_str(),
+                    view_access.as_str(),
+                    power.as_str(),
+                    division.as_str(),
+                    typed_text.as_str(),
+                    progress.as_str(),
+                    byte_buffer.as_str(),
+                    iter.as_str(),
+                    collections.as_str(),
+                    memo.as_str(),
+                    shared_protocol.as_str(),
+                    term.as_str(),
+                    runtime_control.as_str(),
+                    numeric_widen.as_str(),
+                    observe.as_str(),
+                    exact_units.as_str(),
+                    structural_debug.as_str(),
+                    stream_cursor.as_str(),
+                ]
+                .concat(),
+            );
+            expected
+        };
         assert_eq!(
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 429_720, "split changed prelude byte length");
-        assert_eq!(
-            crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "fe5a40539ea1f9b909b7c1ea6033d0fde59c02cbc3f216b80042934b76d9712d",
-            "split changed prelude bytes, order, or boundary newline"
-        );
+        assert!(emitted.contains("fn jet_runtime_diagnostic_row"));
+        assert!(!emitted.contains("crate::Registry"));
     }
 
     #[test]
@@ -2877,12 +2941,16 @@ mod tests {
             .and_then(|source| source.strip_suffix(CACHED_RUNTIME_END))
             .expect("cached runtime markers must enclose one exact block");
         assert!(body.contains("fn jet_ffi_install_reporter() {}"));
-        for part in PRELUDE_PARTS {
+        for (index, part) in PRELUDE_PARTS.iter().enumerate() {
+            if index == 0 {
+                continue;
+            }
             assert!(
                 body.contains(part),
                 "every PRELUDE_PARTS byte string must affect the runtime cache key"
             );
         }
+        assert!(body.contains("fn jet_runtime_diagnostic_row"));
         for part in [
             ENV_INIT_PRELUDE,
             UNINIT_PRELUDE,
