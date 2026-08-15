@@ -768,7 +768,7 @@ version: "0.1.0"
     );
     write(
         &packages.join("b").join("run.jet"),
-        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\") {\n        fn b_generated() => String :: \\\"b\\\";\n    }?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
+        "fn build(b: BuildContext) => BuildPlan ? {\n    b.generate(\"b_generated\") {\n        fn b_generated() => String :: \"b\";\n    }?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
     );
 
     let output = jet::compile_programmable_build_opts(

@@ -2380,6 +2380,7 @@ pub fn record_generated_inputs(
     stamp: &BuildStamp,
 ) -> Result<(), Diagnostic> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let lock_was_present = lock_path.exists();
     let mut lock = std::fs::read_to_string(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
@@ -2419,6 +2420,19 @@ pub fn record_generated_inputs(
             ));
         }
         return Ok(());
+    }
+    // Bootstrap direct dependency names only for a new lock. Existing locks
+    // stay under Loader's fail-closed manifest-drift check.
+    if !lock_was_present {
+        if let Some(manifest) = crate::Manifest::load(project_root) {
+            let manifest = manifest?;
+            for dependency in manifest.dependencies.keys() {
+                if !lock.root_dependencies.contains(dependency) {
+                    lock.root_dependencies.push(dependency.clone());
+                }
+            }
+            lock.root_dependencies.sort();
+        }
     }
     if lock.build_stamp.is_none() {
         lock.build_stamp = Some(stamp.clone());
