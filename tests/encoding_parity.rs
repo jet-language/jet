@@ -436,25 +436,19 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
 
 #[test]
 fn serde_derive_examples_match_production_cli_tiers() {
-    for (stem, expected) in [
-        (
-            "serde/codable_default",
-            "web\n[80, 443]\nprod\n{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n[8080]\n",
-        ),
-        (
-            "serde/hand_codec",
-            "{\"name\":\"Ada\",\"email\":\"ada@lovelace.org\"}\nada@lovelace.org\n",
-        ),
-        (
-            "serde/serde_derive",
-            "{\"id\":7,\"customer\":\"Ada\",\"items\":[\"pen\",\"ink\"]}\nBo\nrush\n",
-        ),
-        (
-            "serde/serde_generic",
-            "{\"value\":7}\n42\n{\"value\":\"hi\"}\n{\"raw\":9}\n3\n",
-        ),
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for stem in [
+        "serde/codable_default",
+        "serde/hand_codec",
+        "serde/serde_derive",
+        "serde/serde_generic",
     ] {
-        tir_support::assert_example_cli_tiers_agree(stem, expected);
+        let expected_path = root
+            .join("examples/features/expected")
+            .join(format!("{stem}.out"));
+        let expected = fs::read_to_string(&expected_path)
+            .unwrap_or_else(|error| panic!("read {expected_path:?}: {error}"));
+        tir_support::assert_example_cli_tiers_agree(stem, &expected);
     }
 }
 
