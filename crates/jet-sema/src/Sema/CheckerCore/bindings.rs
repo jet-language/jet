@@ -227,6 +227,34 @@ impl<'a> Checker<'a> {
             _ => true,
         }
     }
+    /// `#Memo` is result-pure but runtime-observable through `name.cache()`.
+    /// Implicitly baking a binding that reaches a memoized function would erase
+    /// that call from the one runtime store and make its counters tier-dependent.
+    fn implicit_fold_reaches_memoized_function(&self, init: &Expr) -> bool {
+        crate::Comptime::walk_purity_expr(
+            init,
+            self.ct_funcs,
+            &|name| {
+                self.ct_funcs.get(name).is_some_and(|function| {
+                    crate::AST::memo_bound_from_markers(&function.markers).is_some()
+                })
+            },
+            // The shared call-graph walker uses a diagnostic as its short-circuit
+            // carrier. This value is observed only through `is_err` below.
+            &|name, _, span| {
+                Diagnostic::error(
+                    "E0938",
+                    format!("`{name}` is memoized"),
+                    "memoized calls have runtime-observable cache state".to_string(),
+                    "leave this call for runtime evaluation".to_string(),
+                    Some(span),
+                )
+            },
+            crate::Comptime::PurityStage::BuildTime,
+        )
+        .is_err()
+    }
+
 
     pub(crate) fn ct_value_is_emittable(&self, value: &crate::AST::CtValue) -> bool {
         use crate::AST::{CtReport, CtValue};
@@ -833,6 +861,9 @@ impl<'a> Checker<'a> {
                 &b.init,
                 Expr::Copy(inner, _) if field_read_to_clone(inner, self.registry, self.imports)
             );
+            let skip_ct_memo_fold = !b.mutable
+                && !b.is_comptime
+                && self.implicit_fold_reaches_memoized_function(&b.init);
             // D-DECIMAL1: default-on float-money lint for money-like binding names.
             if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
                 self.diags.push(Diagnostic::lint(
@@ -882,7 +913,11 @@ impl<'a> Checker<'a> {
                     }
                     Err(d) => self.diags.push(d),
                 }
-            } else if !b.mutable && !skip_ct_view_bake && !skip_ct_field_read_bake {
+            } else if !b.mutable
+                && !skip_ct_view_bake
+                && !skip_ct_field_read_bake
+                && !skip_ct_memo_fold
+            {
                 let is_patch_binding = matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
