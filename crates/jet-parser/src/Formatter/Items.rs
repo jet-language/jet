@@ -10,6 +10,92 @@ enum EnumFmtEntry<'b> {
     Group(&'b EnumGroup),
 }
 
+/// One member of a struct or enum body, tagged with where the author wrote it.
+///
+/// The parser splits a type body into parallel vectors — `fields`,
+/// `cli_bindings`, `trait_impls`, `methods`, `validate_block` — which erases the
+/// authored interleaving. Printing those vectors back to back rewrites every
+/// program that did not happen to use that order: a `fn` written before an
+/// `impl Trait { … }` block comes back out after it. `emit_leading` consumes
+/// comments in ascending-offset order, so the same reordering additionally hands
+/// each comment to whichever member happens to be printing at the time. Rethread
+/// the vectors into one source-ordered list before printing.
+#[derive(Clone, Copy)]
+enum TypeBodyMember<'b> {
+    Field(&'b Field),
+    CLIBinding(&'b crate::AST::CLICommandBinding),
+    TraitImpl(&'b TraitImplBlock),
+    Method(&'b Func),
+    /// D-VALIDATE1 (card #506): `validate { … }`, keyed by its `validate` keyword.
+    Validate {
+        start: usize,
+        body: &'b [crate::AST::Stmt],
+    },
+}
+
+impl TypeBodyMember<'_> {
+    /// The member's leftmost authored offset. Every arm names a span *inside*
+    /// the member, so the keys rise exactly as the source does — a field's or
+    /// binding's markers, a method's `fn`, and a block's `impl` keyword all sit
+    /// between the previous member and the span used here, and no two members
+    /// can share a start.
+    fn start(&self) -> usize {
+        match self {
+            Self::Field(field) => field.name_span.start,
+            Self::CLIBinding(binding) => binding.name_span.start,
+            Self::TraitImpl(block) => block.trait_span.start,
+            Self::Method(method) => method.span.start,
+            Self::Validate { start, .. } => *start,
+        }
+    }
+
+    /// Data declarations stack on adjacent lines; anything carrying a body is
+    /// set off from its neighbour by a blank line.
+    fn is_compact(&self) -> bool {
+        matches!(self, Self::Field(_))
+    }
+}
+
+/// One member of an `impl` body, tagged with where the author wrote it. Same
+/// split-vector hazard as `TypeBodyMember`: D-LIB2 `type Name = Concrete` rows
+/// live in `assoc_type_impls`, methods in `methods`.
+#[derive(Clone, Copy)]
+enum ImplBodyMember<'b> {
+    AssocType(&'b (String, Span, Type)),
+    Method(&'b Func),
+}
+
+impl ImplBodyMember<'_> {
+    fn start(&self) -> usize {
+        match self {
+            Self::AssocType((_, span, _)) => span.start,
+            Self::Method(method) => method.span.start,
+        }
+    }
+
+    fn is_compact(&self) -> bool {
+        matches!(self, Self::AssocType(_))
+    }
+}
+
+/// One member of a `trait` body, tagged with where the author wrote it. Same
+/// split-vector hazard as `TypeBodyMember`: D-LIB2 `type Name` rows live in
+/// `assoc_types`, signatures in `methods`.
+#[derive(Clone, Copy)]
+enum TraitBodyMember<'b> {
+    AssocType(&'b (String, Span)),
+    Method(&'b crate::AST::TraitMethodSig),
+}
+
+impl TraitBodyMember<'_> {
+    fn start(&self) -> usize {
+        match self {
+            Self::AssocType((_, span)) => span.start,
+            Self::Method(method) => method.span.start,
+        }
+    }
+}
+
 /// D-FMT-SIMPLIFY1=A: may this rendered expression be a `::` one-line function
 /// body? The parser reads that body with `expr_no_struct_lit`, which refuses a
 /// `{` opening in the bare expression spine — a `Type.{ … }` construction or a
@@ -377,17 +463,27 @@ impl<'a> Fmt<'a> {
         self.write(Syntax::BLOCK_OPEN);
         self.newline();
         self.with_indent(|f| {
-            // D-LIB2: `type Name` associated-type declarations. These were
-            // being dropped entirely — `fmt_trait` only ever walked
-            // `t.methods`, so a trait's `type Elem` line silently vanished
-            // on every fmt pass (a real token-dropping bug, caught
-            // reformatting examples/features/types/associated_types.jet).
-            for (name, _) in &t.assoc_types {
-                f.write("type ");
-                f.write(name);
-                f.newline();
-            }
-            for m in &t.methods {
+            // D-LIB2: `type Name` associated-type declarations live in
+            // `assoc_types` and signatures in `methods`, so printing one vector
+            // and then the other moves a signature the author wrote before a
+            // row. The rows were dropped outright until they were printed here
+            // at all — a real token-dropping bug, caught reformatting
+            // examples/features/types/associated_types.jet.
+            let mut members: Vec<TraitBodyMember<'_>> =
+                Vec::with_capacity(t.assoc_types.len() + t.methods.len());
+            members.extend(t.assoc_types.iter().map(TraitBodyMember::AssocType));
+            members.extend(t.methods.iter().map(TraitBodyMember::Method));
+            members.sort_by_key(|member| member.start());
+            for member in members {
+                let m = match member {
+                    TraitBodyMember::AssocType((name, _)) => {
+                        f.write("type ");
+                        f.write(name);
+                        f.newline();
+                        continue;
+                    }
+                    TraitBodyMember::Method(m) => m,
+                };
                 f.write("fn ");
                 f.write(&m.name);
                 f.write("(");
@@ -659,21 +755,55 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_trait_impl_block(&mut self, block: &TraitImplBlock) {
+        // The block is a body member like any other, so its own leading
+        // comments belong before `impl`, not inside the braces where the first
+        // method's `emit_leading` would otherwise flush them.
+        self.emit_leading(block.trait_span.start);
         self.write("impl ");
         self.write(&block.trait_name);
         self.write(" {");
         self.newline();
         self.with_indent(|f| {
-            for (i, m) in block.methods.iter().enumerate() {
-                if i > 0 {
-                    f.newline();
-                    f.newline();
-                }
-                f.emit_leading(m.name_span.start);
-                f.fmt_func(m, false);
-            }
+            f.fmt_impl_body(&block.assoc_type_impls, &block.methods);
         });
         self.end_block();
+    }
+
+    /// Emit an `impl` body in authored order.
+    ///
+    /// D-LIB2 `type Name = Concrete` rows and methods arrive in two vectors, so
+    /// printing one vector and then the other moves a row the author wrote after
+    /// a method. An in-type `impl Trait { … }` block additionally never printed
+    /// `assoc_type_impls` at all, which deleted the row from the program.
+    fn fmt_impl_body(&mut self, assoc_types: &[(String, Span, Type)], methods: &[Func]) {
+        let mut members: Vec<ImplBodyMember<'_>> =
+            Vec::with_capacity(assoc_types.len() + methods.len());
+        members.extend(assoc_types.iter().map(ImplBodyMember::AssocType));
+        members.extend(methods.iter().map(ImplBodyMember::Method));
+        members.sort_by_key(|member| member.start());
+        let mut previous: Option<ImplBodyMember<'_>> = None;
+        for member in members {
+            if previous.is_some() {
+                self.newline();
+                if !previous.is_some_and(|prior| prior.is_compact() && member.is_compact()) {
+                    self.newline();
+                }
+            }
+            match member {
+                ImplBodyMember::AssocType((name, span, ty)) => {
+                    self.emit_leading(span.start);
+                    self.write("type ");
+                    self.write(name);
+                    self.write(" = ");
+                    self.fmt_type(ty);
+                }
+                ImplBodyMember::Method(method) => {
+                    self.emit_leading(method.name_span.start);
+                    self.fmt_func(method, false);
+                }
+            }
+            previous = Some(member);
+        }
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
@@ -1057,6 +1187,68 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// Print one type-body member. `derives_decode` is the type-level `Decode`
+    /// fact a field's type spelling depends on.
+    fn fmt_type_body_member(&mut self, member: TypeBodyMember<'_>, derives_decode: bool) {
+        match member {
+            TypeBodyMember::Field(field) => {
+                self.emit_leading(field.name_span.start);
+                let decodes_field = derives_decode
+                    && !field.serde_markers.iter().any(|marker| {
+                        matches!(
+                            marker.name.as_str(),
+                            Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
+                        )
+                    });
+                self.fmt_field(field, decodes_field);
+            }
+            TypeBodyMember::CLIBinding(binding) => {
+                self.emit_leading(binding.name_span.start);
+                self.fmt_cli_binding(binding);
+            }
+            TypeBodyMember::TraitImpl(block) => self.fmt_trait_impl_block(block),
+            TypeBodyMember::Method(method) => {
+                self.emit_leading(method.name_span.start);
+                self.fmt_func(method, false);
+            }
+            TypeBodyMember::Validate { start, body } => {
+                self.emit_leading(start);
+                self.write(Syntax::KW_VALIDATE_BLOCK);
+                self.write(" {");
+                if body.is_empty() {
+                    // An authored `validate { }` is still a block the program
+                    // contains; `fmt_body` would render it as a blank line
+                    // between the braces.
+                    self.end_block();
+                } else {
+                    self.fmt_body(body);
+                }
+            }
+        }
+    }
+
+    /// Emit a source-ordered type-body member list. `preceded` says whether the
+    /// body already printed something this list must be separated from (an
+    /// enum's variant list).
+    fn fmt_type_body_members(
+        &mut self,
+        members: &[TypeBodyMember<'_>],
+        derives_decode: bool,
+        preceded: bool,
+    ) {
+        let mut previous: Option<TypeBodyMember<'_>> = None;
+        for member in members.iter().copied() {
+            if previous.is_some() || preceded {
+                self.newline();
+                if !previous.is_some_and(|prior| prior.is_compact() && member.is_compact()) {
+                    self.newline();
+                }
+            }
+            self.fmt_type_body_member(member, derives_decode);
+            previous = Some(member);
+        }
+    }
+
     fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
         // D-VERDICT-1455-1: the retained registry marker nodes are the sole
         // formatter input. Typed flags remain for sema/codegen only.
@@ -1076,62 +1268,23 @@ impl<'a> Fmt<'a> {
             .iter()
             .any(|(name, _)| name == crate::Generics::DECODE);
         self.with_indent(|f| {
-            for (i, field) in s.fields.iter().enumerate() {
-                if i > 0 {
-                    f.newline();
-                }
-                f.emit_leading(field.name_span.start);
-                let decodes_field = derives_decode
-                    && !field.serde_markers.iter().any(|marker| {
-                        matches!(
-                            marker.name.as_str(),
-                            Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
-                        )
-                    });
-                f.fmt_field(field, decodes_field);
+            let mut members: Vec<TypeBodyMember<'_>> = Vec::with_capacity(
+                s.fields.len() + s.cli_bindings.len() + s.trait_impls.len() + s.methods.len() + 1,
+            );
+            members.extend(s.fields.iter().map(TypeBodyMember::Field));
+            members.extend(s.cli_bindings.iter().map(TypeBodyMember::CLIBinding));
+            members.extend(s.trait_impls.iter().map(TypeBodyMember::TraitImpl));
+            members.extend(s.methods.iter().map(TypeBodyMember::Method));
+            // D-VALIDATE1 (card #506): `validate { … }` is one more body member,
+            // printed where it was authored like every other one.
+            if let Some(span) = s.validate_span {
+                members.push(TypeBodyMember::Validate {
+                    start: span.start,
+                    body: s.validate_block.as_slice(),
+                });
             }
-            for (i, binding) in s.cli_bindings.iter().enumerate() {
-                if i > 0 || !s.fields.is_empty() {
-                    f.newline();
-                    f.newline();
-                }
-                f.emit_leading(binding.name_span.start);
-                f.fmt_cli_binding(binding);
-            }
-            for (i, block) in s.trait_impls.iter().enumerate() {
-                if i > 0 || !s.fields.is_empty() || !s.cli_bindings.is_empty() {
-                    f.newline();
-                    f.newline();
-                }
-                f.fmt_trait_impl_block(block);
-            }
-            for (i, m) in s.methods.iter().enumerate() {
-                if i > 0
-                    || !s.fields.is_empty()
-                    || !s.cli_bindings.is_empty()
-                    || !s.trait_impls.is_empty()
-                {
-                    f.newline();
-                    f.newline();
-                }
-                f.emit_leading(m.name_span.start);
-                f.fmt_func(m, false);
-            }
-            // D-VALIDATE1 (card #506): `validate { … }` in-body block — last
-            // in the struct body, same spacing rule as the sections above.
-            if !s.validate_block.is_empty() {
-                if !s.fields.is_empty()
-                    || !s.cli_bindings.is_empty()
-                    || !s.trait_impls.is_empty()
-                    || !s.methods.is_empty()
-                {
-                    f.newline();
-                    f.newline();
-                }
-                f.write(Syntax::KW_VALIDATE_BLOCK);
-                f.write(" {");
-                f.fmt_body(&s.validate_block);
-            }
+            members.sort_by_key(|member| member.start());
+            f.fmt_type_body_members(&members, derives_decode, false);
         });
         self.end_block();
     }
@@ -1164,24 +1317,12 @@ impl<'a> Fmt<'a> {
             } else {
                 f.fmt_enum_grouped(e, derives_decode);
             }
-            for (i, block) in e.trait_impls.iter().enumerate() {
-                if i > 0 || !e.variants.is_empty() {
-                    f.newline();
-                    f.newline();
-                }
-                f.fmt_trait_impl_block(block);
-            }
-            for (i, m) in e.methods.iter().enumerate() {
-                if i > 0
-                    || !e.variants.is_empty()
-                    || !e.trait_impls.is_empty()
-                {
-                    f.newline();
-                    f.newline();
-                }
-                f.emit_leading(m.name_span.start);
-                f.fmt_func(m, false);
-            }
+            let mut members: Vec<TypeBodyMember<'_>> =
+                Vec::with_capacity(e.trait_impls.len() + e.methods.len());
+            members.extend(e.trait_impls.iter().map(TypeBodyMember::TraitImpl));
+            members.extend(e.methods.iter().map(TypeBodyMember::Method));
+            members.sort_by_key(|member| member.start());
+            f.fmt_type_body_members(&members, derives_decode, !e.variants.is_empty());
         });
         self.end_block();
     }
@@ -1338,25 +1479,7 @@ impl<'a> Fmt<'a> {
         self.write(" {");
         self.newline();
         self.with_indent(|f| {
-            // D-LIB2: `type Name = ConcreteType` associated-type implementations.
-            for (idx, (name, _, ty)) in i.assoc_type_impls.iter().enumerate() {
-                if idx > 0 {
-                    f.newline();
-                }
-                f.write("type ");
-                f.write(name);
-                f.write(" = ");
-                f.fmt_type(ty);
-            }
-            let had_assoc = !i.assoc_type_impls.is_empty();
-            for (idx, m) in i.methods.iter().enumerate() {
-                if idx > 0 || had_assoc {
-                    f.newline();
-                    f.newline();
-                }
-                f.emit_leading(m.name_span.start);
-                f.fmt_func(m, false);
-            }
+            f.fmt_impl_body(&i.assoc_type_impls, &i.methods);
         });
         self.end_block();
     }

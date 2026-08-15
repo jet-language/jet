@@ -47,7 +47,7 @@ impl<'a> Fmt<'a> {
     /// expression therefore has to start from its real left edge — descend the
     /// leftmost operand until a node whose own span already leads. `min` keeps
     /// the answer right for the nodes whose span does cover their operand.
-    fn expr_start(expr: &Expr) -> usize {
+    pub(super) fn expr_start(expr: &Expr) -> usize {
         let own = expr.span().start;
         let leftmost = match expr {
             Expr::Field(base, ..)
@@ -334,6 +334,16 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// True when `a` denotes the dispatch subject: either the `it` placeholder
+    /// or an expression with byte-for-byte the same source text as `subject`.
+    ///
+    /// The slice has to begin at `expr_start`, never at `span().start`: an
+    /// anchor span cuts the receiver off the front, so an arm head `other.code`
+    /// and a bare `code` subject both read as `code` — and the arm then prints
+    /// with its `other.` deleted, because a matching subject is elided from the
+    /// table. The right edge is still the anchor's end, which truncates a call's
+    /// argument list, so two heads differing only inside those parens still
+    /// compare equal.
     fn same_dispatch_subject(&self, a: &Expr, subject: &Expr) -> bool {
         if let Expr::Ident(name, _) = a {
             if name == Syntax::KW_IT {
@@ -343,8 +353,8 @@ impl<'a> Fmt<'a> {
         if a.span() == subject.span() {
             return true;
         }
-        let a_src = self.src.get(a.span().start..a.span().end);
-        let subj_src = self.src.get(subject.span().start..subject.span().end);
+        let a_src = self.src.get(Self::expr_start(a)..a.span().end);
+        let subj_src = self.src.get(Self::expr_start(subject)..subject.span().end);
         matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
     }
 
@@ -1794,8 +1804,14 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// True when the author wrote `?? { … return value }` rather than
+    /// `?? { … value }`. Both spellings fold to one `OrFallback::Block`, so the
+    /// source before the value's left edge is the only surviving evidence of the
+    /// authored `return` — and that edge is `expr_start`, never `span().start`:
+    /// for `?? { return frozen.value }` the anchor is the member name, so the
+    /// prefix ended in `return frozen.` and the keyword was silently dropped.
     fn fallback_value_was_return(&self, value: &Expr) -> bool {
-        let Some(prefix) = self.src.get(..value.span().start) else {
+        let Some(prefix) = self.src.get(..Self::expr_start(value)) else {
             return false;
         };
         let Some(return_start) = prefix.rfind("return") else {

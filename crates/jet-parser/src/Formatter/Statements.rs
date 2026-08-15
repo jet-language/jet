@@ -1268,14 +1268,22 @@ impl<'a> Fmt<'a> {
 
     /// True when `a` denotes the `when` subject: either the `it` placeholder or
     /// an expression with byte-for-byte the same source text as `subject`.
+    ///
+    /// The slice has to begin at `expr_start`, never at `span().start`: an
+    /// anchor span cuts the receiver off the front, so an arm head `other.code`
+    /// and a bare `code` subject both read as `code` — and the arm then prints
+    /// with its `other.` deleted, because a matching subject is elided from the
+    /// table. The right edge is still the anchor's end, which truncates a call's
+    /// argument list, so two heads differing only inside those parens still
+    /// compare equal.
     fn same_subject(&self, a: &Expr, subject: &Expr) -> bool {
         if let Expr::Ident(name, _) = a {
             if name == Syntax::KW_IT {
                 return true;
             }
         }
-        let a_src = self.src.get(a.span().start..a.span().end);
-        let subj_src = self.src.get(subject.span().start..subject.span().end);
+        let a_src = self.src.get(Self::expr_start(a)..a.span().end);
+        let subj_src = self.src.get(Self::expr_start(subject)..subject.span().end);
         matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
     }
 
