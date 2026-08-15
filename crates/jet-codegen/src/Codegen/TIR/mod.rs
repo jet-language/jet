@@ -33,8 +33,8 @@ mod eval;
 pub use eval::{
     install_comptime_bridge, lower_interp_program, new_memo_state, run_named_func,
     run_named_func_with_memos, run_program,
-    run_program_with_structs, set_native_call_hook, stable_place_address, tir_place_address_key,
-    MemoState, NativeCallHook,
+    run_program_with_structs, set_native_call_hook, stable_memo_field_slot,
+    stable_place_address, tir_place_address_key, MemoState, NativeCallHook,
 };
 mod lower;
 mod subset;
