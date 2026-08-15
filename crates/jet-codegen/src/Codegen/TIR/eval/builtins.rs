@@ -200,7 +200,10 @@ pub(super) fn eval_builtin(
             let Some(CtValue::Int(capacity)) = args.first() else {
                 return Err(unsupported("List.try_with_capacity argument", span));
             };
-            match CollectionEval::try_list_with_capacity::<CtValue>(*capacity) {
+            match CollectionEval::try_list_with_capacity_defaulted::<CtValue>(
+                *capacity,
+                crate::program_allocator::jet_host_program_allocator_allows,
+            ) {
                 Ok(values) => Ok(CtValue::Present(Box::new(CtValue::List(values)))),
                 Err(error) => Ok(alloc_failure(error)),
             }

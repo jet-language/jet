@@ -80,6 +80,12 @@ pub fn jet_with_host_program_allocator<R>(
     drop(guard);
     (output, facts)
 }
+/// Canonical hosted preflight for fallible Prelude allocations. Engines pass
+/// this function into the same `*_defaulted` collection kernel AOT uses; the
+/// checked package fact has already configured the resident allocator.
+pub fn jet_host_program_allocator_allows(requested: usize) -> bool {
+    JET_HOST_PROGRAM_ALLOCATOR.allows(requested)
+}
 
 impl JetProgramAllocator {
     pub const fn system() -> Self {
@@ -153,18 +159,32 @@ impl JetProgramAllocator {
         previous
     }
 
+    fn next_live_bytes(&self, live: usize, requested: usize) -> Option<usize> {
+        let next = live.checked_add(requested)?;
+        let cap = self
+            .cap_bytes
+            .load(std::sync::atomic::Ordering::Acquire);
+        (cap == 0 || next <= cap).then_some(next)
+    }
+
+    fn allows(&self, requested: usize) -> bool {
+        use std::sync::atomic::Ordering;
+        self.mode.load(Ordering::Acquire) == JET_PROGRAM_ALLOCATOR_SYSTEM
+            || self
+                .next_live_bytes(self.live_bytes.load(Ordering::Acquire), requested)
+                .is_some()
+    }
+
     fn reserve(&self, requested: usize) -> Option<bool> {
         use std::sync::atomic::Ordering;
         if self.mode.load(Ordering::Acquire) == JET_PROGRAM_ALLOCATOR_SYSTEM {
             return Some(false);
         }
-        let cap = self.cap_bytes.load(Ordering::Acquire);
         let mut live = self.live_bytes.load(Ordering::Acquire);
         loop {
-            let next = live.checked_add(requested)?;
-            if cap != 0 && next > cap {
+            let Some(next) = self.next_live_bytes(live, requested) else {
                 return None;
-            }
+            };
             match self.live_bytes.compare_exchange_weak(
                 live,
                 next,

@@ -223,7 +223,10 @@ mod collection_semantics {
     }
 
     pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
-        jet_list_try_with_capacity(capacity)
+        jet_list_try_with_capacity_defaulted(
+            capacity,
+            jet_codegen::program_allocator::jet_host_program_allocator_allows,
+        )
     }
 
     pub(super) fn try_list_push<T>(values: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {

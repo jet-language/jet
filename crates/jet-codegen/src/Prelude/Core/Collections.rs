@@ -217,19 +217,26 @@ fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
     Ok(Vec::new())
 }
 
-fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+fn jet_list_try_with_capacity_defaulted<T>(
+    capacity: i64,
+    program_allocator_allows: impl FnOnce(usize) -> bool,
+) -> JetOutcome<Vec<T>, AllocError> {
     if capacity < 0 {
         return Err(jet_alloc_error(0, "List"));
     }
     let capacity = usize::try_from(capacity).map_err(|_| jet_alloc_error(0, "List"))?;
     let requested = capacity.saturating_mul(std::mem::size_of::<T>().max(1));
-    if jet_fault_should_fail_allocation() {
+    if jet_fault_should_fail_allocation() || !program_allocator_allows(requested) {
         return Err(jet_alloc_error(requested, "List"));
     }
     let mut list = Vec::new();
     list.try_reserve_exact(capacity)
         .map_err(|_| jet_alloc_error(requested, "List"))?;
     Ok(list)
+}
+
+fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+    jet_list_try_with_capacity_defaulted(capacity, |_| true)
 }
 
 fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
