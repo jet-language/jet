@@ -3,6 +3,7 @@ pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+jet_datatree_decode_helpers!();
 
 fn quote_json(s: &str) -> String {
     let mut out = String::from("\"");
