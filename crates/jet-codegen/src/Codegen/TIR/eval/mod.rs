@@ -51,6 +51,17 @@ mod disjoint_semantics {
 }
 
 #[allow(dead_code)]
+mod division_semantics {
+    // Division.rs also carries AOT-only stop adapters. The evaluator uses its
+    // fallible Prelude policy below, so this path must never be called here.
+    fn jet_arithmetic_stop(_: &str, _: u32, _: &str) -> ! {
+        unreachable!("TIR evaluator division adapter must return a diagnostic")
+    }
+
+    include!("../../../Prelude/Core/Division.rs");
+}
+
+#[allow(dead_code)]
 mod interrupt_queue {
     include!("../../../Prelude/CoreLib/Top/Interrupt.rs");
 }
@@ -2404,6 +2415,33 @@ impl<'a> EvalCtx<'a> {
                 Err(self.runtime_stop("E3010", line, &message))
             }
             result => result,
+        }
+    }
+
+    pub(super) fn eval_fixed_width_division(
+        &mut self,
+        left: i64,
+        right: i64,
+        signed: bool,
+        bits: u8,
+        right_signed: bool,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let left = crate::Comptime::MathLayout::integer_widen(left, signed);
+        let right = crate::Comptime::MathLayout::integer_widen(right, right_signed);
+        let (minimum, maximum) = crate::AST::int_range(signed, bits);
+        match division_semantics::jet_division(left, right, minimum, maximum) {
+            Ok(value) => Ok(CtValue::Int(crate::Comptime::MathLayout::integer_narrow(
+                value, signed, bits,
+            ))),
+            Err(message) => {
+                let line = self
+                    .source_text
+                    .get(..span.start.min(self.source_text.len()))
+                    .map(|prefix| prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1)
+                    .unwrap_or(1);
+                Err(self.runtime_stop("E3010", line, message))
+            }
         }
     }
 

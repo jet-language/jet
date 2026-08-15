@@ -5481,6 +5481,16 @@ impl<'a> EvalCtx<'a> {
                         crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
                             .map(|(signed, _)| signed)
                             .unwrap_or(true);
+                    if *op == BinOp::Div && self.runtime_execution {
+                        return self.eval_fixed_width_division(
+                            a,
+                            b,
+                            *signed,
+                            *bits,
+                            right_signed,
+                            self.span(),
+                        );
+                    }
                     return self.route_runtime_arithmetic(
                         crate::Comptime::MathLayout::integer_binop(
                             *op,

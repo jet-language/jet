@@ -932,8 +932,14 @@ macro_rules! jet_arith_impl {
                     &format!("this multiplication overflows the value's type (the result is outside its range)")))
             }
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_div(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    &format!("this division can't be done (dividing by zero, or overflow)")))
+                jet_division(
+                    self as i128,
+                    rhs as i128,
+                    <$t>::MIN as i128,
+                    <$t>::MAX as i128,
+                )
+                .map(|value| value as $t)
+                .unwrap_or_else(|message| jet_arithmetic_stop(file, line, message))
             }
             fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {

@@ -13,6 +13,26 @@ const JET_FLOORDIV_ZERO: &str = "divided by zero";
 const JET_FLOORDIV_OVERFLOW: &str =
     "this division overflows the value's type (the result is outside its range)";
 
+// Fixed-width `/` uses one policy for signed and unsigned values. The caller
+// supplies the result range because the evaluator carries every IntN value in
+// an i64, while AOT calls this with the concrete Rust width.
+const JET_DIVISION_ERROR: &str =
+    "this division can't be done (dividing by zero, or overflow)";
+
+pub fn jet_division(
+    left: i128,
+    right: i128,
+    minimum: i128,
+    maximum: i128,
+) -> Result<i128, &'static str> {
+    let quotient = left.checked_div(right).ok_or(JET_DIVISION_ERROR)?;
+    if (minimum..=maximum).contains(&quotient) {
+        Ok(quotient)
+    } else {
+        Err(JET_DIVISION_ERROR)
+    }
+}
+
 trait JetFloorDiv: Copy {
     fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self;
 }
