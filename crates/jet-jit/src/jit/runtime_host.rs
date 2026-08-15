@@ -305,8 +305,9 @@ pub(crate) struct JitRuntime {
     pub(crate) next_option_lift2_thunk: u64,
     /// Unique names for deferred Shared transaction lambda callbacks.
     pub(crate) next_shared_txn_thunk: u64,
-    /// Runtime function values. Negative words are explicit callable handles;
-    /// raw Cranelift addresses are normalized at the boundary before a call.
+    /// Runtime function values. Every function value is a negative handle
+    /// minted by `bind_jit_callable`; a raw Cranelift address is not a callable
+    /// and is refused at the call boundary (`jet_jit_callable_normalize`).
     pub(crate) jit_callables: Vec<JitCallableSlot>,
     /// Process-edge callbacks. The resident adapter invokes these after all
     /// generated scope cleanup and before it returns the run outcome.
@@ -2769,7 +2770,44 @@ pub(crate) fn run_jit_atexit_handlers(rt: &mut JitRuntime) {
     });
 }
 
+/// I2: a broken callable invariant is Jet's own defect, so it must never be
+/// reported as the running program's runtime stop. `set_trap` renders
+/// `Stop [E3001]` and exits 70 (`Outcome.rs::jet_render_runtime_stop_from_row`),
+/// a breach report that blames the program for a compiler bug. The branded ICE
+/// rail is the right one: `set_host_fault` records `ExitCodes::ICE` (101) and
+/// `resident.rs::take_host_fault_outcome` hands the run to
+/// `Diagnostics::render_ice_report` ("internal compiler error: … This is a bug
+/// in jet, NOT in your program"). Deliberately not a deopt: re-running a
+/// miscompiled callable on another tier can succeed and bury the miscompile,
+/// which is precisely how this class of defect stays invisible.
+///
+/// Both trap channels are set, because generated code polls a different one per
+/// tier: `jet_jit_is_trapped` reads `JitRuntime::trapped` on the resident tier
+/// but the task-local slot inside a scheduler task, the same routing
+/// `JitRuntime::store_trap` performs. Setting only the runtime flag would let an
+/// in-task null callable sail past `emit_trap_check` into `call 0` anyway.
+///
+/// A status return, never a panic: cranelift-jit registers no `eh_frame` for
+/// JIT'd code, so a panic here would have to unwind an FDE-less frame.
+fn callable_defect(rt: &mut JitRuntime, what: &str) {
+    rt.set_host_fault(what);
+    if Concurrency::in_scheduler_task() {
+        Concurrency::set_task_trap(what);
+    }
+}
+
+/// The one place a `JitCallableSlot` is created, so the one place the
+/// callable invariant is enforced: a slot always names a Cranelift function.
+///
+/// A zero `fn_ptr` is not a function address, it is a word that reached here
+/// from something that was never a callable. Binding it anyway hands JIT'd
+/// code a `call 0` — an I1 violation that dies as SIGSEGV with the faulting
+/// address inside the JIT code page and no diagnostic.
 fn bind_jit_callable(rt: &mut JitRuntime, fn_ptr: i64, env: i64, has_env: bool) -> i64 {
+    if fn_ptr == 0 {
+        callable_defect(rt, "resident callable value has no function address");
+        return 0;
+    }
     let index = rt.jit_callables.len();
     if index >= i64::MAX as usize - 1 {
         rt.set_trap("too many resident callable values");
@@ -2799,26 +2837,81 @@ extern "C" fn jet_jit_callable_bind(fn_ptr: i64, env: i64, has_env: i8) -> i64 {
     with_runtime_result(0, |rt| bind_jit_callable(rt, fn_ptr, env, has_env != 0))
 }
 
+/// Accept a callable value on its way into a call, and nothing else.
+///
+/// Every function value the lowering can produce is already a bound handle:
+/// each `TExprKind::FnValue` arm ends in `callable_bind`
+/// (`lower_ctx.rs:18769`, `:18834`, `:18995`, `:19054`, `:26956`), resident
+/// adapters go through `bind_jit_callable_handle`, and a stored function value
+/// keeps that handle. So an unrecognised word here is never a code address —
+/// it is a word from something that was never a callable, and binding it would
+/// mint a slot whose `fn_ptr` is that word. `jet_jit_callable_fn` then hands it
+/// back and JIT'd code executes `call <arbitrary integer>`: an I1 violation
+/// that dies as SIGSEGV inside the JIT code page with no diagnostic.
+///
+/// The old fallback bound any non-handle word as a code address, so it accepted
+/// whole classes of word that cannot be one, and a zero-only guard closes just
+/// the first of them:
+///
+/// - `0` — the observed crash: a result-arena Option handle decoded through the
+///   packed carrier yields `Some(0)`.
+/// - `1`, `2`, `3`, … — the *same* mis-decode one allocation later
+///   (`arena_handle - 1`), plus list indexes, packed-carrier words, `Bool`
+///   `0`/`1`, and packed enum tags. Page zero is never mapped.
+/// - Heap handles — `JitHeap` string/list/map handles are small positive ints
+///   too (the faulting frame held `0x11`, the `"hi"` String), indistinguishable
+///   from a "code address" under the old rule.
+/// - Odd or under-aligned words — a Cranelift function entry is at least
+///   4-byte aligned (16 on x86-64), so an odd word is never an entry point.
+/// - Non-canonical words — a big `Int`, a `Float` bit pattern, or a hash lands
+///   outside the `0..=0x0000_7FFF_FFFF_FFFF` user range.
+/// - Negative words that merely *look* like handles — `jit_callable_slot`
+///   rejects `-(len + 1)` and below, and the fallback then bound them as
+///   kernel-space addresses.
+///
+/// Enumerating impossible words can never be complete: a live data pointer is a
+/// mapped address and still the wrong answer. So the rule is inverted to a
+/// whitelist — only an already-bound handle passes, everything else is a defect.
 extern "C" fn jet_jit_callable_normalize(value: i64) -> i64 {
     with_runtime_result(0, |rt| {
         if jit_callable_slot(rt, value).is_some() {
             value
         } else {
-            bind_jit_callable(rt, value, 0, false)
+            callable_defect(rt, "resident callable value was never bound");
+            0
         }
     })
 }
 
+/// A handle that names no slot is a defect too: handles are minted only by
+/// `bind_jit_callable` and never leave the run that made them.
 fn jit_callable_or_trap(rt: &mut JitRuntime, handle: i64) -> Option<JitCallableSlot> {
     let slot = jit_callable_slot(rt, handle);
     if slot.is_none() {
-        rt.set_trap("invalid resident callable value");
+        callable_defect(rt, "invalid resident callable value");
     }
     slot
 }
 
+/// The word generated code puts straight into `call_indirect`
+/// (`lower_ctx.rs:9874`, `:9895`), with no null check of its own. Returning `0`
+/// without recording a trap is what let the faulting run reach `call rax` with
+/// `rax == 0`: the `emit_trap_check` at `lower_ctx.rs:9857` OR's
+/// `is_trapped`/`pending_exit_status`, both clear, so the branch fell through.
+/// `bind_jit_callable` now refuses a zero `fn_ptr`, so this is the floor under
+/// that invariant rather than the load-bearing check — but the floor is what
+/// makes the generated check fire if a future writer mints a slot another way.
 extern "C" fn jet_jit_callable_fn(handle: i64) -> i64 {
-    with_runtime_result(0, |rt| jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.fn_ptr))
+    with_runtime_result(0, |rt| {
+        let Some(slot) = jit_callable_or_trap(rt, handle) else {
+            return 0;
+        };
+        if slot.fn_ptr == 0 {
+            callable_defect(rt, "resident callable slot has no function address");
+            return 0;
+        }
+        slot.fn_ptr
+    })
 }
 
 extern "C" fn jet_jit_callable_env(handle: i64) -> i64 {

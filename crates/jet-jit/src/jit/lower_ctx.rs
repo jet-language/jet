@@ -1510,8 +1510,9 @@ impl LowerCtx<'_, '_> {
                 return Err("jit SerdeEncode Char unsupported".to_string());
             }
             Type::Option(inner) => {
-                let zero = self.b.ins().iconst(types::I64, 0);
-                let is_none = self.b.ins().icmp(IntCC::Equal, val, zero);
+                let present = self.option_present_flag(val, inner, false);
+                let absent_flag = self.b.ins().iconst(types::I8, 0);
+                let is_none = self.b.ins().icmp(IntCC::Equal, present, absent_flag);
                 let none_block = self.b.create_block();
                 let some_block = self.b.create_block();
                 let merge = self.b.create_block();
@@ -11257,8 +11258,9 @@ impl LowerCtx<'_, '_> {
         for (index, field_ty) in field_types.iter().enumerate() {
             let option_ty = Type::Option(Box::new(field_ty.clone()));
             let packed = self.record_slot(patch_value, index, &option_ty)?;
-            let zero = self.b.ins().iconst(types::I64, 0);
-            let missing = self.bool_from_icmp(IntCC::Equal, packed, zero);
+            let present = self.option_present_flag(packed, field_ty, false);
+            let absent_flag = self.b.ins().iconst(types::I8, 0);
+            let missing = self.b.ins().icmp(IntCC::Equal, present, absent_flag);
             let old_block = self.b.create_block();
             let patch_block = self.b.create_block();
             let merge = self.b.create_block();
@@ -17509,11 +17511,20 @@ impl LowerCtx<'_, '_> {
                             return self.lower_patch_merge(recv, &args[0]);
                         });
                     }
-                    // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a clean
-                    // absence into a failure. One packed carrier (0 = absent), so
-                    // presence/absence reuse the same test `lower_option_enum_match`
-                    // uses; the report handle shares the I64 ABI with every `T`
-                    // this covers.
+                    // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a
+                    // clean absence into a failure. The carrier is not fixed:
+                    // an Option arrives here either packed (`0` = absent,
+                    // `bits + 1` = present) or as a result-arena handle, exactly
+                    // as `uses_result_option_abi` reports it. Presence and
+                    // payload therefore share that one decision, the way `??`
+                    // (`TExprKind::OrFallback`) already does it.
+                    //
+                    // Hardcoding the packed carrier here mis-decoded every
+                    // arena-carried receiver — `Map.get(k)` above all. A hit
+                    // became `Some(handle - 1)`, so arena handle `1` decoded as
+                    // `Some(0)` and a `fn` payload of `0` reached `call 0`; a
+                    // miss reported `Ok`, because an arena handle is non-zero
+                    // even when it carries absence.
                     if method.name == jet_foundation::Syntax::METHOD_OUTCOME_OR_ERR
                         && args.len() == 1
                     {
@@ -17522,13 +17533,18 @@ impl LowerCtx<'_, '_> {
                                 == Some(types::I64)
                                 && !matches!(inner.as_ref(), Type::IntN { .. })
                             {
-                                let packed = self.lower_expr(recv)?;
+                                let result_abi = self.uses_result_option_abi(recv);
+                                let carrier = self.lower_expr(recv)?;
                                 let why = self.lower_call_arg(&args[0])?;
                                 let zero = self.b.ins().iconst(types::I64, 0);
                                 let why = self.call_host(self.host.err_new, &[why, zero, zero]);
                                 let is_some =
-                                    self.b.ins().icmp(IntCC::NotEqual, packed, zero);
-                                let ok_payload = self.unpack_option_payload(packed, inner)?;
+                                    self.option_present_flag(carrier, inner, result_abi);
+                                let ok_payload = self.unpack_option_payload_with_abi(
+                                    carrier,
+                                    inner,
+                                    result_abi,
+                                )?;
                                 let ok_tag = self.b.ins().iconst(types::I8, 1);
                                 let err_tag = self.b.ins().iconst(types::I8, 0);
                                 let tag = self.b.ins().select(is_some, ok_tag, err_tag);
@@ -19420,6 +19436,13 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    /// Lower an `Option`-producing expression to its raw carrier word.
+    ///
+    /// The carrier is deliberately not uniform across the arms below, because
+    /// the `*_get_opt` host family is not uniform: `list_get_opt` returns the
+    /// packed carrier and `map_get_opt` returns a result-arena handle. Every
+    /// caller must decode the word with `uses_result_option_abi` on the same
+    /// expression, which reports precisely that split.
     fn lower_list_get_opt_status(&mut self, value: &TExpr) -> Result<Value, String> {
         if let TExprKind::BuiltinMethod {
             recv,
@@ -19438,7 +19461,10 @@ impl LowerCtx<'_, '_> {
             let idx = self.lower_expr(&args[0])?;
             return Ok(self.call_host(self.host.coll.list_get_opt, &[list, idx]));
         }
-        // Map.get(k) ?? … — same 0 / value+1 Option encoding as list_get_opt.
+        // Map.get(k) ?? … — result-arena Option handle, *not* the packed
+        // `0 / value + 1` encoding `list_get_opt` above returns. Callers
+        // discriminate on `uses_result_option_abi`, which reports `GetMap` on a
+        // `Map` receiver as result-arena.
         if let TExprKind::BuiltinMethod {
             recv,
             op: TBuiltinOp::GetMap,
@@ -21879,7 +21905,9 @@ impl LowerCtx<'_, '_> {
         owner: Option<Value>,
     ) -> Result<Value, String> {
         let zero = self.b.ins().iconst(types::I64, 0);
-        let is_none = self.b.ins().icmp(IntCC::Equal, value, zero);
+        let present = self.option_present_flag(value, inner, false);
+        let absent_flag = self.b.ins().iconst(types::I8, 0);
+        let is_none = self.b.ins().icmp(IntCC::Equal, present, absent_flag);
         let none = self.b.create_block();
         let some = self.b.create_block();
         let merge = self.b.create_block();
@@ -22393,8 +22421,8 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(present_args);
         self.b.seal_block(present_args);
-        let pa = self.unpack_option_payload(a_val, inner_a)?;
-        let pb = self.unpack_option_payload(b_val, inner_b)?;
+        let pa = self.unpack_option_payload_with_abi(a_val, inner_a, a_result_abi)?;
+        let pb = self.unpack_option_payload_with_abi(b_val, inner_b, b_result_abi)?;
         let (factory, env) = self.lower_option_lift2_factory(f)?;
         let adapter_id = super::functions_compile::lower_option_lift2_adapter(
             self.module,
@@ -26339,11 +26367,27 @@ impl LowerCtx<'_, '_> {
         })
     }
 
-    /// 1 when this `Option` carrier holds a value. `result_abi` selects the
-    /// tagged result arena; otherwise the legacy `0 = None, bits + 1 = Some`
-    /// i64 word. Same two tests the `TIfCond::IsNone` statement path uses.
-    fn option_present_flag(&mut self, value: Value, result_abi: bool) -> Value {
-        if result_abi {
+    /// 1 when this `Option` carrier holds a value.
+    ///
+    /// The carrier decision is exactly the one `pack_option_payload_with_abi`
+    /// and `unpack_option_payload_with_abi` make: `result_abi` or an `IntN`
+    /// payload selects the tagged result arena, anything else is the legacy
+    /// `0 = None, bits + 1 = Some` i64 word. `uses_result_option_abi` reports
+    /// `result_abi`, and it is what the `TIfCond::IsNone` path tests too.
+    ///
+    /// Presence and payload share one rule here so a seam can never test
+    /// presence one way and decode the payload the other — the `IntN` case in
+    /// particular already decodes through the arena, so testing it as packed
+    /// read a non-zero absent handle as present.
+    ///
+    /// The arena test is also correct for a literal `0` carrier: handle `0` is
+    /// never a live arena slot (`jit_result` rejects it), so `result_is_ok`
+    /// reports absence for both the `ok = false` handle `absent_option_value`
+    /// builds and the plain `0` that `TExprKind::Absent` emits. The packed
+    /// `!= 0` test only recognises the latter, which is why an arena-carried
+    /// absence must never reach it.
+    fn option_present_flag(&mut self, value: Value, inner: &Type, result_abi: bool) -> Value {
+        if result_abi || matches!(inner, Type::IntN { .. }) {
             let is_ok = self.call_host(self.host.result_is_ok, &[value]);
             let zero = self.b.ins().iconst(types::I8, 0);
             self.bool_from_icmp(IntCC::NotEqual, is_ok, zero)
@@ -26364,8 +26408,8 @@ impl LowerCtx<'_, '_> {
         left_result: bool,
         right_result: bool,
     ) -> Result<Value, String> {
-        let left_present = self.option_present_flag(l, left_result);
-        let right_present = self.option_present_flag(r, right_result);
+        let left_present = self.option_present_flag(l, inner, left_result);
+        let right_present = self.option_present_flag(r, inner, right_result);
         let both_present = self.b.ins().band(left_present, right_present);
         let same_presence = self.bool_from_icmp(IntCC::Equal, left_present, right_present);
 

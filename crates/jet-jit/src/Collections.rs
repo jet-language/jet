@@ -1304,7 +1304,21 @@ extern "C" fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, line: u32) -
     i8::from(jet_jit_list_get_range(list, idx, line).2)
 }
 
-/// `0` = absent; otherwise `value + 1`.
+/// Packed Option carrier: `0` = absent, otherwise `value + 1`.
+///
+/// Deliberately *not* the carrier `jet_jit_map_get_opt` returns. These two are
+/// siblings in name only: this one is packed, that one is a result-arena
+/// handle, and the JIT lowering discriminates with `uses_result_option_abi`
+/// rather than assuming the family is uniform.
+///
+/// The packed carrier is retained here (it allocates nothing on a hot lookup)
+/// but it is *not* free of representational limits, and this comment used to
+/// claim otherwise. `Type::Int` is not `Type::IntN`, so a plain `Int` element
+/// does reach this path, and `value + 1` then aliases a `-1` element onto
+/// `None` and overflows at `i64::MAX`. `[-1].get(0)` decoding as absent is a
+/// live defect of this encoding, independent of the map carrier above; fixing
+/// it means moving this producer to the arena carrier and updating the
+/// `GetList` arm of `uses_result_option_abi` with it.
 extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
@@ -1803,7 +1817,15 @@ extern "C" fn jet_jit_map_validate(map: i64) -> i64 {
     })
 }
 
-/// Result-arena Option handle (`result_is_ok` / `result_get_i64`).
+/// Result-arena Option handle (`result_is_ok` / `result_get_i64`), *not* the
+/// packed `0 / value + 1` carrier its sibling `jet_jit_list_get_opt` returns.
+///
+/// The arena carrier is required, not incidental: a map value is an arbitrary
+/// i64, so packing it as `value + 1` would alias a `-1` payload onto `None`.
+/// Function values make that concrete — `bind_jit_callable` hands out
+/// `-(index + 1)`, so the very first callable stored in a map has the handle
+/// `-1`. Keeping presence in a separate `ok` bit is what makes any payload,
+/// including `i64::MAX` and every negative handle, representable.
 extern "C" fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.map_len(map).is_none() {
