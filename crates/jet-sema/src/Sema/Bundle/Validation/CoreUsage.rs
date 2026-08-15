@@ -72,17 +72,11 @@ pub(crate) fn collect_used_core(
 ) {
     let mut used = HashSet::new();
     let mut spans = HashMap::new();
-    // D-INTBIG1: use sema's typed facts, not a second AST walk, for exact-Int
-    // reachability. Constants are registered here even when no function body
-    // consumes them; checked/generated bodies publish the same fact through
-    // `ModuleState`.
-    if states.iter().any(|state| {
-        state.exact_int_reachable.get()
-            || state
-                .consts
-                .values()
-                .any(|ty| crate::Sema::type_uses_default_int(ty))
-    }) {
+    // D-INTBIG1: use sema's typed executable-reachability fact, not a second
+    // AST walk. `consts` is a registration/type lookup map: an entry there is
+    // not evidence that its declaration or an imported Core row is emitted.
+    // Checked/generated bodies publish the fact through `ModuleState`.
+    if states.iter().any(|state| state.exact_int_reachable.get()) {
         used.insert("core.math::__exact_int__".to_string());
     }
     // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
