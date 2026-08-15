@@ -4312,7 +4312,7 @@ fn run() { print(three.get()); print(same.get()) }
 }
 
 #[test]
-fn generic_user_derive_multi_instantiation_matches_resident_default_dev_and_aot() {
+fn generic_user_derive_multi_instantiation_matches_every_execution_tier() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
@@ -4478,6 +4478,16 @@ fn run() {
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(diags) => panic!("default dev failed generic user derive: {diags:?}"),
     };
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter failed generic user derive: {diags:?}")
+        }
+    };
     let aot = compiled_binary_output(
         &dir,
         "generic_user_derive",
@@ -4487,6 +4497,7 @@ fn run() {
     );
     assert_eq!(resident, expected);
     assert_eq!(default, expected);
+    assert_eq!(interpreted, expected);
     assert_eq!(aot, expected);
     let _ = fs::remove_dir_all(dir);
 }
