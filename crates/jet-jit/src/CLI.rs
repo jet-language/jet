@@ -145,7 +145,7 @@ mod runtime {
     }
 }
 
-use crate::Job::jet_args_source_program_name;
+use crate::Job::{jet_args_source_program_name, jet_cli_banner};
 
 use runtime::{
     empty_spec, flag, flag_set, flag_short, help_text, option, option_val, parse, positional,
@@ -802,8 +802,7 @@ fn decode_frame(
 
 fn report_cli_error(error: &str) {
     Concurrency::with_runtime_mut(|rt| {
-        rt.stderr.push_str(error);
-        rt.stderr.push('\n');
+        rt.stderr.push_str(&jet_cli_banner(error));
         rt.exit_code = Some(2);
     });
 }
@@ -818,8 +817,7 @@ fn finish_cli_version(plan: &CLIPlan) {
         return;
     };
     Concurrency::with_runtime_mut(|rt| {
-        rt.stdout.push_str(version);
-        rt.stdout.push('\n');
+        rt.stdout.push_str(&jet_cli_banner(version));
     });
     finish_cli_success();
 }
@@ -875,8 +873,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
                 })
                 .unwrap_or_else(|| spec.clone());
             Concurrency::with_runtime_mut(|rt| {
-                rt.stdout.push_str(&help_text(&help_spec));
-                rt.stdout.push('\n');
+                rt.stdout.push_str(&jet_cli_banner(&help_text(&help_spec)));
             });
             finish_cli_success();
             return 0;
@@ -887,8 +884,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
         }
         let Some(command_name) = command_name else {
             Concurrency::with_runtime_mut(|rt| {
-                rt.stdout.push_str(&help_text(&spec));
-                rt.stdout.push('\n');
+                rt.stdout.push_str(&jet_cli_banner(&help_text(&spec)));
             });
             finish_cli_success();
             return 0;
@@ -978,8 +974,7 @@ pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
     apply_standard_cli(&parsed, plan.schema.standard);
     if flag_set(&parsed, "help") {
         Concurrency::with_runtime_mut(|rt| {
-            rt.stdout.push_str(&help_text(&spec));
-            rt.stdout.push('\n');
+            rt.stdout.push_str(&jet_cli_banner(&help_text(&spec)));
         });
         finish_cli_success();
         return 0;

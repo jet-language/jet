@@ -162,13 +162,13 @@ fn emit_struct_command_entry(
         let tuple = cli_tuple_expr(&variables);
         let receiver = if self_method || shared_param.is_some() {
             format!(
-                "                let __jet_cli_receiver = match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                    Ok(__value) => __value,\n                    Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                }};\n",
+                "                let __jet_cli_receiver = match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                    Ok(__value) => __value,\n                    Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n                }};\n",
             )
         } else {
             String::new()
         };
         arms.push_str(&format!(
-            "                Some({name:?}) => {{\n                    let __spec = {variable}.clone();\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    let __decoded = (|| {{\n{decode_lines}                        Ok::<_, String>({tuple})\n                    }})();\n                    match __decoded {{\n                        Ok({tuple}) => {{\n{receiver}{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n",
+            "                Some({name:?}) => {{\n                    let __spec = {variable}.clone();\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", jet_cli_banner(&__spec.help())); return; }}\n                    let __decoded = (|| {{\n{decode_lines}                        Ok::<_, String>({tuple})\n                    }})();\n                    match __decoded {{\n                        Ok({tuple}) => {{\n{receiver}{invoke}                        }}\n                        Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n                    }}\n                }}\n",
             name = command.name,
             variable = variable,
         ));
@@ -201,7 +201,7 @@ fn emit_struct_command_entry(
     let standard_init = cli_standard_runtime_init(schema.standard, "            ");
     let version_check = format!("{standard_init}{version_check}");
     out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}{spec_defs}{root_spec}    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{\n                let __help_spec = match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{help_selection}                    _ => __spec.clone(),\n                }};\n                println!(\"{{}}\", __help_spec.help());\n                return;\n            }}\n{version_check}            match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{arms}                Some(__other) => {{ eprintln!(\"unknown command `{{}}`\", __other); std::process::exit(2); }}\n                None => {{ println!(\"{{}}\", __spec.help()); return; }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n"
+        "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}{spec_defs}{root_spec}    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{\n                let __help_spec = match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{help_selection}                    _ => __spec.clone(),\n                }};\n                print!(\"{{}}\", jet_cli_banner(&__help_spec.help()));\n                return;\n            }}\n{version_check}            match jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n{arms}                Some(__other) => {{ eprintln!(\"unknown command `{{}}`\", __other); std::process::exit(2); }}\n                None => {{ print!(\"{{}}\", jet_cli_banner(&__spec.help())); return; }}\n            }}\n        }}\n        Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n}}\n\n"
     ));
 }
 
@@ -1129,7 +1129,7 @@ fn emit_direct_cli_entry(
     let standard_init = cli_standard_runtime_init(schema.standard, "            ");
     let version_check = format!("{standard_init}{version_check}");
     out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {{\n{spec_body}    }};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n{version_check}            let __decoded = (|| {{\n{decode_lines}                Ok::<_, String>({tuple})\n            }})();\n            match __decoded {{\n                Ok({pattern}) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n"
+        "fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {{\n{spec_body}    }};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", jet_cli_banner(&__spec.help())); return; }}\n{version_check}            let __decoded = (|| {{\n{decode_lines}                Ok::<_, String>({tuple})\n            }})();\n            match __decoded {{\n                Ok({pattern}) => {{\n{invoke}                }}\n                Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n}}\n\n"
     ));
 }
 
@@ -1326,7 +1326,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             let standard_init = cli_standard_runtime_init(schema.standard, "            ");
             let version_check = format!("{standard_init}{version_check}");
             out.push_str(&format!(
-                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {spec_init};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n{version_check}            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok({args_binding}__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n{dispatch}    let __spec = {spec_init};\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", jet_cli_banner(&__spec.help())); return; }}\n{version_check}            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok({args_binding}__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n}}\n\n",
                 decode_name = decode_name,
                 dispatch = dispatch,
                 args_binding = args_binding,
@@ -1469,7 +1469,7 @@ fn emit_job_wrapper(
                 "                ",
             );
             out.push_str(&format!(
-                "    let __spec = jet_args_program({helper_prefix}{spec_name}(), &jet_args_source_program_name(__program));\n    match jet_args_parse(&__spec, __argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
+                "    let __spec = jet_args_program({helper_prefix}{spec_name}(), &jet_args_source_program_name(__program));\n    match jet_args_parse(&__spec, __argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", jet_cli_banner(&__spec.help())); return; }}\n            match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n}}\n\n",
                 spec_name = spec_name,
                 decode_name = decode_name,
             ));

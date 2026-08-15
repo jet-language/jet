@@ -36,6 +36,17 @@ pub(crate) fn jet_args_source_program_name(prog: &str) -> String {
     }
 }
 
+/// The one terminator for a banner a generated CLI writes to a stream: help,
+/// usage and command errors. `JetArgsSpec::help()` renders the block, this
+/// closes it with the single trailing newline `println!` would add. AOT emits
+/// `print!`/`eprint!` around it, the Cranelift host and the interpreter push
+/// the result into their own stdout/stderr buffers — no engine re-decides how
+/// a banner ends.
+#[allow(dead_code)]
+pub(crate) fn jet_cli_banner(text: &str) -> String {
+    format!("{text}\n")
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum JetJobSelection {
     Ordinary,

@@ -13,6 +13,7 @@ use jet_foundation::Numeric::CtBigInt;
 use crate::Comptime;
 use crate::Diagnostics::{Diagnostic, Span};
 
+use super::cli_boundary::jet_args_source_program_name;
 use super::unsupported;
 
 pub(super) enum Dispatch {
@@ -37,14 +38,6 @@ fn args_call(
 
 fn optional_text(value: Option<&str>) -> CtValue {
     value.map_or(CtValue::Unit, |value| CtValue::Str(value.to_string()))
-}
-
-fn program_name(argv0: &str) -> String {
-    let name = std::path::Path::new(argv0)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(argv0);
-    name.strip_suffix(".jet").unwrap_or(name).to_string()
 }
 
 fn value_kind(kind: CLIValueKind) -> &'static str {
@@ -128,7 +121,7 @@ fn build_spec(
     spec = args_call(
         "ArgsSpecProgram",
         &mut spec,
-        vec![CtValue::Str(program_name(argv0))],
+        vec![CtValue::Str(jet_args_source_program_name(argv0))],
         span,
     )?;
     if let Some(description) = description {
@@ -203,7 +196,7 @@ fn build_command_spec(
             command.description.as_deref(),
             false,
             None,
-            &format!("{} {}", program_name(argv0), command.name),
+            &format!("{} {}", jet_args_source_program_name(argv0), command.name),
             span,
         )?;
         root = args_call(

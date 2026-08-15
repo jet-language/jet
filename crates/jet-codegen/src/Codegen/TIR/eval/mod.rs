@@ -100,6 +100,14 @@ pub(super) mod term_semantics {
     include!("../../../Prelude/Term.rs");
 }
 
+/// The generated-CLI argv boundary: the interpreter reads the same Prelude
+/// part AOT embeds and the Cranelift host includes, so program-name
+/// normalization and banner termination are decided once.
+#[allow(dead_code, unexpected_cfgs)]
+mod cli_boundary {
+    include!("../../../Prelude/Job.rs");
+}
+
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -3710,22 +3718,15 @@ fn run_program_with_structs_at_stage_and_cli(
             | cli::Dispatch::Direct { .. }
             | cli::Dispatch::Invoke { .. }) => Some(dispatch),
             cli::Dispatch::Version(version) => {
-                sink.stdout.push_str(&version);
-                sink.stdout.push('\n');
+                sink.stdout.push_str(&cli_boundary::jet_cli_banner(&version));
                 return Ok(CtValue::Unit);
             }
             cli::Dispatch::Help(help) => {
-                sink.stdout.push_str(&help);
-                if !help.ends_with('\n') {
-                    sink.stdout.push('\n');
-                }
+                sink.stdout.push_str(&cli_boundary::jet_cli_banner(&help));
                 return Ok(CtValue::Unit);
             }
             cli::Dispatch::Error(error) => {
-                sink.stderr.push_str(&error);
-                if !error.ends_with('\n') {
-                    sink.stderr.push('\n');
-                }
+                sink.stderr.push_str(&cli_boundary::jet_cli_banner(&error));
                 sink.exit_code = Some(2);
                 return Ok(CtValue::Unit);
             }
