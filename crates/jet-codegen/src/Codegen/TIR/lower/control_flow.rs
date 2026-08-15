@@ -585,9 +585,15 @@ fn lower_if_cond_atom(
                         vec![prefix],
                     );
                 }
+                // The wire subject decides the owner. A user/anonymous enum may
+                // export the same tag (`Int`, `Text`, …), so the name-only
+                // binding emitter cannot safely recover DataTree ownership.
                 return (
                     TIfCond::IfLet {
-                        pattern: TPattern::binding(pattern.clone()),
+                        pattern: TPattern::arm(
+                            pattern.clone(),
+                            Some(Syntax::TYPE_DATA.to_string()),
+                        ),
                         subj,
                     },
                     Some((name.clone(), place, ty)),
