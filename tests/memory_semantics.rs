@@ -177,8 +177,23 @@ fn missing_memory_ledger_is_stable_e2112() {
 fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
     let root = common::unique_tmp("jet_memory_gc_feed");
     std::fs::create_dir_all(&root).unwrap();
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/memory/gc_cyclic.jet");
+    let source = root.join("gc.jet");
+    std::fs::write(
+        &source,
+        r#"#Policy(gc)
+
+fn promoted() => [Int] {
+    values :: [1, 2, 3]
+    return values
+}
+
+fn run() {
+    values :: promoted()
+    print(values[0])
+}
+"#,
+    )
+    .unwrap();
     let source = source.to_str().unwrap();
 
     let first = run(&root, &["run", source]);
@@ -187,6 +202,7 @@ fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
         "first GC run failed: {}",
         String::from_utf8_lossy(&first.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&first.stdout), "1\n");
     let ledger_path = root.join(".jet/memory/ledger-v1.jsonl");
     let first_ledger = std::fs::read_to_string(&ledger_path).unwrap();
     let first_rows = first_ledger.lines().count();
@@ -202,6 +218,7 @@ fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
         "second GC run failed: {}",
         String::from_utf8_lossy(&second.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&second.stdout), "1\n");
     let persisted = std::fs::read_to_string(&ledger_path).unwrap();
     assert_eq!(persisted.lines().count(), first_rows * 2);
 
