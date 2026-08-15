@@ -477,7 +477,15 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
     }
     assert_eq!(
         declared,
-        vec!["hangar import", "gc report", "env test", "perf run", "perf test", "perf bench"]
+        vec![
+            "inspect audit",
+            "hangar import",
+            "gc report",
+            "env test",
+            "perf run",
+            "perf test",
+            "perf bench",
+        ]
     );
 }
 

@@ -1395,7 +1395,10 @@ pub fn completions_for_program(
                     shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, args,
                 ));
             }
-            let commands = schema.commands.iter().map(|command| shell_single_quote(&command.name)).collect::<Vec<_>>().join(" ");
+            // The whole `_arguments` spec is already single-quoted below.
+            // Jet command words are checked identifiers; quoting each word
+            // again produces literal quote characters in zsh's candidate list.
+            let commands = schema.commands.iter().map(|command| command.name.as_str()).collect::<Vec<_>>().join(" ");
             let mut root_specs = zsh_standard_specs(schema.standard, schema.version.is_some());
             root_specs.extend(zsh_input_specs(&schema.inputs));
             root_specs.push(format!("    '1:command:({commands})'"));

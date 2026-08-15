@@ -78,7 +78,7 @@ Inspect saved data schema versions
 Preview or apply code changes
 .TP
 .B inspect audit
-Check dependencies for known vulnerabilities
+Inspect implicit copies, exercised memory witnesses, or dependencies
 .TP
 .B inspect sbom
 Create a software bill of materials
@@ -180,7 +180,7 @@ Merge Jet programs without losing code structure
 Run a program or project
 .TP
 .B jobs
-List project jobs
+List project #Job functions (<file.jet> -- <job>)
 .TP
 .B check
 Check code without creating a binary
@@ -216,13 +216,16 @@ Create a Jet project
 Format Jet source files
 .TP
 .B fix
-Apply safe automatic fixes
+Apply safe automatic fixes, including `fix memory`
+.TP
+.B audit
+Inspect implicit copies, exercised memory witnesses, or dependencies
 .TP
 .B lint
 Run optional code-quality checks
 .TP
 .B explain
-Explain a diagnostic code or build fact
+Explain a diagnostic code, build fact, or generic-module value
 .TP
 .B env
 Open the project development shell
@@ -408,6 +411,9 @@ with fmt: rewrite to the simplest ratified spelling
 .B --changed
 with fmt: format only VCS-changed .jet files (requires git)
 .TP
+.B --explicit-copies
+with fmt: materialize implicit read-view copies as `~`
+.TP
 .B --skipped
 with project parts: show modules omitted from automatic discovery
 .TP
@@ -425,6 +431,12 @@ with fetch: verify only, refuse network
 .TP
 .B --lock
 with fetch: lock a manifest-less script's inline deps instead of fetching a project
+.TP
+.B --read-only
+with shared-store enroll: grant read-only broker access
+.TP
+.B --fd
+with shared-store broker: inherited broker socket descriptor
 .TP
 .B -p
 with run/dev/debug/bench/check/build/jobs: pick a workspace member by name
@@ -499,7 +511,7 @@ with dev: interpret past unsupported features (no guarantees)
 with dev: force the tier-0 TIR interpreter
 .TP
 .B --trace-tiers
-with run/dev: print per-function Cranelift vs interpreter tier selection
+with run/dev: print per-function Cranelift vs interpreter tier selection; with test: print AOT marker
 .TP
 .B --restart
 with dev: always rerun from scratch after a save
@@ -512,6 +524,18 @@ with run/dev: re-run on dependency changes; --watch=off runs once
 .TP
 .B --project
 with repl: load package settings and imports from this directory
+.TP
+.B --protocol
+with notebook: use the bounded headless JSONL/script session
+.TP
+.B --headless
+with notebook: use the bounded headless session
+.TP
+.B --bind
+with notebook: bind the local HTTP client to this address
+.TP
+.B --token
+with notebook: require this bearer token for clients
 .TP
 .B --pure
 with eval: reject code with side effects
@@ -553,7 +577,7 @@ with build: copy generated Jet sources into build/generated/
 short form of --update-snapshots
 .TP
 .B --release
-with build/run: optimize for release
+with build/run/test: optimize for release
 .TP
 .B --profile
 with build/run: how hard to optimize: release, debug, ci, or a named optimization bundle

@@ -86,12 +86,6 @@ impl JetArgsSpec {
         let mut s = String::new();
         // usage line
         let prog = jet_args_source_program_name(&self.prog);
-        let has_opts = self.entries.iter().any(|e| {
-            matches!(
-                e,
-                JetArgKind::Flag { .. } | JetArgKind::Option { .. } | JetArgKind::Subcommand { .. }
-            )
-        }) || self.version.is_some();
         let positionals: Vec<&JetArgKind> = self
             .entries
             .iter()
@@ -105,9 +99,9 @@ impl JetArgsSpec {
                 s.push_str(name);
             }
         }
-        if has_opts {
-            s.push_str(" [options]");
-        }
+        // Every generated parser accepts `--help`, including a command with no
+        // declared values of its own, so every usage line has options.
+        s.push_str(" [options]");
         s.push('\n');
         if let Some(description) = &self.description {
             s.push('\n');

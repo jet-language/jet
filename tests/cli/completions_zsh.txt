@@ -11,7 +11,7 @@ commands=(
         'diff:Compare two Jet programs by meaning'
         'merge:Merge Jet programs without losing code structure'
         'run:Run a program or project'
-        'jobs:List project jobs'
+        'jobs:List project #Job functions (<file.jet> -- <job>)'
         'check:Check code without creating a binary'
         'test:Run tests'
         'prove:Create a proof report for code and tests'
@@ -23,9 +23,10 @@ commands=(
         'import:Convert supported source code into editable Jet'
         'new:Create a Jet project'
         'fmt:Format Jet source files'
-        'fix:Apply safe automatic fixes'
+        'fix:Apply safe automatic fixes, including `fix memory`'
+        'audit:Inspect implicit copies, exercised memory witnesses, or dependencies'
         'lint:Run optional code-quality checks'
-        'explain:Explain a diagnostic code or build fact'
+        'explain:Explain a diagnostic code, build fact, or generic-module value'
         'env:Open the project development shell'
         'shared-store:Manage the optional shared Hangar broker'
         'cache:Manage host-owned binary-cache bindings'
@@ -71,12 +72,15 @@ flags=(
         '--diff[with fmt --check\: also print unified diffs for each changed file]'
         '--simplify[with fmt\: rewrite to the simplest ratified spelling]'
         '--changed[with fmt\: format only VCS-changed .jet files (requires git)]'
+        '--explicit-copies[with fmt\: materialize implicit read-view copies as `~`]'
         '--skipped[with project parts\: show modules omitted from automatic discovery]'
         '--stdin-path[with fmt -\: path label used in diagnostics when reading from stdin]'
         '--small[with build/run\: favor a smaller binary]'
         '--output[with run\: run a named build output]'
         '--locked[with fetch\: verify only, refuse network]'
         '--lock[with fetch\: lock a manifest-less script'\''s inline deps instead of fetching a project]'
+        '--read-only[with shared-store enroll\: grant read-only broker access]'
+        '--fd[with shared-store broker\: inherited broker socket descriptor]'
         '-p[with run/dev/debug/bench/check/build/jobs\: pick a workspace member by name]'
         '--annotated[with new\: include commented example deps]'
         '--force[with publish\: bypass pre-publish gate (with warning)]'
@@ -101,11 +105,15 @@ flags=(
         '--edition[with fix\: apply edition migration rewrites --edition=<year>]'
         '--try-anyway[with dev\: interpret past unsupported features (no guarantees)]'
         '--interpret[with dev\: force the tier-0 TIR interpreter]'
-        '--trace-tiers[with run/dev\: print per-function Cranelift vs interpreter tier selection]'
+        '--trace-tiers[with run/dev\: print per-function Cranelift vs interpreter tier selection; with test\: print AOT marker]'
         '--restart[with dev\: always rerun from scratch after a save]'
         '--swap[with dev\: hot-swap compatible edits and restart after type changes]'
         '--watch[with run/dev\: re-run on dependency changes; --watch=off runs once]'
         '--project[with repl\: load package settings and imports from this directory]'
+        '--protocol[with notebook\: use the bounded headless JSONL/script session]'
+        '--headless[with notebook\: use the bounded headless session]'
+        '--bind[with notebook\: bind the local HTTP client to this address]'
+        '--token[with notebook\: require this bearer token for clients]'
         '--pure[with eval\: reject code with side effects]'
         '--freestanding[with build/run\: target a system without an operating system]'
         '--gate[with build/run/dev\: allow one audited gate as --gate name=allow]'
@@ -119,12 +127,11 @@ flags=(
         '--rust[with emit\: print generated Rust source]'
         '--emit-generated[with build\: copy generated Jet sources into build/generated/]'
         '-u[short form of --update-snapshots]'
-        '--release[with build/run\: optimize for release]'
+        '--release[with build/run/test\: optimize for release]'
         '--profile[with build/run\: how hard to optimize\: release, debug, ci, or a named optimization bundle]'
         '--set[with build/run\: set one declared package setting as key=value]'
         '--builder[with build\: select a previously bound remote builder]'
         '--a11y[with lint\: check roles, labels, and other accessibility basics]'
-flags="--attach --once --observe --gc-trace --structural --out --report --repo --json --kind --quiet --color --version --check --restore-role-files --diff --simplify --changed --skipped --stdin-path --small --output --locked --lock -p --annotated --force --no-sign --registry --pkg --clang --ar --from --to --message --before --spdx --cyclonedx --advisory-db --vendor-dir --sbom --verbose --online --fix --dry-run --edition --try-anyway --interpret --trace-tiers --restart --swap --watch --project --pure --freestanding --gate --target --env --preset --explain-partition --capabilities-json --update-snapshots --coverage --rust --emit-generated -u --release --profile --set --builder --a11y --scope --filter --shuffle --serial --show-default --iterations --time --seed --corpus --lens --facts --annotations --baseline --bootstrap --accept-regression --reason --yes -y --allow-net --deny-net --allow-fs --deny-fs --allow-io --deny-io --allow-db --deny-db --allow-time --deny-time --allow-rand --deny-rand --allow-env --deny-env --allow-exec --deny-exec --allow-log --deny-log --allow-gpu --deny-gpu"
         '--scope[with inspect gates/authority or trust grant\: choose a ledger or trust scope]'
         '--filter[with test/bench\: only run regions whose name contains --filter=<substr>]'
         '--shuffle[with test\: run tests in random (or --shuffle=<seed>) order]'
@@ -169,7 +176,7 @@ _describe -t commands 'command' commands
 elif (( CURRENT == 3 )); then
 case $words[2] in
             registry) _values 'action' 'publish:Publish the current package' 'yank:Stop new installs of a published version' 'keygen:Create a package-signing key' 'key:Manage the package-signing key' 'vendor:Copy dependencies into vendor/' ;;
-            inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:Show everything known about a file or symbol' 'guarantees:Show memory-safety guarantees by component' 'provenance:Read dependency provenance' 'semindex:Search the code index' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'unsafe:Review unsafe code and its safeguards' 'gates:Read the complete compile-time gate ledger' 'authority:Read rights-bearing gates from the ledger' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Check dependencies for known vulnerabilities' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'search:Search the local package catalog' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' 'facts:List every registered truth and its guard' ;;
+            inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:Show everything known about a file or symbol' 'guarantees:Show memory-safety guarantees by component' 'provenance:Read dependency provenance' 'semindex:Search the code index' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'unsafe:Review unsafe code and its safeguards' 'gates:Read the complete compile-time gate ledger' 'authority:Read rights-bearing gates from the ledger' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'search:Search the local package catalog' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' 'facts:List every registered truth and its guard' ;;
             hangar) _values 'action' 'verify:Check package-store integrity' 'repair:Repair a damaged Hangar object from a signed archive' 'copy:Copy a verified closure between local Hangars' 'import:Verify and import a signed Hangar archive' 'export:Export a signed Hangar closure' 'dump:Stream a signed Hangar archive' 'restore:Restore a signed Hangar archive from stdin' 'sign:Sign a Hangar object or archive' 'rollback:Restore an earlier package-store generation' 'generations:List package-store generations' 'du:Show disk use for each stored object' ;;
             project) _values 'action' 'parts:List loaded and skipped project modules' ;;
             self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'upgrade:Show how to install a newer Jet release' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' ;;
