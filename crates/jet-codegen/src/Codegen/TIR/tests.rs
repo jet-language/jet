@@ -35,12 +35,14 @@
     #[test]
     fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
         let span = crate::Diagnostics::Span::new(0, 0);
-        let fact_value = Expr::EnumLit {
-            type_name: "Maturity".to_string(),
-            variant: "Experimental".to_string(),
-            args: Vec::new(),
-            leading_dot: false,
+        let fact_value = Expr::ComptimeName {
+            name: "method_maturity".to_string(),
             span,
+            value: Some(crate::AST::CtValue::Enum {
+                type_name: "Maturity".to_string(),
+                variant: "Experimental".to_string(),
+                args: Vec::new(),
+            }),
         };
         let pattern = Pattern::Variant {
             variant: "Experimental".to_string(),
@@ -48,29 +50,25 @@
             leading_dot: true,
             span,
         };
-        let compiler_cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new());
         assert_eq!(
-            fold_typed_fact_enum_pattern(&compiler_cx, &fact_value, &pattern),
+            fold_typed_fact_enum_pattern(&fact_value, &pattern),
             Some(true)
         );
 
-        let source = "enum Maturity { Experimental Tested }";
-        let (tokens, diagnostics) = crate::Lexer::lex(source);
-        assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
-        let program = crate::Parser::parse(&tokens).expect("parse failed");
-        let user_cx = build_cx(&program, source, "test.jet");
+        let user_value = Expr::EnumLit {
+            type_name: "Maturity".to_string(),
+            variant: "Experimental".to_string(),
+            args: Vec::new(),
+            leading_dot: false,
+            span,
+        };
         assert!(
-            fold_typed_fact_enum_pattern(&user_cx, &fact_value, &pattern).is_none(),
+            fold_typed_fact_enum_pattern(&user_value, &pattern).is_none(),
             "a user enum must not be folded as a compiler fact"
         );
         assert!(
-            fold_typed_fact_enum_equality(
-                &user_cx,
-                crate::AST::BinOp::Eq,
-                &fact_value,
-                &fact_value,
-            )
-            .is_none(),
+            fold_typed_fact_enum_equality(crate::AST::BinOp::Eq, &user_value, &user_value)
+                .is_none(),
             "the binary route must preserve the same user-enum ownership wall"
         );
     }

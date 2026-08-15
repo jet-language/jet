@@ -63,7 +63,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // pattern can enter any engine.
         Expr::PatternTest {
             subject, pattern, ..
-        } if fold_typed_fact_enum_pattern(cx, subject, pattern).is_some() => true,
+        } if fold_typed_fact_enum_pattern(subject, pattern).is_some() => true,
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
         // Bool `matches!` (`TExprKind::PatternMatches`). Only user enums whose
@@ -82,12 +82,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         {
             expr_in_subset(subject, cx, locals)
         }
-        // D-FACT-ENUM-TIR: generated fact reads are already typed enum literals,
-        // not `ComptimeName` nodes for sema's earlier fold. The shared TIR fold
-        // turns the closed comparison into a Bool before either literal reaches
-        // an engine or the Rust emitter.
+        // D-FACT-ENUM-TIR: generated fact reads are typed comptime enum values.
+        // The shared TIR fold turns the closed comparison into a Bool before
+        // either value reaches an engine or the Rust/Web emitter.
         Expr::Binary(op, l, r, _)
-            if fold_typed_fact_enum_equality(cx, *op, l, r).is_some() => true,
+            if fold_typed_fact_enum_equality(*op, l, r).is_some() => true,
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
         Expr::CompareChain { operands, .. } => {

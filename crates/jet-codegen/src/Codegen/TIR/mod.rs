@@ -51,20 +51,19 @@ use crate::AST::{
 };
 use crate::Codegen::{mangle, mangle_path};
 
-/// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with its enum
-/// value before sema sees the generated body. The core fact enum metadata is
-/// the positive ownership proof; absence from `Cx::enum_variants` only excludes
-/// a user enum that reuses a core spelling.
+/// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with a
+/// `ComptimeName` carrying its enum value before sema sees the generated body.
+/// Canonical fact metadata proves the enum kind; the AST node proves this is a
+/// compiler-substituted fact rather than an ordinary user enum.
 fn compiler_owned_unit_enum(
     type_name: &str,
-    cx: &Cx,
 ) -> Option<
     std::collections::HashMap<
         String,
         (crate::Diagnostics::Span, crate::AST::VariantPayload),
     >,
 > {
-    if is_eval_fragment() || cx.enum_variants.contains_key(type_name) {
+    if is_eval_fragment() {
         return None;
     }
     crate::Sema::core_fact_kind_variants(type_name)
@@ -92,11 +91,26 @@ fn typed_unit_enum_value(expr: &Expr) -> Option<(&str, &str)> {
     }
 }
 
+fn compiler_fact_enum_value(expr: &Expr) -> Option<(&str, &str)> {
+    match expr {
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => compiler_fact_enum_value(inner),
+        Expr::ComptimeName {
+            value:
+                Some(CtValue::Enum {
+                    type_name,
+                    variant,
+                    args,
+                }),
+            ..
+        } if args.is_empty() => Some((type_name, variant)),
+        _ => None,
+    }
+}
+
 /// Fold equality between compiler-owned fact enum values before any engine or
 /// Rust emission sees them. The caller must use this predicate as its coverage
 /// proof and its lowering decision so a fact cannot re-enter runtime dispatch.
 pub(crate) fn fold_typed_fact_enum_equality(
-    cx: &Cx,
     op: BinOp,
     lhs: &Expr,
     rhs: &Expr,
@@ -104,12 +118,17 @@ pub(crate) fn fold_typed_fact_enum_equality(
     if !matches!(op, BinOp::Eq | BinOp::Ne) {
         return None;
     }
+    if compiler_fact_enum_value(lhs).is_none()
+        && compiler_fact_enum_value(rhs).is_none()
+    {
+        return None;
+    }
     let (left_type, left_variant) = typed_unit_enum_value(lhs)?;
     let (right_type, right_variant) = typed_unit_enum_value(rhs)?;
     if left_type != right_type {
         return None;
     }
-    let variants = compiler_owned_unit_enum(left_type, cx)?;
+    let variants = compiler_owned_unit_enum(left_type)?;
     let is_unit = |variant: &str| {
         matches!(
             variants.get(variant),
@@ -129,11 +148,10 @@ pub(crate) fn fold_typed_fact_enum_equality(
 /// The parser represents `value == .Variant` as a pattern test rather than a
 /// binary expression. Fold that generated fact shape at the same typed boundary.
 pub(crate) fn fold_typed_fact_enum_pattern(
-    cx: &Cx,
     subject: &Expr,
     pattern: &Pattern,
 ) -> Option<bool> {
-    let (type_name, value_variant) = typed_unit_enum_value(subject)?;
+    let (type_name, value_variant) = compiler_fact_enum_value(subject)?;
     let Pattern::Variant {
         variant,
         bindings,
@@ -145,7 +163,7 @@ pub(crate) fn fold_typed_fact_enum_pattern(
     if !bindings.is_empty() {
         return None;
     }
-    let variants = compiler_owned_unit_enum(type_name, cx)?;
+    let variants = compiler_owned_unit_enum(type_name)?;
     let is_unit = |variant: &str| {
         matches!(
             variants.get(variant),

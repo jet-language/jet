@@ -1919,7 +1919,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     } = e
     {
         if let Some(value) =
-            crate::Codegen::TIR::fold_typed_fact_enum_pattern(cx, subject, pattern)
+            crate::Codegen::TIR::fold_typed_fact_enum_pattern(subject, pattern)
         {
             return TExpr {
                 ty: Type::Bool,
@@ -2305,13 +2305,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Binary(op, l, r, span) => {
-            // D-FACT-ENUM-TIR: derive expansion has already folded the fact
-            // read into an enum literal, but sema's earlier ComptimeName-only
-            // equality fold cannot see that generated shape. Fold it here at
-            // the typed boundary; compiler-only fact enums never become a
+            // D-FACT-ENUM-TIR: derive expansion has already substituted the
+            // fact read with a typed comptime enum value. Fold it here at the
+            // shared typed boundary; compiler-only fact enums never become a
             // runtime TExprKind::EnumLit.
             if let Some(value) =
-                crate::Codegen::TIR::fold_typed_fact_enum_equality(cx, *op, l, r)
+                crate::Codegen::TIR::fold_typed_fact_enum_equality(*op, l, r)
             {
                 return TExpr {
                     ty: Type::Bool,
