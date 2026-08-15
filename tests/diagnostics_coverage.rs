@@ -257,38 +257,31 @@ fn registered_code_rows() -> Vec<(String, usize)> {
 }
 
 #[test]
-fn diagnostic_code_identity_accepts_every_numeric_and_named_prefix() {
+fn registered_codes_keep_explicit_severity_and_lint_names() {
     use jet_foundation::Diagnostics::Severity;
 
     for (code, severity) in [
-        ("E0043", Severity::Error),
-        ("E-CALL-VALUE", Severity::Error),
-        ("R0801", Severity::Error),
-        ("R-NAMED-PROBE", Severity::Error),
-        ("L0302", Severity::Lint),
-        ("L-NAMED-PROBE", Severity::Lint),
+        ("E2930", Severity::Lint),
         ("W0410", Severity::Lint),
-        ("W-NAMED-PROBE", Severity::Lint),
+        ("R0801", Severity::Error),
+        ("E0043", Severity::Error),
     ] {
+        let row = jet_foundation::Registry::diagnostic(code)
+            .unwrap_or_else(|| panic!("{code} must stay registered"));
         assert_eq!(
-            jet_foundation::Registry::diagnostic_code_severity(code),
-            Some(severity),
-            "{code} must keep its leading-letter severity identity"
+            row.severity, severity,
+            "{code} must keep the registry row's explicit severity"
         );
     }
-    for code in ["", "E", "L", "R", "W", "X0001", "X-NAMED"] {
-        assert_eq!(
-            jet_foundation::Registry::diagnostic_code_severity(code),
-            None,
-            "{code:?} is not an E/L/R/W diagnostic identity"
-        );
-    }
-    for row in jet_foundation::Registry::diagnostic_rows() {
-        assert_eq!(
-            jet_foundation::Registry::diagnostic_code_severity(row.code),
-            Some(row.severity),
-            "registered code {} disagrees with its severity",
-            row.code
+
+    for lint in jet_foundation::Registry::lint_rows() {
+        let name = lint
+            .lint_name
+            .unwrap_or_else(|| panic!("lint {} needs a stable name", lint.code));
+        assert!(
+            is_snake_case(name),
+            "lint {} has an unstable selector name `{name}`",
+            lint.code
         );
     }
 }

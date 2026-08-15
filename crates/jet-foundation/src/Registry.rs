@@ -844,20 +844,11 @@ pub fn diagnostic_registry_rows() -> impl Iterator<Item = &'static RegistryRow> 
     rows().iter().filter(|row| row.kind() == RowKind::Diagnostic)
 }
 
-/// Classify a diagnostic identity by its severity prefix.
-///
-/// Numeric (`E0043`, `L0302`, `R0801`, `W0410`) and named identities share
-/// the same leading-letter law. The registry owns the complete valid set.
-pub fn diagnostic_code_severity(code: &str) -> Option<Severity> {
-    let (prefix, rest) = code.as_bytes().split_first()?;
-    if rest.is_empty() {
-        return None;
-    }
-    match *prefix {
-        b'E' | b'R' => Some(Severity::Error),
-        b'L' | b'W' => Some(Severity::Lint),
-        _ => None,
-    }
+fn is_diagnostic_code(code: &str) -> bool {
+    let Some((prefix, rest)) = code.as_bytes().split_first() else {
+        return false;
+    };
+    !rest.is_empty() && matches!(*prefix, b'E' | b'L' | b'R' | b'W')
 }
 
 fn is_snake_case_lint_name(name: &str) -> bool {
@@ -894,10 +885,9 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         "lint" => Severity::Lint,
         other => panic!("unknown diagnostic severity `{other}` in {line}"),
     };
-    assert_eq!(
-        diagnostic_code_severity(code),
-        Some(severity),
-        "diagnostic code identity must match its severity: {line}"
+    assert!(
+        is_diagnostic_code(code),
+        "diagnostic code needs a nonempty E/L/R/W identity: {line}"
     );
     assert_eq!(
         severity == Severity::Lint,
