@@ -3086,6 +3086,34 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
+    out.push_str(
+        "mod jet_std {\n\
+         \x20   pub fn jet_int_to_string(value: super::JetWasmInt) -> String { value.to_string() }\n\
+         }\n\
+         macro_rules! jet_web_scalar_display {\n\
+         \x20   ($($ty:ty),+ $(,)?) => { $(\n\
+         \x20       impl JetDisplay for $ty {\n\
+         \x20           fn jet_display(&self) -> String { self.to_string() }\n\
+         \x20       }\n\
+         \x20   )+ };\n\
+         }\n\
+         jet_web_scalar_display!(i8, i16, i32, i64, u8, u16, u32, u64, bool, char);\n\
+         impl JetDisplay for f32 {\n\
+         \x20   fn jet_display(&self) -> String { format!(\"{:?}\", self) }\n\
+         }\n\
+         impl JetDisplay for f64 {\n\
+         \x20   fn jet_display(&self) -> String { format!(\"{:?}\", self) }\n\
+         }\n\
+         impl JetDisplay for String {\n\
+         \x20   fn jet_display(&self) -> String { self.clone() }\n\
+         }\n\
+         impl JetDisplay for str {\n\
+         \x20   fn jet_display(&self) -> String { self.to_string() }\n\
+         }\n\
+         impl JetDisplay for JetWasmInt {\n\
+         \x20   fn jet_display(&self) -> String { self.to_string() }\n\
+         }\n\n",
+    );
     if super::core_usage_matches(&bundle.used_core, &["core.reflect"]) {
         out.push_str(
             "#[derive(Clone)]\n\
