@@ -451,38 +451,121 @@ impl<'a> Checker<'a> {
     }
 
     fn fold_comptime_struct_field(&mut self, expr: &mut Expr) -> Option<Type> {
-        let Expr::Field(inner, member, span) = expr else {
-            return None;
-        };
-        if Syntax::fact_read_kind(member).is_some() {
-            return None;
-        }
-        let member = member.clone();
-        let span = *span;
-        let Expr::ComptimeName { name, value, .. } = inner.as_mut() else {
-            return None;
-        };
-        if value.is_none() {
-            *value = self.current_ct_globals().get(name).cloned();
-        }
-        let (projected, declared_ty) = match value.as_ref()? {
-            crate::Comptime::CtValue::Struct { type_name, fields } => {
-                let projected = fields
-                    .iter()
-                    .find(|(field, _)| field == &member)
-                    .map(|(_, value)| value)
-                    .cloned()?;
-                (projected, core_struct_field(type_name, &member))
+        match expr {
+            Expr::Field(inner, member, span) => {
+                if Syntax::fact_read_kind(member).is_some() {
+                    return None;
+                }
+                self.fold_comptime_struct_field(inner);
+                let member = member.clone();
+                let span = *span;
+                let Expr::ComptimeName { name, value, .. } = inner.as_mut() else {
+                    return None;
+                };
+                if value.is_none() {
+                    *value = self.current_ct_globals().get(name).cloned();
+                }
+                let (projected, declared_ty) = match value.as_ref()? {
+                    crate::Comptime::CtValue::Struct { type_name, fields } => {
+                        let projected = fields
+                            .iter()
+                            .find(|(field, _)| field == &member)
+                            .map(|(_, value)| value)
+                            .cloned()?;
+                        (projected, core_struct_field(type_name, &member))
+                    }
+                    _ => return None,
+                };
+                let ty = declared_ty.unwrap_or_else(|| projected.jet_type());
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.fact.{}", span.start),
+                    span,
+                    value: Some(projected),
+                };
+                Some(ty)
             }
-            _ => return None,
-        };
-        let ty = declared_ty.unwrap_or_else(|| projected.jet_type());
-        *expr = Expr::ComptimeName {
-            name: format!("\0jet.fact.{}", span.start),
-            span,
-            value: Some(projected),
-        };
-        Some(ty)
+            Expr::Index {
+                base,
+                index,
+                span,
+                ..
+            } => {
+                self.fold_comptime_struct_field(base);
+                let base_ty = self.infer(base);
+                let Expr::ComptimeName { name, value, .. } = base.as_mut() else {
+                    return None;
+                };
+                if value.is_none() {
+                    *value = self.current_ct_globals().get(name).cloned();
+                }
+                let index = match index.as_ref() {
+                    Expr::Int(value, ..) => usize::try_from(*value).ok(),
+                    Expr::ComptimeName {
+                        value: Some(crate::Comptime::CtValue::Int(value)),
+                        ..
+                    } => usize::try_from(*value).ok(),
+                    _ => None,
+                }?;
+                let (projected, declared_ty) = match value.as_ref()? {
+                    crate::Comptime::CtValue::List(values) => {
+                        let projected = values.get(index)?.clone();
+                        let declared_ty = match base_ty {
+                            Some(Type::List(inner)) => Some(*inner),
+                            Some(Type::FixedList { elem, .. }) => Some(*elem),
+                            _ => None,
+                        };
+                        (projected, declared_ty)
+                    }
+                    crate::Comptime::CtValue::Bytes(values) => {
+                        let projected = crate::Comptime::CtValue::Int(i64::from(*values.get(index)?));
+                        let declared_ty = Some(Type::IntN {
+                            signed: false,
+                            bits: 8,
+                        });
+                        (projected, declared_ty)
+                    }
+                    _ => return None,
+                };
+                let ty = declared_ty.unwrap_or_else(|| projected.jet_type());
+                let span = *span;
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.fact.{}", span.start),
+                    span,
+                    value: Some(projected),
+                };
+                Some(ty)
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                args,
+                ..
+            } if method == "len" && args.is_empty() => {
+                self.fold_comptime_struct_field(receiver);
+                let Expr::ComptimeName { name, value, .. } = receiver.as_mut() else {
+                    return None;
+                };
+                if value.is_none() {
+                    *value = self.current_ct_globals().get(name).cloned();
+                }
+                let len = match value.as_ref()? {
+                    crate::Comptime::CtValue::List(values) => values.len(),
+                    crate::Comptime::CtValue::Bytes(values) => values.len(),
+                    crate::Comptime::CtValue::Map(values) => values.len(),
+                    crate::Comptime::CtValue::Str(value) => value.chars().count(),
+                    _ => return None,
+                };
+                let span = *method_span;
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.fact.{}", span.start),
+                    span,
+                    value: Some(crate::Comptime::CtValue::Int(i64::try_from(len).ok()?)),
+                };
+                Some(Type::Int)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn default_err_value(
@@ -1081,6 +1164,11 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
+        if matches!(e, Expr::Field(..) | Expr::Index { .. } | Expr::MethodCall { .. }) {
+            if let Some(ty) = self.fold_comptime_struct_field(e) {
+                return Some(ty);
+            }
+        }
         // D-QUANTITY-CONVERT1=B: destination-owned exact conversion is
         // fallible at runtime; the explicit `_rounded` spelling carries the
         // ratified mode and destination decimal precision. Codegen emits these
@@ -2813,9 +2901,6 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(result) = self.fold_fact_read(e) {
                     return result;
-                }
-                if let Some(ty) = self.fold_comptime_struct_field(e) {
-                    return Some(ty);
                 }
                 let Expr::Field(inner, member, _) = e else {
                     unreachable!("matched Field above")
