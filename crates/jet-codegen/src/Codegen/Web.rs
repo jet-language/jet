@@ -2,8 +2,9 @@
 
 use crate::jet_generated_format as jet_format;
 use super::{
-    build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, mangle, mangle_path, Cx, TIR, SOURCE_MAP_MARKER,
+    build_cx_items, bundle_extern_funcs, escape_rust_str, mangle, mangle_path,
+    populate_cx_from_bundle, register_foreign_enum_variants,
+    update_cloneability_with_foreign_types, Cx, TIR, SOURCE_MAP_MARKER,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
@@ -867,6 +868,14 @@ fn web_wasm_expr_supported(
             }
         }),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.reflect" && method == "of" && args.len() == 1 => {
+            web_wasm_expr_supported(&args[0], bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::CoreCall { module, method, args, .. }
             if module == "core.time" && method == "instant" && args.is_empty() => true,
         TIR::TExprKind::HandleMethod { recv, op, args }
@@ -1400,6 +1409,12 @@ fn web_wasm_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
             kind == "Instant" && argc == 0 && matches!(method.as_str(), "elapsed_millis" | "elapsed")
         }
+        TIR::THandleOp::ReflectValueTypeName
+        | TIR::THandleOp::ReflectValuePath
+        | TIR::THandleOp::ReflectValueDisplay
+        | TIR::THandleOp::ReflectValueFields
+        | TIR::THandleOp::ReflectFieldName
+        | TIR::THandleOp::ReflectFieldValue => argc == 0,
         _ => false,
     }
 }
@@ -2823,8 +2838,111 @@ fn web_stmts_use_uninit(stmts: &[TIR::TStmt]) -> bool {
             arms.iter().any(|(_, _, body)| web_stmts_use_uninit(body))
                 || web_stmts_use_uninit(else_body)
         }
+
         _ => false,
     })
+}
+fn wasm_reflect_field_type(cx: &Cx, owner_ty: &Type, declared: &Type) -> Type {
+    let Type::Apply { name, args } = owner_ty else {
+        return declared.clone();
+    };
+    let Some(params) = cx.struct_type_param_order.get(name) else {
+        return declared.clone();
+    };
+    let substitutions = params
+        .iter()
+        .zip(args)
+        .map(|(param, arg)| (param.clone(), arg.clone()))
+        .collect();
+    crate::Generics::substitute_type(declared, &substitutions)
+}
+
+fn wasm_reflect_value(cx: &Cx, ty: &Type, value: &str) -> String {
+    let type_name = ty.leaf_name();
+    let path = cx.reflect_path(ty);
+    let rows = match ty {
+        Type::Named(name) | Type::Apply { name, .. } => cx.reflection_fields.get(name),
+        _ => None,
+    };
+    let Some(rows) = rows.filter(|rows| !rows.is_empty()) else {
+        return format!(
+            "JetReflectValue {{ type_name: {}.to_string(), path: {}.to_string(), display: format!(\"{{}}\", ({})), fields: Vec::new() }}",
+            escape_rust_str(&type_name),
+            escape_rust_str(&path),
+            value,
+        );
+    };
+    let fields = rows
+        .iter()
+        .map(|field| {
+            let field_ty = wasm_reflect_field_type(cx, ty, &field.ty);
+            let field_value = format!("({value}).{}", mangle(&field.name));
+            format!(
+                "JetReflectField {{ name: {}.to_string(), value: {} }}",
+                escape_rust_str(&field.name),
+                wasm_reflect_value(cx, &field_ty, &field_value),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "JetReflectValue {{ type_name: {}.to_string(), path: {}.to_string(), display: ({}).jet_display(), fields: vec![{}] }}",
+        escape_rust_str(&type_name),
+        escape_rust_str(&path),
+        value,
+        fields,
+    )
+}
+
+fn emit_wasm_display_impls(items: &[Item], cx: &Cx, out: &mut String) {
+    for item in items {
+        match item {
+            Item::Struct(def) if def.type_params.is_empty() => {
+                for block in &def.trait_impls {
+                    if block.trait_name == Syntax::TRAIT_DISPLAY {
+                        super::Items::emit_trait_impl(
+                            cx,
+                            &def.name,
+                            &def.type_params,
+                            block,
+                            Some(def),
+                            out,
+                        );
+                    }
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    emit_wasm_display_impls(body, cx, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn emit_wasm_reflection_impls(items: &[Item], cx: &Cx, out: &mut String) {
+    for item in items {
+        match item {
+            Item::Struct(def)
+                if def.type_params.is_empty() && cx.has_display_type(&def.name) =>
+            {
+                let ty = Type::Named(def.name.clone());
+                let value = wasm_reflect_value(cx, &ty, "self");
+                out.push_str(&format!(
+                    "impl JetWebReflect for {} {{\n    fn jet_web_reflect(&self) -> JetReflectValue {{ {} }}\n}}\n\n",
+                    mangle_path(&def.name),
+                    value,
+                ));
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    emit_wasm_reflection_impls(body, cx, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn emit_wasm_uninit_storage(out: &mut String) {
@@ -2910,6 +3028,30 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
+    if super::core_usage_matches(&bundle.used_core, &["core.reflect"]) {
+        out.push_str(
+            "#[derive(Clone)]\n\
+             struct JetReflectValue { type_name: String, path: String, display: String, fields: Vec<JetReflectField> }\n\
+             #[derive(Clone)]\n\
+             struct JetReflectField { name: String, value: JetReflectValue }\n\
+             impl JetReflectValue {\n\
+             \x20   fn type_name(&self) -> String { self.type_name.clone() }\n\
+             \x20   fn path(&self) -> String { self.path.clone() }\n\
+             \x20   fn display(&self) -> String { self.display.clone() }\n\
+             \x20   fn fields(&self) -> Vec<JetReflectField> { self.fields.clone() }\n\
+             }\n\
+             impl JetReflectField {\n\
+             \x20   fn name(&self) -> String { self.name.clone() }\n\
+             \x20   fn value(&self) -> JetReflectValue { self.value.clone() }\n\
+             }\n\
+             trait JetWebReflect { fn jet_web_reflect(&self) -> JetReflectValue; }\n\
+             impl JetWebReflect for JetWasmInt {\n\
+             \x20   fn jet_web_reflect(&self) -> JetReflectValue {\n\
+             \x20       JetReflectValue { type_name: \"Int\".to_string(), path: \"Int\".to_string(), display: format!(\"{}\", self), fields: Vec::new() }\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
     // I9: Wasm receives the same generated active-runtime-row projection as
     // native standalone AOT. The adapter owns no diagnostic table.
     super::push_embedded_outcome(&mut out);
@@ -3243,6 +3385,10 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut cx, bundle, module_index);
+        if super::core_usage_matches(&bundle.used_core, &["core.reflect"]) {
+            emit_wasm_display_impls(&module.items, &cx, &mut out);
+            emit_wasm_reflection_impls(&module.items, &cx, &mut out);
+        }
         emit_wasm_computed_methods(&module.items, &cx, &mut out);
         // D-ERR-CONV: web conversion calls use the same TIR-owned conversion
         // bodies as native emission. The web expression emitter only marshals
@@ -4875,6 +5021,17 @@ fn wasm_emit_expr(
             method,
             args,
             ..
+        } if module == "core.reflect" && method == "of" && args.len() == 1 => {
+            format!(
+                "({}).jet_web_reflect()",
+                wasm_emit_expr(&args[0], funcs, file_prefix, reconstructions)?
+            )
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
         } if module == "core.time" && method == "instant" && args.is_empty() => {
             "jet_time_monotonic_now_ns()".to_string()
         }
@@ -4915,6 +5072,12 @@ fn wasm_emit_expr(
                     if kind == "Instant" && method == "elapsed" => {
                         format!("jet_time_monotonic_now_ns().saturating_sub({recv})")
                     }
+                TIR::THandleOp::ReflectValueTypeName => format!("({recv}).type_name()"),
+                TIR::THandleOp::ReflectValuePath => format!("({recv}).path()"),
+                TIR::THandleOp::ReflectValueDisplay => format!("({recv}).display()"),
+                TIR::THandleOp::ReflectValueFields => format!("({recv}).fields()"),
+                TIR::THandleOp::ReflectFieldName => format!("({recv}).name()"),
+                TIR::THandleOp::ReflectFieldValue => format!("({recv}).value()"),
                 TIR::THandleOp::TaskJoin if args.is_empty() => {
                     format!("jet_task_join({recv})")
                 }
