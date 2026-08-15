@@ -35,12 +35,29 @@ pub struct FileIdentity {
 }
 
 impl FileIdentity {
+    /// A regular file's identity includes its length and mtime: its bytes were
+    /// read from the opened handle, so drift in either means the snapshot no
+    /// longer describes what was read.
+    ///
+    /// A directory's length and mtime are *not* its identity. Both change
+    /// whenever any entry is created or removed inside it, which is exactly
+    /// what legitimate writers do below an authority root: the running command
+    /// creating `build/` or `.jet/perf/reports/`, a sibling process working in
+    /// a shared parent directory. A durability check that cannot tell this
+    /// process from an attacker is not a durability check, so a directory is
+    /// identified by the object itself — kind plus device and inode.
+    ///
+    /// That keeps the attack this resolver exists to stop. [`AuthorityResolver::open`]
+    /// compares an identity taken by path against one taken from the
+    /// `O_NOFOLLOW` handle; a path swapped between those two observations
+    /// yields a different inode and is still refused. What is lost is only a
+    /// "the entry list moved" signal that never was a guarantee — mtime has
+    /// coarse granularity and misses replace-in-place entirely. A caller that
+    /// genuinely needs it must compare entry sets explicitly.
+    ///
+    /// Where no stable device/inode is available the content fields stay in
+    /// place, because then they are the only identity there is.
     fn from_metadata(metadata: &Metadata, kind: AuthorityKind) -> Self {
-        let modified_ns = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos());
         #[cfg(unix)]
         let (device, inode) = {
             use std::os::unix::fs::MetadataExt;
@@ -48,9 +65,20 @@ impl FileIdentity {
         };
         #[cfg(not(unix))]
         let (device, inode) = (None, None);
+        let pinned_by_object =
+            kind == AuthorityKind::Directory && device.is_some() && inode.is_some();
+        let modified_ns = if pinned_by_object {
+            None
+        } else {
+            metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos())
+        };
         Self {
             kind,
-            length: metadata.len(),
+            length: if pinned_by_object { 0 } else { metadata.len() },
             modified_ns,
             device,
             inode,

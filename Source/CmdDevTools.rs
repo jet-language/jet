@@ -2916,7 +2916,27 @@ pub(crate) struct BenchRunOpts {
 const BENCH_PROFILE_LABEL: &str = "release";
 
 fn bench_path_label(path: &Path) -> String {
-    let mut label = path.to_string_lossy().replace('\\', "/");
+    // `resolve_source_path` (Source/main.rs) hands a single-file bench target
+    // to `run_bench` as the *canonical* authority path since the fail-closed
+    // authority resolver landed, so `path` arrives absolute even when the user
+    // typed `bench.jet`. The bench label is the display identity of the region
+    // (`== <file> ==`, the human line, and the JSON `name`/`file` fields), so
+    // it names the file the way it was addressed: relative to the working
+    // directory whenever it lives there. A target outside the working
+    // directory keeps its absolute spelling — there is no shorter honest name.
+    // `getcwd` and the resolver's `canonicalize` both yield a symlink-free
+    // absolute path, so one comparison is enough.
+    let mut display = path;
+    if path.is_absolute() {
+        if let Ok(working) = std::env::current_dir() {
+            if let Ok(relative) = path.strip_prefix(&working) {
+                if !relative.as_os_str().is_empty() {
+                    display = relative;
+                }
+            }
+        }
+    }
+    let mut label = display.to_string_lossy().replace('\\', "/");
     while let Some(rest) = label.strip_prefix("./") {
         label = rest.to_string();
     }
