@@ -1656,7 +1656,7 @@ pub(crate) fn run_explain(
     }
     if let Some(key) = jet::Policy::PolicyKey::parse(code.trim_start_matches('@')) {
         if fact_file.is_some() {
-            run_explain_policy(key, fact_file, mode, profile, setting_overrides);
+            run_explain_policy(key, fact_file, mode);
             return;
         }
     }
@@ -1686,21 +1686,29 @@ fn explain_bundle(
     fact_file: Option<&str>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> jet::AST::ProgramBundle {
+) -> jet_foundation::Facts::BuildFactSnapshot {
     let file = explain_source_file(fact_file);
-    let mut bundle = jet::Loader::load_entry(file.to_string_lossy().as_ref()).unwrap_or_else(|diags| {
+    jet::Driver::query_build_facts(
+        file.to_string_lossy().as_ref(),
+        profile,
+        setting_overrides,
+    )
+    .unwrap_or_else(|diags| {
         for diagnostic in diags {
             eprintln!("{}", diagnostic.what);
         }
         exit(ExitCodes::USER_ERROR);
-    });
-    if let Err(diags) = jet::Driver::seed_build_facts(&mut bundle, profile, false, setting_overrides) {
+    })
+}
+
+fn explain_policy_bundle(fact_file: Option<&str>) -> jet::AST::ProgramBundle {
+    let file = explain_source_file(fact_file);
+    jet::Loader::load_entry(file.to_string_lossy().as_ref()).unwrap_or_else(|diags| {
         for diagnostic in diags {
             eprintln!("{}", diagnostic.what);
         }
         exit(ExitCodes::USER_ERROR);
-    }
-    bundle
+    })
 }
 
 fn print_explanation(explanation: &jet::Explain::Explanation, mode: OutputMode) {
@@ -1735,8 +1743,8 @@ fn run_explain_fact(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) {
-    let bundle = explain_bundle(fact_file, profile, setting_overrides);
-    let Some(fact) = bundle.build_facts.contribution(name) else {
+    let build_facts = explain_bundle(fact_file, profile, setting_overrides);
+    let Some(fact) = build_facts.contribution(name) else {
         if let Some(key) = name.strip_prefix("Build.Settings.") {
             crate::cli_error!(@full "E0302", format!("`build.settings.{key}` is undeclared"), "settings are declared in the package manifest", format!("add `{key}: Type = default` to `package.jet`"));
         } else {
@@ -1760,10 +1768,8 @@ fn run_explain_policy(
     key: jet::Policy::PolicyKey,
     fact_file: Option<&str>,
     mode: OutputMode,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
 ) {
-    let bundle = explain_bundle(fact_file, profile, setting_overrides);
+    let bundle = explain_policy_bundle(fact_file);
     let declarations = bundle
         .modules
         .iter()

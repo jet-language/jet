@@ -1326,6 +1326,39 @@ pub fn seed_build_facts_with_contributions(
     setting_overrides: &BTreeMap<String, String>,
     computed_contributions: &[jet_foundation::Policy::FactContribution],
 ) -> Result<(), Vec<Diagnostic>> {
+    let stamp = build_stamp_for_facts(&bundle.project_root, locked)?;
+    seed_build_facts_from_stamp(
+        bundle,
+        profile,
+        setting_overrides,
+        computed_contributions,
+        &stamp,
+    )
+}
+
+fn build_stamp_for_facts(
+    project_root: &std::path::Path,
+    locked: bool,
+) -> Result<jet_foundation::Facts::BuildStamp, Vec<Diagnostic>> {
+    crate::Lock::build_stamp(project_root, locked).map_err(|error| {
+        vec![Diagnostic::error(
+            "E3512",
+            "the build provenance stamp is unavailable".to_string(),
+            error,
+            "run an unlocked build to create the lock stamp, then rerun with `--locked`"
+                .to_string(),
+            None,
+        )]
+    })
+}
+
+fn seed_build_facts_from_stamp(
+    bundle: &mut crate::AST::ProgramBundle,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    computed_contributions: &[jet_foundation::Policy::FactContribution],
+    stamp: &jet_foundation::Facts::BuildStamp,
+) -> Result<(), Vec<Diagnostic>> {
     let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
         None => None,
         Some(Ok(facts)) => Some(facts),
@@ -1358,16 +1391,6 @@ pub fn seed_build_facts_with_contributions(
         .as_ref()
         .and_then(|facts| facts.version.clone())
         .unwrap_or_else(|| "0.0.0".to_string());
-    let stamp = crate::Lock::build_stamp(&bundle.project_root, locked).map_err(|error| {
-        vec![Diagnostic::error(
-            "E3512",
-            "the build provenance stamp is unavailable".to_string(),
-            error,
-            "run an unlocked build to create the lock stamp, then rerun with `--locked`"
-                .to_string(),
-            None,
-        )]
-    })?;
     let profile_key = jet_foundation::Policy::FactKey::with_default_source(
         "Build.Profile",
         jet_foundation::Policy::FactValue::Text("dev".to_string()),
@@ -1596,7 +1619,15 @@ pub fn seed_build_facts_with_contributions(
             .keys()
             .next()
             .cloned()
-            .or_else(|| computed_contributions.first().map(|contribution| contribution.key.clone()))
+            .or_else(|| {
+                computed_contributions.first().map(|contribution| {
+                    contribution
+                        .key
+                        .strip_prefix("Build.Settings.")
+                        .unwrap_or(&contribution.key)
+                        .to_string()
+                })
+            })
             .unwrap_or_else(|| "<unknown>".to_string());
         return Err(vec![undeclared_setting_diagnostic(
             &key,
@@ -1609,7 +1640,7 @@ pub fn seed_build_facts_with_contributions(
         package_version,
         os: bundle.active_os,
         profile: resolved_profile,
-        stamp,
+        stamp: stamp.clone(),
         contributions,
         settings,
         setting_provenance,
@@ -1721,68 +1752,6 @@ fn resolve_build_fact(
                 None,
             )]
         })
-}
-
-fn validate_build_contributions(
-    bundle: &crate::AST::ProgramBundle,
-    contributions: &[jet_foundation::Policy::FactContribution],
-) -> Result<(), Vec<Diagnostic>> {
-    if contributions.is_empty() {
-        return Ok(());
-    }
-    let facts = match crate::Package::PackageFacts::load(&bundle.project_root) {
-        Some(Ok(facts)) => facts,
-        Some(Err(error)) => {
-            return Err(vec![Diagnostic::error(
-                "E1206",
-                "package manifest is not valid".to_string(),
-                error.to_string(),
-                "fix `package.jet` before compiling the package".to_string(),
-                None,
-            )]);
-        }
-        None => {
-            let declaration_site = bundle
-                .project_root
-                .join(crate::Syntax::PACKAGE_FILE)
-                .display()
-                .to_string();
-            return Err(vec![undeclared_setting_diagnostic(
-                contributions[0].key.strip_prefix("Build.Settings.").unwrap_or(&contributions[0].key),
-                "the package has no `settings:` declaration",
-                &declaration_site,
-            )]);
-        }
-    };
-    let enum_types = fieldless_setting_enums(bundle);
-    let mut by_key = BTreeMap::<String, Vec<jet_foundation::Policy::FactContribution>>::new();
-    for contribution in contributions {
-        let Some(key) = contribution.key.strip_prefix("Build.Settings.") else {
-            return Err(vec![undeclared_setting_diagnostic(
-                &contribution.key,
-                "`fn build` can contribute only to a declared setting",
-                &facts.origin,
-            )]);
-        };
-        let Some(declaration) = facts.settings.get(key) else {
-            return Err(vec![undeclared_setting_diagnostic(
-                key,
-                "the `fn build` contribution names no declaration in `package.jet`",
-                &facts.origin,
-            )]);
-        };
-        let _ = setting_value_from_fact(key, &declaration.ty, &contribution.value, &enum_types)?;
-        by_key
-            .entry(contribution.key.clone())
-            .or_default()
-            .push(contribution.clone());
-    }
-    for (key, values) in by_key {
-        // Computed writers are checked before build actions execute, but they
-        // still enter the same resolver wrapper as the complete chain below.
-        resolve_build_fact(jet_foundation::Policy::FactKey::new(key), values)?;
-    }
-    Ok(())
 }
 
 fn undeclared_setting_diagnostic(key: &str, why: &str, declaration_site: &str) -> Diagnostic {
@@ -2391,11 +2360,16 @@ fn compile_bundle_path_build_inner(
         crate::Sema::CompileMode::Run
     };
     bundle.active_os = active_os;
-    seed_build_facts(
+    // Capture the provenance input once for this package build. Every build
+    // entry, generated-source check, and final runtime bundle receives this
+    // exact snapshot; only the lock boundary may probe the host.
+    let build_stamp = build_stamp_for_facts(&bundle.project_root, options.locked)?;
+    seed_build_facts_from_stamp(
         &mut bundle,
         &options.profile,
-        options.locked,
         &options.setting_overrides,
+        &[],
+        &build_stamp,
     )?;
     bundle.web_partition_enforced = options.web_target;
     let local_build_indices = bundle.modules[bundle.entry]
@@ -2450,11 +2424,12 @@ fn compile_bundle_path_build_inner(
                 false,
             )?;
             bundle.active_os = active_os;
-            seed_build_facts(
+            seed_build_facts_from_stamp(
                 &mut bundle,
                 &options.profile,
-                options.locked,
                 &options.setting_overrides,
+                &[],
+                &build_stamp,
             )?;
             bundle.web_partition_enforced = options.web_target;
         }
@@ -2527,6 +2502,7 @@ fn compile_bundle_path_build_inner(
             .filter_map(|(name, _)| crate::Comptime::Build::BuildCapability::parse(name))
             .collect::<std::collections::BTreeSet<_>>();
         let has_impure_gate = contains_impure_gate(&build.body);
+        let build_name_span = build.name_span;
         let mut funcs = std::collections::HashMap::new();
         let mut methods = std::collections::HashMap::new();
         let mut structs = std::collections::HashMap::new();
@@ -2708,7 +2684,17 @@ fn compile_bundle_path_build_inner(
             return Err(evaluated.diagnostics);
         }
 
-        validate_build_contributions(&bundle, evaluated.plan.fact_contributions())?;
+        // Resolve computed writers through the complete fact pipeline before
+        // any action or generated-source check observes the build snapshot.
+        // This is both validation and finalization: there is no build-only
+        // declaration/type/conflict evaluator beside the canonical resolver.
+        seed_build_facts_from_stamp(
+            &mut bundle,
+            &options.profile,
+            &options.setting_overrides,
+            evaluated.plan.fact_contributions(),
+            &build_stamp,
+        )?;
 
         let dependency_name = dependency_boundary.map(build_package_name).transpose()?;
         validate_build_authority(
@@ -2717,9 +2703,9 @@ fn compile_bundle_path_build_inner(
             has_impure_gate,
             &options,
             dependency_name,
-            build.name_span,
+            build_name_span,
         )?;
-        validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build.name_span)?;
+        validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build_name_span)?;
 
         let package_spec_bundle = runtime_bundle_for_package.as_ref().unwrap_or(&bundle);
         let package_specs = if package_spec_bundle.dep_roots.is_empty() {
@@ -2968,12 +2954,12 @@ fn compile_bundle_path_build_inner(
         let build_run = build_run
             .as_ref()
             .expect("selected build entry produces a build run");
-        seed_build_facts_with_contributions(
+        seed_build_facts_from_stamp(
             &mut bundle,
             &options.profile,
-            options.locked,
             &options.setting_overrides,
             build_run.plan.fact_contributions(),
+            &build_stamp,
         )?;
         bundle.web_partition_enforced = options.web_target;
     }
