@@ -6754,10 +6754,10 @@ impl<'a> EvalCtx<'a> {
             TExprKind::MethodCall {
                 recv,
                 method,
+                type_args,
                 args,
                 source_first_string_literal,
                 operator_line,
-                ..
             } => {
                 let mut r = self.eval_expr_child(recv, scope)?;
                 let template_source = args
@@ -6988,7 +6988,15 @@ impl<'a> EvalCtx<'a> {
                 ) {
                     return Ok(v);
                 }
-                let mut names = vec![method.name.clone()];
+                let mut names = Vec::new();
+                if matches!(&recv.ty, Type::Apply { .. }) || !type_args.is_empty() {
+                    names.push(crate::Codegen::TIR::generic_method_instance_key(
+                        &recv.ty,
+                        &method.name,
+                        type_args,
+                    ));
+                }
+                names.push(method.name.clone());
                 if method.mangled {
                     names.push(mangle(&method.name));
                 }
