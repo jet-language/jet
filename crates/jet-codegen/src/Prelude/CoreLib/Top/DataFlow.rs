@@ -439,8 +439,9 @@ fn jet_data_json_reader(
     limits: jet_std::DataLimits,
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
     jet_data_limits_validate(&limits)?;
-    let reader = jet_enc_json_reader(input, limits.encoding.clone())
+    let mut reader = jet_enc_json_reader(input, limits.encoding.clone())
         .map_err(|enc| jet_data_from_encoding("json_reader", Err(JetAbsent), enc))?;
+    reader.typed_numbers = true;
     Ok(jet_std::DataStream {
         inner: jet_std::DataStreamInner::JSON {
             reader,

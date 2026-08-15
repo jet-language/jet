@@ -20,6 +20,9 @@ fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
         jet_foundation::EncodingJson::Value::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
+        jet_foundation::EncodingJson::Value::Number(_) => {
+            unreachable!("lossless JSON number leaked into dynamic projection")
+        }
         jet_foundation::EncodingJson::Value::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
         }
@@ -55,6 +58,9 @@ fn from_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
         jet_foundation::EncodingJson::Value::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
+        jet_foundation::EncodingJson::Value::Number(_) => {
+            unreachable!("lossless JSON number leaked into dynamic projection")
+        }
         jet_foundation::EncodingJson::Value::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
         }
@@ -64,6 +70,46 @@ fn from_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
                 values.into_iter().map(from_ordered_json).collect(),
             )),
         ),
+    }
+}
+
+fn from_typed_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
+    match value {
+        jet_foundation::EncodingJson::Value::Object(fields) => json_object(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key, from_typed_ordered_json(value)))
+                .collect(),
+        ),
+        jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
+        jet_foundation::EncodingJson::Value::Bool(value) => {
+            json_variant("Bool", Some(CtValue::Bool(value)))
+        }
+        jet_foundation::EncodingJson::Value::Number(value) => json_variant(
+            "Text",
+            Some(CtValue::Str(
+                jet_foundation::JSONNumber::json_typed_number(&value),
+            )),
+        ),
+        jet_foundation::EncodingJson::Value::Text(value) => json_variant(
+            "Text",
+            Some(CtValue::Str(
+                jet_foundation::JSONNumber::json_typed_text(&value),
+            )),
+        ),
+        jet_foundation::EncodingJson::Value::Array(values) => json_variant(
+            "Array",
+            Some(CtValue::List(
+                values
+                    .into_iter()
+                    .map(from_typed_ordered_json)
+                    .collect(),
+            )),
+        ),
+        jet_foundation::EncodingJson::Value::Int(_)
+        | jet_foundation::EncodingJson::Value::Float(_) => {
+            unreachable!("lossless JSON parsing projected a number early")
+        }
     }
 }
 
@@ -117,6 +163,13 @@ pub(super) fn parse_json_ordered(
     text: &str,
 ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
     jet_foundation::EncodingJson::parse_json(text, false).map(from_ordered_json)
+}
+
+pub(super) fn parse_json_typed_ordered(
+    text: &str,
+) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
+    jet_foundation::EncodingJson::parse_json_exact_numbers(text, false)
+        .map(from_typed_ordered_json)
 }
 
 pub(super) fn json_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {

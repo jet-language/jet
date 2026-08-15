@@ -233,9 +233,25 @@
         match t {
             DataTree::Int(n) => Ok(*n),
             DataTree::Float(f) if f.fract() == 0.0 => Ok(*f as i64),
-            DataTree::Text(s) => s.trim().parse::<i64>().map_err(|_| {
-                FieldError::one(format!("expected Int, found text {:?}", s))
-            }),
+            DataTree::Text(s) => {
+                let text = if let Some(raw) =
+                    crate::jet_json_number::json_typed_number_text(s)
+                {
+                    crate::jet_json_number::json_exact_integer_text(raw)
+                        .map_err(FieldError::one)?
+                } else if let Some(raw) =
+                    crate::jet_json_number::json_typed_text_text(s)
+                {
+                    return Err(FieldError::one(format!(
+                        "expected Int, found text {:?}",
+                        raw
+                    )));
+                } else {
+                    s.trim().to_string()
+                };
+                jet_int_from_str(&text)
+                    .map_err(|_| FieldError::one(format!("expected Int, found text {:?}", text)))
+            }
             other => Err(FieldError::one(format!(
                 "expected Int, found {}",
                 datatree_kind_for(other)
@@ -247,9 +263,30 @@
         match t {
             DataTree::Float(f) => Ok(*f),
             DataTree::Int(n) => Ok(*n as f64),
-            DataTree::Text(s) => s.trim().parse::<f64>().map_err(|_| {
-                FieldError::one(format!("expected Float, found text {:?}", s))
-            }),
+            DataTree::Text(s) => {
+                let text = if let Some(raw) =
+                    crate::jet_json_number::json_typed_number_text(s)
+                {
+                    raw
+                } else if let Some(raw) =
+                    crate::jet_json_number::json_typed_text_text(s)
+                {
+                    return Err(FieldError::one(format!(
+                        "expected Float, found text {:?}",
+                        raw
+                    )));
+                } else {
+                    s
+                };
+                let value = text.trim().parse::<f64>().map_err(|_| {
+                    FieldError::one(format!("expected Float, found text {:?}", text))
+                })?;
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(FieldError::one("expected Float, found out-of-range Float"))
+                }
+            }
             other => Err(FieldError::one(format!(
                 "expected Float, found {}",
                 datatree_kind_for(other)
@@ -260,14 +297,22 @@
     pub fn decode_bool(t: &DataTree) -> Result<bool, Vec<FieldError>> {
         match t {
             DataTree::Bool(value) => Ok(*value),
-            DataTree::Text(s) => match s.trim() {
-                "true" => Ok(true),
-                "false" => Ok(false),
-                _ => Err(FieldError::one(format!(
-                    "expected Bool, found text {:?}",
-                    s
-                ))),
-            },
+            DataTree::Text(s) => {
+                if let Some(raw) = crate::jet_json_number::json_typed_text_text(s) {
+                    return Err(FieldError::one(format!(
+                        "expected Bool, found text {:?}",
+                        raw
+                    )));
+                }
+                match s.trim() {
+                    "true" => Ok(true),
+                    "false" => Ok(false),
+                    _ => Err(FieldError::one(format!(
+                        "expected Bool, found text {:?}",
+                        s
+                    ))),
+                }
+            }
             other => Err(FieldError::one(format!(
                 "expected Bool, found {}",
                 datatree_kind_for(other)
@@ -277,7 +322,15 @@
 
     pub fn decode_string(t: &DataTree) -> Result<String, Vec<FieldError>> {
         match t {
-            DataTree::Text(s) => Ok(s.clone()),
+            DataTree::Text(s) => {
+                if let Some(raw) = crate::jet_json_number::json_typed_number_text(s) {
+                    Err(FieldError::one(format!("expected Text, found number {raw}")))
+                } else {
+                    Ok(crate::jet_json_number::json_typed_text_text(s)
+                        .unwrap_or(s)
+                        .to_string())
+                }
+            }
             DataTree::Int(n) => Ok(n.to_string()),
             DataTree::Float(f) => Ok(format!("{:?}", f)),
             DataTree::Bool(value) => Ok(value.to_string()),
@@ -292,6 +345,25 @@
         let value = match t {
             DataTree::Float(value) => *value,
             DataTree::Int(value) => *value as f64,
+            DataTree::Text(text) => {
+                let text = if let Some(raw) =
+                    crate::jet_json_number::json_typed_number_text(text)
+                {
+                    raw
+                } else if let Some(raw) =
+                    crate::jet_json_number::json_typed_text_text(text)
+                {
+                    return Err(FieldError::one(format!(
+                        "expected F32, found text {:?}",
+                        raw
+                    )));
+                } else {
+                    text
+                };
+                text.trim().parse::<f64>().map_err(|_| {
+                    FieldError::one(format!("expected F32, found text {:?}", text))
+                })?
+            }
             other => {
                 return Err(FieldError::one(format!(
                     "expected F32, found {}",

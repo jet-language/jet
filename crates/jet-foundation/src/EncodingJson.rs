@@ -6,6 +6,10 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
+    /// Original number token for typed projection. Dynamic parsing never
+    /// constructs this arm; `parse_json_exact_numbers` uses the same tokenizer
+    /// and preserves it until the requested destination type consumes it.
+    Number(String),
     Text(String),
     Array(Vec<Value>),
     Object(Vec<(String, Value)>),
@@ -18,10 +22,26 @@ pub struct Error {
 }
 
 pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<Value, Error> {
+    parse_json_with_number_mode(text, reject_duplicate_keys, false)
+}
+
+pub fn parse_json_exact_numbers(
+    text: &str,
+    reject_duplicate_keys: bool,
+) -> Result<Value, Error> {
+    parse_json_with_number_mode(text, reject_duplicate_keys, true)
+}
+
+fn parse_json_with_number_mode(
+    text: &str,
+    reject_duplicate_keys: bool,
+    preserve_numbers: bool,
+) -> Result<Value, Error> {
     let mut parser = Parser {
         chars: text.chars().collect(),
         pos: 0,
         reject_duplicate_keys,
+        preserve_numbers,
     };
     let value = parser.value()?;
     parser.ws();
@@ -39,6 +59,7 @@ struct Parser {
     chars: Vec<char>,
     pos: usize,
     reject_duplicate_keys: bool,
+    preserve_numbers: bool,
 }
 
 impl Parser {
@@ -218,6 +239,11 @@ impl Parser {
             }
         }
         let text: String = self.chars[start..self.pos].iter().collect();
+        if self.preserve_numbers {
+            super::jet_json_number::validate_json_number(&text)
+                .map_err(|message| self.err(&message))?;
+            return Ok(Value::Number(text));
+        }
         if !text.contains('.') && !text.contains('e') && !text.contains('E') {
             if let Ok(value) = text.parse::<i64>() {
                 return Ok(Value::Int(value));

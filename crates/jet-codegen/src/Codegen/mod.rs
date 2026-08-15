@@ -989,6 +989,9 @@ fn push_corelib_prelude_body(
     out.push_str("\nmod jet_encoding_errors {\n");
     out.push_str(include_str!("../../../jet-foundation/src/EncodingErrors.rs"));
     out.push_str("\n}\n");
+    out.push_str("\nmod jet_json_number {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/JSONNumber.rs"));
+    out.push_str("\n}\n");
     out.push_str("\nmod jet_encoding_json {\n");
     out.push_str(include_str!("../../../jet-foundation/src/EncodingJson.rs"));
     out.push_str("\n}\n");

@@ -537,6 +537,7 @@ fn jet_enc_json_reader(
         terminal: None,
         eof: false,
         record_mode: false,
+        typed_numbers: false,
         allocation_budget,
         output_heap: 0,
     })
@@ -874,6 +875,23 @@ impl jet_std::JSONReader {
             drop(bytes);
             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, start, self.line, self.column, "invalid JSON number"));
         }
+        if self.typed_numbers {
+            if let Err(message) = jet_std::validate_json_number(text) {
+                self.release_item_heap(bytes.capacity());
+                drop(bytes);
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Limit,
+                    start,
+                    self.line,
+                    self.column,
+                    message,
+                ));
+            }
+            let value = jet_std::json_typed_number(text);
+            self.release_item_heap(bytes.capacity());
+            drop(bytes);
+            return Ok(jet_std::DataEvent::Text(value));
+        }
         if !text.contains(['.', 'e', 'E']) {
             if let Ok(value) = text.parse::<i64>() {
                 self.release_item_heap(bytes.capacity());
@@ -899,7 +917,18 @@ impl jet_std::JSONReader {
             b'n' => self.read_literal(b"ull", jet_std::DataEvent::Null),
             b't' => self.read_literal(b"rue", jet_std::DataEvent::Bool(true)),
             b'f' => self.read_literal(b"alse", jet_std::DataEvent::Bool(false)),
-            b'"' => { self.lookahead = Some(b'"'); self.offset -= 1; self.total -= 1; self.column -= 1; Ok(jet_std::DataEvent::Text(self.read_string()?)) }
+            b'"' => {
+                self.lookahead = Some(b'"');
+                self.offset -= 1;
+                self.total -= 1;
+                self.column -= 1;
+                let text = self.read_string()?;
+                Ok(jet_std::DataEvent::Text(if self.typed_numbers {
+                    jet_std::json_typed_text(&text)
+                } else {
+                    text
+                }))
+            }
             b'[' => {
                 if self.frames.len() as i64 >= self.limits.max_depth { return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset - 1, self.line, self.column.saturating_sub(1), format!("max_depth {} exceeded", self.limits.max_depth))); }
                 self.reserve_read_frame()?;

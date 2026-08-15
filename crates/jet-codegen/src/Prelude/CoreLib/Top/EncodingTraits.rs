@@ -323,42 +323,36 @@ impl __jet_Decode for JetDateTime {
 }
 impl __jet_Decode for jet_std::Duration {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        match t {
-            jet_std::DataTree::Int(ns) => Ok(jet_std::Duration {
-                ns: jet_codec_duration_decode(*ns),
-            }),
-            other => Err(jet_std::FieldError::one(format!(
-                "expected Duration, found {}",
-                jet_std::datatree_kind_for(other)
-            ))),
-        }
+        let value = jet_std::decode_int(t)?;
+        let ns = jet_std::jet_int_to_i64(value).ok_or_else(|| {
+            jet_std::FieldError::one("expected Duration, found out-of-range Int")
+        })?;
+        Ok(jet_std::Duration {
+            ns: jet_codec_duration_decode(ns),
+        })
     }
 }
 impl __jet_Decode for u8 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        match t {
-            jet_std::DataTree::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-            other => Err(jet_std::FieldError::one(format!("expected U8, found {}", jet_std::datatree_kind_for(other)))),
-        }
+        let value = jet_std::decode_int(t)?;
+        jet_std::jet_int_to_i64(value)
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| jet_std::FieldError::one("expected U8, found out-of-range Int"))
     }
 }
 macro_rules! jet_impl_sized_int_decode {
     ($($ty:ty => $name:literal),* $(,)?) => {$(
         impl __jet_Decode for $ty {
             fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-                match t {
-                    jet_std::DataTree::Int(n) => <$ty>::try_from(*n).map_err(|_| {
+                let value = jet_std::decode_int(t)?;
+                jet_std::jet_int_to_i64(value)
+                    .and_then(|value| <$ty>::try_from(value).ok())
+                    .ok_or_else(|| {
                         jet_std::FieldError::one(format!(
                             "expected {}, found out-of-range Int",
                             $name
                         ))
-                    }),
-                    other => Err(jet_std::FieldError::one(format!(
-                        "expected {}, found {}",
-                        $name,
-                        jet_std::datatree_kind_for(other)
-                    ))),
-                }
+                    })
             }
         }
     )*};
@@ -378,8 +372,25 @@ impl __jet_Decode for f32 {
 impl __jet_Decode for jet_std::JetDecimal {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Text(s) => jet_codec_decimal_decode_text(s)
-                .map_err(|e| jet_std::FieldError::one(format!("expected Decimal: {e}"))),
+            jet_std::DataTree::Text(s) => {
+                let parsed = if let Some(raw) =
+                    crate::jet_json_number::json_typed_number_text(s)
+                {
+                    jet_std::JetDecimal::from_json_number(raw)
+                } else if let Some(raw) =
+                    crate::jet_json_number::json_typed_text_text(s)
+                {
+                    return Err(jet_std::FieldError::one(format!(
+                        "expected Decimal, found text {:?}",
+                        raw
+                    )));
+                } else {
+                    jet_codec_decimal_decode_text(s)
+                };
+                parsed.map_err(|e| {
+                    jet_std::FieldError::one(format!("expected Decimal: {e}"))
+                })
+            }
             jet_std::DataTree::Int(n) => jet_codec_decimal_decode_int(*n)
                 .map_err(jet_std::FieldError::one),
             other => Err(jet_std::FieldError::one(format!(
@@ -506,7 +517,7 @@ fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> String {
     jet_std::render_datatree_json(&v.jet_encode(), true, 0)
 }
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_datatree(text).map_err(|e| {
+    let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
     })?;
     // D-MIGRATE4: plain decode walks the same migration chain, silently — the
@@ -520,7 +531,7 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
 fn jet_enc_json_decode_traced<T: __jet_Decode>(
     text: &String,
 ) -> Result<jet_std::DecodeResult<T>, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_datatree(text).map_err(|e| {
+    let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
     })?;
     let (value, migration) = T::jet_decode_traced(&tree)?;

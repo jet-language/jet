@@ -16,6 +16,14 @@ struct Person {
     age: Int?
 }
 
+#Codable
+struct ExactNumbers {
+    amount: Decimal
+    exponent: Decimal
+    whole: Decimal
+    large: Int
+}
+
 fn run() ? {
     raw :: "{{\"fullName\":\"Ada\",\"homeAddress\":{{\"city\":\"Reno\",\"zip\":\"89501\"}},\"nicknames\":[\"Addy\"],\"age\":36}}"
     p :: json.decode<Person>(raw)?
@@ -23,4 +31,10 @@ fn run() ? {
     print(p.home_address.city)
     print(p.nicknames.len())
     print(json.to_string(p))
+    exact_raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"large\":123456789012345678901234567890}}"
+    exact :: json.decode<ExactNumbers>(exact_raw)?
+    print(exact.amount.to_string())
+    print(exact.exponent.to_string())
+    print(exact.whole.to_string())
+    print(exact.large.to_string())
 }

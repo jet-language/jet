@@ -241,6 +241,7 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) eof: bool,
         pub(crate) record_mode: bool,
+        pub(crate) typed_numbers: bool,
         pub(crate) allocation_budget: Option<super::JetEncodingAllocationBudget>,
         // A string event owns its decoded backing until `next_event` hands the
         // event to the caller.  Keeping that charge live through object-key
@@ -2083,6 +2084,18 @@
                 scale,
             }
             .normalize())
+        }
+
+        /// Project one JSON number token directly into base-10 digits. This
+        /// preserves written scale and exponent without crossing binary64.
+        pub fn from_json_number(s: &str) -> Result<Self, String> {
+            let (negative, digits, scale) =
+                crate::jet_json_number::json_decimal_lexeme(s)?;
+            Ok(JetDecimal {
+                negative,
+                digits,
+                scale,
+            })
         }
 
         fn normalize(mut self) -> Self {

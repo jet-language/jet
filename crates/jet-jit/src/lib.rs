@@ -44,6 +44,9 @@ pub mod Job {
 
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
+pub(crate) mod jet_json_number {
+    include!("../../jet-foundation/src/JSONNumber.rs");
+}
 pub(crate) mod jet_encoding_json {
     include!("../../jet-foundation/src/EncodingJson.rs");
 }

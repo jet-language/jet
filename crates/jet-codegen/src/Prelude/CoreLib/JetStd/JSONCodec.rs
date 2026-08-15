@@ -17,6 +17,9 @@
             crate::jet_encoding_json::Value::Bool(value) => JSON::Boolean(value),
             crate::jet_encoding_json::Value::Int(value) => JSON::Integer(value),
             crate::jet_encoding_json::Value::Float(value) => JSON::Number(value),
+            crate::jet_encoding_json::Value::Number(_) => {
+                unreachable!("lossless JSON number leaked into dynamic projection")
+            }
             crate::jet_encoding_json::Value::Text(value) => JSON::Text(value),
             crate::jet_encoding_json::Value::Array(values) => {
                 JSON::Array(values.into_iter().map(json_from_shared).collect())

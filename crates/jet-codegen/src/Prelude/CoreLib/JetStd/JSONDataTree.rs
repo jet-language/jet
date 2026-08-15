@@ -125,12 +125,53 @@
             .map_err(json_error_from_shared)
     }
 
+    /// Parse typed JSON through the same tokenizer while preserving each
+    /// number token until a destination decoder chooses Int, a sized integer,
+    /// Decimal, or Float.
+    pub fn parse_json_typed_datatree(text: &str) -> Result<DataTree, JSONError> {
+        crate::jet_encoding_json::parse_json_exact_numbers(text, false)
+            .map(typed_datatree_from_shared)
+            .map_err(json_error_from_shared)
+    }
+
+    fn typed_datatree_from_shared(value: crate::jet_encoding_json::Value) -> DataTree {
+        match value {
+            crate::jet_encoding_json::Value::Null => DataTree::Null,
+            crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
+            crate::jet_encoding_json::Value::Number(value) => {
+                DataTree::Text(crate::jet_json_number::json_typed_number(&value))
+            }
+            crate::jet_encoding_json::Value::Text(value) => {
+                DataTree::Text(crate::jet_json_number::json_typed_text(&value))
+            }
+            crate::jet_encoding_json::Value::Array(values) => DataTree::Array(
+                values
+                    .into_iter()
+                    .map(typed_datatree_from_shared)
+                    .collect(),
+            ),
+            crate::jet_encoding_json::Value::Object(entries) => DataTree::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, typed_datatree_from_shared(value)))
+                    .collect(),
+            ),
+            crate::jet_encoding_json::Value::Int(_)
+            | crate::jet_encoding_json::Value::Float(_) => {
+                unreachable!("lossless JSON parsing projected a number early")
+            }
+        }
+    }
+
     fn datatree_from_shared(value: crate::jet_encoding_json::Value) -> DataTree {
         match value {
             crate::jet_encoding_json::Value::Null => DataTree::Null,
             crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
             crate::jet_encoding_json::Value::Int(value) => DataTree::Int(value),
             crate::jet_encoding_json::Value::Float(value) => DataTree::Float(value),
+            crate::jet_encoding_json::Value::Number(_) => {
+                unreachable!("lossless JSON number leaked into dynamic DataTree projection")
+            }
             crate::jet_encoding_json::Value::Text(value) => DataTree::Text(value),
             crate::jet_encoding_json::Value::Array(values) => {
                 DataTree::Array(values.into_iter().map(datatree_from_shared).collect())

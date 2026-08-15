@@ -364,9 +364,25 @@ fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
         Some(("Float", Some(CtValue::Float(value)))) if value.as_f64().fract() == 0.0 => {
             Ok(CtValue::Int(value.as_f64() as i64))
         }
-        Some(("Text", Some(CtValue::Str(s)))) => crate::Numeric::CtBigInt::from_str(s.trim())
-            .map(super::Builtins::exact_int_value)
-            .map_err(|_| decode_error(format!("expected Int, found text {:?}", s))),
+        Some(("Text", Some(CtValue::Str(s)))) => {
+            let parsed = if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_number_text(s)
+            {
+                crate::Numeric::CtBigInt::from_json_number(raw)
+            } else if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_text_text(s)
+            {
+                return Err(decode_error(format!(
+                    "expected Int, found text {:?}",
+                    raw
+                )));
+            } else {
+                crate::Numeric::CtBigInt::from_str(s.trim())
+            };
+            parsed
+                .map(super::Builtins::exact_int_value)
+                .map_err(|_| decode_error(format!("expected Int, found text {:?}", s)))
+        }
         _ => Err(decode_error(format!("expected Int, found {}", datatree_kind_for(tree)))),
     }
 }
@@ -376,28 +392,66 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
         }
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
-        Some(("Text", Some(CtValue::Str(s)))) => s
-            .trim()
-            .parse::<f64>()
-            .map(|value| CtValue::Float(CtFloat::f64(value)))
-            .map_err(|_| decode_error(format!("expected Float, found text {:?}", s))),
+        Some(("Text", Some(CtValue::Str(s)))) => {
+            let text = if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_number_text(s)
+            {
+                raw
+            } else if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_text_text(s)
+            {
+                return Err(decode_error(format!(
+                    "expected Float, found text {:?}",
+                    raw
+                )));
+            } else {
+                s
+            };
+            let value = text
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| decode_error(format!("expected Float, found text {:?}", text)))?;
+            if value.is_finite() {
+                Ok(CtValue::Float(CtFloat::f64(value)))
+            } else {
+                Err(decode_error("expected Float, found out-of-range Float"))
+            }
+        }
         _ => Err(decode_error(format!("expected Float, found {}", datatree_kind_for(tree)))),
     }
 }
 fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Bool(*b)),
-        Some(("Text", Some(CtValue::Str(s)))) => match s.trim() {
-            "true" => Ok(CtValue::Bool(true)),
-            "false" => Ok(CtValue::Bool(false)),
-            _ => Err(decode_error(format!("expected Bool, found text {:?}", s))),
-        },
+        Some(("Text", Some(CtValue::Str(s)))) => {
+            if let Some(raw) = jet_foundation::JSONNumber::json_typed_text_text(s) {
+                return Err(decode_error(format!(
+                    "expected Bool, found text {:?}",
+                    raw
+                )));
+            }
+            match s.trim() {
+                "true" => Ok(CtValue::Bool(true)),
+                "false" => Ok(CtValue::Bool(false)),
+                _ => Err(decode_error(format!("expected Bool, found text {:?}", s))),
+            }
+        }
         _ => Err(decode_error(format!("expected Bool, found {}", datatree_kind_for(tree)))),
     }
 }
 fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
-        Some(("Text", Some(CtValue::Str(s)))) => Ok(CtValue::Str(s.clone())),
+        Some(("Text", Some(CtValue::Str(s)))) => {
+            if let Some(raw) = jet_foundation::JSONNumber::json_typed_number_text(s) {
+                Err(decode_error(format!("expected Text, found number {raw}")))
+            } else {
+                Ok(CtValue::Str(
+                    jet_foundation::JSONNumber::json_typed_text_text(s)
+                        .unwrap_or(s)
+                        .to_string(),
+                ))
+            }
+        }
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Str(n.to_string())),
         Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::Str(n.to_string_rep())),
         Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
@@ -445,6 +499,25 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
     let value = match variant_of(tree) {
         Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
         Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
+        Some(("Text", Some(CtValue::Str(text)))) => {
+            let text = if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_number_text(text)
+            {
+                raw
+            } else if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_text_text(text)
+            {
+                return Err(decode_error(format!(
+                    "expected F32, found text {:?}",
+                    raw
+                )));
+            } else {
+                text
+            };
+            text.trim().parse::<f64>().map_err(|_| {
+                decode_error(format!("expected F32, found text {:?}", text))
+            })?
+        }
         _ => {
             return Err(decode_error(format!(
                 "expected F32, found {}",
@@ -457,6 +530,37 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
     } else {
         Err(decode_error("expected F32, found out-of-range Float"))
     }
+}
+
+fn decode_decimal(tree: &CtValue) -> Result<CtValue, CtValue> {
+    let parsed = match variant_of(tree) {
+        Some(("Text", Some(CtValue::Str(text)))) => {
+            if let Some(raw) = jet_foundation::JSONNumber::json_typed_number_text(text) {
+                crate::Numeric::CtDecimal::from_json_number(raw)
+            } else if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_text_text(text)
+            {
+                return Err(decode_error(format!(
+                    "expected Decimal, found text {:?}",
+                    raw
+                )));
+            } else {
+                crate::Numeric::CtDecimal::from_str(text)
+            }
+        }
+        Some(("Int", Some(CtValue::Int(value)))) => {
+            crate::Numeric::CtDecimal::from_str(&value.to_string())
+        }
+        _ => {
+            return Err(decode_error(format!(
+                "expected Decimal, found {}",
+                datatree_kind_for(tree)
+            )))
+        }
+    };
+    parsed
+        .map(|value| value.to_value())
+        .map_err(|error| decode_error(format!("expected Decimal: {error}")))
 }
 
 /// Decode the closed primitive/container subset without an interpreter-owned
@@ -486,6 +590,9 @@ pub(super) fn typed_decode_builtin_value(
         Type::Bool => Some(decode_bool(tree)),
         Type::String => Some(decode_string(tree)),
         Type::Char => Some(decode_char(tree)),
+        Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL => {
+            Some(decode_decimal(tree))
+        }
         Type::Option(inner) => match variant_of(tree) {
             Some(("Null", _)) => Some(Ok(CtValue::absent((**inner).clone()))),
             _ => typed_decode_builtin_value(inner, tree)
@@ -1105,7 +1212,7 @@ impl<'a> Interp<'a> {
             return self.eval_typed_csv_decode(method, text, ty, span);
         }
         let parsed: Result<CtValue, CtValue> = match module {
-            "core.encoding.json" => super::JSONInterp::parse_json_ordered(text)
+            "core.encoding.json" => super::JSONInterp::parse_json_typed_ordered(text)
                 .map_err(|e| json_parse_err_to_decode("JSON", super::JSONInterp::json_error_value(e))),
             "core.encoding.toml" => super::EncodingLite::toml_parse(text).map_err(|e| json_parse_err_to_decode("TOML", e)),
             "core.encoding.yaml" => super::EncodingLite::yaml_parse(text).map_err(|e| json_parse_err_to_decode("YAML", e)),

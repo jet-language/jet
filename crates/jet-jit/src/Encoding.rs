@@ -116,6 +116,11 @@ pub(crate) mod json_rt {
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs");
 
+    /// JIT marshalling adapter for the Prelude exact-Int decoder.
+    pub fn jet_int_from_str(value: &str) -> Result<i64, String> {
+        crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(value))
+    }
+
     /// D-JSON3 coerce walk — same as `jet_std_json_coerce_walk` (MathRandomTime.rs).
     pub fn coerce_walk(value: &JSON, path: &str) -> JSON {
         match value {
@@ -188,6 +193,10 @@ pub(crate) mod json_rt {
 
     pub fn parse_datatree_ordered(text: &str) -> Result<DataTree, JSONError> {
         parse_json_datatree(text)
+    }
+
+    pub fn parse_datatree_typed_ordered(text: &str) -> Result<DataTree, JSONError> {
+        parse_json_typed_datatree(text)
     }
 
     pub fn decode_lenient(text: &str) -> Result<DataTree, JSONError> {
@@ -896,7 +905,7 @@ extern "C" fn jet_jit_json_parse(text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_json_parse_ordered(text: i64) -> i64 {
-    match json_rt::parse_datatree_ordered(&clone_string(text)) {
+    match json_rt::parse_datatree_typed_ordered(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
     }
@@ -1609,6 +1618,9 @@ extern "C" fn jet_jit_decode_int_range(
     }
     let value = value.bits as i64;
     let type_name = clone_string(type_name);
+    let Some(value) = Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(value)) else {
+        return result_err_decode("", &format!("expected {type_name}, found out-of-range Int"));
+    };
     match json_rt::check_int_range(Ok(value), lo, hi, &type_name) {
         Ok(_) => result,
         Err(errors) => result_err_fields(errors),
@@ -1917,13 +1929,17 @@ extern "C" fn jet_jit_codec_encode(kind: i64, value: i64) -> i64 {
     alloc_datatree(&tree)
 }
 
+fn typed_json_text(text: &str) -> &str {
+    jet_foundation::JSONNumber::json_typed_text_text(text).unwrap_or(text)
+}
+
 extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode("", "invalid DataTree");
     };
     match (kind, tree) {
         (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_date_decode(&text) {
+            match codec_rt::jet_codec_date_decode(typed_json_text(&text)) {
                 Ok((year, month, day)) => result_ok(crate::Time::push(TimeValue::Date(
                     crate::Time::time_rt::JetDate::new(year, month, day),
                 )) as u64),
@@ -1931,7 +1947,7 @@ extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
             }
         }
         (CODEC_KIND_LOCAL_TIME, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_local_time_decode(&text) {
+            match codec_rt::jet_codec_local_time_decode(typed_json_text(&text)) {
                 Ok((hour, minute, second)) => result_ok(crate::Time::push(TimeValue::LocalTime(
                     crate::Time::time_rt::JetLocalTime::new(hour, minute, second),
                 )) as u64),
@@ -1939,7 +1955,7 @@ extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
             }
         }
         (CODEC_KIND_DATETIME, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_datetime_decode(&text) {
+            match codec_rt::jet_codec_datetime_decode(typed_json_text(&text)) {
                 Ok((secs, nanos)) => result_ok(crate::Time::push(TimeValue::DateTime(
                     crate::Time::time_rt::JetDateTime::from_timestamp_ns(secs, nanos),
                 )) as u64),
@@ -1949,8 +1965,41 @@ extern "C" fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         (CODEC_KIND_DURATION, json_rt::DataTree::Int(ns)) => {
             result_ok(codec_rt::jet_codec_duration_decode(ns) as u64)
         }
+        (CODEC_KIND_DURATION, json_rt::DataTree::Text(text)) => {
+            let decoded = if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_number_text(&text)
+            {
+                jet_foundation::JSONNumber::json_exact_integer_text(raw).and_then(|value| {
+                    value
+                        .parse::<i64>()
+                        .map_err(|_| "Duration is outside the I64 range".to_string())
+                })
+            } else if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_text_text(&text)
+            {
+                Err(format!("expected Duration, found text {:?}", raw))
+            } else {
+                text.parse::<i64>()
+                    .map_err(|_| "Duration is outside the I64 range".to_string())
+            };
+            match decoded {
+                Ok(ns) => result_ok(codec_rt::jet_codec_duration_decode(ns) as u64),
+                Err(error) => result_err_decode("", &error),
+            }
+        }
         (CODEC_KIND_DECIMAL, json_rt::DataTree::Text(text)) => {
-            match codec_rt::jet_codec_decimal_decode_text(&text) {
+            let decoded = if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_number_text(&text)
+            {
+                jet_foundation::Numeric::CtDecimal::from_json_number(raw)
+            } else if let Some(raw) =
+                jet_foundation::JSONNumber::json_typed_text_text(&text)
+            {
+                Err(format!("expected Decimal, found text {:?}", raw))
+            } else {
+                codec_rt::jet_codec_decimal_decode_text(&text)
+            };
+            match decoded {
                 Ok(decimal) => result_ok(crate::Numeric::push_decimal(decimal) as u64),
                 Err(error) => result_err_decode("", &format!("expected Decimal: {error}")),
             }

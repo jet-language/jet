@@ -20,6 +20,8 @@ pub mod generated;
 pub mod JitBackend;
 pub mod JSON;
 pub mod JSONNumber;
+#[allow(unused_imports)]
+pub(crate) use JSONNumber as jet_json_number;
 pub mod EncodingErrors;
 pub mod EncodingJson;
 #[allow(unused_imports)]
