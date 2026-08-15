@@ -643,6 +643,9 @@ fn reflected_fact_value_detail<'a>(
     if variant != expected {
         return None;
     }
+    if matches!(read, jet_foundation::Registry::FactRead::RegisteredPlane(_)) {
+        return Some(value);
+    }
     let field = read.detail_field()?;
     match reflected_struct_field(value, field)? {
         CtValue::Present(value) => Some(value.as_ref()),
@@ -1389,6 +1392,17 @@ pub fn registered_fact_value(
             )),
             _ => None,
         }),
+        jet_foundation::Registry::FactRead::RegisteredPlane(name)
+            if jet_foundation::Registry::fact_declarations()
+                .iter()
+                .find(|declaration| declaration.name == name)
+                .is_some_and(|declaration| {
+                    declaration.name == subject || declaration.source_name == subject
+                }) =>
+        {
+            let info = build_registered_fact_info(name)?;
+            reflected_struct_field(&info, "value").cloned()
+        }
         _ => None,
     }
 }
@@ -1589,7 +1603,8 @@ pub fn fact_read_value(
         | jet_foundation::Registry::FactRead::Obligation => {
             registered_fact_value(read, subject_name, items)
         }
-        jet_foundation::Registry::FactRead::BuildProfile
+        jet_foundation::Registry::FactRead::RegisteredPlane(_)
+        | jet_foundation::Registry::FactRead::BuildProfile
         | jet_foundation::Registry::FactRead::BuildPackageName
         | jet_foundation::Registry::FactRead::BuildPackageVersion
         | jet_foundation::Registry::FactRead::BuildOS
@@ -1598,8 +1613,8 @@ pub fn fact_read_value(
         | jet_foundation::Registry::FactRead::BuildStampToolchain
         | jet_foundation::Registry::FactRead::BuildStampAt => {
             build_fact_value(build_facts, read)
+                .or_else(|| registered_fact_value(read, subject_name, items))
         }
-        jet_foundation::Registry::FactRead::RegisteredPlane(_) => None,
         jet_foundation::Registry::FactRead::Layout
         | jet_foundation::Registry::FactRead::Name
         | jet_foundation::Registry::FactRead::Fields => None,

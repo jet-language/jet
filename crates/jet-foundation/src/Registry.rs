@@ -607,9 +607,9 @@ pub enum FactRead {
     ViewProvenance,
     UnitScaleProvenance,
     Maturity,
-    /// A registered value plane without a source member-position read. The
-    /// canonical row name is carried directly so new planes are reflected
-    /// without adding another fact-kind name table.
+    /// A registered value plane without a dedicated detail carrier. The
+    /// canonical row name is carried directly so new planes keep a typed
+    /// `FactValue` projection without adding another fact-kind name table.
     RegisteredPlane(&'static str),
     BuildPackageName,
     BuildPackageVersion,
@@ -656,6 +656,42 @@ impl FactRead {
         }
     }
 
+    /// Canonical source spelling for readers with a dedicated typed carrier.
+    /// Registry-only carriers derive their spelling from their row below.
+    pub const fn source_member(self) -> Option<&'static str> {
+        match self {
+            Self::Layout => Some(crate::Syntax::COMPILER_FACT_LAYOUT),
+            Self::Name => Some(crate::Syntax::COMPILER_FACT_NAME),
+            Self::Fields => Some(crate::Syntax::COMPILER_FACT_FIELDS),
+            Self::Range => Some(crate::Syntax::COMPILER_FACT_RANGE),
+            Self::Dimension => Some(crate::Syntax::COMPILER_FACT_DIMENSION),
+            Self::Measure => Some(crate::Syntax::COMPILER_FACT_MEASURE),
+            Self::Exactness => Some(crate::Syntax::COMPILER_FACT_EXACTNESS),
+            Self::Classification => Some(crate::Syntax::COMPILER_FACT_CLASSIFICATION),
+            Self::Obligation => Some(crate::Syntax::COMPILER_FACT_OBLIGATION),
+            Self::States => Some(crate::Syntax::COMPILER_FACT_STATES),
+            Self::Effects => Some(crate::Syntax::COMPILER_FACT_EFFECTS),
+            Self::Sendability => Some(crate::Syntax::COMPILER_FACT_SENDABILITY),
+            Self::Movedness => Some(crate::Syntax::COMPILER_FACT_MOVEDNESS),
+            Self::Attribution => Some(crate::Syntax::COMPILER_FACT_ATTRIBUTION),
+            Self::TrackOrigin => Some(crate::Syntax::COMPILER_FACT_TRACK_ORIGIN),
+            Self::ViewProvenance => Some(crate::Syntax::COMPILER_FACT_VIEW_PROVENANCE),
+            Self::UnitScaleProvenance => {
+                Some(crate::Syntax::COMPILER_FACT_UNIT_SCALE_PROVENANCE)
+            }
+            Self::Maturity => Some(crate::Syntax::COMPILER_FACT_MATURITY),
+            Self::BuildProfile => Some(crate::Syntax::COMPILER_BUILD_FACT_PROFILE),
+            Self::RegisteredPlane(_)
+            | Self::BuildPackageName
+            | Self::BuildPackageVersion
+            | Self::BuildOS
+            | Self::BuildStampGit
+            | Self::BuildStampDirty
+            | Self::BuildStampToolchain
+            | Self::BuildStampAt => None,
+        }
+    }
+
     /// Typed detail slot on a reflected FactValue. Aggregate Effects and
     /// States use their containing info records instead.
     pub const fn detail_field(self) -> Option<&'static str> {
@@ -690,51 +726,96 @@ impl FactRead {
         }
     }
 
-    /// Find the registered plane row for this typed reader. The row name is
-    /// intentionally derived from the Prelude registry's reflection kind;
-    /// readers do not carry a second plane-name table.
-    pub fn registered_plane(self) -> Option<&'static RegistryRow> {
-        if let Self::RegisteredPlane(name) = self {
-            return row(name).filter(|registered| registered.kind() == RowKind::Plane);
-        }
-        let kind = self.reflection_kind()?;
-        fact_rows().find(|row| reflection_kind(row.name) == Some(kind))
+    /// Every registered plane row represented by this typed reader. Multiple
+    /// rows may share one semantic kind (`Type.Exactness` and `Exactness`);
+    /// the receiver supplies the row identity, so the reader must not pick an
+    /// arbitrary winner.
+    pub fn registered_planes(self) -> impl Iterator<Item = &'static RegistryRow> {
+        let exact_name = match self {
+            Self::RegisteredPlane(name) => Some(name),
+            _ => None,
+        };
+        let kind = self.reflection_kind();
+        fact_rows().filter(move |row| {
+            exact_name
+                .map(|name| row.name == name)
+                .unwrap_or_else(|| reflection_kind(row.name) == kind)
+        })
     }
 }
 
+const TYPED_FACT_READS: [FactRead; 18] = [
+    FactRead::Layout,
+    FactRead::Name,
+    FactRead::Fields,
+    FactRead::Range,
+    FactRead::Dimension,
+    FactRead::Measure,
+    FactRead::Exactness,
+    FactRead::Classification,
+    FactRead::Obligation,
+    FactRead::States,
+    FactRead::Effects,
+    FactRead::Sendability,
+    FactRead::Movedness,
+    FactRead::Attribution,
+    FactRead::TrackOrigin,
+    FactRead::ViewProvenance,
+    FactRead::UnitScaleProvenance,
+    FactRead::Maturity,
+];
+
 /// Resolve a marked member through the registered fact planes.
 pub fn fact_read(member: &str) -> Option<FactRead> {
-    let read = match member {
-        crate::Syntax::COMPILER_FACT_LAYOUT => FactRead::Layout,
-        crate::Syntax::COMPILER_FACT_NAME => FactRead::Name,
-        crate::Syntax::COMPILER_FACT_FIELDS => FactRead::Fields,
-        crate::Syntax::COMPILER_FACT_RANGE => FactRead::Range,
-        crate::Syntax::COMPILER_FACT_DIMENSION => FactRead::Dimension,
-        crate::Syntax::COMPILER_FACT_MEASURE => FactRead::Measure,
-        crate::Syntax::COMPILER_FACT_EXACTNESS => FactRead::Exactness,
-        crate::Syntax::COMPILER_FACT_CLASSIFICATION => FactRead::Classification,
-        crate::Syntax::COMPILER_FACT_OBLIGATION => FactRead::Obligation,
-        crate::Syntax::COMPILER_FACT_STATES => FactRead::States,
-        crate::Syntax::COMPILER_FACT_EFFECTS => FactRead::Effects,
-        crate::Syntax::COMPILER_FACT_SENDABILITY => FactRead::Sendability,
-        crate::Syntax::COMPILER_FACT_MOVEDNESS => FactRead::Movedness,
-        crate::Syntax::COMPILER_FACT_ATTRIBUTION => FactRead::Attribution,
-        crate::Syntax::COMPILER_FACT_TRACK_ORIGIN => FactRead::TrackOrigin,
-        crate::Syntax::COMPILER_FACT_VIEW_PROVENANCE => FactRead::ViewProvenance,
-        crate::Syntax::COMPILER_FACT_UNIT_SCALE_PROVENANCE => FactRead::UnitScaleProvenance,
-        crate::Syntax::COMPILER_FACT_MATURITY => FactRead::Maturity,
-        crate::Syntax::COMPILER_BUILD_FACT_PROFILE => FactRead::BuildProfile,
-        _ => return None,
-    };
-
-    if read == FactRead::BuildProfile {
+    if member == crate::Syntax::COMPILER_BUILD_FACT_PROFILE {
         return row("Build.Profile")
             .is_some_and(|registered| registered.kind() == RowKind::Fact)
-            .then_some(read);
+            .then_some(FactRead::BuildProfile);
     }
-    read.registered_plane()
-        .filter(|registered| matches!(registered.kind(), RowKind::Fact | RowKind::Plane))
-        .map(|_| read)
+    if let Some(read) = TYPED_FACT_READS
+        .into_iter()
+        .find(|read| read.source_member() == Some(member))
+    {
+        return read.registered_planes().next().map(|_| read);
+    }
+
+    let source_name = member.strip_prefix(crate::Syntax::COMPTIME_MARK)?;
+    fact_rows().find_map(|row| {
+        let read = registered_fact_read(row.name)?;
+        let FactRead::RegisteredPlane(_) = read else {
+            return None;
+        };
+        let kind = read.reflection_kind()?;
+        (crate::Syntax::canonical_name_case(kind, crate::Syntax::NameCase::Snake)
+            == source_name)
+            .then_some(read)
+    })
+}
+
+/// Every accepted source member, including projections synthesized directly
+/// from registered planes that need no dedicated detail carrier.
+pub fn fact_read_members() -> impl Iterator<Item = String> {
+    TYPED_FACT_READS
+        .into_iter()
+        .filter_map(FactRead::source_member)
+        .map(str::to_string)
+        .chain(std::iter::once(
+            crate::Syntax::COMPILER_BUILD_FACT_PROFILE.to_string(),
+        ))
+        .chain(fact_rows().filter_map(|row| {
+            let read = registered_fact_read(row.name)?;
+            let FactRead::RegisteredPlane(_) = read else {
+                return None;
+            };
+            Some(format!(
+                "{}{}",
+                crate::Syntax::COMPTIME_MARK,
+                crate::Syntax::canonical_name_case(
+                    read.reflection_kind()?,
+                    crate::Syntax::NameCase::Snake,
+                )
+            ))
+        }))
 }
 
 /// Resolve a registered plane to its typed reader. This projection is used by
@@ -743,32 +824,10 @@ pub fn fact_read(member: &str) -> Option<FactRead> {
 pub fn registered_fact_read(name: &str) -> Option<FactRead> {
     let registered = row(name).filter(|row| row.kind() == RowKind::Plane)?;
     let kind = reflection_kind(name)?;
-    [
-        FactRead::Layout,
-        FactRead::Name,
-        FactRead::Fields,
-        FactRead::Range,
-        FactRead::Dimension,
-        FactRead::Measure,
-        FactRead::Exactness,
-        FactRead::Classification,
-        FactRead::Obligation,
-        FactRead::States,
-        FactRead::Effects,
-        FactRead::Sendability,
-        FactRead::Movedness,
-        FactRead::Attribution,
-        FactRead::TrackOrigin,
-        FactRead::ViewProvenance,
-        FactRead::UnitScaleProvenance,
-        FactRead::Maturity,
-    ]
-    .into_iter()
-    .find(|read| {
-        read.reflection_kind() == Some(kind)
-            && read.registered_plane().is_some_and(|row| row.name == name)
-    })
-    .or(Some(FactRead::RegisteredPlane(registered.name)))
+    TYPED_FACT_READS
+        .into_iter()
+        .find(|read| read.reflection_kind() == Some(kind))
+        .or(Some(FactRead::RegisteredPlane(registered.name)))
 }
 
 /// D-CONF-READ1=A / D-CONF-STAMP1=B: resolve one complete `@build.*` path
@@ -1537,7 +1596,10 @@ pub fn law_violations() -> Vec<String> {
                 plane.name
             )),
             Some(read) => {
-                if read.registered_plane().map(|row| row.name) != Some(plane.name) {
+                if !read
+                    .registered_planes()
+                    .any(|registered| registered.name == plane.name)
+                {
                     violations.push(format!(
                         "plane `{}` resolves to the wrong FactRead row",
                         plane.name
@@ -1546,6 +1608,15 @@ pub fn law_violations() -> Vec<String> {
                 if read.reflection_kind() != reflection_kind(plane.name) {
                     violations.push(format!(
                         "plane `{}` FactRead kind drifted from its registry row",
+                        plane.name
+                    ));
+                }
+                if !fact_read_members()
+                    .filter_map(|member| fact_read(&member))
+                    .any(|candidate| candidate == read)
+                {
+                    violations.push(format!(
+                        "plane `{}` has no source member-position FactRead",
                         plane.name
                     ));
                 }
@@ -1731,7 +1802,12 @@ mod tests {
             let read = super::registered_fact_read(plane.name)
                 .unwrap_or_else(|| panic!("plane `{}` has no typed reader", plane.name));
             assert_eq!(read.reflection_kind(), super::reflection_kind(plane.name));
-            assert_eq!(read.registered_plane().map(|row| row.name), Some(plane.name));
+            assert!(
+                read.registered_planes()
+                    .any(|registered| registered.name == plane.name),
+                "plane `{}` resolves to the wrong typed reader",
+                plane.name,
+            );
         }
     }
 

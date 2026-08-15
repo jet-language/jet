@@ -914,30 +914,6 @@ pub const COMPILER_FACTS: &[(&str, &str)] = &[
     (COMPILER_FACT_FIELDS, "fields"),
 ];
 
-/// D-FACT-READ1=A: every marked member accepted after `.` is owned by the one
-/// registry reader. The projection is used only for a reflected `TypeInfo`
-/// value in a derive body.
-pub const FACT_READS: &[(&str, &str)] = &[
-    (COMPILER_FACT_LAYOUT, "layout"),
-    (COMPILER_FACT_NAME, "name"),
-    (COMPILER_FACT_FIELDS, "fields"),
-    (COMPILER_FACT_RANGE, "range"),
-    (COMPILER_FACT_DIMENSION, "dimension"),
-    (COMPILER_FACT_MEASURE, "measure"),
-    (COMPILER_FACT_EXACTNESS, "exactness"),
-    (COMPILER_FACT_CLASSIFICATION, "classification"),
-    (COMPILER_FACT_OBLIGATION, "obligation"),
-    (COMPILER_FACT_STATES, "states"),
-    (COMPILER_FACT_EFFECTS, "effects"),
-    (COMPILER_FACT_SENDABILITY, "sendability"),
-    (COMPILER_FACT_MOVEDNESS, "movedness"),
-    (COMPILER_FACT_ATTRIBUTION, "attribution"),
-    (COMPILER_FACT_TRACK_ORIGIN, "track_origin"),
-    (COMPILER_FACT_VIEW_PROVENANCE, "view_provenance"),
-    (COMPILER_FACT_UNIT_SCALE_PROVENANCE, "unit_scale_provenance"),
-    (COMPILER_FACT_MATURITY, "maturity"),
-    (COMPILER_BUILD_FACT_PROFILE, "profile"),
-];
 
 pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
     COMPILER_FACTS.iter().find_map(|(name, member)| (*name == fact).then_some(*member))
@@ -945,6 +921,10 @@ pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
 
 pub fn fact_read_kind(member: &str) -> Option<crate::Registry::FactRead> {
     crate::Registry::fact_read(member)
+}
+
+pub fn fact_read_members() -> impl Iterator<Item = String> {
+    crate::Registry::fact_read_members()
 }
 pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
 pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";

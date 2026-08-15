@@ -118,9 +118,8 @@ impl<'a> Parser<'a> {
                         format!("`{member}` is not a compiler-owned fact"),
                         format!(
                             "the compiler-owned facts are {}",
-                            Syntax::FACT_READS
-                                .iter()
-                                .map(|(name, _)| format!("`{name}`"))
+                            Syntax::fact_read_members()
+                                .map(|name| format!("`{name}`"))
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),

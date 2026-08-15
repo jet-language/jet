@@ -128,16 +128,17 @@ fn folded_fact_reads_emit_values_without_runtime_dispatch() {
 }
 
 #[test]
-fn every_registered_type_plane_has_a_source_fact_read() {
-    let reads = jet::Syntax::FACT_READS
-        .iter()
-        .map(|(member, _)| {
-            jet_foundation::Registry::fact_read(member)
+fn every_registered_plane_has_a_source_fact_read() {
+    let reads = jet::Syntax::fact_read_members()
+        .map(|member| {
+            jet_foundation::Registry::fact_read(&member)
                 .unwrap_or_else(|| panic!("unregistered fact member: {member}"))
         })
         .collect::<Vec<_>>();
 
-    for plane in jet_foundation::Registry::type_plane_rows() {
+    for plane in jet_foundation::Registry::fact_rows()
+        .filter(|row| row.kind() == jet_foundation::Registry::RowKind::Plane)
+    {
         let read = jet_foundation::Registry::registered_fact_read(plane.name)
             .unwrap_or_else(|| panic!("registered plane `{}` has no typed reader", plane.name));
         assert!(
@@ -145,7 +146,38 @@ fn every_registered_type_plane_has_a_source_fact_read() {
             "registered plane `{}` has no source member-position read",
             plane.name
         );
+        assert_eq!(
+            read.reflection_kind(),
+            jet_foundation::Registry::reflection_kind(plane.name),
+            "source read and aggregate reflection disagree for `{}`",
+            plane.name,
+        );
     }
+}
+
+#[test]
+fn registry_derived_plane_reads_are_typed_and_folded() {
+    let output = jet::compile(
+        "@flow :: Flow.@flow\n@taint :: Taint.@taint\n@duty :: Duty.@duty\n\nfn run() {\n    print(@flow.kind == .Flow)\n    print(@taint.kind == .Taint)\n    print(@duty.kind == .Duty)\n}\n",
+    )
+    .expect("registry-derived plane reads should compile");
+    assert!(output.rust.contains("Flow"));
+    assert!(output.rust.contains("Taint"));
+    assert!(output.rust.contains("Duty"));
+    assert!(!has_runtime_fact_dispatch(&output.rust));
+}
+
+#[test]
+fn tracked_binding_origin_reads_the_track_marker() {
+    let output = jet::compile(
+        "fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@track_origin\n    print(@origin.tracked)\n    print(@origin.source ?? \"missing\")\n}\n",
+    )
+    .expect("a tracked binding should publish its typed origin");
+    assert!(
+        output.rust.contains("\"tracked\""),
+        "the #Track source was not folded into the typed fact"
+    );
+    assert!(!has_runtime_fact_dispatch(&output.rust));
 }
 
 #[test]

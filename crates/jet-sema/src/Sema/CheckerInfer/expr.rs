@@ -45,6 +45,11 @@ fn reflected_fact_type(base: &Type, read: jet_foundation::Registry::FactRead) ->
         ("FunctionInfo" | "MethodInfo", jet_foundation::Registry::FactRead::Effects) => {
             Some(Type::Named("EffectInfo".to_string()))
         }
+        (
+            "TypeInfo" | "FunctionInfo" | "MethodInfo" | "FieldInfo" | "FactInfo"
+            | "FactValue",
+            jet_foundation::Registry::FactRead::RegisteredPlane(_),
+        ) => Some(Type::Named("FactValue".to_string())),
         ("TypeInfo", _) | ("FunctionInfo" | "MethodInfo", _) => {
             let field = read.detail_field()?;
             match core_struct_field("FactValue", field)? {
@@ -362,8 +367,25 @@ impl<'a> Checker<'a> {
                 .map(|value| (value.jet_type(), value)),
                 _ => None,
             },
-            jet_foundation::Registry::FactRead::Attribution
-            | jet_foundation::Registry::FactRead::TrackOrigin => match &**inner {
+            jet_foundation::Registry::FactRead::Attribution => match &**inner {
+                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
+                    read,
+                    subject_name,
+                    self.items,
+                )
+                .map(|value| (value.jet_type(), value)),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::TrackOrigin => match &**inner {
+                Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => {
+                    let origin = self
+                        .flow
+                        .track_origins
+                        .get(subject_name)
+                        .map(String::as_str);
+                    let value = crate::Comptime::build_track_origin_info(origin);
+                    Some((value.jet_type(), value))
+                }
                 Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
                     read,
                     subject_name,
@@ -438,7 +460,15 @@ impl<'a> Checker<'a> {
                     }),
                 _ => None,
             },
-            jet_foundation::Registry::FactRead::RegisteredPlane(_) => None,
+            read @ jet_foundation::Registry::FactRead::RegisteredPlane(_) => match &**inner {
+                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
+                    read,
+                    subject_name,
+                    self.items,
+                )
+                .map(|value| (value.jet_type(), value)),
+                _ => None,
+            },
             jet_foundation::Registry::FactRead::BuildProfile => self
                 .modules
                 .and_then(|modules| modules.get(self.module_idx))

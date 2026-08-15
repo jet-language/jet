@@ -1111,6 +1111,13 @@ impl<'a> Checker<'a> {
                 },
                 binding_sendable,
             );
+            if b.track() && matches!(&final_ty, Type::Float) {
+                let depth =
+                    self.binding_fact_depth(&b.name).unwrap_or_else(|| self.scope_depth());
+                self.flow
+                    .track_origins
+                    .set_at(&b.name, depth, b.name.clone());
+            }
             // D-CONC-FREEZE1=A: publish the freeze provenance in the shared
             // flow store after the declaration owns the new binding.
             if let Some(site) = self.frozen_expr_site(&b.init) {

@@ -464,16 +464,57 @@ fn every_registered_plane_is_reflectable() {
         assert!(Registry::row(row.name).is_some(), "plane `{}` has no home", row.name);
         let read = Registry::registered_fact_read(row.name)
             .unwrap_or_else(|| panic!("plane `{}` has no FactRead projection", row.name));
-        assert_eq!(read.registered_plane().map(|registered| registered.name), Some(row.name));
+        assert!(
+            read.registered_planes()
+                .any(|registered| registered.name == row.name),
+            "plane `{}` resolves to the wrong FactRead row",
+            row.name,
+        );
         assert_eq!(read.reflection_kind(), Registry::reflection_kind(row.name));
         let info = jet::Comptime::build_registered_fact_info(row.name)
             .unwrap_or_else(|| panic!("plane `{}` has no typed reflection row", row.name));
-        assert!(matches!(
-            info,
-            CtValue::Struct { fields, .. }
-                if fields.iter().any(|(name, value)| name == "kind"
-                    && matches!(value, CtValue::Enum { .. }))
-        ));
+        let CtValue::Struct { fields, .. } = &info else {
+            panic!("plane `{}` did not reflect as FactInfo", row.name);
+        };
+        let CtValue::Enum {
+            variant: info_kind, ..
+        } = &fields
+            .iter()
+            .find(|(name, _)| name == "kind")
+            .expect("FactInfo.kind")
+            .1
+        else {
+            panic!("plane `{}` has an untyped FactInfo.kind", row.name);
+        };
+        let CtValue::Struct {
+            fields: value_fields,
+            ..
+        } = &fields
+            .iter()
+            .find(|(name, _)| name == "value")
+            .expect("FactInfo.value")
+            .1
+        else {
+            panic!("plane `{}` has an untyped FactInfo.value", row.name);
+        };
+        let CtValue::Enum {
+            variant: value_kind,
+            ..
+        } = &value_fields
+            .iter()
+            .find(|(name, _)| name == "kind")
+            .expect("FactValue.kind")
+            .1
+        else {
+            panic!("plane `{}` has an untyped FactValue.kind", row.name);
+        };
+        assert_eq!(info_kind, value_kind, "aggregate kind drifted for `{}`", row.name);
+        assert_eq!(
+            Some(info_kind.as_str()),
+            read.reflection_kind(),
+            "source read and aggregate kind disagree for `{}`",
+            row.name,
+        );
     }
     assert_eq!(
         planes.len(),

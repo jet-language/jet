@@ -11,6 +11,7 @@
 //! |---|---|---|
 //! | [`Binding`] | everything a declaration says about a name | `CheckerCore` |
 //! | [`Sendability`] | whether a value may cross a concurrent boundary | ownership prover |
+//! | [`TrackOrigin`] | source name recorded by `#Track` | `CheckerCore` |
 //! | [`Frozen`] | freeze site that proved a value deeply immutable | ownership prover |
 //! | [`Narrow`] | a binding refined by a proven test (D-FLOWTYPE1) | `CheckerCore` |
 //! | [`Moved`] | the use that gave a place away | `CheckerOwnership` |
@@ -423,6 +424,19 @@ impl Plane for Sendability {
     }
 }
 
+/// D-PROVENANCE1: the source name recorded by an actual `#Track` binding.
+/// The marker stays on the AST; this plane makes its erased fact readable
+/// while sema is folding `@track_origin`.
+pub(crate) enum TrackOrigin {}
+
+impl Plane for TrackOrigin {
+    type Fact = String;
+
+    fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
+        keep_left(left, right)
+    }
+}
+
 /// D-CONC-FREEZE1=A: the source span of the `freeze(...)` proof attached to a
 /// binding. This is one ordinary flow plane, not a second crossing checker.
 pub(crate) enum Frozen {}
@@ -546,6 +560,7 @@ pub(crate) struct FlowFacts {
     pub(crate) reachable: bool,
     pub(crate) bindings: Facts<Binding>,
     pub(crate) sendability: Facts<Sendability>,
+    pub(crate) track_origins: Facts<TrackOrigin>,
     pub(crate) frozen: Facts<Frozen>,
     pub(crate) narrow: Facts<Narrow>,
     pub(crate) moved: Facts<Moved>,
@@ -561,6 +576,7 @@ impl Default for FlowFacts {
             reachable: true,
             bindings: Facts::default(),
             sendability: Facts::default(),
+            track_origins: Facts::default(),
             frozen: Facts::default(),
             narrow: Facts::default(),
             moved: Facts::default(),
@@ -581,6 +597,7 @@ impl FlowFacts {
         let depth = self.depth;
         self.bindings.leave_depth(depth);
         self.sendability.leave_depth(depth);
+        self.track_origins.leave_depth(depth);
         self.frozen.leave_depth(depth);
         self.narrow.leave_depth(depth);
         self.views.leave_depth(depth);
@@ -628,6 +645,11 @@ impl FlowFacts {
             sendability: Facts::merge_paths(
                 &before.sendability,
                 &Self::plane(&paths, |facts| &facts.sendability),
+                &mut Vec::new(),
+            ),
+            track_origins: Facts::merge_paths(
+                &before.track_origins,
+                &Self::plane(&paths, |facts| &facts.track_origins),
                 &mut Vec::new(),
             ),
             frozen: Facts::merge_paths(
@@ -685,6 +707,11 @@ impl FlowFacts {
             sendability: Facts::after_loop(
                 &before.sendability,
                 &after_body.sendability,
+                &mut Vec::new(),
+            ),
+            track_origins: Facts::after_loop(
+                &before.track_origins,
+                &after_body.track_origins,
                 &mut Vec::new(),
             ),
             frozen: Facts::after_loop(&before.frozen, &after_body.frozen, &mut Vec::new()),
