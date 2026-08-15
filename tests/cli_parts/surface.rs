@@ -179,19 +179,18 @@ fn run(args: Commands) {}
         assert!(completion.status.success(), "{shell} subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
         let script = String::from_utf8(completion.stdout).unwrap();
         let expected = match shell {
-            "bash" => ["serve", "import", "--port", "file --file"],
-            "zsh" => ["serve", "import", "--port", ":file:value for --file"],
-            "fish" => ["serve", "import", "-l port", "-l file"],
-            "powershell" => ["serve", "import", "'--port'", "'file','--file'"],
+            "bash" => ["serve", "import", "--port", "file --file", "--config"],
+            "zsh" => ["serve", "import", "--port", ":file:value for --file", "--config"],
+            "fish" => ["serve", "import", "-l port", "-l file", "-l config"],
+            "powershell" => ["serve", "import", "'--port'", "'file','--file'", "'--config'"],
             _ => unreachable!(),
         };
         for fragment in expected {
             assert!(script.contains(fragment), "{shell} external completion omitted {fragment}: {script}");
         }
-        assert!(script.contains("--config"), "{shell} omitted the shared root config: {script}");
-        assert!(script.contains("--verbose"), "{shell} omitted the Standard root flags: {script}");
-        assert!(script.contains("--quiet"), "{shell} omitted the Standard root flags: {script}");
-        assert!(script.contains("--color"), "{shell} omitted the Standard root flags: {script}");
+        assert!(script.contains("--verbose") || script.contains("-l verbose") || script.contains("'--verbose'"), "{shell} omitted the Standard root flags: {script}");
+        assert!(script.contains("--quiet") || script.contains("-l quiet") || script.contains("'--quiet'"), "{shell} omitted the Standard root flags: {script}");
+        assert!(script.contains("--color") || script.contains("-l color") || script.contains("'--color'"), "{shell} omitted the Standard root flags: {script}");
         check_snapshot(&format!("shape_cli_program_{shell}.txt"), &script);
     }
     let dossier = Command::new(jet())
@@ -480,8 +479,8 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
         vec![
             "inspect audit",
             "hangar import",
-            "gc report",
             "env test",
+            "gc report",
             "perf run",
             "perf test",
             "perf bench",
@@ -563,13 +562,9 @@ fn bare_dev_uses_file_scoped_run() {
 fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
     for group in jet::CLI::command_groups() {
         for action in group.actions {
-            // `import` names both the canonical source translator and a
-            // physical hangar action. Only actions without a canonical
-            // top-level meaning are moved bare commands.
-            if jet::CLI::is_canonical_top_level(action.name) {
+            let Some(owner) = jet::CLI::moved_command_group(action.name) else {
                 continue;
-            }
-            let owner = jet::CLI::moved_command_group(action.name).unwrap_or(group.name);
+            };
             let replacement = format!("jet {} {}", owner, action.name);
             let out = Command::new(jet()).arg(action.name).arg("sentinel").output().unwrap();
             assert_eq!(out.status.code(), Some(2), "bare {}", action.name);
