@@ -62,6 +62,8 @@ pub(super) struct CachedFunctionBody {
     pub address_taken: HashSet<String>,
     pub name_ledger: jet_foundation::Names::NameLedger,
     pub pending_diagnostics: Vec<PendingFunctionDiagnostic>,
+    /// D-INTBIG1: replay the typed exact-Int reachability fact on cache hits.
+    pub uses_exact_int: bool,
 }
 
 #[derive(Clone, Debug)]

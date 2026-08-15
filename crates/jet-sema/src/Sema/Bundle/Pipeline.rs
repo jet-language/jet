@@ -380,6 +380,7 @@ fn check_bundle_opts_for_output_inner(
             items: m.items.clone(),
             build_facts: bundle.build_facts.clone(),
             allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
+            exact_int_reachable: std::cell::Cell::new(false),
             funcs: HashMap::new(),
             registry: builtin_type_registry(),
             consts: HashMap::new(),

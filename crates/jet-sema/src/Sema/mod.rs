@@ -1263,6 +1263,10 @@ pub(crate) struct ModuleState {
     /// True only for the explicitly selected package/workspace build entry.
     /// Ordinary `fn build` names do not grant compiler-host capabilities.
     allow_compiler_api: bool,
+    /// D-INTBIG1: a checked body or sema-typed constant can reach the exact
+    /// `Int` runtime. Keep this fact in sema; codegen must not rediscover it
+    /// by enumerating source expression shapes.
+    exact_int_reachable: std::cell::Cell<bool>,
     funcs: HashMap<String, FuncSig>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
@@ -1320,6 +1324,42 @@ pub(crate) struct ModuleState {
     /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
     /// value is the Core module and the second is the original member name.
     inline_reexport_core: HashMap<(String, String), (String, String)>,
+}
+
+/// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.
+/// Fixed-width integers remain separate and must not pull in the exact runtime.
+pub(crate) fn type_uses_default_int(ty: &Type) -> bool {
+    match ty {
+        Type::Int => true,
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => type_uses_default_int(inner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            type_uses_default_int(key) || type_uses_default_int(value)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| type_uses_default_int(field)),
+        Type::Union(members) => members.iter().any(type_uses_default_int),
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(type_uses_default_int)
+                || ret.as_deref().is_some_and(type_uses_default_int)
+        }
+        Type::Apply { args, .. } => args.iter().any(type_uses_default_int),
+        Type::IntN { .. }
+        | Type::Float
+        | Type::Float32
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::Named(_)
+        | Type::TraitObject(_)
+        | Type::ComputeDim(_) => false,
+    }
 }
 
 pub(crate) struct Checker<'a> {
@@ -1484,6 +1524,8 @@ pub(crate) struct Checker<'a> {
     pub(crate) binder_ref_types: HashMap<String, Type>,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
+    /// D-INTBIG1: typed reachability fact for this checked/generated body.
+    uses_exact_int: bool,
     /// The written bounded-arithmetic call currently checking its argument.
     /// This is a sema-only context; no gate marker reaches TIR or codegen.
     knowledge_gate: Option<KnowledgeGate>,

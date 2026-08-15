@@ -444,6 +444,9 @@ fn check_func_body_incremental(
     // and disabled-cache checks have no fingerprint consumer.
     let input = format!("{function:?}").into_bytes();
     if let Some(hit) = cache.get(&key, &input) {
+        if hit.uses_exact_int {
+            states[module_idx].exact_int_reachable.set(true);
+        }
         *function = hit.function;
         summaries.extend(hit.summaries);
         embed_inputs_out.extend(hit.comptime_inputs);
@@ -458,7 +461,7 @@ fn check_func_body_incremental(
     let mut local_address_taken = HashSet::new();
     let mut local_ledger = name_ledger.body_snapshot();
     let mut local_pending_diagnostics = Vec::new();
-    let diagnostics = check_func_body_bundle(
+    let (diagnostics, uses_exact_int) = check_func_body_bundle_with_usage(
         function,
         module_idx,
         states,
@@ -497,6 +500,7 @@ fn check_func_body_incremental(
             address_taken: local_address_taken,
             name_ledger: local_ledger,
             pending_diagnostics: local_pending_diagnostics,
+            uses_exact_int,
         },
     );
     diagnostics
@@ -1189,7 +1193,7 @@ pub(crate) fn check_module_bodies(
                                 name_ledger,
                                 pending_diagnostics_out,
                                 Some(&cm.name),
-                            ));
+                            ).0);
                             for pending in &mut pending_diagnostics_out[pending_start..] {
                                 pending.function_key = jet_foundation::Names::member_name(&cm.name, &f.name);
                             }
@@ -1421,7 +1425,7 @@ fn merge_view_provenance(
     true
 }
 
-pub(crate) fn check_func_body_bundle(
+fn check_func_body_bundle_with_usage(
     f: &mut Func,
     module_idx: usize,
     states: &[ModuleState],
@@ -1442,7 +1446,7 @@ pub(crate) fn check_func_body_bundle(
     no_prelude: bool,
     name_ledger: &mut jet_foundation::Names::NameLedger,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-) -> Vec<Diagnostic> {
+) -> (Vec<Diagnostic>, bool) {
     check_func_body_bundle_scoped(
         f,
         module_idx,
@@ -1467,6 +1471,50 @@ pub(crate) fn check_func_body_bundle(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(crate) fn check_func_body_bundle(
+    f: &mut Func,
+    module_idx: usize,
+    states: &[ModuleState],
+    effect_facts: &jet_foundation::Facts::FactRegistry,
+    owner_type: Option<&str>,
+    ct_funcs: &HashMap<String, Func>,
+    ct_externs: &HashSet<String>,
+    ct_base_dir: &std::path::Path,
+    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+    summaries: &mut HashMap<String, EffectSummary>,
+    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
+    global_addr_taken: &mut HashSet<String>,
+    _no_alloc: bool,
+    no_prelude: bool,
+    name_ledger: &mut jet_foundation::Names::NameLedger,
+    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
+) -> Vec<Diagnostic> {
+    check_func_body_bundle_with_usage(
+        f,
+        module_idx,
+        states,
+        effect_facts,
+        owner_type,
+        ct_funcs,
+        ct_externs,
+        ct_base_dir,
+        ct_globals,
+        freestanding,
+        gates,
+        summaries,
+        embed_inputs_out,
+        global_addr_taken,
+        _no_alloc,
+        no_prelude,
+        name_ledger,
+        pending_diagnostics_out,
+    )
+    .0
+}
+
+#[allow(clippy::too_many_arguments)]
 fn check_func_body_bundle_scoped(
     f: &mut Func,
     module_idx: usize,
@@ -1487,7 +1535,7 @@ fn check_func_body_bundle_scoped(
     name_ledger: &mut jet_foundation::Names::NameLedger,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
     inline_module: Option<&str>,
-) -> Vec<Diagnostic> {
+) -> (Vec<Diagnostic>, bool) {
     let st = &states[module_idx];
     let mut scoped_imports = st.imports.clone();
     let mut scoped_core_imports = st.core_imports.clone();
@@ -1610,6 +1658,12 @@ fn check_func_body_bundle_scoped(
             .collect(),
         binder_ref_types: HashMap::new(),
         expected_type: None,
+        uses_exact_int: f.params.iter().any(|param| {
+            crate::Sema::type_uses_default_int(&param.ty)
+        }) || f
+            .return_type
+            .as_ref()
+            .is_some_and(crate::Sema::type_uses_default_int),
         knowledge_gate: None,
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
@@ -1867,7 +1921,11 @@ fn check_func_body_bundle_scoped(
             },
         },
     );
-    ck.diags
+    let uses_exact_int = ck.uses_exact_int;
+    if uses_exact_int {
+        st.exact_int_reachable.set(true);
+    }
+    (ck.diags, uses_exact_int)
 }
 
 /// D-DATARACE1=C: mark reactive bindings that crossed a concurrency boundary so

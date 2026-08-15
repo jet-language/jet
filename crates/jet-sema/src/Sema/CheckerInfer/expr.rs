@@ -1013,10 +1013,22 @@ impl<'a> Checker<'a> {
             self.check_noelse_dispatch_chain(e);
         }
         if let Some(result) = self.fold_reflect_call(e) {
+            if result
+                .as_ref()
+                .is_some_and(crate::Sema::type_uses_default_int)
+            {
+                self.uses_exact_int = true;
+            }
             self.leave_source_nesting();
             return result;
         }
         let result = self.infer_checked(e);
+        if result
+            .as_ref()
+            .is_some_and(crate::Sema::type_uses_default_int)
+        {
+            self.uses_exact_int = true;
+        }
         self.leave_source_nesting();
         result
     }
@@ -1026,6 +1038,9 @@ impl<'a> Checker<'a> {
         e: &mut Expr,
         expected: &Type,
     ) -> Option<Type> {
+        if crate::Sema::type_uses_default_int(expected) {
+            self.uses_exact_int = true;
+        }
         let saved = self.expected_type.replace(expected.clone());
         let result = self.infer(e);
         self.expected_type = saved;

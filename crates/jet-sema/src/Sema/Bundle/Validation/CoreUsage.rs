@@ -72,6 +72,19 @@ pub(crate) fn collect_used_core(
 ) {
     let mut used = HashSet::new();
     let mut spans = HashMap::new();
+    // D-INTBIG1: use sema's typed facts, not a second AST walk, for exact-Int
+    // reachability. Constants are registered here even when no function body
+    // consumes them; checked/generated bodies publish the same fact through
+    // `ModuleState`.
+    if states.iter().any(|state| {
+        state.exact_int_reachable.get()
+            || state
+                .consts
+                .values()
+                .any(|ty| crate::Sema::type_uses_default_int(ty))
+    }) {
+        used.insert("core.math::__exact_int__".to_string());
+    }
     // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
     // a stable C callback symbol (`arg.flags.c_callback_symbol`) at some
     // `#Extern` call site anywhere in the bundle. Collected in this same
@@ -472,12 +485,6 @@ pub(crate) fn collect_core_expr(
     // a math-type *constructor* call and a static `T.method(...)` both surface the
     // type NAME, which is enough to require the prelude.
     match expr {
-        // D-INTBIG1: an unsized integer literal is the exact `Int` carrier.
-        // AOT lowering routes its arithmetic/display through the shared JetStd
-        // exact-number Prelude even when the source has no Core import.
-        Expr::Int(_, span, None, _) => {
-            note_core_usage(used, spans, "core.math::__exact_int__", Some(*span));
-        }
         Expr::Call(c) if is_math_type(&c.name) => {
             note_core_usage(used, spans, "core.math::__mathtypes__", Some(c.name_span));
         }

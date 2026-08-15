@@ -40,7 +40,7 @@ fn run() {
 }
 "#,
     );
-    assert!(out.rust.contains("mod jet_std"));
+    assert!(!out.rust.contains("mod jet_std"));
     assert!(!out.rust.contains("jet_std_fs_read"));
     assert!(out.rust.contains("fn main()"));
 }
@@ -474,4 +474,3 @@ fn run() {
         "https://xn--bcher-kva.example:443/a/c?x=1#frag\nxn--bcher-kva.example\n/a/c\nx\n1\nhttps://xn--bcher-kva.example:443/notify?user=ada%20lovelace&user=grace#done\nnotify\ndone\nuser=ada%20lovelace&user=grace&empty=\na%20b%2Fc\na b/c\ntext/html\nUTF-8\nimage/png\npng\ndata:image/png,%3Ch1%3EHi%3C%2Fh1%3E\nfile:///tmp/a%20b.txt\n"
     );
 }
-
