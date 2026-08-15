@@ -4775,7 +4775,7 @@ fn compile_src_with_options_and_policy(
         modules: vec![crate::AST::LoadedModule {
             path: std::path::PathBuf::from(file),
             display: file.to_string(),
-            alias: "main".to_string(),
+            alias: crate::Loader::default_module_alias(std::path::Path::new(file)),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
             script_body: std::mem::take(&mut prog.script_body),

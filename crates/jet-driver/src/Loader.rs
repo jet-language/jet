@@ -2338,7 +2338,7 @@ fn find_module_files(name: &str, project_root: &Path) -> Result<Vec<PathBuf>, Di
 /// File stems become generated Rust `mod __jet_<alias>` names, so the alias must be a
 /// valid identifier: non-alphanumeric characters map to `_`, and a leading
 /// digit gets a `_` prefix.
-fn default_module_alias(path: &Path) -> String {
+pub(crate) fn default_module_alias(path: &Path) -> String {
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
