@@ -627,10 +627,23 @@ where
             value
         }
         Err(payload) => {
-            // Only the private FFI adapter marker below converts a String
+            // Only the private foreign-boundary marker below converts a String
             // payload into a user stop. A rendered runtime report crosses this
             // boundary as a typed report or private envelope; arbitrary panic
             // text remains a host/compiler fault.
+            //
+            // This is the one place the marker is read, and it is the only E3001
+            // renderer a shared Prelude source can reach without naming a
+            // registered-row adapter. Its producers are boundaries whose source
+            // is embedded into crates that carry no such adapter: the generated
+            // bridge crate's `ffi_panic` (jet-pkg-model/src/FFI.rs) and the
+            // fail-closed OS entropy shim (Prelude/CoreLib/Top/CryptoEntropy.rs,
+            // which is also embedded verbatim into that bridge). Those sources
+            // must not build a report themselves: the bridge strips Foundation's
+            // `jet_render_runtime_stop` wrapper and never regenerates it, so a
+            // report built there is a call with no definition (I2 — rustc E0425
+            // inside Jet's own generated crate, reported as E0705 against the
+            // user's `extern rust` line).
             if let Some(message) = payload
                 .downcast_ref::<String>()
                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))

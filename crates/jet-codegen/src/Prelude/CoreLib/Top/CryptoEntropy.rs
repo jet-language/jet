@@ -458,13 +458,30 @@ pub(crate) fn jet_crypto_entropy_fail_closed(
     operation: &str,
     error: JetCryptoEntropyError,
 ) -> ! {
-    let message = format!("{operation}: {error}");
     // D-FAIL-EXIT1: crypto has no private edge rule. An infallible crypto
     // shim reports the ordinary E3001 program fault, and the execution tier's
-    // boundary owns delivery and cleanup.
-    std::panic::panic_any(jet_render_runtime_stop(
-        "E3001", "", 0, "", "", 1, 1, &message, "",
-    ))
+    // boundary owns the registered row, the rendering, delivery and cleanup.
+    //
+    // I2 — why the report is NOT built here: this file is embedded verbatim by
+    // four independent projections (the AOT kernel closure in
+    // Codegen/mod.rs, the Cranelift host in jet-jit/src/Crypto.rs, the
+    // comptime hosts in jet-comptime/src/Comptime, and the standalone
+    // `jet_ffi_*` bridge crate in jet-pkg-model/src/FFI.rs). Those projections
+    // do not all carry Foundation's registered-row adapter
+    // `jet_render_runtime_stop`: the bridge strips it with the rest of the host
+    // wrapper (`JET_HOST_RUNTIME_STOP_BEGIN`/`_END`) and, unlike
+    // `push_embedded_outcome`, never appends a replacement. Rendering here
+    // therefore emitted a call whose definition lived in another projection's
+    // guard — rustc E0425 inside a crate Jet itself generated, surfaced to the
+    // user as E0705 against their `extern rust` line.
+    //
+    // So the fault leaves this file as the shared foreign-boundary stop
+    // message that `jet_runtime_boundary` (Prelude/Core.rs) already converts
+    // into the one registered E3001 report — the same protocol the generated
+    // bridge's own `ffi_panic` uses. This file now names no Prelude or
+    // Foundation symbol at all, so no projection can strip a definition out
+    // from under it.
+    std::panic::panic_any(format!("__jet_ffi_runtime__: {operation}: {error}"))
 }
 
 pub(crate) fn jet_std_crypto_random_bytes(n: i64) -> Vec<u8> {
