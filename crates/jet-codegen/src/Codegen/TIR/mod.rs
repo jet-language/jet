@@ -1333,6 +1333,87 @@ fn memo_dependency_facts(
         .collect()
 }
 
+/// D-SERDE2=A / I9: lower the compiler-written codecs an IMPORTED module declares.
+///
+/// A generated codec is a top-level `Item::Impl` carrying the parser-unforgeable
+/// `is_generated_serde` provenance — the same authority the entry-module
+/// `Item::Impl` arm below and `Codegen/Items.rs::emit_trait_method` already treat
+/// as the coverage decision for compiler-written code. The imported-module loop
+/// matches only `Item::Func`, `Item::CodeModule`, `Item::Struct`/`Item::Enum` and
+/// the unit-label `Display` impl, so without this pass AOT emits an imported
+/// type's `Encode`/`Decode` while the JIT program and the interpreter have no
+/// method at all: encoding a struct with an imported field succeeds under
+/// `jet build` and stops at E0956 under the default `jet run`. One program, two
+/// meanings by tier — the I9 split this closes.
+///
+/// The codec is lowered against the IMPORTING context, not the declaring one.
+/// `register_imported_struct_shapes` registers an imported nominal under its
+/// canonical bundle identity (`open_dep::Badge`) with canonically qualified field
+/// types, while the declaring module's own context knows the type only by its
+/// local leaf (`Badge`). Lowering here therefore gives the codec the same owner
+/// identity every other TIR node already uses for that type — including the
+/// nominal its `decode` body constructs, which must match the value an
+/// `alias.Type.{ … }` literal builds, or structural equality on a decoded value
+/// would compare two spellings of one type and answer `false`.
+fn lower_imported_generated_codecs(bundle: &ProgramBundle, cx: &Cx, funcs: &mut Vec<TFunc>) {
+    for (module_idx, imported) in bundle.modules.iter().enumerate() {
+        if module_idx == bundle.entry {
+            continue;
+        }
+        for item in &imported.items {
+            let Item::Impl(implementation) = item else {
+                continue;
+            };
+            if !implementation.is_generated_serde {
+                continue;
+            }
+            let Some(trait_name) = &implementation.trait_name else {
+                continue;
+            };
+            // D-PUBSCHEMA: a published schema's unknown-field holder is registered
+            // only in the declaring module's context, so its codec cannot be
+            // reproduced faithfully from here. Leave it refused rather than lower a
+            // codec that silently drops the merge AOT performs.
+            if imported.items.iter().any(|candidate| {
+                matches!(candidate, Item::Struct(definition)
+                    if definition.name == implementation.type_name
+                        && definition.is_published_schema)
+            }) {
+                continue;
+            }
+            for owner in imported_type_owners(bundle, module_idx) {
+                let qualified = imported_type_name(&owner, &implementation.type_name);
+                // Only a nominal this context actually resolved carries a canonical
+                // shape here; anything else would lower against an unknown owner.
+                if !cx.struct_fields.contains_key(&qualified)
+                    && !cx.enum_variants.contains_key(&qualified)
+                {
+                    continue;
+                }
+                for method in &implementation.methods {
+                    if !method.type_params.is_empty() {
+                        continue;
+                    }
+                    let name = format!("{qualified}::{}", method.name);
+                    if funcs.iter().any(|function| function.name == name) {
+                        continue;
+                    }
+                    let mut lowered = lower_trait_method(method, &qualified, cx, trait_name);
+                    // `decode` declares `Result<Badge, [FieldError]>` with the
+                    // declaring module's leaf; carry it to the same canonical
+                    // identity the owner and the body already use.
+                    lowered.ret = lowered
+                        .ret
+                        .as_ref()
+                        .map(|ty| qualify_imported_type(bundle, module_idx, &owner, ty));
+                    lowered.name = name;
+                    funcs.push(lowered);
+                }
+            }
+        }
+    }
+}
+
 pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
@@ -1634,6 +1715,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    lower_imported_generated_codecs(bundle, &cx, &mut funcs);
     lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
     specialize_generic_free_functions(&module.items, &cx, &mut funcs);
     let entry_ok = if entry_name == super::mangle_generated("cli_main") {

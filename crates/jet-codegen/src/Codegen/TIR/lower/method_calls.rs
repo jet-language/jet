@@ -654,7 +654,44 @@ fn lower_crypto_instance_fast(
     })
 }
 
-fn lower_serde_encode_node(recv: TExpr, cx: &Cx) -> TExpr {
+/// D-SERDE2=A / I9: project a codec owner onto its canonical bundle identity.
+///
+/// A codec instance is keyed by the OWNER TYPE — `cx.rust_type` for AOT, the JIT
+/// program's function table for the resident tier, and `serde_codec` for the TIR
+/// evaluator all spell it `Owner::encode` / `Owner::decode`. Every imported
+/// nominal in TIR is spelled by its canonical identity: `register_imported_struct_shapes`
+/// registers it that way, and the struct-literal head resolves `alias.Type` through
+/// `foreign_type_identity` (it ICEs rather than keep the alias spelling). A LOCAL
+/// struct's declared field type is the one place the source spelling survives —
+/// `struct ImportedEnvelope { badge: library.Badge }` stores `library.Badge`
+/// verbatim — so a field read reaches this node under a spelling no codec is
+/// keyed by, and the evaluator refuses it with E0956 while AOT emits fine.
+/// Resolve it here, through the one resolver that splits an alias off a qualified
+/// name, so one type demands exactly one codec in every tier. `cx.rust_type`
+/// renders both spellings to the same Rust path (`Context.rs` foreign-identity arm
+/// and dotted-alias arm), so AOT emit is unchanged.
+///
+/// Only the alias-qualified spelling is projected. A BARE name is left alone: a
+/// core codec owner (`Decimal`, `Instant`, …) is not registered in
+/// `cx.struct_fields`, and rewriting it onto a same-leaf nominal from some
+/// dependency would route it past `builtin_codec_name` into a user codec. A dotted
+/// name can never be a builtin, and a core module alias (`json.Value`) has no
+/// `cx.import_mods` entry, so it resolves to `None` and stays as written.
+fn canonical_codec_owner(ty: &Type, cx: &Cx) -> Type {
+    let Type::Named(name) = ty else {
+        return ty.clone();
+    };
+    if !name.contains('.') {
+        return ty.clone();
+    }
+    match cx.imported_type_metadata_name(name) {
+        Some(identity) if identity != *name => Type::Named(identity),
+        _ => ty.clone(),
+    }
+}
+
+fn lower_serde_encode_node(mut recv: TExpr, cx: &Cx) -> TExpr {
+    recv.ty = canonical_codec_owner(&recv.ty, cx);
     if matches!(&recv.ty, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
             crate::Codegen::TIR::generic_method_instance_key(&recv.ty, "encode", &[]),
@@ -677,6 +714,7 @@ fn lower_datatree_decode_node(
     resolved_ret: Option<&Type>,
     cx: &Cx,
 ) -> TExpr {
+    let target = canonical_codec_owner(&target, cx);
     if matches!(&target, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
             crate::Codegen::TIR::generic_method_instance_key(&target, "decode", &[]),
