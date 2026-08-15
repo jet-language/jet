@@ -67,6 +67,15 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
+    // D-MEMO1=A: sema resolves `name.cache()` to the MemoStats projection.
+    // Mirror the lowerer's exact shape so the TIR gate cannot reject a call
+    // that lower_method_call_with_sig already represents canonically.
+    if method == Syntax::METHOD_MEMO_CACHE
+        && args.is_empty()
+        && matches!(resolved_ret, Some(Type::Named(name)) if name == Syntax::TYPE_MEMO_STATS)
+    {
+        return matches!(receiver, Expr::Ident(_, _));
+    }
     // D-CALLDUAL1=E: sema has already resolved a receiver-first `#Root` call
     // to one ordinary function, import, or Core print target. Keep this gate
     // structural; the target's signature and capabilities were checked in
