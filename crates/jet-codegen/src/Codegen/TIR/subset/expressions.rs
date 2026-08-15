@@ -6,6 +6,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::arg_conv_in_subset;
 use crate::Codegen::TIR::enum_is_covered;
+use crate::Codegen::TIR::fold_typed_fact_enum_equality;
 use crate::Codegen::TIR::foreign_struct_lit_in_subset;
 use crate::Codegen::TIR::is_covered_generic_struct_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -74,6 +75,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         {
             expr_in_subset(subject, cx, locals)
         }
+        // D-FACT-ENUM-TIR: generated fact reads are already typed enum literals,
+        // not `ComptimeName` nodes for sema's earlier fold. The shared TIR fold
+        // turns the closed comparison into a Bool before either literal reaches
+        // an engine or the Rust emitter.
+        Expr::Binary(op, l, r, _)
+            if fold_typed_fact_enum_equality(cx, *op, l, r).is_some() => true,
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
         Expr::CompareChain { operands, .. } => {

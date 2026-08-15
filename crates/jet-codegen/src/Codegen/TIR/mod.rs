@@ -45,8 +45,82 @@ pub(crate) use emit::*;
 pub(crate) use lower::*;
 pub(crate) use subset::*;
 
-use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp, VariantPayload};
+use crate::AST::{
+    AccessConvention, BinOp, CtValue, Expr, Item, ProgramBundle, Type, UnOp, VariantPayload,
+};
 use crate::Codegen::{mangle, mangle_path};
+
+/// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with its enum
+/// value before sema sees the generated body. User/imported enums are already
+/// present in `Cx::enum_variants`; sema-synthesized fact menus are not runtime
+/// enum entries. That resolved ownership fact is the boundary proof, so this
+/// path carries no second fact-kind name registry.
+fn compiler_owned_unit_enum(type_name: &str, cx: &Cx) -> bool {
+    !is_eval_fragment() && !cx.enum_variants.contains_key(type_name)
+}
+
+fn typed_fact_enum_value(expr: &Expr, cx: &Cx) -> Option<CtValue> {
+    match expr {
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => typed_fact_enum_value(inner, cx),
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } if args.is_empty() && compiler_owned_unit_enum(type_name, cx) => Some(CtValue::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: Vec::new(),
+        }),
+        Expr::ComptimeName {
+            value:
+                Some(CtValue::Enum {
+                    type_name,
+                    variant,
+                    args,
+                }),
+            ..
+        } if args.is_empty() && compiler_owned_unit_enum(type_name, cx) => Some(CtValue::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: Vec::new(),
+        }),
+        _ => None,
+    }
+}
+
+/// Fold equality between compiler-owned fact enum values before any engine or
+/// Rust emission sees them. The caller must use this predicate as its coverage
+/// proof and its lowering decision so a fact cannot re-enter runtime dispatch.
+pub(crate) fn fold_typed_fact_enum_equality(
+    cx: &Cx,
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+) -> Option<bool> {
+    if !matches!(op, BinOp::Eq | BinOp::Ne) {
+        return None;
+    }
+    let left = typed_fact_enum_value(lhs, cx)?;
+    let right = typed_fact_enum_value(rhs, cx)?;
+    let (
+        CtValue::Enum {
+            type_name: left_type,
+            ..
+        },
+        CtValue::Enum {
+            type_name: right_type,
+            ..
+        },
+    ) = (&left, &right)
+    else {
+        return None;
+    };
+    if left_type != right_type {
+        return None;
+    }
+    Some(if op == BinOp::Eq { left == right } else { left != right })
+}
 
 thread_local! {
     static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
