@@ -39,12 +39,52 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// The offset of an expression's first source byte.
+    ///
+    /// `Expr::span` is a diagnostic *anchor*, not an extent: `Expr::Field`
+    /// carries the member name's span, `Expr::MethodCall` the method name's,
+    /// `Expr::CallValue` the argument parens'. Asking which token precedes an
+    /// expression therefore has to start from its real left edge — descend the
+    /// leftmost operand until a node whose own span already leads. `min` keeps
+    /// the answer right for the nodes whose span does cover their operand.
+    fn expr_start(expr: &Expr) -> usize {
+        let own = expr.span().start;
+        let leftmost = match expr {
+            Expr::Field(base, ..)
+            | Expr::MemberSpread { base, .. }
+            | Expr::OptField { base, .. }
+            | Expr::Index { base, .. }
+            | Expr::Slice { base, .. } => Some(base.as_ref()),
+            Expr::MethodCall { receiver, .. } => Some(receiver.as_ref()),
+            Expr::CallValue { callee, .. } => Some(callee.as_ref()),
+            Expr::Binary(_, lhs, _, _) => Some(lhs.as_ref()),
+            Expr::CompareChain { operands, .. } => operands.first(),
+            Expr::Range { start, .. } => Some(start.as_ref()),
+            Expr::Deref(inner, _) | Expr::Try(inner, ..) => Some(inner.as_ref()),
+            Expr::OrFallback { value, .. } => Some(value.as_ref()),
+            Expr::PatternTest { subject, .. } => Some(subject.as_ref()),
+            Expr::IncDec {
+                operand,
+                postfix: true,
+                ..
+            } => Some(operand.as_ref()),
+            _ => None,
+        };
+        leftmost.map_or(own, |child| own.min(Self::expr_start(child)))
+    }
+
+    /// True when the author wrote this value inside its own `{ … }`. It is the
+    /// discriminator between `-> value` and `-> { value }`, and between
+    /// `task expr` and `task { expr }`: both spellings of each pair fold to the
+    /// same node, so the source token before the value's left edge is the only
+    /// surviving evidence of the authored braces.
     fn value_was_braced(&self, value: &Expr) -> bool {
+        let start = Self::expr_start(value);
         self.source_toks
             .iter()
             .rev()
             .find(|token| {
-                token.span.end <= value.span().start
+                token.span.end <= start
                     && !matches!(
                         token.kind,
                         TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi
@@ -2037,7 +2077,7 @@ impl<'a> Fmt<'a> {
                         self.newline();
                         self.with_trailing_comment_limit(lam.span.end, |f| {
                             f.with_indent(|f| {
-                                f.emit_leading(expr.span().start);
+                                f.emit_leading(Self::expr_start(expr));
                                 f.fmt_expr(expr, Prec::OrFallback);
                                 f.emit_trailing(expr.span().end);
                             });

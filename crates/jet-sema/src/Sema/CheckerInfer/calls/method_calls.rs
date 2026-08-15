@@ -4632,36 +4632,57 @@ impl<'a> Checker<'a> {
                 }
             }
             let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
-                let iter_positional_pick = matches!(
-                    &recv_ty,
-                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER
-                ) && method == "nth";
-                let materializer = matches!(
-                    &recv_ty,
-                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER
-                )
-                .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
-                .flatten();
-                let candidate = self.method_candidate(method, &recv_ty, Some(&type_name));
-                let (why, fix) = if iter_positional_pick {
+                let iter_elem = match &recv_ty {
+                    Type::Apply { name, args } if name == Syntax::TYPE_ITER => args.first(),
+                    _ => None,
+                };
+                let iter_positional_pick = iter_elem.is_some() && method == "nth";
+                // #1887: `.to_list()` is the truthful fix only when the collected
+                // list really carries the method that was asked for — a lazy view
+                // has to be materialized before a positional read. A name the
+                // list doesn't carry either is an ordinary misspelling, and falls
+                // through to the near-miss candidate below.
+                let collect_first = iter_elem
+                    .is_some_and(|elem| {
+                        Collections::builtin_method_names(&Type::List(Box::new(elem.clone())))
+                            .iter()
+                            .any(|known| known == method)
+                    })
+                    .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
+                    .flatten();
+                // #1887: a hand-authored hint for a known receiver/method pair
+                // outranks the generic edit-distance near-miss. `len` is one edit
+                // away from `get` but semantically unrelated, and offering it
+                // would displace the real explanation. The candidate list is the
+                // fallback for a receiver nothing specific is known about, and it
+                // also owns the suggested source edit: renaming the method is an
+                // honest edit only when renaming is the fix being offered.
+                let (why, fix, rename_edit) = if iter_positional_pick {
                     (
                         "positional picks on `Iter` use one consuming path".to_string(),
                         "use `.skip(n).first()`; `nth` is not part of the API".to_string(),
+                        None,
                     )
-                } else {
+                } else if let Some(materializer) = collect_first {
                     (
                         "check the method name on this type".to_string(),
-                        candidate
-                            .as_deref()
-                            .map(|candidate| format!("did you mean `{candidate}`?"))
-                            .or_else(|| {
-                                materializer.map(|method| format!("call `{method}` first"))
-                            })
-                            .unwrap_or_else(|| {
-                                format!(
-                                    "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
-                                )
-                            }),
+                        format!("call `{materializer}` first"),
+                        None,
+                    )
+                } else {
+                    let candidate = self.method_candidate(method, &recv_ty, Some(&type_name));
+                    let fix = candidate
+                        .as_deref()
+                        .map(|candidate| format!("did you mean `{candidate}`?"))
+                        .unwrap_or_else(|| {
+                            format!(
+                                "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
+                            )
+                        });
+                    (
+                        "check the method name on this type".to_string(),
+                        fix,
+                        candidate,
                     )
                 };
                 let mut diagnostic = Diagnostic::error(
@@ -4671,7 +4692,7 @@ impl<'a> Checker<'a> {
                     fix,
                     Some(span),
                 );
-                if let Some(candidate) = candidate {
+                if let Some(candidate) = rename_edit {
                     diagnostic = diagnostic.with_edit(TextEdit {
                         span,
                         new_text: candidate,
