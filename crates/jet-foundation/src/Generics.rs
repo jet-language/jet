@@ -345,7 +345,7 @@ pub fn sig_matches_trait(
 
 fn types_equal_modulo_self(a: &Type, b: &Type) -> bool {
     match (a, b) {
-        (Type::Named(sa), Type::Named(sb)) if sa.is_empty() || sb.is_empty() => true,
+        (Type::Named(name), _) | (_, Type::Named(name)) if name.is_empty() => true,
         _ => a == b,
     }
 }
