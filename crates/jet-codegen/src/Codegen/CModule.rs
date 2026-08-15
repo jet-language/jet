@@ -17,7 +17,7 @@ const NULL_RETURN_PANIC: &str =
     "a C function declared to return String returned a null pointer";
 const UTF8_RETURN_PANIC: &str =
     "a C function declared to return String returned bytes that are not valid UTF-8";
-const INT_RANGE_PANIC: &str = "a default Int value does not fit in the C i64 range";
+const INT_RANGE_MESSAGE: &str = "a default Int value does not fit in the C i64 range";
 
 /// Card #436: `CModule` functions are always emitted in a synthetic per-lib
 /// Rust module (`CFFI::assemble` in the jetpack crate folds every
@@ -86,8 +86,8 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
             match &p.ty {
                 Type::Int => {
                     conv_lines.push(format!(
-                        "    let c{i} = {}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| jet_panic(file!(), line!(), \"{INT_RANGE_PANIC}\"));",
-                        cx.root_prefix
+                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), \"{INT_RANGE_MESSAGE}\"));",
+                        root = cx.root_prefix,
                     ));
                     call_args.push(format!("c{i}"));
                 }
