@@ -88,13 +88,14 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
 /// reset on restart.
 #[derive(Clone)]
 pub(crate) struct ReflectSlot {
-    /// Present only for a field projection. The same slot is also the typed
-    /// Value returned by `Field.value()`; its text is only `display`.
+    /// Present only for a field projection. It points at the nested typed
+    /// Value returned by `Field.value()`; text is only `display`.
     pub field_name: Option<String>,
     pub type_name: String,
     pub path: String,
     pub display: String,
     pub fields: Vec<(String, i64)>,
+    pub value: Option<i64>,
 }
 
 /// Canonical resident representation for a runtime function value.
@@ -3063,28 +3064,26 @@ extern "C" fn jet_jit_reflect_of_finish(
             path,
             display,
             fields: out,
+            value: None,
         });
         rt.reflect_values.len() as i64
     })
 }
 
-extern "C" fn jet_jit_reflect_field_new(
-    name: i64,
-    type_name: i64,
-    path: i64,
-    display: i64,
-) -> i64 {
+extern "C" fn jet_jit_reflect_field_new(name: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let name = rt.heap.clone_string(name).unwrap_or_default();
-        let type_name = rt.heap.clone_string(type_name).unwrap_or_default();
-        let path = rt.heap.clone_string(path).unwrap_or_default();
-        let display = rt.heap.clone_string(display).unwrap_or_default();
+        let value_idx = (value as usize).wrapping_sub(1);
+        let Some(value_slot) = rt.reflect_values.get(value_idx).cloned() else {
+            return 0;
+        };
         rt.reflect_values.push(ReflectSlot {
             field_name: Some(name),
-            type_name,
-            path,
-            display,
-            fields: Vec::new(),
+            type_name: value_slot.type_name,
+            path: value_slot.path,
+            display: value_slot.display,
+            fields: value_slot.fields,
+            value: Some(value),
         });
         rt.reflect_values.len() as i64
     })
@@ -3140,12 +3139,18 @@ extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
             let Some(value_slot) = rt.reflect_values.get(value_idx).cloned() else {
                 continue;
             };
+            let value = value_slot.value.unwrap_or(value);
+            let value_idx = (value as usize).wrapping_sub(1);
+            let Some(value_slot) = rt.reflect_values.get(value_idx).cloned() else {
+                continue;
+            };
             rt.reflect_values.push(ReflectSlot {
                 field_name: Some(name),
                 type_name: value_slot.type_name,
                 path: value_slot.path,
                 display: value_slot.display,
-                fields: Vec::new(),
+                fields: value_slot.fields,
+                value: Some(value),
             });
             ids.push(rt.reflect_values.len() as i64);
         }
@@ -3168,11 +3173,10 @@ extern "C" fn jet_jit_reflect_field_name(handle: i64) -> i64 {
 extern "C" fn jet_jit_reflect_field_value(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (handle as usize).wrapping_sub(1);
-        if rt.reflect_values.get(idx).is_some() {
-            handle
-        } else {
-            0
-        }
+        rt.reflect_values
+            .get(idx)
+            .and_then(|slot| slot.value)
+            .unwrap_or(0)
     })
 }
 
@@ -3318,7 +3322,7 @@ host_fns! {
         let mut sig_reflect_field_new = Signature::new(cc);
         sig_reflect_field_new
             .params
-            .extend([AbiParam::new(types::I64); 4]);
+            .extend([AbiParam::new(types::I64); 2]);
         sig_reflect_field_new
             .returns
             .push(AbiParam::new(types::I64));

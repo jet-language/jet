@@ -6719,32 +6719,6 @@ impl LowerCtx<'_, '_> {
         let field_rows = named_type
             .and_then(|name| self.meta.reflection_fields(name))
             .map(|fields| fields.to_vec());
-        if let Some(fields) = field_rows.as_ref() {
-            // Reject before emitting any resident instructions. The ambient
-            // path owns nested/collection reflection semantics; the resident
-            // path only has exact scalar field encoders.
-            if fields.iter().any(|field| {
-                let field_ty = self
-                    .concrete_struct_field_ty(&ty, &field.name)
-                    .unwrap_or_else(|| field.ty.clone());
-                !matches!(
-                    &field_ty,
-                    Type::Int
-                        | Type::IntN { .. }
-                        | Type::InlineRange { .. }
-                        | Type::Float
-                        | Type::Float32
-                        | Type::Bool
-                        | Type::Char
-                        | Type::String
-                )
-            }) {
-                return Err(format!(
-                    "resident reflection for `{}` has non-scalar fields; use ambient parity path",
-                    named_type.unwrap_or_default()
-                ));
-            }
-        }
         let type_h = self.runtime.heap.alloc_string(type_name.clone());
         let type_v = self.b.ins().iconst(types::I64, type_h);
         let path_h = self.runtime.heap.alloc_string(path);
@@ -6764,19 +6738,12 @@ impl LowerCtx<'_, '_> {
                 let field_ty = self
                     .concrete_struct_field_ty(&ty, &field.name)
                     .unwrap_or_else(|| field.ty.clone());
-                let field_type_h = self.runtime.heap.alloc_string(field_ty.leaf_name());
-                let field_type_v = self.b.ins().iconst(types::I64, field_type_h);
-                let field_path_h = self
-                    .runtime
-                    .heap
-                    .alloc_string(self.meta.reflect_path(&field_ty));
-                let field_path_v = self.b.ins().iconst(types::I64, field_path_h);
                 let field_val = self.lower_record_field(value, n, &field.name, &field_ty)?;
-                let fbuf = self.lower_reflect_text(field_val, &field_ty, false)?;
-                let fnew = self
-                    .b
-                    .ins()
-                    .call(field_new, &[name_v, field_type_v, field_path_v, fbuf]);
+                // D-METAREFLECT1: keep a nested typed Value carrier. Its
+                // display text is only a later projection, matching the AOT
+                // Prelude and interpreter shapes.
+                let child = self.lower_reflect_value(field_val, &field_ty, false)?;
+                let fnew = self.b.ins().call(field_new, &[name_v, child]);
                 let fh = self.b.inst_results(fnew)[0];
                 self.b.ins().call(push, &[fields, fh]);
             }
