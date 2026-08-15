@@ -344,7 +344,43 @@ fn load_entry_with_overlays_mode(
     )
 }
 
+/// Loading is an unbounded-depth recursive descent over user syntax — the
+/// module graph, the parser, and derive/comptime expansion — so the frame
+/// requirement is per source-nesting level, not per program size. This is the
+/// narrowest point every public `load_entry*` shares, so the sized stack is
+/// installed here instead of being chased caller by caller: `Loader::load_entry`
+/// and its overlay siblings are public API, and an embedder holding its own
+/// entry path — or a 2 MiB libtest worker — would otherwise run the descent on
+/// whatever stack it happens to have, aborting the process on overflow.
+///
+/// [`crate::run_compiler_work`] is the product boundary rather than
+/// `CompilerStack::run_on_compiler_stack` directly, because it owns this
+/// crate's thread-local carry: it tests re-entrancy *first*, so an outer
+/// boundary (a driver funnel, a JIT public entry) makes this run inline with
+/// no capture and no spawn, and on the spawning path it carries the comptime
+/// ambient hooks — the one piece of caller-established thread-local state the
+/// front end reads — across to the worker.
 fn load_entry_with_overlays_mode_with_sink(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+    load_adjacent_unqualified: bool,
+    dependencies: &mut Vec<PathBuf>,
+    sink: Option<&mut Vec<LoaderDiagnostic>>,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    crate::run_compiler_work(move || {
+        load_entry_with_overlays_mode_on_stack(
+            entry_path,
+            overlays,
+            for_check,
+            load_adjacent_unqualified,
+            dependencies,
+            sink,
+        )
+    })
+}
+
+fn load_entry_with_overlays_mode_on_stack(
     entry_path: &str,
     overlays: &[(&Path, &str)],
     for_check: bool,

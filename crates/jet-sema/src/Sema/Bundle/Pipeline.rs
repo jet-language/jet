@@ -297,7 +297,65 @@ pub(super) fn check_bundle_opts_for_output(
     )
 }
 
+/// Checking is an unbounded-depth recursive descent over user syntax, so the
+/// frame requirement is per source-nesting level, not per program size. This
+/// is the narrowest point every public `check_bundle*` shares, so the sized
+/// stack is installed here instead of being chased caller by caller:
+/// `Sema::check_bundle` and its siblings are public API, and an embedder
+/// holding its own bundle — or a 2 MiB libtest worker — would otherwise run
+/// the descent on whatever stack it happens to have, aborting the process on
+/// overflow.
+///
+/// The re-entrancy flag is shared in `jet-foundation`, so an outer boundary
+/// already on the worker (a driver funnel, a JIT public entry, the loader)
+/// makes this run inline: the check comes *first*, so the inline path does no
+/// capture and no spawn.
+///
+/// Thread-locals across the spawn. `PACKAGE_EDITION` is established *inside*
+/// the worker from `bundle.edition`, so `with_package_edition` stays under the
+/// boundary rather than over it. The comptime ambient hooks are the one piece
+/// of caller-established state the check reads back (derive/comptime folding
+/// reaches them through `TirBridge`), so they are carried across explicitly —
+/// the same carry `jet_driver::run_compiler_work` performs. `TirBridge`'s own
+/// hooks are a process-global `OnceLock`, not thread-local, so they need no
+/// carry.
 pub(super) fn check_bundle_opts_for_output_with_context(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+    explicit_output: Option<&str>,
+    incremental: Option<&mut IncrementalSemaCache>,
+    allow_compiler_api: bool,
+) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+    if jet_foundation::CompilerStack::on_compiler_worker() {
+        return check_bundle_opts_for_output_on_stack(
+            bundle,
+            mode,
+            freestanding,
+            gates,
+            explicit_output,
+            incremental,
+            allow_compiler_api,
+        );
+    }
+    let (ambient_core_call, ambient_handle) = crate::Comptime::ambient_hooks();
+    jet_foundation::CompilerStack::run_on_compiler_stack(move || {
+        crate::Comptime::with_ambient(ambient_core_call, ambient_handle, || {
+            check_bundle_opts_for_output_on_stack(
+                bundle,
+                mode,
+                freestanding,
+                gates,
+                explicit_output,
+                incremental,
+                allow_compiler_api,
+            )
+        })
+    })
+}
+
+fn check_bundle_opts_for_output_on_stack(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     freestanding: bool,

@@ -15,14 +15,27 @@
 //!
 //! # Why this crate owns it
 //!
-//! Two independent crates install this boundary and they must share one
+//! Four independent crates install this boundary and they must share one
 //! re-entrancy flag, or a nested entry would spawn a worker inside a worker:
-//! `jet-driver` wraps the compile/check/run funnels, and `jet-jit` wraps its
-//! public bundle entries. I6 keeps the seam one-directional — `jet-jit` must
-//! not depend on `jet-driver`, and `jet-driver` does not depend on `jet-jit` —
-//! so the flag lives in the deepest crate both take a path dependency on.
-//! That is the same reason the `JitBackend` / `RunOutcome` execution seam
-//! lives here rather than in either side.
+//!
+//! * `jet-sema` — `check_bundle_opts_for_output_with_context`, the funnel every
+//!   public `Sema::check_bundle*` shares
+//! * `jet-driver` — the compile/check/run funnels, and the loader funnel every
+//!   public `Loader::load_entry*` shares
+//! * `jet-codegen` — `TIR::lower_jit_program`
+//! * `jet-jit` — its public bundle entries
+//!
+//! Installing at those funnels rather than at their callers is the whole
+//! point. Each one is public API, so an embedder holding its own bundle, a
+//! test harness, or the LSP reaches the recursive descent on whatever stack it
+//! happens to have — and wrapping callers one at a time never converges,
+//! because the overflow just moves to the next unwrapped caller.
+//!
+//! I6 keeps the seam one-directional — `jet-jit` must not depend on
+//! `jet-driver`, and `jet-sema` depends on neither — so the flag lives in the
+//! deepest crate all four take a path dependency on. That is the same reason
+//! the `JitBackend` / `RunOutcome` execution seam lives here rather than in
+//! any one side.
 
 use std::cell::Cell;
 
@@ -63,8 +76,12 @@ pub fn on_compiler_worker() -> bool {
 ///
 /// This primitive carries no thread-local state of its own. Each installing
 /// crate knows which of its own thread-locals the work reads or publishes and
-/// wraps this with exactly that capture/restore (see
-/// `jet_driver::run_compiler_work` and `jet_jit::on_compiler_stack`).
+/// wraps this with exactly that capture/restore: `jet_driver::run_compiler_work`
+/// and `Sema::check_bundle_opts_for_output_with_context` carry the comptime
+/// ambient hooks, `TIR::lower_jit_program` carries `LAST_JIT_LOWER_FAILURE`
+/// back out, and `jet_jit::on_compiler_stack` carries the trace flags and tier
+/// rows. Each checks [`on_compiler_worker`] before capturing, so the inline
+/// path stays allocation-free.
 ///
 /// Values and panics propagate unchanged: `join` returns the work's value, and
 /// a panic is re-raised with `resume_unwind`, so the ICE path and the
