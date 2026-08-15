@@ -677,6 +677,11 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
     "\njet_datatree_decode_helpers!();\n",
+    // `EncodingStream.rs` validates exact JSON number tokens through
+    // `jet_std::validate_json_number`. The root `jet_json_number` module holds
+    // the one implementation; name it here so the generated program, the JIT
+    // host, and comptime all reach the same function (I9).
+    "\n#[allow(unused_imports)]\npub use crate::jet_json_number::validate_json_number;\n",
     "\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
     include_str!("../Prelude/LocalCell.rs"),
     "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n// JET_VETTED_UNSAFE_END: jet_cell\n",
