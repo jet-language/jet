@@ -304,7 +304,7 @@ pub(crate) struct JitRuntime {
 }
 
 #[derive(Clone)]
-struct JitSourceFrame {
+pub(crate) struct JitSourceFrame {
     file: String,
     line: u32,
     fn_name: String,
