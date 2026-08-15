@@ -114,6 +114,10 @@ pub(crate) struct Cx {
     /// structured literal to every engine instead of the rendered Rust text.
     pub(crate) const_values: HashMap<String, CtValue>,
     pub(crate) type_names: HashSet<String>,
+    /// Nominals declared by the module being emitted. Imported canonical
+    /// identities and convenience leaves also live in `type_names`; this set
+    /// preserves source lookup precedence when a local shadows an import.
+    pub(crate) local_type_names: HashSet<String>,
     /// D-BOUND-SINK1=A: checked text-head names are nominal in sema but erase
     /// to the one Prelude `String` representation in every backend.
     pub(crate) checked_text_heads: HashSet<String>,
@@ -817,9 +821,8 @@ impl Cx {
 
     pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
         // A bare source name resolves to a local nominal before any imported
-        // type with the same leaf. Imported shapes are keyed by their canonical
-        // identity in `type_names`, so this rejects only a real local shadow.
-        if alias.is_empty() && self.type_names.contains(leaf) {
+        // type with the same leaf. Qualified aliases still select their import.
+        if alias.is_empty() && self.local_type_names.contains(leaf) {
             return None;
         }
         let rust_mod = if alias.is_empty() {
@@ -3767,6 +3770,7 @@ pub(crate) fn build_cx_items(
         consts: HashMap::new(),
         const_values: HashMap::new(),
         type_names: HashSet::new(),
+        local_type_names: HashSet::new(),
         checked_text_heads: HashSet::new(),
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
@@ -4205,6 +4209,7 @@ pub(crate) fn build_cx_items(
             }
             Item::Struct(s) => {
                 cx.type_names.insert(s.name.clone());
+                cx.local_type_names.insert(s.name.clone());
                 if s.is_published_schema {
                     cx.published_schemas.insert(s.name.clone());
                 }
@@ -4262,6 +4267,7 @@ pub(crate) fn build_cx_items(
             }
             Item::Enum(e) => {
                 cx.type_names.insert(e.name.clone());
+                cx.local_type_names.insert(e.name.clone());
                 cx.enum_variants.insert(
                     e.name.clone(),
                     e.variants
@@ -4453,6 +4459,7 @@ pub(crate) fn build_cx_items(
             }
             Item::MarkerDecl(declaration) if declaration.text.is_some() => {
                 cx.type_names.insert(declaration.name.clone());
+                cx.local_type_names.insert(declaration.name.clone());
                 cx.checked_text_heads.insert(declaration.name.clone());
             }
             Item::EffectDecl(_)
@@ -4472,6 +4479,7 @@ pub(crate) fn build_cx_items(
             }
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
+                cx.local_type_names.insert(d.name.clone());
                 cx.distinct_types
                     .insert(
                         d.name.clone(),
@@ -4497,6 +4505,7 @@ pub(crate) fn build_cx_items(
                         .any(|member| member.offset != crate::AST::UnitRatio::zero());
                 for d in uf.distinct_defs() {
                     cx.type_names.insert(d.name.clone());
+                    cx.local_type_names.insert(d.name.clone());
                     cx.distinct_types
                         .insert(
                             d.name.clone(),

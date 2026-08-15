@@ -3058,6 +3058,7 @@ fn seed_fragment_unit_families(cx: &mut Cx, families: &[UnitFamilyDef]) {
         .collect::<Vec<_>>();
     let units = build_cx_items(&items, "", "<eval>", None, &HashMap::new());
     cx.type_names.extend(units.type_names);
+    cx.local_type_names.extend(units.local_type_names);
     cx.distinct_types.extend(units.distinct_types);
     cx.distinct_ranges.extend(units.distinct_ranges);
     cx.unit_facts.extend(units.unit_facts);
