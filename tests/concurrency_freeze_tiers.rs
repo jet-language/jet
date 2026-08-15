@@ -1,6 +1,8 @@
 //! D-CONC-CROSS1 / D-CONC-FREEZE1: crossing and frozen values keep one meaning
 //! through the parser, sema, TIR, AOT, JIT, interpreter, comptime, REPL, and web.
 
+mod common;
+
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
