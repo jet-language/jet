@@ -66,6 +66,44 @@ fn default_entry_error_golden_matches_all_execution_tiers() {
     );
 }
 
+/// D-FAIL-BREACH1 / I9: the checked-in runtime-stop reports are one byte oracle
+/// across AOT, default `jet run`, and the forced interpreter. Keep one example
+/// for each shipped stop kind so exit 101 or a second renderer cannot hide in a
+/// single tier.
+#[test]
+fn runtime_stop_goldens_match_all_execution_tiers() {
+    tir_support::assert_example_cli_error_tiers_agree(
+        "collections/list_bounds",
+        70,
+        include_str!("../examples/features/expected/collections/list_bounds.err.out"),
+    );
+    tir_support::assert_example_cli_error_tiers_agree(
+        "collections/map_key",
+        70,
+        include_str!("../examples/features/expected/collections/map_key.err.out"),
+    );
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/panic",
+        70,
+        include_str!("../examples/features/expected/errors/panic.err.out"),
+    );
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/stack_overflow",
+        70,
+        include_str!("../examples/features/expected/errors/stack_overflow.err.out"),
+    );
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/todo_stop",
+        70,
+        include_str!("../examples/features/expected/errors/todo_stop.err.out"),
+    );
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/u8_divide_zero",
+        70,
+        include_str!("../examples/features/expected/errors/u8_divide_zero.err.out"),
+    );
+}
+
 /// D-FAIL-EXIT1=A: explicit process termination unwinds Jet cleanup in the
 /// documented order before returning its requested code.
 #[test]
