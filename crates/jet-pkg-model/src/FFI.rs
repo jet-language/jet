@@ -1425,8 +1425,27 @@ pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "=2.6.1");
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
+const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
+const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+
+fn standalone_outcome_runtime() -> String {
+    let start = OUTCOME_RUNTIME
+        .find(HOST_RUNTIME_STOP_BEGIN)
+        .expect("Outcome host wrapper marker missing");
+    let end = OUTCOME_RUNTIME
+        .find(HOST_RUNTIME_STOP_END)
+        .expect("Outcome host wrapper end marker missing")
+        + HOST_RUNTIME_STOP_END.len();
+
+    // The crypto bridge has no compiler Registry. Keep the carrier/kernel and
+    // remove only the host adapter, matching the standalone Prelude projection.
+    let mut projected = String::with_capacity(OUTCOME_RUNTIME.len() - (end - start));
+    projected.push_str(&OUTCOME_RUNTIME[..start]);
+    projected.push_str(&OUTCOME_RUNTIME[end..]);
+    projected
+}
 
 /// The `wasmtime` crate version that backs sandboxed Component Model hosts
 /// (D-DEP-WASM1=A application `core.plugin`, and D-DX5-HOOK1=A compiler
@@ -2341,7 +2360,7 @@ fn cache_key_full(
     }
     if needs_crypto {
         needs_crypto.hash(&mut h);
-        OUTCOME_RUNTIME.hash(&mut h);
+        standalone_outcome_runtime().hash(&mut h);
         CRYPTO_RUNTIME.hash(&mut h);
         CRYPTO_ENTROPY_RUNTIME.hash(&mut h);
         // The helper is a separately cached binary. Its closed status protocol
@@ -2837,7 +2856,7 @@ fn emit_wrapper_lib(
     }
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
-        out.push_str(OUTCOME_RUNTIME);
+        out.push_str(&standalone_outcome_runtime());
         out.push('\n');
         out.push_str(CRYPTO_ENTROPY_RUNTIME);
         out.push('\n');
@@ -3634,6 +3653,20 @@ mod tests {
         assert!(source.contains("std::panic::panic_any"));
         assert!(!source.contains("std::process::exit"));
         assert!(!source.contains("eprintln!(\"panic: a foreign function panicked\")"));
+    }
+
+    #[test]
+    fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
+        let source = emit_wrapper_lib(&[], false, false, false, false, false, false, true, false, false, false);
+
+        assert!(source.contains("pub type JetOutcome<T, E> = Result<T, E>;"));
+        assert!(source.contains("pub struct JetAbsent;"));
+        assert!(source.contains("pub fn jet_present<T, E>(value: T)"));
+        assert!(source.contains("pub fn jet_render_runtime_stop_from_row("));
+        assert!(!source.contains("crate::Registry::active_runtime_diagnostic"));
+        assert!(!source.contains("JET_HOST_RUNTIME_STOP_BEGIN"));
+        assert!(!source.contains("JET_HOST_RUNTIME_STOP_END"));
+        assert!(!source.contains("pub fn jet_render_runtime_stop("));
     }
 
     #[test]
