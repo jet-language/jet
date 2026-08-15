@@ -202,12 +202,44 @@ impl NameLedger {
             .insert((module, internal_path.into()), display_path.into());
     }
 
-    fn declaration_at(&self, module: usize, start: usize, end: usize) -> Option<&NameDeclaration> {
-        self.declarations.values().find(|declaration| {
-            declaration.module == module
-                && declaration.span.start == start
-                && declaration.span.end == end
-        })
+    /// Resolve the one declaration that owns a source span.
+    ///
+    /// A span identifies a declaration only while it belongs to one. Every
+    /// compiler-synthesized member — the auto-derived `encode`/`decode`/
+    /// `compare` bodies, and each parameter and local inside them — reuses
+    /// its type's declaration span, so one span in one module can carry
+    /// several ledger declarations. `key` is the ledger key of the symbol
+    /// being projected: the declaration recorded under exactly that key owns
+    /// the span; a lone candidate is the inline-module bridge this lookup
+    /// exists for; several candidates that are none of them are not evidence
+    /// at all. Picking one by iteration would hand presentation output a
+    /// different answer in every process.
+    fn declaration_at(
+        &self,
+        module: usize,
+        start: usize,
+        end: usize,
+        key: Option<&str>,
+    ) -> Option<&NameDeclaration> {
+        if let Some(declaration) = key.and_then(|key| self.declaration(module, key)) {
+            if declaration.span.start == start && declaration.span.end == end {
+                return Some(declaration);
+            }
+        }
+        let mut only = None;
+        for declaration in self.declarations.values() {
+            if declaration.module != module
+                || declaration.span.start != start
+                || declaration.span.end != end
+            {
+                continue;
+            }
+            if only.is_some() {
+                return None;
+            }
+            only = Some(declaration);
+        }
+        only
     }
 
     /// Canonical identity for a nominal declared in one loaded module.
@@ -230,15 +262,16 @@ impl NameLedger {
     }
 
     /// Resolve a declaration without reconstructing its semantic key. Source
-    /// indexes already carry the declaration span, which is the unambiguous
-    /// bridge for inline-module names stored under generated keys.
+    /// indexes already carry the declaration span, which is the bridge for
+    /// inline-module names stored under generated keys. A span shared by
+    /// several declarations names none of them, so it resolves to nothing.
     pub fn canonical_path_at(
         &self,
         module: usize,
         start: usize,
         end: usize,
     ) -> Option<String> {
-        self.declaration_at(module, start, end)
+        self.declaration_at(module, start, end, None)
             .map(|declaration| declaration.path.clone())
     }
 
@@ -327,10 +360,15 @@ impl NameLedger {
         }
     }
 
-    /// Project one indexed declaration through the same unique/ambiguous rule
+    /// Project one indexed definition through the same unique/ambiguous rule
     /// as diagnostics. Inline-module declarations use generated ledger keys,
     /// so their recorded canonical path is the only source-facing fallback.
     /// Members first project their owner, then append the member leaf.
+    ///
+    /// The span is evidence, not a precondition: a definition whose span
+    /// names no declaration of its own — a parameter or local, or anything
+    /// sharing a compiler-synthesized member's span — still gets the ordinary
+    /// name projection instead of nothing.
     pub fn display_path_at(
         &self,
         from_module: usize,
@@ -340,24 +378,28 @@ impl NameLedger {
         owner: Option<&str>,
         resolved_module: Option<usize>,
     ) -> Option<String> {
-        let declaration = self.declaration_at(from_module, start, end)?;
-        let canonical = self
-            .display_declaration_path(from_module, &declaration.name)
-            .unwrap_or_else(|| declaration.path.clone());
+        let member = owner.map(|owner| format!("{owner}.{name}"));
+        let key = member.as_deref().unwrap_or(name);
+        let declaration = self.declaration_at(from_module, start, end, Some(key));
+        let canonical = declaration.map(|declaration| {
+            self.display_declaration_path(from_module, &declaration.name)
+                .unwrap_or_else(|| declaration.path.clone())
+        });
         if let Some(owner) = owner {
             return self
                 .display_path(from_module, owner, resolved_module)
                 .map(|owner| format!("{owner}.{name}"))
-                .or(Some(canonical));
+                .or(canonical);
         }
-        if declaration
-            .name
-            .starts_with(crate::Syntax::GENERATED_NAME_PREFIX)
-        {
-            return Some(canonical);
+        if declaration.is_some_and(|declaration| {
+            declaration
+                .name
+                .starts_with(crate::Syntax::GENERATED_NAME_PREFIX)
+        }) {
+            return canonical;
         }
         self.display_path(from_module, name, resolved_module)
-            .or(Some(canonical))
+            .or(canonical)
     }
 
     /// Return every source-name key in one module with its canonical path.

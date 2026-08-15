@@ -41,6 +41,41 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     ));
 }
 
+/// D-CMD-OVERRIDE1=C: `TestSuite`/`BenchSuite` are `Copy` snapshots, and the
+/// ratified override signature binds one by value — `fn test(suite: TestSuite)`.
+/// Their one method, `run`, mutates the receiver, which the shared-reference
+/// form of a non-scalar `Read` parameter cannot express: `rust_param_type`
+/// renders the parameter `&T`, so `jet_test_suite_run(&mut (*__jet_suite))`
+/// borrows through a shared reference and rustc rejects the emitted program —
+/// an I2 compiler bug, never the user's fault.
+/// A source `struct TestSuite` shadows the core name (the same
+/// `!cx.type_names.contains(..)` guard `Cx::rust_type` applies), and that value
+/// is an ordinary user struct with ordinary `Read` semantics.
+fn is_owned_snapshot_param(cx: &Cx, convention: AccessConvention, ty: &Type) -> bool {
+    let Type::Named(name) = ty else { return false };
+    matches!(convention, AccessConvention::Read)
+        && matches!(name.as_str(), "TestSuite" | "BenchSuite")
+        && !cx.type_names.contains(name.as_str())
+}
+
+/// Re-bind every command-suite parameter to the callee's own mutable copy at
+/// the head of the body, so a `suite.run()` that mutates is expressible. Both
+/// other tiers already hand the override body a suite it mutates in place (the
+/// TIR evaluator writes back into the receiver `CtValue`, the JIT writes back
+/// into the suite record), so `suite.iteration`/`suite.result` read the same
+/// post-`run` values under the default `jet run`, the resident JIT, and AOT
+/// (I9). Emits nothing for a function that takes no suite.
+fn emit_owned_snapshot_params(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    for (rust_name, ty, convention) in &tir.params {
+        if !is_owned_snapshot_param(cx, *convention, ty) {
+            continue;
+        }
+        out.push_str(&format!("{pad}let mut {rust_name} = *{rust_name};\n"));
+        out.push_str(&format!("{pad}let {rust_name} = &mut {rust_name};\n"));
+    }
+}
+
 /// Emit a covered function from its TIR, reusing the same pure formatting helpers
 /// as `emit_func` so the output is byte-identical to the AST path (golden parity).
 /// The only difference is that every decision is *read off the TIR* rather than
@@ -301,6 +336,7 @@ fn memo_key_expr(tir: &TFunc, cx: &Cx) -> String {
 fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     emit_stack_guard(tir, cx, out, indent);
     emit_sentry_gate(tir, cx, out, indent);
+    emit_owned_snapshot_params(tir, cx, out, indent);
     // D-COV1: probe at the function head (skip the synthetic `main`).
     if cx.coverage && !tir.is_main {
         out.push_str(&format!(
@@ -500,6 +536,7 @@ pub(crate) fn emit_tir_method(
     ));
     emit_stack_guard(tir, cx, out, indent + 1);
     emit_sentry_gate(tir, cx, out, indent + 1);
+    emit_owned_snapshot_params(tir, cx, out, indent + 1);
     // D-COV1: probe at the method head.
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
@@ -635,6 +672,7 @@ pub(crate) fn emit_tir_trait_method(
     ));
     emit_stack_guard(tir, cx, out, indent + 1);
     emit_sentry_gate(tir, cx, out, indent + 1);
+    emit_owned_snapshot_params(tir, cx, out, indent + 1);
     // D-COV1: probe at the trait-method head.
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));

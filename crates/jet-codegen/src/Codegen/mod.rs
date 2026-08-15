@@ -3480,21 +3480,50 @@ fn emit_test_main_cov_mode(
     }
     out.push_str("}\n");
     if command_override {
-        out.push_str("\nfn main() {\n");
-        out.push_str("    jet_std_env_init();\n");
-        out.push_str(&format!(
-            "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
-        ));
-        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-        out.push_str("    jet_test_trace_tier();\n");
-        out.push_str("    jet_test_suite_install(jet_test_command_run);\n");
-        out.push_str("    run();\n");
-        out.push_str("    let output = jet_test_take_output();\n");
-        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
-        out.push_str("    let status = jet_test_suite_status();\n");
-        out.push_str("    if status != 0 { std::process::exit(status as i32); }\n");
-        out.push_str("}\n");
+        emit_command_override_main(
+            "jet_test_suite_install",
+            "jet_test_command_run",
+            "jet_test_suite_status",
+            package_hardened,
+            true,
+            out,
+        );
     }
+}
+
+/// D-CMD-OVERRIDE1=C: the `main` an overridden command gets. It installs the
+/// stock harness as the suite runner, hands control to the user's command
+/// entry, then reports the suite's status as the process status. `jet test`
+/// and `jet bench` share this emitter so the entry call exists once: a
+/// hand-written `run()` resolved against nothing (the Jet entry mangles to
+/// `__jet_run`) and rustc offered `crate::jet_runtime_atexit::run` instead —
+/// generated Rust that does not compile is an I2 compiler bug. The driver
+/// synthesizes the entry as the Jet function `run` (`swap_command_entry_point`),
+/// so its Rust name is whatever `mangle` says, never a literal.
+fn emit_command_override_main(
+    install: &str,
+    runner: &str,
+    status: &str,
+    package_hardened: bool,
+    trace_tier: bool,
+    out: &mut String,
+) {
+    out.push_str("\nfn main() {\n");
+    out.push_str("    jet_std_env_init();\n");
+    out.push_str(&format!(
+        "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
+    ));
+    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
+    if trace_tier {
+        out.push_str("    jet_test_trace_tier();\n");
+    }
+    out.push_str(&format!("    {install}({runner});\n"));
+    out.push_str(&format!("    {}();\n", mangle("run")));
+    out.push_str("    let output = jet_test_take_output();\n");
+    out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
+    out.push_str(&format!("    let status = {status}();\n"));
+    out.push_str("    if status != 0 { std::process::exit(status as i32); }\n");
+    out.push_str("}\n");
 }
 
 fn emit_output_check_fns(checks: &[&ResolvedOutput], out: &mut String) {
@@ -4910,20 +4939,14 @@ fn emit_bundle_benches_inner(
     }
     out.push_str("}\n");
     if command_override {
-        out.push_str("\nfn main() {\n");
-        out.push_str("    jet_std_env_init();\n");
-        out.push_str(&format!(
-            "    jet_mem::jet_sentry_set_hardened({});\n",
-            cx.package_hardened
-        ));
-        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-        out.push_str("    jet_bench_suite_install(jet_bench_command_run);\n");
-        out.push_str("    run();\n");
-        out.push_str("    let output = jet_test_take_output();\n");
-        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
-        out.push_str("    let status = jet_bench_suite_status();\n");
-        out.push_str("    if status != 0 { std::process::exit(status as i32); }\n");
-        out.push_str("}\n");
+        emit_command_override_main(
+            "jet_bench_suite_install",
+            "jet_bench_command_run",
+            "jet_bench_suite_status",
+            cx.package_hardened,
+            false,
+            &mut out,
+        );
     }
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
