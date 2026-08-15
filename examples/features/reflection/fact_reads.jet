@@ -2,6 +2,15 @@
 #Numeric Severity :: distinct Int(0..10)
 #UnitFamily(Length, dimension) { meter }
 
+tag Audited { deny: [Net] }
+
+struct PlaneFacts {
+    approximate: F32
+    shape: [Int#4]
+    classified: #Audited Int
+    callable: fn(value: Int) => Int
+}
+
 state Order { Draft, Confirmed }
 
 struct Order {
@@ -14,6 +23,10 @@ fn send_report() =[IO]=> {}
 @effects :: send_report.@effects
 @states :: Order.@states
 @dimension :: Meter.@dimension
+@measure :: PlaneFacts.@measure
+@exactness :: PlaneFacts.@exactness
+@classification :: PlaneFacts.@classification
+@obligation :: PlaneFacts.@obligation
 @package_name :: @build.package.name
 @package_version :: @build.package.version
 @os :: @build.os
@@ -31,6 +44,10 @@ fn run() {
     print(@effects.values.len())
     print(@states[0].name)
     print(@dimension.axes.len())
+    print(@measure.kind == "length")
+    print(@exactness.kind == .Approximate)
+    print(@classification.name)
+    print(@obligation.param_contract[0].zone == .Either)
     print(@package_name)
     print(@package_version)
     print(@profile)

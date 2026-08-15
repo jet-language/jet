@@ -891,6 +891,10 @@ pub const COMPILER_FACT_NAME: &str = "@name";
 pub const COMPILER_FACT_FIELDS: &str = "@fields";
 pub const COMPILER_FACT_RANGE: &str = "@range";
 pub const COMPILER_FACT_DIMENSION: &str = "@dimension";
+pub const COMPILER_FACT_MEASURE: &str = "@measure";
+pub const COMPILER_FACT_EXACTNESS: &str = "@exactness";
+pub const COMPILER_FACT_CLASSIFICATION: &str = "@classification";
+pub const COMPILER_FACT_OBLIGATION: &str = "@obligation";
 pub const COMPILER_FACT_STATES: &str = "@states";
 pub const COMPILER_FACT_EFFECTS: &str = "@effects";
 pub const COMPILER_FACT_SENDABILITY: &str = "@sendability";
@@ -919,6 +923,10 @@ pub const FACT_READS: &[(&str, &str)] = &[
     (COMPILER_FACT_FIELDS, "fields"),
     (COMPILER_FACT_RANGE, "range"),
     (COMPILER_FACT_DIMENSION, "dimension"),
+    (COMPILER_FACT_MEASURE, "measure"),
+    (COMPILER_FACT_EXACTNESS, "exactness"),
+    (COMPILER_FACT_CLASSIFICATION, "classification"),
+    (COMPILER_FACT_OBLIGATION, "obligation"),
     (COMPILER_FACT_STATES, "states"),
     (COMPILER_FACT_EFFECTS, "effects"),
     (COMPILER_FACT_SENDABILITY, "sendability"),

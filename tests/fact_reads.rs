@@ -128,11 +128,22 @@ fn folded_fact_reads_emit_values_without_runtime_dispatch() {
 }
 
 #[test]
-fn every_typed_fact_member_uses_the_one_registry_reader() {
-    for (member, _) in jet::Syntax::FACT_READS {
+fn every_registered_type_plane_has_a_source_fact_read() {
+    let reads = jet::Syntax::FACT_READS
+        .iter()
+        .map(|(member, _)| {
+            jet_foundation::Registry::fact_read(member)
+                .unwrap_or_else(|| panic!("unregistered fact member: {member}"))
+        })
+        .collect::<Vec<_>>();
+
+    for plane in jet_foundation::Registry::type_plane_rows() {
+        let read = jet_foundation::Registry::registered_fact_read(plane.name)
+            .unwrap_or_else(|| panic!("registered plane `{}` has no typed reader", plane.name));
         assert!(
-            jet_foundation::Registry::fact_read(member).is_some(),
-            "unregistered fact member: {member}"
+            reads.contains(&read),
+            "registered plane `{}` has no source member-position read",
+            plane.name
         );
     }
 }

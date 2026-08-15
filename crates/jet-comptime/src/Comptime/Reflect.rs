@@ -1376,6 +1376,13 @@ pub fn registered_fact_value(
                 _ => None,
             })
         }
+        read @ (jet_foundation::Registry::FactRead::Measure
+            | jet_foundation::Registry::FactRead::Exactness
+            | jet_foundation::Registry::FactRead::Classification
+            | jet_foundation::Registry::FactRead::Obligation) => {
+            reflect_type_value(items, subject, "main")
+                .and_then(|value| reflected_fact_field(&value, read).cloned())
+        }
         jet_foundation::Registry::FactRead::Maturity => items.iter().find_map(|item| match item {
             Item::Func(function) if function.name == subject => Some(build_maturity_info(
                 function.maturity.unwrap_or(MaturityTag::Experimental),
