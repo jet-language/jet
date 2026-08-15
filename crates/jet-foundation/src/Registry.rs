@@ -844,6 +844,28 @@ pub fn diagnostic_registry_rows() -> impl Iterator<Item = &'static RegistryRow> 
     rows().iter().filter(|row| row.kind() == RowKind::Diagnostic)
 }
 
+fn diagnostic_code_severity(code: &str) -> Option<Severity> {
+    let bytes = code.as_bytes();
+    if bytes.len() != 5 || !bytes[1..].iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    match bytes[0] {
+        b'E' => Some(Severity::Error),
+        b'L' => Some(Severity::Lint),
+        _ => None,
+    }
+}
+
+fn is_snake_case_lint_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('_')
+        && !name.ends_with('_')
+        && !name.contains("__")
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
 fn read_diagnostic_rows() -> Vec<DiagnosticRow> {
     DIAGNOSTIC_SOURCE
         .lines()
@@ -869,10 +891,21 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         other => panic!("unknown diagnostic severity `{other}` in {line}"),
     };
     assert_eq!(
+        diagnostic_code_severity(code),
+        Some(severity),
+        "diagnostic code identity must match its severity: {line}"
+    );
+    assert_eq!(
         severity == Severity::Lint,
         lint_name.is_some(),
         "only lint rows carry a stable selector name: {line}"
     );
+    if let Some(name) = lint_name {
+        assert!(
+            is_snake_case_lint_name(name),
+            "lint selector name must be stable snake_case: {line}"
+        );
+    }
     let moment = match fields[4] {
         "compile" => ReportMoment::Compile,
         "run" => ReportMoment::Run,

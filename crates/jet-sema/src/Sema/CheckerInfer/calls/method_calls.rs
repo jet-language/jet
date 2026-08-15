@@ -54,7 +54,14 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         if let Some(type_name) = type_name.or(receiver_type_name) {
-            candidates.extend(self.method_names_for_type_name(type_name));
+            candidates.extend(
+                self.method_names_for_type_name(type_name)
+                    .into_iter()
+                    .filter(|candidate| {
+                        self.resolve_method_sig(type_name, candidate)
+                            .is_some_and(|(_, signature)| !signature.is_static)
+                    }),
+            );
         }
         candidates.sort_unstable();
         candidates.dedup();

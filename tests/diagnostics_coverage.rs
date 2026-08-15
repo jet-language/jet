@@ -334,6 +334,40 @@ fn rendered_lint_keeps_code_beside_name() {
     );
 }
 
+fn assert_ui_snapshot_matches_row(
+    code: &str,
+    holes: &[(&str, &str)],
+    fixture: &str,
+) {
+    let row = jet_foundation::Registry::diagnostic(code)
+        .unwrap_or_else(|| panic!("{code} must stay registered"));
+    let rendered = row.render(holes);
+    let expected = format!(
+        "Error [{code}]: {}\n Why: {}\n Fix: {}\n",
+        rendered.what, rendered.why, rendered.fix
+    );
+    assert_eq!(
+        read(&root().join("tests/ui").join(fixture)),
+        expected,
+        "{fixture} must preserve {code}'s registered What/Why/Fix identity"
+    );
+}
+
+#[test]
+fn registered_config_and_cli_snapshots_keep_row_identity() {
+    assert_ui_snapshot_matches_row(
+        "E1206",
+        &[("code", "L0302"), ("name", "same_enum_guard_table")],
+        "lint_policy_code_name.stderr",
+    );
+    assert_ui_snapshot_matches_row("E0043", &[], "cli_e0043_install.stderr");
+    assert_ui_snapshot_matches_row(
+        "E1219",
+        &[("name", "turbo")],
+        "cli_e1219_unknown_profile.stderr",
+    );
+}
+
 /// Whether a code is marked retired in the typed row source.
 fn is_retired(code: &str, _diag_md: &str) -> bool {
     jet_foundation::Registry::diagnostic(code).is_some_and(|row| {
