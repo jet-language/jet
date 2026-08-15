@@ -5,7 +5,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, substitute_type, COMPARABLE};
-use crate::AST::{BinOp, Dimension, Expr, Type};
+use crate::AST::{BinOp, CtValue, Dimension, Expr, Type};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use std::collections::HashMap;
 
@@ -26,6 +26,36 @@ fn is_written_negative_int(expr: &Expr) -> bool {
             }
             _ => false,
         },
+        _ => false,
+    }
+}
+
+fn known_comptime_value(expr: &Expr) -> Option<CtValue> {
+    match expr {
+        Expr::ComptimeName {
+            value: Some(value), ..
+        } => Some(value.clone()),
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } if args.is_empty() && !type_name.is_empty() => Some(CtValue::Enum {
+            type_name: type_name.clone(),
+            variant: variant.clone(),
+            args: Vec::new(),
+        }),
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => known_comptime_value(inner),
+        _ => None,
+    }
+}
+
+fn is_folded_fact_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::ComptimeName {
+            value: Some(_), ..
+        } => true,
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => is_folded_fact_expr(inner),
         _ => false,
     }
 }
@@ -669,6 +699,27 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
+
+        // A folded fact compared with a closed enum literal is already a Bool.
+        // Keep the comparison out of TIR: core enum literals intentionally stay
+        // outside the resident subset, and no engine may rediscover a fact at
+        // runtime.
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && (is_folded_fact_expr(lhs) || is_folded_fact_expr(rhs))
+            && matches!((&lt, &rt), (Type::Named(left), Type::Named(right)) if left == right
+                && crate::Sema::CheckerCoreLib::core_type_known(left))
+        {
+            if let (Some(left), Some(right)) =
+                (known_comptime_value(lhs), known_comptime_value(rhs))
+            {
+                if let Ok(CtValue::Bool(value)) =
+                    crate::Comptime::Builtins::eval_binop(op, left, right, span)
+                {
+                    *replacement = Some(Expr::Bool(value, span));
+                    return Some(Type::Bool);
+                }
+            }
+        }
 
         // D-INTLIT-WIDTH1=F / D-NUMLIT-PEER1=A: an unowned whole literal adopts a
         // fixed-width peer that contains its singleton value; without a sized
