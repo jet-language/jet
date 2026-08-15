@@ -1516,7 +1516,9 @@ fn lsp_budget_reports_projects_canonical_report_without_measuring() {
 pub fn api() {}
 fn run() {}
 "#;
-    let path = root.join("src/main.jet");
+    // Bare `jet budget check` resolves the canonical `run.jet` entry
+    // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
+    let path = root.join("src/run.jet");
     std::fs::write(&path, source).unwrap();
     let measured = Command::new(&jet).args(["budget", "check", "--json"]).current_dir(&root).output().unwrap();
     assert_eq!(measured.status.code(), Some(0), "{}", String::from_utf8_lossy(&measured.stderr));

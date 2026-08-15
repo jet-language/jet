@@ -17,7 +17,9 @@ fn budget_workspace(name: &str) -> PathBuf {
     let root = workspace(name);
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
-    fs::write(root.join("src/main.jet"), r#"module perf.package {
+    // Bare `jet budget check` resolves the canonical `run.jet` entry
+    // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
+    fs::write(root.join("src/run.jet"), r#"module perf.package {
     budgets: [Budget.{
         name: "public-api",
         scope: .Package,
@@ -40,7 +42,7 @@ fn prove_projects_compatible_canonical_budget_identity_without_measuring() {
     let command = String::from_utf8(checked.stdout).unwrap();
     let report_id = command.split("\"report_id\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
     let before = fs::read_dir(root.join(".jet/perf/reports")).unwrap().count();
-    let out = Command::new(jet()).current_dir(&root).args(["prove", "src/main.jet", "--json"]).output().unwrap();
+    let out = Command::new(jet()).current_dir(&root).args(["prove", "src/run.jet", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let proof = String::from_utf8(out.stdout).unwrap();
     assert!(proof.contains("\"producer\":\"jet-budget\""), "{proof}");
@@ -247,7 +249,7 @@ fn prove_rejected_budget_reports_are_unavailable_and_counted() {
     fs::write(root.join(".jet/perf/reports/broken.json"), "not canonical budget JSON\n").unwrap();
     let out = Command::new(jet())
         .current_dir(&root)
-        .args(["prove", "src/main.jet", "--json"])
+        .args(["prove", "src/run.jet", "--json"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));

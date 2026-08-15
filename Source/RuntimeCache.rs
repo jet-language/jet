@@ -90,7 +90,10 @@ pub fn prepare(
     )
 }
 
-fn cache_root() -> PathBuf {
+/// The directory holding cached runtime rlibs. Public so a provider that
+/// spawns a child compiler can hand the child the same toolchain cache
+/// instead of letting it fall back onto a project-scoped build cache.
+pub fn cache_root() -> PathBuf {
     if let Ok(path) = std::env::var("JET_RUNTIME_CACHE_DIR") {
         return PathBuf::from(path);
     }

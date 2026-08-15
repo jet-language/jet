@@ -14,7 +14,9 @@ use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const SELECTED_BUILD_DEADLINE: Duration = Duration::from_secs(120);
+/// One real native build, shared with the CompilerProbe child compiles that do
+/// the same work (`jet::BudgetProviders::NATIVE_BUILD_DEADLINE`).
+const SELECTED_BUILD_DEADLINE: Duration = jet::BudgetProviders::NATIVE_BUILD_DEADLINE;
 const PROVIDER_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -813,8 +815,10 @@ mod tests {
     /// that compiles or benchmarks must be allowed the inner deadlines it is
     /// pinned to spend: 21 trials of child compiles for CompilerProbe (twice
     /// per trial in `Edit`, which compiles the clean tree and then the patched
-    /// one), and one real native build for a bench harness. Cancelling sooner
-    /// than that kills a healthy measurement instead of a stuck one.
+    /// one), and one real native build for a bench harness. A CompilerProbe
+    /// child compile *is* one real native build, so it spends the same
+    /// allowance. Cancelling sooner than that kills a healthy measurement
+    /// instead of a stuck one.
     #[test]
     fn measuring_provider_deadlines_cover_their_pinned_inner_work() {
         use jet::BudgetProviders::collection_deadline;
@@ -827,9 +831,9 @@ mod tests {
         assert_eq!(bound("BuildArtifact", None), PROVIDER_DEADLINE);
         assert_eq!(bound("ServiceProbe", None), PROVIDER_DEADLINE);
 
-        assert_eq!(bound("CompilerProbe", Some("Clean")), Duration::from_secs(21 * 20 + 30));
-        assert_eq!(bound("CompilerProbe", Some("NoChange")), Duration::from_secs(21 * 20 + 30));
-        assert_eq!(bound("CompilerProbe", Some("Edit")), Duration::from_secs(21 * 2 * 20 + 30));
+        assert_eq!(bound("CompilerProbe", Some("Clean")), Duration::from_secs(21 * 120 + 30));
+        assert_eq!(bound("CompilerProbe", Some("NoChange")), Duration::from_secs(21 * 120 + 30));
+        assert_eq!(bound("CompilerProbe", Some("Edit")), Duration::from_secs(21 * 2 * 120 + 30));
         assert_eq!(bound("BenchMeasurement", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE);
         assert_eq!(bound("AllocationProbe", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE);
 

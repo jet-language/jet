@@ -2250,7 +2250,9 @@ fn canvas_proof_projects_canonical_budget_report_read_only() {
     let dir = temp_dir("proof_budget_projection");
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
-    let entry = dir.join("src/main.jet");
+    // Bare `jet budget check` resolves the canonical `run.jet` entry
+    // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
+    let entry = dir.join("src/run.jet");
     fs::write(&entry, r#"module perf.package {
     budgets: [Budget.{
         name: "public-api",

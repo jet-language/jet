@@ -130,6 +130,10 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 
 
 
+// D-VERDICT-678-1 (2026-07-17) renamed the project entry to `run.jet`; retired
+// `main.jet` is never a discovery fallback (jet-pkg-model
+// `resolve_run_entry_checked`). A bare `jet budget`/`jet bench` in these
+// fixtures resolves its entry, so the entry must carry the canonical name.
 fn budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
@@ -138,7 +142,7 @@ fn budget_project(tag: &str, limit: u64) -> PathBuf {
         "name: \"app\"\nversion: \"0.1.0\"\n",
     ).unwrap();
     fs::write(
-        dir.join("src/main.jet"),
+        dir.join("src/run.jet"),
         format!(r#"module perf.package {{
     budgets: [Budget.{{
         name: "public-api",
@@ -169,7 +173,7 @@ fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
         "name: \"app\"\nversion: \"0.1.0\"\n",
     ).unwrap();
     fs::write(
-        dir.join("src/main.jet"),
+        dir.join("src/run.jet"),
         format!(r#"module perf.package {{
     budgets: [Budget.{{
         name: "binary",
@@ -195,7 +199,7 @@ fn mixed_budget_project(tag: &str) -> PathBuf {
         "name: \"app\"\nversion: \"0.1.0\"\n",
     ).unwrap();
     fs::write(
-        dir.join("src/main.jet"),
+        dir.join("src/run.jet"),
         r#"module perf.package {
     budgets: [
         Budget.{
@@ -226,7 +230,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
-    fs::write(dir.join("src/main.jet"), r#"module perf.package {
+    fs::write(dir.join("src/run.jet"), r#"module perf.package {
     budgets: [Budget.{
         name: "parse",
         scope: .Bench("parse"),
@@ -240,7 +244,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
 #Bench("parse") {
     total := 0
     loop value, 0..100 { total = total + value }
-    require_eq(total, 4950)
+    require_eq(total, 5050)
 }
 fn run() {}
 "#).unwrap();
@@ -251,7 +255,7 @@ fn allocation_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
-    fs::write(dir.join("src/main.jet"), r#"use core.mem
+    fs::write(dir.join("src/run.jet"), r#"use core.mem
 module perf.package {
     budgets: [
         Budget.{

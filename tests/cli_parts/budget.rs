@@ -34,7 +34,7 @@ fn compiler_probe_rejects_unsupported_target_without_a_report() {
 fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = allocation_budget_project("allocation_probe_runtime");
-    let run = || Command::new(jet()).args(["bench", "--show-default", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let run = || Command::new(jet()).args(["bench", "--show-default", "src/run.jet"]).current_dir(&dir).output().unwrap();
 
     let first = run();
     assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));
@@ -86,8 +86,8 @@ fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
 fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = benchmark_budget_project("budget_stale_history");
-    let source = fs::read_to_string(dir.join("src/main.jet")).unwrap().replace("enforcement: .Warn", "enforcement: .Fail");
-    fs::write(dir.join("src/main.jet"), source).unwrap();
+    let source = fs::read_to_string(dir.join("src/run.jet")).unwrap().replace("enforcement: .Warn", "enforcement: .Fail");
+    fs::write(dir.join("src/run.jet"), source).unwrap();
     let first = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","initial benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(first.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&first.stdout),String::from_utf8_lossy(&first.stderr));
     let (first_id, stale_state_id) = age_budget_baseline(&dir, "ci/linux");
@@ -149,7 +149,7 @@ fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
 #[test]
 fn budget_effect_count_uses_solved_effects_not_import_count() {
     let dir = budget_project("budget_effect_truth", 10);
-    fs::write(dir.join("src/main.jet"), r#"use core.files as files
+    fs::write(dir.join("src/run.jet"), r#"use core.files as files
 module perf.package {
     budgets: [Budget.{ name: "effects", scope: .Package, metric: .EffectCount, comparison: .Absolute, limit: .AtMost(0) }],
 }
@@ -165,7 +165,7 @@ fn run() {}
 #[test]
 fn budget_generated_unsafe_rejects_proxy_before_artifact() {
     let dir = budget_project("budget_unsafe_truth", 10);
-    fs::write(dir.join("src/main.jet"), r#"use core.mem as mem
+    fs::write(dir.join("src/run.jet"), r#"use core.mem as mem
 module perf.package {
     budgets: [Budget.{ name: "unsafe", scope: .Package, metric: .GeneratedUnsafe, comparison: .Absolute, limit: .AtMost(0) }],
 }
@@ -214,7 +214,7 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("cannot hash running compiler executable"), "{stderr}");
     assert!(!dir.join(".jet").exists(), "missing compiler identity emitted an artifact");
-    assert!(!dir.join("build/main").exists(), "missing compiler identity started the selected artifact build");
+    assert!(!dir.join("build/run").exists(), "missing compiler identity started the selected artifact build");
 }
 
 #[test]
@@ -234,11 +234,11 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
     // build IDs, and this test owns compiler replacement rather than linking.
     let primed = output_with_retry(Command::new(&copied)
         .arg("build")
-        .arg(dirs[0].join("src/main.jet"))
+        .arg(dirs[0].join("src/run.jet"))
         .current_dir(&dirs[0])
         .env("JET_CACHE_DIR", &cache));
     assert_eq!(primed.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&primed.stdout), String::from_utf8_lossy(&primed.stderr));
-    let seed_artifact = dirs[0].join("build/main");
+    let seed_artifact = dirs[0].join("build/run");
     let expected_artifact = (
         CanonicalJson::String(jet::SHA256::sha256_file_hex(&seed_artifact).unwrap()),
         CanonicalJson::Integer(fs::metadata(seed_artifact).unwrap().len().to_string()),
@@ -272,7 +272,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         assert_eq!(toolchain["stdlib_id"], CanonicalJson::String(expected_stdlib.clone()));
         let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject object") };
         let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("artifact object") };
-        let artifact_path = dir.join("build/main");
+        let artifact_path = dir.join("build/run");
         assert_eq!(artifact["sha256"], CanonicalJson::String(jet::SHA256::sha256_file_hex(&artifact_path).unwrap()));
         assert_eq!(artifact["bytes"], CanonicalJson::Integer(fs::metadata(artifact_path).unwrap().len().to_string()));
         assert_eq!((&artifact["sha256"], &artifact["bytes"]), (&expected_artifact.0, &expected_artifact.1), "parallel builds produced different artifact identities");
@@ -287,7 +287,7 @@ fn budget_failure_has_human_github_projection_and_exit_one() {
     assert!(out.stdout.is_empty());
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("Error [E2907]: performance budget public-api regressed"), "{stderr}");
-    assert!(stderr.contains("::error file=src/main.jet"), "{stderr}");
+    assert!(stderr.contains("::error file=src/run.jet"), "{stderr}");
     assert!(stderr.contains("performance budget public-api regressed%0AWhy: measured estimator"), "{stderr}");
     assert!(stderr.contains("%0AFix: improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"), "{stderr}");
     assert!(stderr.contains("budgets failed: 1 budget failed · report "), "{stderr}");
@@ -296,7 +296,7 @@ fn budget_failure_has_human_github_projection_and_exit_one() {
 #[test]
 fn budget_imported_declaration_reports_owning_module_location() {
     let dir = budget_project("budget_imported_source", 10);
-    fs::write(dir.join("src/main.jet"), "module perf_defs;\nfn run() {}\n").unwrap();
+    fs::write(dir.join("src/run.jet"), "module perf_defs;\nfn run() {}\n").unwrap();
     fs::write(dir.join("src/perf_defs.jet"), r#"module perf.package {
     budgets: [Budget.{ name: "imported-api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(0) }],
 }
@@ -348,7 +348,7 @@ fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     let CanonicalJson::Object(comparison) = &result["comparison"] else { panic!("comparison") };
     assert_eq!(comparison.keys().map(String::as_str).collect::<Vec<_>>(), ["direction","kind","limit"]);
 
-    fs::write(dir.join("src/main.jet"), "fn run( {\n").unwrap();
+    fs::write(dir.join("src/run.jet"), "fn run( {\n").unwrap();
     let invalid = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(invalid.status.code(), Some(1));
     assert!(invalid.stderr.is_empty());
@@ -358,7 +358,7 @@ fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     let CanonicalJson::Object(diagnostic) = &diagnostics[0] else { panic!("diagnostic") };
     let CanonicalJson::Object(source) = &diagnostic["source"] else { panic!("diagnostic source") };
     assert_eq!(source.keys().map(String::as_str).collect::<Vec<_>>(), ["column","end_column","end_line","line","path"]);
-    assert_eq!(source["path"], CanonicalJson::String("src/main.jet".into()));
+    assert_eq!(source["path"], CanonicalJson::String("src/run.jet".into()));
     assert!(matches!(source["end_line"], CanonicalJson::Integer(_)));
     assert!(matches!(source["end_column"], CanonicalJson::Integer(_)));
 

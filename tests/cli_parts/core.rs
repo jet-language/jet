@@ -79,7 +79,16 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     let stderr = String::from_utf8(json.stderr).unwrap();
     assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
     assert!(stdout.contains("\"code\":\"E3107\"") && stdout.contains("helper.jet") && stdout.contains("\"line\":4,\"col\":16"), "{stdout}");
-    let report = parse_json(&stdout).unwrap();
+    // D-REPORT-MACHINE1: `--json` emits JSON Lines — one complete report per
+    // line. `*Int.{*value}` is two `raw_pointer` operations (the same shape is
+    // blessed twice in tests/ui/unsafe_obligation_missing.stderr), so this
+    // inspection prints two reports; each line must parse on its own.
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert!(!lines.is_empty(), "{stdout}");
+    for line in &lines {
+        assert!(parse_json(line).is_ok(), "each report line must parse: {line}");
+    }
+    let report = parse_json(lines[0]).unwrap();
     assert_eq!(
         jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(&report, "file").unwrap()).unwrap(),
         helper.to_str().unwrap()
@@ -99,7 +108,12 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     assert_eq!(loader_json.status.code(), Some(1), "{}", String::from_utf8_lossy(&loader_json.stderr));
     let loader_stdout = String::from_utf8(loader_json.stdout).unwrap();
     assert!(loader_stdout.contains("\"code\":\"E0003\"") && loader_stdout.contains("\"line\":1,\"col\":9"), "{loader_stdout}");
-    let loader_report = parse_json(&loader_stdout).unwrap();
+    let loader_lines = loader_stdout.lines().collect::<Vec<_>>();
+    assert!(!loader_lines.is_empty(), "{loader_stdout}");
+    for line in &loader_lines {
+        assert!(parse_json(line).is_ok(), "each report line must parse: {line}");
+    }
+    let loader_report = parse_json(loader_lines[0]).unwrap();
     assert_eq!(
         jet_foundation::JSON::json_str(
             jet_foundation::JSON::json_get(&loader_report, "file").unwrap(),
@@ -390,7 +404,9 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
     );
     assert_eq!(
         String::from_utf8(selected.stdout).unwrap(),
-        "greet  Say hello from this workspace member\n"
+        // A bare `#Job` is `.Dev` (JobScope::default), and `jet jobs` tags every
+        // listing with its scope — same shape as the project listing above.
+        "greet  [dev] Say hello from this workspace member\n"
     );
 }
 
@@ -462,8 +478,16 @@ fn isolated_cwd_never_reuses_executing_fixture_path() {
     let executable = first.join("cli-test-holder");
     fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
     let ready = first.join("ready");
+    // libtest's `--exact` filter is the full test path, which includes this
+    // module since the CLI suite was split (tests/cli.rs `mod cli_core`).
+    // Derive it instead of spelling it, so a later move cannot silently
+    // select zero tests and leave the holder unspawned.
+    let child_test = match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::isolated_cwd_child_holds_executable"),
+        None => "isolated_cwd_child_holds_executable".to_string(),
+    };
     let mut child = Command::new(&executable)
-        .args(["--exact", "isolated_cwd_child_holds_executable"])
+        .args(["--exact", child_test.as_str()])
         .env("JET_CLI_EXECUTABLE_HOLDER_READY", &ready)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -523,7 +547,7 @@ fn budget_usage_and_preflight_fail_without_artifacts() {
         assert!(out.stdout.is_empty());
         assert!(!dir.join(".jet").exists(), "usage failure created an artifact");
     }
-    fs::write(dir.join("src/main.jet"), "fn run( {\n").unwrap();
+    fs::write(dir.join("src/run.jet"), "fn run( {\n").unwrap();
     let out = Command::new(jet()).args(["budget", "check"]).current_dir(&dir).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(!dir.join(".jet").exists(), "compiler preflight created an artifact");
@@ -620,7 +644,7 @@ fn budget_build_artifact_measures_real_selected_binary() {
     let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("artifact identity") };
     let CanonicalJson::Integer(bytes) = &artifact["bytes"] else { panic!("artifact byte count") };
     let CanonicalJson::String(digest) = &artifact["sha256"] else { panic!("artifact digest") };
-    let artifact_path = dir.join("build/main");
+    let artifact_path = dir.join("build/run");
     let metadata = fs::metadata(&artifact_path).unwrap();
     assert_eq!(bytes, &metadata.len().to_string());
     assert_eq!(digest, &jet::SHA256::sha256_file_hex(&artifact_path).unwrap());
@@ -661,7 +685,7 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
     let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject") };
     let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("shared artifact provenance") };
     let CanonicalJson::Integer(bytes) = &artifact["bytes"] else { panic!("artifact bytes") };
-    assert_eq!(bytes, &fs::metadata(dir.join("build/main")).unwrap().len().to_string());
+    assert_eq!(bytes, &fs::metadata(dir.join("build/run")).unwrap().len().to_string());
     let report_path = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();
     jet_foundation::PerformanceBudget::verify_budget_report(&fs::read(report_path).unwrap()).unwrap();
 }
@@ -670,12 +694,12 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
 fn build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = mixed_budget_project("build_budget_gates");
-    let source_path = dir.join("src/main.jet");
+    let source_path = dir.join("src/run.jet");
     let passing = fs::read_to_string(&source_path).unwrap();
     let failing = passing.replace(".AtMost(10)", ".AtMost(0)");
     fs::write(&source_path, &failing).unwrap();
 
-    let failed = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let failed = Command::new(jet()).args(["build", "src/run.jet"]).current_dir(&dir).output().unwrap();
     assert_eq!(failed.status.code(), Some(1), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&failed.stdout), String::from_utf8_lossy(&failed.stderr));
     assert!(!String::from_utf8_lossy(&failed.stdout).contains("built:"), "failed budget claimed build success");
     assert!(String::from_utf8_lossy(&failed.stderr).contains("Error [E2907]: performance budget public-api regressed"), "{}", String::from_utf8_lossy(&failed.stderr));
@@ -683,16 +707,16 @@ fn build_enforces_deterministic_fail_budgets_and_reuses_relevant_identity() {
     assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 1);
 
     fs::write(&source_path, &passing).unwrap();
-    let passed = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let passed = Command::new(jet()).args(["build", "src/run.jet"]).current_dir(&dir).output().unwrap();
     assert_eq!(passed.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&passed.stdout), String::from_utf8_lossy(&passed.stderr));
     assert!(String::from_utf8_lossy(&passed.stderr).contains("budgets: 2 budgets passed · report "));
     assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 2, "source/spec change must refresh evidence");
 
-    let reused = Command::new(jet()).args(["build", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let reused = Command::new(jet()).args(["build", "src/run.jet"]).current_dir(&dir).output().unwrap();
     assert_eq!(reused.status.code(), Some(0), "{}", String::from_utf8_lossy(&reused.stderr));
     assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 2, "unchanged relevant identity must reuse canonical report");
 
-    let ci = Command::new(jet()).args(["build", "src/main.jet", "--profile=ci"]).current_dir(&dir).output().unwrap();
+    let ci = Command::new(jet()).args(["build", "src/run.jet", "--profile=ci"]).current_dir(&dir).output().unwrap();
     assert_eq!(ci.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&ci.stdout), String::from_utf8_lossy(&ci.stderr));
     assert_eq!(fs::read_dir(&report_dir).unwrap().count(), 3, "CI profile identity must refresh evidence");
     let mut profiles = Vec::new();
@@ -730,7 +754,7 @@ fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
 
     let workspace = benchmark_budget_project("perf_report_compiler_identity");
     let seeded = Command::new(&compiler)
-        .args(["bench", "--show-default", "src/main.jet"])
+        .args(["bench", "--show-default", "src/run.jet"])
         .current_dir(&workspace)
         .output()
         .unwrap();
@@ -747,7 +771,7 @@ fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
         let first = scope.spawn(|| {
             start.wait();
             Command::new(&compiler)
-                .args(["bench", "--show-default", "src/main.jet"])
+                .args(["bench", "--show-default", "src/run.jet"])
                 .current_dir(&workspace)
                 .output()
                 .unwrap()
@@ -755,7 +779,7 @@ fn perf_report_reuse_ignores_nonsemantic_compiler_bytes_under_parallel_load() {
         let second = scope.spawn(|| {
             start.wait();
             Command::new(&padded_compiler)
-                .args(["bench", "--show-default", "src/main.jet"])
+                .args(["bench", "--show-default", "src/run.jet"])
                 .current_dir(&workspace)
                 .output()
                 .unwrap()
@@ -806,7 +830,7 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
 fn bench_owns_canonical_refresh_and_dossier_only_projects_it() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = benchmark_budget_project("bench_owned_budget_refresh");
-    let run = || Command::new(jet()).args(["bench", "--show-default", "src/main.jet"]).current_dir(&dir).output().unwrap();
+    let run = || Command::new(jet()).args(["bench", "--show-default", "src/run.jet"]).current_dir(&dir).output().unwrap();
     let first = run();
     assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));
     assert!(String::from_utf8_lossy(&first.stderr).contains("report "));
@@ -827,7 +851,7 @@ fn bench_owns_canonical_refresh_and_dossier_only_projects_it() {
     assert_eq!(report_paths(), initial, "unchanged relevant identity must reuse report");
 
     let before = fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
-    let dossier = Command::new(jet()).args(["inspect", "dossier", "src/main.jet", "run", "--json"]).current_dir(&dir).output().unwrap();
+    let dossier = Command::new(jet()).args(["inspect", "dossier", "src/run.jet", "run", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(dossier.status.code(), Some(0), "{}", String::from_utf8_lossy(&dossier.stderr));
     let dossier = String::from_utf8(dossier.stdout).unwrap();
     assert!(dossier.contains("\"performance_budgets\":{\"mode\":\"read_only\""), "{dossier}");
@@ -835,7 +859,7 @@ fn bench_owns_canonical_refresh_and_dossier_only_projects_it() {
     let after = fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
     assert_eq!(before, after, "dossier projection must not rewrite reports");
 
-    fs::OpenOptions::new().append(true).open(dir.join("src/main.jet")).unwrap().write_all(b"\n// relevant source digest change\n").unwrap();
+    fs::OpenOptions::new().append(true).open(dir.join("src/run.jet")).unwrap().write_all(b"\n// relevant source digest change\n").unwrap();
     let third = run();
     assert_eq!(third.status.code(), Some(0), "{}", String::from_utf8_lossy(&third.stderr));
     assert_eq!(report_paths().len(), 2, "source digest change must refresh canonical report");

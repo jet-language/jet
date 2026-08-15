@@ -70,6 +70,19 @@ fn record_loader_error(
     error.into_plain()
 }
 
+/// The standard loader diagnostic for a user-named `.jet` input that does not
+/// exist. A missing *source* is an ordinary spelling/path mistake, not an
+/// authority-metadata failure, so it never wears the E1334 authority wrapper.
+fn missing_source_diagnostic(display: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0603",
+        format!("can't find the file `{display}`"),
+        "a named `.jet` source path must point at an existing file".to_string(),
+        "check the spelling, or create the missing file".to_string(),
+        None,
+    )
+}
+
 fn checked_source_file(
     path: &Path,
     display: &str,
@@ -79,22 +92,18 @@ fn checked_source_file(
         .map_err(|error| LoaderError::at(display, "", vec![error.diagnostic()]))?;
     let name = path
         .file_name()
-        .ok_or_else(|| {
-            LoaderError::at(
-                display,
-                "",
-                vec![Diagnostic::error(
-                    "E0603",
-                    format!("can't find the file `{display}`"),
-                    "an import path must point at an existing `.jet` file".to_string(),
-                    "check the spelling, or create the missing file".to_string(),
-                    None,
-                )],
-            )
-        })?;
-    let checked = resolver
-        .checked_file(Path::new(name))
-        .map_err(|error| LoaderError::at(display, "", vec![error.diagnostic()]))?;
+        .ok_or_else(|| LoaderError::at(display, "", vec![missing_source_diagnostic(display)]))?;
+    // A missing source reports E0603; every other authority failure (symlink,
+    // wrong kind, changed under us, unreadable) keeps its E1334 row, so
+    // genuinely missing authority *metadata* is still reported as such.
+    let checked = resolver.checked_file(Path::new(name)).map_err(|error| {
+        let diagnostic = if error.is_missing() {
+            missing_source_diagnostic(display)
+        } else {
+            error.diagnostic()
+        };
+        LoaderError::at(display, "", vec![diagnostic])
+    })?;
     let source = checked
         .text()
         .map_err(|error| LoaderError::at(display, "", vec![error.diagnostic()]))?;

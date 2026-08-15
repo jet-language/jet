@@ -230,18 +230,21 @@ fn build_artifact_provider(request: &ProviderRequest, _: &ProviderCancellation) 
 const COMPILE_WARMUPS: u128 = 1;
 const COMPILE_SAMPLES: usize = 20;
 const COMPILE_MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
-/// One child compile inside a CompilerProbe trial gets this long. Every
-/// CompilerProbe collection bound below is derived from it, never assumed.
-const COMPILE_CHILD_DEADLINE: Duration = Duration::from_secs(20);
+/// How long one real native build of a project may take: emit Rust, compile
+/// the content-addressed `jet_runtime` rlib when that toolchain artifact is
+/// cold, then compile and link the program. A CompilerProbe child compile and
+/// a bench/selected artifact build are the same operation, so one allowance
+/// covers both instead of two independent guesses.
+pub const NATIVE_BUILD_DEADLINE: Duration = Duration::from_secs(120);
 
 /// How long one provider collection may take, derived from the workload the
 /// provider kind is pinned to run.
 ///
 /// `facts` is the bound for a provider that answers from memory. A provider
 /// that compiles or benchmarks is already bounded from the inside — every
-/// CompilerProbe child compile has `COMPILE_CHILD_DEADLINE`, and a bench
-/// harness is one real native build — so a collection cancelled sooner than
-/// those allow kills a healthy measurement instead of catching a stuck one.
+/// CompilerProbe child compile and every bench harness build is one real
+/// native build — so a collection cancelled sooner than those allow kills a
+/// healthy measurement instead of catching a stuck one.
 /// `native_build` is the command's allowance for one real native build.
 /// `mode` names the CompilerProbe cache state; other kinds pass `None`.
 pub fn collection_deadline(kind: &str, mode: Option<&str>, facts: Duration, native_build: Duration) -> Duration {
@@ -251,7 +254,7 @@ pub fn collection_deadline(kind: &str, mode: Option<&str>, facts: Duration, nati
             // compiles again; `Clean` and `NoChange` compile once.
             let compiles_per_trial = if mode == Some("Edit") { 2 } else { 1 };
             let trials = COMPILE_WARMUPS as u32 + COMPILE_SAMPLES as u32;
-            trials * compiles_per_trial * COMPILE_CHILD_DEADLINE + facts
+            trials * compiles_per_trial * native_build + facts
         }
         // Build the release bench harness, then run its pinned 20 trials.
         "BenchMeasurement" | "AllocationProbe" => native_build + facts,
@@ -789,8 +792,37 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
         return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("compile workload target `{target}` is unsupported by the resident fixture compiler")));
     }
     let executable = running_executable().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot identify resident Jet compiler: {error}")))?;
+    // The child runs in the workload copy, so a relative cache root has to be
+    // resolved against this process's directory before it is handed over.
+    let runtime_cache = crate::RuntimeCache::cache_root();
+    let runtime_cache = if runtime_cache.is_absolute() {
+        runtime_cache
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(&runtime_cache))
+            .unwrap_or(runtime_cache)
+    };
     let mut command = Command::new(executable);
-    command.arg("build").arg(entry).current_dir(root).env("JET_TIMING", "1").env("JET_CACHE_DIR", root.join(".jet-compile-cache")).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    command
+        .arg("build")
+        .arg(entry)
+        .current_dir(root)
+        .env("JET_TIMING", "1")
+        // The build cache is project-scoped so `Clean` really recompiles the
+        // workload, and `reset_compile_cache` wipes it between trials.
+        .env("JET_CACHE_DIR", root.join(".jet-compile-cache"))
+        // The `jet_runtime` rlib is a *toolchain* artifact, keyed on the
+        // runtime source plus rustc identity, so a user's clean project build
+        // reuses it. Left to fall back on `JET_CACHE_DIR`, the per-trial reset
+        // deleted it too and every sample recompiled the whole runtime crate —
+        // work no compile-latency budget is measuring, and far more than one
+        // build's allowance. Pin it to the cache root this process resolved so
+        // the samples share it; the report already pins `compiler_digest` and
+        // `core_digest`, so reuse cannot smuggle in a different runtime.
+        .env("JET_RUNTIME_CACHE_DIR", &runtime_cache)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     match profile {
         "dev" => {}
         "release" => { command.arg("--release"); }
@@ -799,7 +831,7 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
     }
     #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
     let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot start compile workload build: {error}")))?;
-    let deadline = Instant::now() + COMPILE_CHILD_DEADLINE;
+    let deadline = Instant::now() + NATIVE_BUILD_DEADLINE;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
