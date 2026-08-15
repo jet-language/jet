@@ -83,17 +83,6 @@ pub fn jet_with_host_program_allocator<R>(
     drop(guard);
     (output, facts)
 }
-/// Reserve bytes for one resident/interpreter fallible allocation through the
-/// canonical allocator. The hosted runtime retains these reservations until
-/// its run scope ends, then the configuration guard releases them together.
-pub fn jet_host_program_allocator_try_reserve(requested: usize) -> bool {
-    JET_HOST_PROGRAM_ALLOCATOR.try_reserve_hosted(requested)
-}
-
-/// Roll back a hosted reservation when the system allocation itself fails.
-pub fn jet_host_program_allocator_cancel_reservation(requested: usize) {
-    JET_HOST_PROGRAM_ALLOCATOR.cancel_hosted_reservation(requested);
-}
 
 impl JetProgramAllocator {
     pub const fn system() -> Self {
@@ -269,6 +258,63 @@ impl JetProgramAllocator {
 }
 
 // JET_VETTED_UNSAFE_BEGIN: program_allocator
+std::thread_local! {
+    static JET_ACTIVE_HOSTED_PROGRAM_ALLOCATOR: std::cell::Cell<*const JetProgramAllocator> =
+        const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+struct JetActiveHostedProgramAllocatorGuard {
+    previous: *const JetProgramAllocator,
+}
+
+impl Drop for JetActiveHostedProgramAllocatorGuard {
+    fn drop(&mut self) {
+        JET_ACTIVE_HOSTED_PROGRAM_ALLOCATOR.with(|active| active.set(self.previous));
+    }
+}
+
+/// Marshal an evaluator deopt through the resident runtime's canonical Prelude
+/// allocator. The pointer is thread-local and cannot escape the synchronous
+/// callback; the guard restores a nested evaluator's previous allocator.
+pub fn jet_with_active_hosted_program_allocator<R>(
+    allocator: &JetProgramAllocator,
+    run: impl FnOnce() -> R,
+) -> R {
+    let previous = JET_ACTIVE_HOSTED_PROGRAM_ALLOCATOR
+        .with(|active| active.replace(allocator as *const JetProgramAllocator));
+    let guard = JetActiveHostedProgramAllocatorGuard { previous };
+    let output = run();
+    drop(guard);
+    output
+}
+
+fn jet_active_hosted_program_allocator<R>(use_allocator: impl FnOnce(&JetProgramAllocator) -> R) -> R {
+    JET_ACTIVE_HOSTED_PROGRAM_ALLOCATOR.with(|active| {
+        let allocator = active.get();
+        if allocator.is_null() {
+            use_allocator(&JET_HOST_PROGRAM_ALLOCATOR)
+        } else {
+            // SAFETY: `jet_with_active_hosted_program_allocator` installs this
+            // pointer only for the synchronous lifetime of its borrowed value.
+            use_allocator(unsafe { &*allocator })
+        }
+    })
+}
+
+/// Reserve bytes for one resident/interpreter fallible allocation through the
+/// canonical allocator. The hosted runtime retains these reservations until
+/// its run scope ends, then the configuration guard releases them together.
+pub fn jet_host_program_allocator_try_reserve(requested: usize) -> bool {
+    jet_active_hosted_program_allocator(|allocator| allocator.try_reserve_hosted(requested))
+}
+
+/// Roll back a hosted reservation when the system allocation itself fails.
+pub fn jet_host_program_allocator_cancel_reservation(requested: usize) {
+    jet_active_hosted_program_allocator(|allocator| {
+        allocator.cancel_hosted_reservation(requested);
+    });
+}
+
 struct JetProgramAllocationNode {
     ptr: *mut u8,
     requested_bytes: usize,

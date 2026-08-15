@@ -499,10 +499,15 @@ pub(crate) extern "C" fn jet_deopt_call(
         let memos = DEOPT_MEMOS
             .with(|state| state.borrow().clone())
             .unwrap_or_else(TIR::new_memo_state);
-        let value = match jet_codegen::Comptime::with_ambient(
-            Some(crate::ambient_interp::ambient_core_call),
-            Some(crate::ambient_interp::ambient_handle),
-            || TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos),
+        let value = match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
+            &rt.program_allocator,
+            || {
+                jet_codegen::Comptime::with_ambient(
+                    Some(crate::ambient_interp::ambient_core_call),
+                    Some(crate::ambient_interp::ambient_handle),
+                    || TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos),
+                )
+            },
         ) {
             Ok(v) => v,
             Err(d) => return Some(Err(d.what)),
