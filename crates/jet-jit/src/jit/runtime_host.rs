@@ -144,6 +144,9 @@ pub(crate) struct JitRuntime {
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
+    /// Canonical Prelude allocator instance for resident fallible allocations.
+    /// The checked package fact selects its mode before any host call runs.
+    pub(crate) program_allocator: jet_codegen::program_allocator::JetProgramAllocator,
     pub(crate) compute: Compute::ComputeState,
     /// Compile-time string handles baked into Cranelift as `iconst` ids.
     /// `reset_run_heap` and the run-cache artifact must preserve these — clearing

@@ -56,6 +56,14 @@ fn main_returns_app(program: &JitProgram) -> bool {
 }
 
 pub(crate) fn fresh_runtime() -> JitRuntime {
+    fresh_runtime_with_program_allocator(None)
+}
+
+pub(crate) fn fresh_runtime_for_program(program: &JitProgram) -> JitRuntime {
+    fresh_runtime_with_program_allocator(program.program_allocator_cap_bytes)
+}
+
+fn fresh_runtime_with_program_allocator(cap_bytes: Option<u64>) -> JitRuntime {
     JitRuntime {
         source_file: String::new(),
         source_text: String::new(),
@@ -67,6 +75,10 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
+        program_allocator: cap_bytes.map_or_else(
+            jet_codegen::program_allocator::JetProgramAllocator::system,
+            jet_codegen::program_allocator::JetProgramAllocator::counting,
+        ),
         compute: crate::Compute::ComputeState::default(),
         compile_strings: Vec::new(),
         zip_plans: Vec::new(),
@@ -169,6 +181,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     // publish_capture reads the heap after this scrub for the warm-run artifact.
     let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
+    rt.program_allocator.release_hosted_reservations();
     rt.heap.install_string_slots(&compile_strings);
     rt.compute.clear();
     rt.memo_values.clear();
@@ -493,7 +506,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
 pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
-    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
+    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime_for_program(program)));
     super::tier_cache::begin_capture();
     let compiled = ensure_resident_module(program);
     if compiled.is_err() {
@@ -516,7 +529,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
     clear_deopt_state();
-    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
+    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime_for_program(program)));
 
     let mut deopt_index = HashMap::new();
     let mut deopt_names = Vec::new();

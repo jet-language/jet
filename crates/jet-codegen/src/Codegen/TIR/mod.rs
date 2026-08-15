@@ -277,6 +277,9 @@ pub struct JitProgram {
     /// D-MEM-GUARANTEE1: package hardening is a checked bundle fact carried
     /// into named deopt; the evaluator never reparses package.jet.
     pub package_hardened: bool,
+    /// D-ALLOC-PROGRAM1=A: checked hosted allocator fact marshalled to the
+    /// resident runtime. `None` is system; `Some(0)` is uncapped counting.
+    pub program_allocator_cap_bytes: Option<u64>,
     /// Sema-selected callable name. The JIT compiles this exact function and
     /// never assumes the source spelling `run`.
     pub entry: String,
@@ -2147,6 +2150,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         source_file: module.display.clone(),
         source_text: module.source.clone(),
         package_hardened: bundle.package_guarantees.harden,
+        program_allocator_cap_bytes: match &bundle.program_allocator {
+            crate::TargetMachine::AllocatorPolicy::Counting { cap } => {
+                Some(cap.map_or(0, |size| size.bytes))
+            }
+            _ => None,
+        },
         entry: entry_name,
         funcs,
         spawn_lambdas,

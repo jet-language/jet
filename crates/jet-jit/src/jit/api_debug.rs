@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use super::gap::{entry_run_name, JitGap};
 use super::resident::{
-    ensure_resident_module, fresh_runtime, resident_hot_swap, resident_run_fresh,
+    ensure_resident_module, fresh_runtime_for_program, resident_hot_swap, resident_run_fresh,
     resident_run_mixed, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
@@ -234,7 +234,9 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
         // Teardown must not wipe CLI plan — reinstall after.
         crate::CLI::prepare_cli_from_bundle(bundle);
         crate::Ffi::bind_bundle_ffi(bundle)?;
-        RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
+        RESIDENT_RUNTIME.with(|slot| {
+            *slot.borrow_mut() = Some(fresh_runtime_for_program(&program))
+        });
         ensure_resident_module(&program)
     })
 }

@@ -87,7 +87,7 @@ pub fn jet_with_host_program_allocator<R>(
 /// canonical allocator. The hosted runtime retains these reservations until
 /// its run scope ends, then the configuration guard releases them together.
 pub fn jet_host_program_allocator_try_reserve(requested: usize) -> bool {
-    JET_HOST_PROGRAM_ALLOCATOR.reserve_hosted(requested)
+    JET_HOST_PROGRAM_ALLOCATOR.try_reserve_hosted(requested)
 }
 
 /// Roll back a hosted reservation when the system allocation itself fails.
@@ -212,7 +212,7 @@ impl JetProgramAllocator {
         }
     }
 
-    fn reserve_hosted(&self, requested: usize) -> bool {
+    pub fn try_reserve_hosted(&self, requested: usize) -> bool {
         use std::sync::atomic::Ordering;
         match self.reserve(requested) {
             Some(true) => {
@@ -228,7 +228,7 @@ impl JetProgramAllocator {
         }
     }
 
-    fn release_hosted_reservations(&self) {
+    pub fn release_hosted_reservations(&self) {
         let requested = self
             .hosted_reserved_bytes
             .swap(0, std::sync::atomic::Ordering::AcqRel);
@@ -237,7 +237,7 @@ impl JetProgramAllocator {
         }
     }
 
-    fn cancel_hosted_reservation(&self, requested: usize) {
+    pub fn cancel_hosted_reservation(&self, requested: usize) {
         use std::sync::atomic::Ordering;
         if self
             .hosted_reserved_bytes

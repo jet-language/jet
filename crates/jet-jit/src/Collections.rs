@@ -222,11 +222,14 @@ mod collection_semantics {
         jet_list_try_new()
     }
 
-    pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
+    pub(super) fn try_list_with_capacity<T>(
+        capacity: i64,
+        allocator: &jet_codegen::program_allocator::JetProgramAllocator,
+    ) -> JetOutcome<Vec<T>, AllocError> {
         jet_list_try_with_capacity_defaulted(
             capacity,
-            jet_codegen::program_allocator::jet_host_program_allocator_try_reserve,
-            jet_codegen::program_allocator::jet_host_program_allocator_cancel_reservation,
+            |requested| allocator.try_reserve_hosted(requested),
+            |requested| allocator.cancel_hosted_reservation(requested),
         )
     }
 
@@ -679,7 +682,10 @@ extern "C" fn jet_jit_list_try_new() -> i64 {
 
 extern "C" fn jet_jit_list_try_with_capacity(capacity: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match collection_semantics::try_list_with_capacity::<i64>(capacity) {
+        match collection_semantics::try_list_with_capacity::<i64>(
+            capacity,
+            &rt.program_allocator,
+        ) {
             Ok(values) => {
                 let list = rt.heap.alloc_int_list(values);
                 crate::runtime_host::alloc_jit_result(rt, true, list as u64)
