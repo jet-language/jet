@@ -3626,13 +3626,36 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // Inline-module instance members are local generated nominals.
                     // Their qualified source spelling is never a foreign identity.
                     jet_foundation::Names::member_name(alias, type_name)
+                } else if let Some(identity) = cx.foreign_type_identity(alias, type_name) {
+                    identity
+                } else if super::is_eval_fragment() {
+                    // Fragment evaluation lowers an AST that carries no module,
+                    // import, or struct table (`TIR/eval/mod.rs::empty_cx`), so no
+                    // dotted head can be resolved through the two tables above.
+                    // D-CONF-GENSPELL1=A makes that routine rather than exotic: a
+                    // GENERIC-MODULE INSTANCE member (`three_ints.Buffer`) reaches
+                    // lowering ONLY this way. `expand_generic_module_aliases` folds
+                    // every module value argument and template `@` binding through
+                    // `Comptime::evaluate_closed_value`, and that bridge
+                    // (`TIR/eval/mod.rs::eval_expr_hook`) lowers every function of the
+                    // module AS IT STANDS AT THAT MOMENT — before expansion projects
+                    // the alias member onto its instance nominal
+                    // (`M5Three4IntsBuffer`), which is why no table can hold it yet.
+                    // Every position in that snapshot — the literal head and each
+                    // annotation naming the same type — spells it `alias.Type`, so
+                    // that spelling is its identity here; the canonical nominal
+                    // belongs to the expanded program, which resolves through the
+                    // branches above. Same fragment contract as the unqualified head
+                    // below and the `IndexKind::Unknown` recovery in `Expr::Index`.
+                    format!("{alias}.{type_name}")
                 } else {
-                    cx.foreign_type_identity(alias, type_name).unwrap_or_else(|| {
-                        jet_foundation::ice!(
-                            None,
-                            "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
-                        )
-                    })
+                    // A bundle-backed context spells a dotted head one of exactly two
+                    // ways: an inline-module member or an import. Failing both tables
+                    // there is a genuine internal contradiction (I3).
+                    jet_foundation::ice!(
+                        None,
+                        "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
+                    )
                 };
                 return TExpr {
                     ty: if type_args.is_empty() {
