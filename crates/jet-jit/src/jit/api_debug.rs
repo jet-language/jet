@@ -202,48 +202,52 @@ pub(crate) fn try_resident_restart(
 /// Test hook: MixedSwitch arm condition strings from lowered `main`.
 #[doc(hidden)]
 pub fn jit_dump_mixed_switch_conds(bundle: &ProgramBundle) -> Vec<String> {
-    let Some(program) = TIR::lower_jit_program(bundle) else {
-        return vec!["<no program>".into()];
-    };
-    let mut out = Vec::new();
-    for f in &program.funcs {
-        for s in &f.body {
-            if let TStmt::MixedSwitch { arms, .. } = s {
-                for (c, _) in arms {
-                    out.push(format!("{}: {:?}", f.name, c.ty));
+    crate::on_compiler_stack(|| {
+        let Some(program) = TIR::lower_jit_program(bundle) else {
+            return vec!["<no program>".into()];
+        };
+        let mut out = Vec::new();
+        for f in &program.funcs {
+            for s in &f.body {
+                if let TStmt::MixedSwitch { arms, .. } = s {
+                    for (c, _) in arms {
+                        out.push(format!("{}: {:?}", f.name, c.ty));
+                    }
                 }
             }
         }
-    }
-    out
+        out
+    })
 }
 
 /// Test hook: try JIT-compile a checked bundle; surfaces lowering errors.
 #[doc(hidden)]
 pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
-    if !cranelift_host_supported() {
-        return Err("cranelift-jit host path unsupported on this architecture".to_string());
-    }
-    crate::Ffi::bind_bundle_ffi(bundle)?;
-    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
-    let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
-        format!(
-            "lower_jit_program returned None ({})",
-            TIR::lower_jit_program_fail_reason(bundle)
-        )
-    })?;
-    crate::CLI::prepare_cli_from_bundle(bundle);
-    catch_jit_panic("compile", || {
-        resident_teardown();
-        crate::Encoding::register_migrations(bundle);
-        super::types_meta::install_struct_redact(bundle);
-        // Teardown must not wipe CLI plan — reinstall after.
-        crate::CLI::prepare_cli_from_bundle(bundle);
+    crate::on_compiler_stack(|| {
+        if !cranelift_host_supported() {
+            return Err("cranelift-jit host path unsupported on this architecture".to_string());
+        }
         crate::Ffi::bind_bundle_ffi(bundle)?;
-        RESIDENT_RUNTIME.with(|slot| {
-            *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
-        });
-        ensure_resident_module(&program)
+        let cap_bytes = crate::program_allocator_cap_bytes(bundle);
+        let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
+            format!(
+                "lower_jit_program returned None ({})",
+                TIR::lower_jit_program_fail_reason(bundle)
+            )
+        })?;
+        crate::CLI::prepare_cli_from_bundle(bundle);
+        catch_jit_panic("compile", || {
+            resident_teardown();
+            crate::Encoding::register_migrations(bundle);
+            super::types_meta::install_struct_redact(bundle);
+            // Teardown must not wipe CLI plan — reinstall after.
+            crate::CLI::prepare_cli_from_bundle(bundle);
+            crate::Ffi::bind_bundle_ffi(bundle)?;
+            RESIDENT_RUNTIME.with(|slot| {
+                *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
+            });
+            ensure_resident_module(&program)
+        })
     })
 }
 
@@ -252,8 +256,15 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
 /// The public backend intentionally deopts to the canonical interpreter when
 /// resident execution is unavailable. Proof harnesses must not accept that
 /// result as JIT evidence, so this seam returns the resident failure instead.
+///
+/// Like `CraneliftBackend::run` this is a one-shot: it starts a session and
+/// finishes it, so it owns the sized stack rather than borrowing its caller's.
 #[doc(hidden)]
 pub fn run_resident_strict_for_test(bundle: &ProgramBundle) -> Result<RunOutcome, String> {
+    crate::on_compiler_stack(|| run_resident_strict_on_compiler_stack(bundle))
+}
+
+fn run_resident_strict_on_compiler_stack(bundle: &ProgramBundle) -> Result<RunOutcome, String> {
     if !cranelift_host_supported() {
         return Err("cranelift-jit host path unsupported on this architecture".to_string());
     }
@@ -284,50 +295,58 @@ pub fn run_resident_strict_for_test(bundle: &ProgramBundle) -> Result<RunOutcome
 /// Test hook: lowered function names in the JIT program.
 #[doc(hidden)]
 pub fn jit_program_func_names(bundle: &ProgramBundle) -> Vec<String> {
-    let Some(program) = TIR::lower_jit_program(bundle) else {
-        return vec!["<no program>".into()];
-    };
-    program.funcs.iter().map(|f| f.name.clone()).collect()
+    crate::on_compiler_stack(|| {
+        let Some(program) = TIR::lower_jit_program(bundle) else {
+            return vec!["<no program>".into()];
+        };
+        program.funcs.iter().map(|f| f.name.clone()).collect()
+    })
 }
 
 /// Test hook: per-function resident safety detail (`None` = covered).
 #[doc(hidden)]
 pub fn resident_jit_func_safety_detail(bundle: &ProgramBundle, name: &str) -> Option<String> {
-    let program = TIR::lower_jit_program(bundle)?;
-    let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let f = program.funcs.iter().find(|f| f.name == name)?;
-    resident_safe_func_detail(f, &names)
+    crate::on_compiler_stack(|| {
+        let program = TIR::lower_jit_program(bundle)?;
+        let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
+        let f = program.funcs.iter().find(|f| f.name == name)?;
+        resident_safe_func_detail(f, &names)
+    })
 }
 
 /// Test hook: dump lowered run stmt tags.
 #[doc(hidden)]
 pub fn jit_dump_main_stmts(bundle: &ProgramBundle) -> Vec<String> {
-    let Some(program) = TIR::lower_jit_program(bundle) else {
-        return vec!["<no program>".into()];
-    };
-    let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
-        return vec!["<no entry>".into()];
-    };
-    m.body
-        .iter()
-        .enumerate()
-        .map(|(i, s)| format!("{i}:{}", jit_stmt_tag(s)))
-        .collect()
+    crate::on_compiler_stack(|| {
+        let Some(program) = TIR::lower_jit_program(bundle) else {
+            return vec!["<no program>".into()];
+        };
+        let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
+            return vec!["<no entry>".into()];
+        };
+        m.body
+            .iter()
+            .enumerate()
+            .map(|(i, s)| format!("{i}:{}", jit_stmt_tag(s)))
+            .collect()
+    })
 }
 
 /// Test hook: observed TIR statement/expression tags in lowered `run`.
 #[doc(hidden)]
 pub fn jit_dump_main_ops(bundle: &ProgramBundle) -> Vec<String> {
-    let Some(program) = TIR::lower_jit_program(bundle) else {
-        return vec!["TStmt::<no program>".into()];
-    };
-    let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
-        return vec!["TStmt::<no entry>".into()];
-    };
-    let mut out = Vec::new();
-    collect_stmt_ops(&m.body, &mut out);
-    out.sort();
-    out
+    crate::on_compiler_stack(|| {
+        let Some(program) = TIR::lower_jit_program(bundle) else {
+            return vec!["TStmt::<no program>".into()];
+        };
+        let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
+            return vec!["TStmt::<no entry>".into()];
+        };
+        let mut out = Vec::new();
+        collect_stmt_ops(&m.body, &mut out);
+        out.sort();
+        out
+    })
 }
 
 fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
@@ -622,6 +641,10 @@ fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
 /// Test hook: count select recv/timer arms on the first `SelectWait` in `run`.
 #[doc(hidden)]
 pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
+    crate::on_compiler_stack(|| jit_select_arm_counts_lowered(bundle))
+}
+
+fn jit_select_arm_counts_lowered(bundle: &ProgramBundle) -> Option<(usize, usize)> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let m = program.funcs.iter().find(|f| f.name == program.entry)?;
@@ -645,6 +668,10 @@ pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
 }
 #[doc(hidden)]
 pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
+    crate::on_compiler_stack(|| jit_main_uncovered_detail_lowered(bundle))
+}
+
+fn jit_main_uncovered_detail_lowered(bundle: &ProgramBundle) -> Option<String> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let m = program.funcs.iter().find(|f| f.name == program.entry)?;
@@ -742,22 +769,24 @@ pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
 /// Test hook: spawn site vs lambda counts for a bundle.
 #[doc(hidden)]
 pub fn jit_spawn_stats(bundle: &ProgramBundle) -> (usize, usize) {
-    let Some(program) = TIR::lower_jit_program(bundle) else {
-        return (0, 0);
-    };
-    (count_spawn_sites(&program), program.spawn_lambdas.len())
+    crate::on_compiler_stack(|| {
+        let Some(program) = TIR::lower_jit_program(bundle) else {
+            return (0, 0);
+        };
+        (count_spawn_sites(&program), program.spawn_lambdas.len())
+    })
 }
 
 /// Test hook: whether TIR lowers this bundle for JIT (`lower_jit_program` gate).
 #[doc(hidden)]
 pub fn tir_lowers_bundle(bundle: &ProgramBundle) -> bool {
-    TIR::lower_jit_program(bundle).is_some()
+    crate::on_compiler_stack(|| TIR::lower_jit_program(bundle).is_some())
 }
 
 /// Test hook: why `lower_jit_program` returned `None`.
 #[doc(hidden)]
 pub fn tir_lower_fail_reason(bundle: &ProgramBundle) -> String {
-    TIR::lower_jit_program_fail_reason(bundle)
+    crate::on_compiler_stack(|| TIR::lower_jit_program_fail_reason(bundle))
 }
 
 /// Test hook: whether the bundle's entry module is inside `resident_jit_safe`.
@@ -769,6 +798,10 @@ pub fn resident_jit_safe_bundle(bundle: &ProgramBundle) -> bool {
 /// Test hook: empty string when covered; otherwise a short failure reason.
 #[doc(hidden)]
 pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
+    crate::on_compiler_stack(|| resident_jit_safe_bundle_detail_lowered(bundle))
+}
+
+fn resident_jit_safe_bundle_detail_lowered(bundle: &ProgramBundle) -> String {
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return format!(
             "lower_jit_program returned None ({})",

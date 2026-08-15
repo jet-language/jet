@@ -111,6 +111,14 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
 
 #[test]
 fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallback() {
+    // `run` then `hot_swap` is one resident session, and a session is scoped
+    // to its thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler
+    // stack once around the whole session; `CraneliftBackend::run`'s own
+    // boundary is re-entrant and runs inline inside it.
+    jet_jit::on_compiler_stack(resident_jit_hot_swap_session);
+}
+
+fn resident_jit_hot_swap_session() {
     if !jet_jit::cranelift_host_supported() {
         return;
     }

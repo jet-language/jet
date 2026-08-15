@@ -59,25 +59,18 @@ fn require_multi_head_parity_prereqs() {
 }
 
 /// Keep JIT trace state scoped to each test operation.
+///
+/// `jet_jit::on_compiler_stack` is the product boundary: it installs the sized
+/// compiler stack and carries the trace flags, tier rows, `struct_new` tally
+/// and tier artifact back to this thread. Re-entrancy makes it inline when an
+/// outer entry already crossed, so nesting it is free.
 fn with_jit_test_scope<T, F>(f: F) -> T
 where
     F: FnOnce() -> T + Send,
     T: Send,
 {
-    let trace_tiers = jet_jit::trace_tiers_enabled();
     jet_jit::reset_jit_trace_for_test();
-    let (result, flags, trace) = jet::run_compiler_work(|| {
-        // Trace state is thread-local. Install it inside the canonical
-        // compiler worker, alongside the coverage compile path it protects.
-        jet_jit::set_trace_tiers(trace_tiers);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        let flags = jet_jit::jit_trace_flags_for_test();
-        let trace = jet_jit::take_last_trace();
-        (result, flags, trace)
-    });
-    jet_jit::merge_jit_trace_flags_for_test(flags);
-    jet_jit::publish_trace(trace);
-    result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    jet_jit::on_compiler_stack(f)
 }
 
 /// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
@@ -3046,15 +3039,24 @@ fn cranelift_backend_matches_hello() {
     );
 }
 
+/// Load + check a fixture on the canonical compiler worker.
+///
+/// `Loader::load_entry` and `Sema::check_bundle` are the same unbounded-depth
+/// recursive descent every compile entry runs, and reaching them directly --
+/// as this helper does, and as any embedder holding its own bundle would --
+/// skips the driver's own boundary. Without it a 2 MiB libtest worker aborts
+/// the whole binary and reports every other in-flight test as failed.
 fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
-    let mut b = jet::Loader::load_entry(file).expect("bundle should load");
-    let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-    b
+    jet::run_compiler_work(|| {
+        let mut b = jet::Loader::load_entry(file).expect("bundle should load");
+        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+        b
+    })
 }
 
 fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
@@ -7778,14 +7780,15 @@ fn run() {
 
 #[test]
 fn resident_jit_safe_increment_decrement() {
-    // Front-end work belongs on Jet's canonical 32 MiB compiler worker
-    // (`jet_driver::COMPILER_STACK_SIZE`), the same hop `with_jit_test_scope`
-    // makes. TIR lowering is a mutually recursive descent whose debug frames
-    // are enormous — `lower_method_call_impl` 528 KiB, `lower_expr_inner`
-    // 272 KiB, `lower_stmt_plan` 256 KiB — so roughly two levels of method
-    // nesting exhaust libtest's 2 MiB worker stack. Reaching the front end
-    // straight from a test thread aborts the whole binary (SIGABRT), which
-    // reports every other in-flight test in this file as failed.
+    // Front-end work belongs on Jet's canonical compiler worker
+    // (`jet_foundation::CompilerStack::COMPILER_STACK_SIZE`, 64 MiB), the same
+    // hop `with_jit_test_scope` makes. TIR lowering is a mutually recursive
+    // descent whose debug frames are enormous — `lower_method_call_impl`
+    // 528 KiB, `lower_expr_inner` 272 KiB, `lower_stmt_plan` 256 KiB — so
+    // roughly two levels of method nesting exhaust libtest's 2 MiB worker
+    // stack. Reaching the front end straight from a test thread aborts the
+    // whole binary (SIGABRT), which reports every other in-flight test in
+    // this file as failed.
     jet::run_compiler_work(|| {
         let file = "examples/features/basics/increment.jet";
         let mut bundle = jet::Loader::load_entry(file).expect("load");
@@ -9566,6 +9569,15 @@ fn cranelift_covers_mixed_record_fields() {
 /// live runtime state; restart tears it down.
 #[test]
 fn cranelift_hot_swap_preserves_live_state() {
+    // One session, one thread. The resident module, the live heap and the
+    // `#Persist` store are scoped to the thread, not to the call or to the
+    // backend value (D-HOTSWAP1 / D-PERSIST1) -- `backend2` below re-links the
+    // very session `backend` started. So the sized stack goes around the whole
+    // session; `CraneliftBackend::run`'s own boundary then runs inline.
+    with_jit_test_scope(cranelift_hot_swap_preserves_live_state_inner);
+}
+
+fn cranelift_hot_swap_preserves_live_state_inner() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
@@ -9634,6 +9646,11 @@ fn cranelift_hot_swap_preserves_live_state() {
 /// which took the whole `jet dev` server down with it.
 #[test]
 fn cranelift_trap_then_hot_swap_continues() {
+    // Session-scoped boundary; see `cranelift_hot_swap_preserves_live_state`.
+    with_jit_test_scope(cranelift_trap_then_hot_swap_continues_inner);
+}
+
+fn cranelift_trap_then_hot_swap_continues_inner() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
@@ -9869,6 +9886,13 @@ fn persist_marker_is_codegen_inert() {
 /// Cranelift and interpreter tiers.
 #[test]
 fn persist_binding_survives_hot_swap_and_resets_on_shape_change() {
+    // `jet_foundation::Persist` is a thread-local store, so run/hot_swap/
+    // restart must share one thread; see
+    // `cranelift_hot_swap_preserves_live_state`.
+    with_jit_test_scope(persist_binding_survives_hot_swap_and_resets_on_shape_change_inner);
+}
+
+fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
     fn load_checked(path: &std::path::Path) -> jet::AST::ProgramBundle {
         let mut b = jet::Loader::load_entry(path.to_str().unwrap()).expect("bundle should load");
         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);

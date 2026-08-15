@@ -165,6 +165,112 @@ fn known_regressions_keep_their_results_on_a_two_mib_embedder_stack() {
         .expect("the full local Cell surface must still compile");
 }
 
+const JIT_ENTRY_SOURCE: &str = r#"
+fn twice(n: Int) => Int {
+    return n + n
+}
+fn run() {
+    print(twice(21))
+}
+"#;
+
+/// An embedder holding a checked bundle reaches the JIT without ever touching
+/// the driver's compile entries, so `CraneliftBackend::run` has to own the
+/// same sized stack they own: TIR lowering inside `try_resident` and the
+/// whole-program interpreter on the deopt route are the same unbounded-depth
+/// recursive descent, and either tier alone exhausts a 2 MiB embedder thread.
+#[test]
+fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
+    let dir = common::unique_tmp("jet_compiler_stack_jit_entry");
+    std::fs::create_dir_all(&dir).expect("create the fixture directory");
+    let file = dir.join("main.jet");
+    std::fs::write(&file, JIT_ENTRY_SOURCE).expect("write the fixture");
+    let path = file.to_string_lossy().into_owned();
+
+    let outcome = std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            use jet::JitBackend::JitBackend;
+            let bundle = jet::run_compiler_work(move || {
+                let mut bundle = jet::Loader::load_entry(&path).expect("the fixture should load");
+                let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+                assert!(
+                    !diagnostics
+                        .iter()
+                        .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+                    "{diagnostics:?}"
+                );
+                bundle
+            });
+            jet_jit::CraneliftBackend::new().run(&bundle, false)
+        })
+        .expect("spawn the embedder thread")
+        .join()
+        .expect("the JIT backend must not overflow the embedder thread");
+
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "42\n"),
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("the fixture must run on one of the two tiers: {diagnostics:?}")
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The boundary is installed at both the driver's entries and the JIT's, so it
+/// has to be re-entrant in both directions or a nested entry would spawn a
+/// worker inside a worker. The thread id is the proof: an inner entry that
+/// stays on the outer worker's thread did not spawn.
+#[test]
+fn the_compiler_boundary_never_nests_a_second_worker() {
+    assert!(
+        !jet_foundation::CompilerStack::on_compiler_worker(),
+        "a test thread is not a compiler worker"
+    );
+
+    let (worker, driver_inside_driver, jit_inside_driver) = jet::run_compiler_work(|| {
+        assert!(
+            jet_foundation::CompilerStack::on_compiler_worker(),
+            "the flag must be set on the worker, not on the thread that spawned it"
+        );
+        (
+            std::thread::current().id(),
+            jet::run_compiler_work(|| std::thread::current().id()),
+            jet_jit::on_compiler_stack(|| std::thread::current().id()),
+        )
+    });
+    assert_eq!(
+        worker, driver_inside_driver,
+        "a nested driver entry must reuse the active worker"
+    );
+    assert_eq!(
+        worker, jit_inside_driver,
+        "a JIT entry inside a driver entry must reuse the active worker"
+    );
+
+    let (worker, driver_inside_jit) = jet_jit::on_compiler_stack(|| {
+        (
+            std::thread::current().id(),
+            jet::run_compiler_work(|| std::thread::current().id()),
+        )
+    });
+    assert_eq!(
+        worker, driver_inside_jit,
+        "a driver entry inside a JIT entry must reuse the active worker"
+    );
+
+    assert_ne!(
+        worker,
+        std::thread::current().id(),
+        "an outermost entry must actually leave the caller's thread"
+    );
+    assert!(
+        !jet_foundation::CompilerStack::on_compiler_worker(),
+        "the flag must not leak back onto the caller"
+    );
+}
+
 fn parenthesized_source(levels: usize) -> String {
     format!(
         "fn nested() => Int {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",

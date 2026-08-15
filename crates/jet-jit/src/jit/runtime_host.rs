@@ -50,6 +50,13 @@ pub fn struct_new_count_for_test() -> usize {
     STRUCT_NEW_COUNT.with(Cell::get)
 }
 
+/// Move a compiler worker's `struct_new` tally back onto its caller's thread,
+/// so a test that resets before the boundary and asserts after it sees the
+/// count the run actually produced instead of a silent zero.
+pub(crate) fn add_struct_new_count_for_test(extra: usize) {
+    STRUCT_NEW_COUNT.with(|count| count.set(count.get() + extra));
+}
+
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
         let _guard = TRY_COMPILE_PANIC_HOOK_LOCK

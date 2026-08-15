@@ -21,29 +21,25 @@ impl CraneliftBackend {
     }
 }
 
+/// The resident session — the compiled module, the live heap, and the
+/// `#Persist` store (D-HOTSWAP1 / D-PERSIST1) — is keyed by *thread*, not by
+/// call and not by backend value: `hot_swap` after a `run` on a second
+/// `CraneliftBackend` still re-links the same session. So `hot_swap` and
+/// `restart` deliberately stay on their caller's thread; hopping each call
+/// onto a fresh worker would drop the live state they exist to preserve. A
+/// session owner that keeps a session alive across calls (the `jet dev` watch
+/// loop, a harness driving swap/restart) installs [`crate::on_compiler_stack`]
+/// once around the whole session instead, and re-entrancy makes the boundary
+/// below free inside it.
 impl JitBackend for CraneliftBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
-        let resident = crate::with_program_allocator(bundle, || {
-            let _ = try_anyway;
-            TIR::install_comptime_bridge();
-            if cranelift_host_supported() {
-                if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
-                    let mut plan = plan_tiers(bundle, None);
-                    if let Some(gap) = plan.gap.as_mut() {
-                        gap.reason = reason;
-                    }
-                    return Err(plan);
-                }
-            }
-            try_resident(bundle)
-        });
-        match resident {
-            Ok(outcome) => outcome,
-            Err(plan) => {
-                note_deopt_invoked_for_test();
-                run_whole_interp(bundle, &plan)
-            }
-        }
+        // `run` is the one-shot entry: it starts a session and finishes it,
+        // so it is the one execution seam that can own the sized stack. Both
+        // halves of the work below are unbounded-depth recursive descent —
+        // `TIR::lower_jit_program` inside `try_resident`, and the whole-program
+        // interpreter on the deopt route — so a caller reaching the backend
+        // directly gets the same budget the driver's compile entries get.
+        crate::on_compiler_stack(|| run_bundle_on_compiler_stack(bundle, try_anyway))
     }
 
     fn hot_swap(
@@ -91,9 +87,35 @@ impl JitBackend for CraneliftBackend {
     }
 }
 
+fn run_bundle_on_compiler_stack(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+    let resident = crate::with_program_allocator(bundle, || {
+        let _ = try_anyway;
+        TIR::install_comptime_bridge();
+        if cranelift_host_supported() {
+            if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
+                let mut plan = plan_tiers(bundle, None);
+                if let Some(gap) = plan.gap.as_mut() {
+                    gap.reason = reason;
+                }
+                return Err(plan);
+            }
+        }
+        try_resident(bundle)
+    });
+    match resident {
+        Ok(outcome) => outcome,
+        Err(plan) => {
+            note_deopt_invoked_for_test();
+            run_whole_interp(bundle, &plan)
+        }
+    }
+}
+
 /// Test helper: classify tiers without executing.
 #[doc(hidden)]
 pub fn plan_bundle_tiers(bundle: &ProgramBundle) -> super::tiers::TierPlan {
-    let program = TIR::lower_jit_program(bundle);
-    plan_tiers(bundle, program.as_ref())
+    crate::on_compiler_stack(|| {
+        let program = TIR::lower_jit_program(bundle);
+        plan_tiers(bundle, program.as_ref())
+    })
 }

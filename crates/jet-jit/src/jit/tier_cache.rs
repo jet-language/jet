@@ -126,6 +126,12 @@ pub fn take_last_tier_artifact() -> Option<Vec<u8>> {
     LAST_ARTIFACT.with(|slot| slot.borrow_mut().take())
 }
 
+/// Move the artifact a compiler worker published back onto its caller's
+/// thread, so the run cache still sees what the run just compiled.
+pub(crate) fn publish_last_tier_artifact(artifact: Option<Vec<u8>>) {
+    LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = artifact);
+}
+
 pub(crate) fn note_defined(export_name: &str, ctx: &Context) {
     CAPTURE.with(|slot| {
         let mut guard = slot.borrow_mut();
