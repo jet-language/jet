@@ -551,12 +551,15 @@ fn run() {
 
     assert_eq!(rejected.status.code(), Some(1));
     assert!(rejected.stdout.is_empty(), "{:?}", rejected.stdout);
-    let stderr = String::from_utf8(rejected.stderr).unwrap();
+    let stderr = scrub(
+        &String::from_utf8(rejected.stderr).unwrap(),
+        &dir.join("main.jet"),
+    );
     assert_eq!(
         stderr,
         concat!(
             "Error [E0102]: `Iter` has no method `get`\n",
-            "  --> main.jet:14:37\n",
+            "  --> BAD.jet:14:37\n",
             "    |\n",
             " 14 |         rows.push(Row.{ name: parts.get(0), count: missing })\n",
             "    |                                     ^^^\n",
@@ -564,7 +567,7 @@ fn run() {
             " Fix: call `.to_list()` first\n",
             "\n",
             "Error [E0107]: nothing named `missing` exists here\n",
-            "  --> main.jet:14:52\n",
+            "  --> BAD.jet:14:52\n",
             "    |\n",
             " 14 |         rows.push(Row.{ name: parts.get(0), count: missing })\n",
             "    |                                                    ^^^^^^^\n",

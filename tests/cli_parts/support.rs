@@ -488,7 +488,7 @@ fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(
         &p,
-        "use core.term as io\nfn run() {\n    args :: process.argv()\n    print(args.len())\n}\n",
+        "use core.process as process\nfn run() {\n    args :: process.argv()\n    print(args.len())\n}\n",
     )
     .unwrap();
     p
