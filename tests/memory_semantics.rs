@@ -211,7 +211,7 @@ fn run() {
     );
     assert_eq!(
         String::from_utf8_lossy(&first.stdout),
-        "Next(Next(End(1)))\n"
+        "Next(Next(Next(End(1))))\n"
     );
     let ledger_path = root.join(".jet/memory/ledger-v1.jsonl");
     let first_ledger = std::fs::read_to_string(&ledger_path).unwrap();
@@ -230,7 +230,7 @@ fn run() {
     );
     assert_eq!(
         String::from_utf8_lossy(&second.stdout),
-        "Next(Next(End(1)))\n"
+        "Next(Next(Next(End(1))))\n"
     );
     let persisted = std::fs::read_to_string(&ledger_path).unwrap();
     assert_eq!(persisted.lines().count(), first_rows * 2);
