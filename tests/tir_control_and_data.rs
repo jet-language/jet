@@ -43,6 +43,41 @@ fn run() ? Err {
     assert_eq!(code, 1, "default `jet run` should return an unhandled Err");
     assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
 }
+/// A `?` from one typed error into a wider union must stay native on the
+/// resident JIT and produce the same value on the explicit interpreter.
+#[test]
+fn typed_error_union_widening_runs_on_jit_and_interpreter() {
+    let src = r#"
+fn narrow() => Int ? String {
+    return Err("narrow")
+}
+
+fn widen() => Int ? String | Bool {
+    return narrow()?
+}
+
+fn run() {
+    print(widen() ?? 7)
+}
+"#;
+    let (jit_code, jit_stdout, jit_stderr) =
+        tir_support::jit_run_traced("tir_error_union_widen_jit", src);
+    assert_eq!(jit_code, 0, "{jit_stderr}");
+    assert_eq!(jit_stdout, "7\n");
+    assert!(
+        jit_stderr
+            .lines()
+            .any(|line| line.starts_with("widen") && line.contains("tier1 native")),
+        "typed error widening deoptimized instead of running on the JIT: {jit_stderr}"
+    );
+    assert!(!jit_stderr.contains("widen: tier0 interp"), "{jit_stderr}");
+
+    let (interp_code, interp_stdout, interp_stderr) =
+        tir_support::interpreter_run("tir_error_union_widen_interp", src);
+    assert_eq!(interp_code, 0, "{interp_stderr}");
+    assert_eq!(interp_stdout, jit_stdout);
+}
+
 
 /// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
 /// produces byte-identical output through AOT, default `jet run`, and the
