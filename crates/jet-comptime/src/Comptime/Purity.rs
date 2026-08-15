@@ -5,6 +5,7 @@
 //! `jet-sema` depends on `jet-comptime` and not the other way around).
 //! `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
 
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -133,13 +134,16 @@ fn impure_builtin(name: &str) -> bool {
 /// it the transitive `jet eval --pure` / comptime-evaluation check. `stage`
 /// selects which statement kinds the walk descends into — see
 /// [`PurityStage`].
-pub fn walk_purity_expr(
+pub fn walk_purity_expr<F>(
     e: &Expr,
-    funcs: &HashMap<String, &Func>,
+    funcs: &HashMap<String, F>,
     is_leaf_impure: &impl Fn(&str) -> bool,
     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     stage: PurityStage,
-) -> Result<(), Diagnostic> {
+) -> Result<(), Diagnostic>
+where
+    F: Borrow<Func>,
+{
     walk_purity_expr_from(
         e,
         funcs,
@@ -153,13 +157,16 @@ pub fn walk_purity_expr(
 
 /// Like [`walk_purity_expr`] but over a statement list, and like
 /// [`walk_purity_stmts_from`] but with a fresh `visited`/`path`.
-pub fn walk_purity_stmts(
+pub fn walk_purity_stmts<F>(
     stmts: &[Stmt],
-    funcs: &HashMap<String, &Func>,
+    funcs: &HashMap<String, F>,
     is_leaf_impure: &impl Fn(&str) -> bool,
     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     stage: PurityStage,
-) -> Result<(), Diagnostic> {
+) -> Result<(), Diagnostic>
+where
+    F: Borrow<Func>,
+{
     walk_purity_stmts_from(
         stmts,
         funcs,
@@ -176,30 +183,36 @@ pub fn walk_purity_stmts(
 /// entry function's own name so a direct violation in the root reads
 /// "`entry` calls `x`" instead of "`x` is impure, but `entry` declares
 /// `=[]=>`".
-pub fn walk_purity_stmts_from(
+pub fn walk_purity_stmts_from<F>(
     stmts: &[Stmt],
-    funcs: &HashMap<String, &Func>,
+    funcs: &HashMap<String, F>,
     is_leaf_impure: &impl Fn(&str) -> bool,
     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     visited: &mut HashSet<String>,
     path: &mut Vec<String>,
     stage: PurityStage,
-) -> Result<(), Diagnostic> {
+) -> Result<(), Diagnostic>
+where
+    F: Borrow<Func>,
+{
     for stmt in stmts {
         walk_purity_stmt(stmt, funcs, is_leaf_impure, diag, visited, path, stage)?;
     }
     Ok(())
 }
 
-fn walk_purity_expr_from(
+fn walk_purity_expr_from<F>(
     e: &Expr,
-    funcs: &HashMap<String, &Func>,
+    funcs: &HashMap<String, F>,
     is_leaf_impure: &impl Fn(&str) -> bool,
     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     visited: &mut HashSet<String>,
     path: &mut Vec<String>,
     stage: PurityStage,
-) -> Result<(), Diagnostic> {
+) -> Result<(), Diagnostic>
+where
+    F: Borrow<Func>,
+{
     let mut result = Ok(());
     walk_calls(e, &mut |name, span| {
         if result.is_err() {
@@ -208,6 +221,7 @@ fn walk_purity_expr_from(
         if is_leaf_impure(name) {
             result = Err(diag(name, path, span));
         } else if let Some(f) = funcs.get(name) {
+            let f = f.borrow();
             if visited.insert(name.to_string()) {
                 path.push(name.to_string());
                 for stmt in &f.body {
@@ -224,15 +238,18 @@ fn walk_purity_expr_from(
     result
 }
 
-fn walk_purity_stmt(
+fn walk_purity_stmt<F>(
     s: &Stmt,
-    funcs: &HashMap<String, &Func>,
+    funcs: &HashMap<String, F>,
     is_leaf_impure: &impl Fn(&str) -> bool,
     diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     visited: &mut HashSet<String>,
     path: &mut Vec<String>,
     stage: PurityStage,
-) -> Result<(), Diagnostic> {
+) -> Result<(), Diagnostic>
+where
+    F: Borrow<Func>,
+{
     let mut result = Ok(());
     walk_stmt_expr_nodes(s, WalkOpts::for_stage(stage), &mut |e| {
         if result.is_ok() {
