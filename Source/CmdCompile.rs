@@ -25,6 +25,26 @@ fn emit_run_output(stdout: &str, stderr: &str) {
         eprint!("{stderr}");
     }
 }
+fn render_internal_fault(what: &str) -> String {
+    jet::Diagnostics::render_ice_report(what, "", false)
+}
+
+fn emit_internal_fault(stdout: &str, what: &str) -> ! {
+    emit_run_output(stdout, "");
+    let _ = std::io::stdout().flush();
+    eprintln!("{}", render_internal_fault(what));
+    exit(ExitCodes::ICE);
+}
+
+fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
+    if let Some((stdout, what)) = diagnostics
+        .iter()
+        .find_map(jet::Diagnostics::Diagnostic::runtime_host_fault_parts)
+    {
+        emit_internal_fault(stdout, what);
+    }
+}
+
 
 /// Preserve a child process failure when the OS reports termination by signal
 /// instead of an ordinary numeric exit status.
@@ -417,6 +437,7 @@ pub(crate) fn run_compile_cmd(
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
+                exit_if_internal_fault(&diags);
                 report_problems(mode, file, &src, &diags);
                 exit(ExitCodes::USER_ERROR);
             }
@@ -459,6 +480,7 @@ pub(crate) fn run_compile_cmd(
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
+                exit_if_internal_fault(&diags);
                 report_problems(mode, file, &src, &diags);
                 exit(ExitCodes::USER_ERROR);
             }
@@ -4572,7 +4594,7 @@ fn missing_linker(stderr: &str) -> Option<String> {
 mod missing_c_lib_tests {
     use super::{
         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
-        native_cache_key_with_toolchain, native_cache_salt,
+        native_cache_key_with_toolchain, native_cache_salt, render_internal_fault,
     };
 
     struct ScratchProject(std::path::PathBuf);
@@ -4727,5 +4749,22 @@ mod missing_c_lib_tests {
     fn genuine_codegen_error_is_not_a_missing_linker() {
         let stderr = "error[E0425]: cannot find type `RaylibWindow` in module `jet_std`\n";
         assert_eq!(missing_linker(stderr), None);
+    }
+
+    #[test]
+    fn driver_brands_runtime_host_fault_without_rust_text() {
+        let diagnostic = jet::Diagnostics::Diagnostic::runtime_host_fault(
+            "before\n".to_string(),
+            "the JIT runtime helper failed".to_string(),
+        );
+        let (stdout, what) = diagnostic
+            .runtime_host_fault_parts()
+            .expect("typed runtime host fault");
+        let report = render_internal_fault(what);
+        assert_eq!(stdout, "before\n");
+        assert!(report.starts_with("internal compiler error: the JIT runtime helper failed\n"));
+        assert!(report.contains("This is a bug in jet, NOT in your program."));
+        assert!(!report.contains("thread 'main' panicked"));
+        assert!(!report.contains("runtime_host.rs"));
     }
 }

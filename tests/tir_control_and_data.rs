@@ -43,6 +43,37 @@ fn run() ? Err {
     assert_eq!(code, 1, "default `jet run` should return an unhandled Err");
     assert_eq!(stderr, "Error [E_RUN]: unhandled\n  cause: root\n");
 }
+
+/// A program exit cannot forge Jet's branded ICE status. Every native and
+/// interpreter adapter calls the same Prelude projection.
+#[test]
+fn explicit_exit_101_maps_to_user_error_on_every_tier() {
+    let src = r#"
+use core.process as process
+fn run() {
+    process.exit(101)
+}
+"#;
+    let (jit_code, jit_stdout, jit_stderr) = jit_run("tir_exit_101_jit", src);
+    assert_eq!((jit_code, jit_stdout.as_str(), jit_stderr.as_str()), (1, "", ""));
+
+    let (interp_code, interp_stdout, interp_stderr) =
+        tir_support::interpreter_run("tir_exit_101_interp", src);
+    assert_eq!(
+        (interp_code, interp_stdout.as_str(), interp_stderr.as_str()),
+        (1, "", "")
+    );
+
+    if have_rustc() {
+        let (aot_code, aot_stdout, aot_stderr) =
+            build_and_run_full("jet_tir_exit", "reserved_101", src);
+        assert_eq!(
+            (aot_code, aot_stdout.as_str(), aot_stderr.as_str()),
+            (1, "", "")
+        );
+    }
+}
+
 /// A `?` from one typed error into a wider union must stay native on the
 /// resident JIT and produce the same value on the explicit interpreter.
 #[test]
@@ -78,6 +109,76 @@ fn run() {
     assert_eq!(interp_stdout, jit_stdout);
 }
 
+/// `?? panic(...)` must stay on the native tier and use the full shared rich
+/// stop renderer, including source and scalar-local context.
+#[test]
+fn jit_or_fallback_panic_keeps_rich_context() {
+    let src = r#"use core.term as io
+fn run() {
+    count :: process.argv().len()
+    missing :: process.argv().get(count + 1)
+    print(missing ?? panic("missing argument"))
+}
+"#;
+    let (code, stdout, stderr) = tir_support::jit_run_traced("jit_fallback_panic", src);
+    assert_eq!(code, 70, "rich panic exit: out={stdout} err={stderr}");
+    assert!(stdout.is_empty(), "{stdout}");
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "panic fallback deoptimized: {stderr}"
+    );
+    assert!(
+        stderr.contains("Stop [E3001]: missing argument")
+            && stderr.contains("jit_fallback_panic.jet:5 in run()")
+            && stderr.contains("print(missing ?? panic(\"missing argument\"))")
+            && stderr.contains("count = "),
+        "panic fallback lost rich context: {stderr}"
+    );
+}
+
+/// An expert Index hook miss is one ordinary program-side E3001 stop on both
+/// the default run path and the explicit evaluator.
+#[test]
+fn index_hook_miss_uses_the_structured_runtime_stop() {
+    let src = r#"struct Tile {
+    value: Int
+}
+struct Grid {
+    cells: [Tile]
+}
+impl Grid.Index {
+    type Key = Int
+    type Value = Int
+    fn get(self, key: Int) => Int? {
+        if key < 0 || key >= self.cells.len() -> return None
+        return Val(self.cells[key].value)
+    }
+}
+fn run() {
+    grid :: Grid.{cells: [Tile.{value: 1}]}
+    print(grid[9])
+}
+"#;
+    for (tier, (code, stdout, stderr)) in [
+        ("default", tir_support::jit_run("index_hook_miss_jit", src)),
+        (
+            "interpreter",
+            tir_support::interpreter_run("index_hook_miss_interp", src),
+        ),
+    ] {
+        assert_eq!(code, 70, "{tier}: out={stdout} err={stderr}");
+        assert!(stdout.is_empty(), "{tier}: {stdout}");
+        assert!(
+            stderr.contains("Stop [E3001]: index miss")
+                && stderr.contains("print(grid[9])")
+                && stderr.contains("in run"),
+            "{tier}: {stderr}"
+        );
+        assert!(!stderr.contains("unsupported"), "{tier}: {stderr}");
+    }
+}
 
 /// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
 /// produces byte-identical output through AOT, default `jet run`, and the

@@ -1091,6 +1091,134 @@ fn run() {
     assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
 }
 
+/// Two modules may use the same foreign binding and inverse spelling without
+/// one bundle row stealing the other's rollback identity.
+#[test]
+fn cross_module_foreign_undo_bindings_keep_distinct_identities() {
+    if !common::have_rustc() {
+        return;
+    }
+    let _ffi_lock = common::FfiBridgeLock::acquire();
+    let root = common::unique_tmp("jet_effects_cross_module_undo");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("left.jet"),
+        r#"
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(value: Int) => Int = "std::convert::identity"
+}
+fn undo_mutate(value: Int) { print("left") }
+pub fn exercise() {
+    #Transact(tx) {
+        mutate(1)
+        return
+    }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("right.jet"),
+        r#"
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(value: Int) => Int = "std::convert::identity"
+}
+fn undo_mutate(value: Int) { print("right") }
+pub fn exercise() {
+    #Transact(tx) {
+        mutate(2)
+        return
+    }
+}
+"#,
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    fs::write(
+        &entry,
+        r#"
+use "./left" as left
+use "./right" as right
+fn run() {
+    left.exercise()
+    right.exercise()
+    print("done")
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg("--release")
+        .arg(&entry)
+        .current_dir(&root)
+        .env("JET_CACHE_DIR", root.join("cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "left\nright\ndone\n"
+    );
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// A re-homed C binding cannot choose between same-named inverses in two
+/// importing modules. Sema must reject the ambiguity before codegen.
+#[test]
+fn shared_foreign_undo_rejects_ambiguous_owners() {
+    let _ffi_lock = common::FfiBridgeLock::acquire();
+    let root = common::unique_tmp("jet_effects_ambiguous_undo");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("left.jet"),
+        r#"
+use c.shared as ffi
+#Extern module c.shared {
+    #Undo(undo_mutate) fn mutate(value: Int) => Int = "mutate"
+}
+fn undo_mutate(value: Int) { print(value) }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("right.jet"),
+        r#"
+use c.shared as ffi
+fn undo_mutate(value: Int) { print(value) }
+"#,
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    fs::write(
+        &entry,
+        r#"
+use "./left" as left
+use "./right" as right
+fn run() {}
+"#,
+    )
+    .unwrap();
+
+    let diagnostics = jet::check_with_path(entry.to_str().unwrap());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0105"
+                && diagnostic.what.contains("ambiguous")),
+        "shared foreign undo ambiguity was not rejected: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// Tier 0 does not execute native foreign code. Its boundary must reject the
 /// program instead of silently running a foreign call without its undo hook.
 #[test]

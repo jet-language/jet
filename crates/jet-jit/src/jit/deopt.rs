@@ -278,6 +278,23 @@ mod rewrite_tests {
         );
         assert_quick_run_voice(&out);
     }
+
+    #[test]
+    fn structured_e0953_survives_deopt_rewrite() {
+        let d = Diagnostic::error(
+            "E0953",
+            "comptime evaluation stopped".to_string(),
+            "the structured evaluator stop".to_string(),
+            "change the expression".to_string(),
+            None,
+        );
+        let out = rewrite_runtime_tier_diag(d);
+        assert_eq!(out.code, "E0953");
+        assert_eq!(out.what, "comptime evaluation stopped");
+        assert_eq!(out.why, "the structured evaluator stop");
+        assert_eq!(out.fix, "change the expression");
+        assert_ne!(out.code, "E3001");
+    }
 }
 
 /// Whole-program interpreter deopt — same evaluator as `--interpret` / comptime.

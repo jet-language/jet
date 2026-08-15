@@ -2992,7 +2992,10 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
     map
 }
 
-pub(crate) fn bundle_foreign_undos(bundle: &ProgramBundle) -> HashMap<String, String> {
+pub(crate) fn bundle_foreign_undos(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for module in &bundle.modules {
         let module_undos = foreign_undo_map(&module.items);
@@ -3003,6 +3006,8 @@ pub(crate) fn bundle_foreign_undos(bundle: &ProgramBundle) -> HashMap<String, St
             map.insert(format!("{module_prefix}::{binding}"), inverse);
         }
     }
+    // Bare calls resolve only within the module currently being lowered.
+    map.extend(foreign_undo_map(&bundle.modules[module_idx].items));
     map
 }
 
@@ -3189,12 +3194,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_close_types(cx);
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
-    cx.foreign_undos = bundle_foreign_undos(bundle);
-    // Unqualified calls bind only to this module. Restore those local
-    // identities after the bundle-qualified map so same-spelled foreign
-    // functions in sibling modules cannot steal each other's undo contract.
-    cx.foreign_undos
-        .extend(foreign_undo_map(&bundle.modules[module_idx].items));
+    cx.foreign_undos = bundle_foreign_undos(bundle, module_idx);
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(cx, bundle, module_idx);
     register_imported_methods(cx, bundle, module_idx);

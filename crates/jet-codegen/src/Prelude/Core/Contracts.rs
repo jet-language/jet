@@ -8,6 +8,40 @@
 pub(crate) fn jet_contract_check(condition: bool) -> bool {
     condition
 }
+pub(crate) fn jet_runtime_stop_report(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    source_line: &str,
+    col: u32,
+    caret_len: u32,
+    message: &str,
+    locals: &str,
+) -> JetRuntimeDiagnostic {
+    jet_render_runtime_stop(
+        code,
+        file,
+        line,
+        fn_name,
+        source_line,
+        col,
+        caret_len,
+        message,
+        locals,
+    )
+}
+
+/// Project a user-requested process status into the native carrier. Exit 101
+/// is reserved for Jet defects, so an explicit user exit becomes status 1.
+pub(crate) fn jet_runtime_exit_code(code: i64) -> i32 {
+    let code = code as i32;
+    if code == 101 {
+        1
+    } else {
+        code
+    }
+}
 
 #[inline]
 pub(crate) fn jet_contract_report(
@@ -17,7 +51,7 @@ pub(crate) fn jet_contract_report(
     line: u32,
 ) -> JetRuntimeDiagnostic {
     let message = format!("#{} contract failed: {}", clause_kw, msg);
-    jet_render_runtime_stop("E3005", file, line, "", "", 1, 1, &message, "")
+    jet_runtime_stop_report("E3005", file, line, "", "", 1, 1, &message, "")
 }
 
 // D-FAIL-ARITH1: engines marshal an operation fact to this one arithmetic

@@ -3080,21 +3080,21 @@ mod project_part_tests {
             "first repeated root".into(),
             "first".into(),
             "fix first".into(),
-            Some(Span::new(0, 1)),
+            Some(Span::new(0, 2)),
         );
         let selected = Diagnostic::error(
             "E0956",
             "selected repeated root".into(),
             "selected".into(),
             "fix selected".into(),
-            Some(Span::new(4, 5)),
+            Some(Span::new(3, 5)),
         );
         let dependent = Diagnostic::error(
             "E0957",
             "dependent".into(),
             "dependent".into(),
             "fix root".into(),
-            Some(Span::new(8, 9)),
+            Some(Span::new(6, 8)),
         )
         .caused_by(&selected);
         let diagnostics = vec![first, selected, dependent.clone()];
@@ -3102,7 +3102,7 @@ mod project_part_tests {
         let json = diagnostic_json_with_clears(
             &dependent,
             &file,
-            "a\n\nb\n\nc",
+            "aa\nbb\ncc",
             0,
             "file:///workspace/src/main.jet",
             &diagnostics,
@@ -3110,6 +3110,12 @@ mod project_part_tests {
 
         assert!(json.contains(r#""message":"selected repeated root""#), "{json}");
         assert!(!json.contains(r#""message":"first repeated root""#), "{json}");
+        assert!(
+            json.contains(
+                r#""range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}}"#,
+            ),
+            "{json}"
+        );
     }
 
     #[test]

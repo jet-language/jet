@@ -635,7 +635,7 @@ where
                 .downcast_ref::<String>()
                 .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
             {
-                let report = jet_render_runtime_stop(
+                let report = jet_runtime_stop_report(
                     "E3001", "", 0, "", "", 1, 1, message, "",
                 );
                 jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
@@ -808,17 +808,8 @@ fn jet_runtime_stop_with_context(
         }));
     }
     jet_proof_record(2, 1, code, msg, file, line);
-    let report = jet_render_runtime_stop(
-        code,
-        file,
-        line,
-        fn_name,
-        src_line,
-        1,
-        1,
-        msg,
-        "",
-    );
+    let report =
+        jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
@@ -994,16 +985,8 @@ fn jet_panic_rich(
         }));
     }
     jet_proof_record(2, 1, "E3001", msg, file, line);
-    let report = jet_render_runtime_stop(
-        "E3001",
-        file,
-        line,
-        fn_name,
-        src_line,
-        col,
-        caret_len,
-        msg,
-        locals,
+    let report = jet_runtime_stop_report(
+        "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());

@@ -2364,7 +2364,7 @@ impl<'a> EvalCtx<'a> {
             .lines()
             .nth((line as usize).saturating_sub(1))
             .unwrap_or_default();
-        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        let report = contract_semantics::jet_runtime_stop_report(
             code,
             &self.source_file,
             line,

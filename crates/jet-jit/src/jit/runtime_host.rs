@@ -375,16 +375,13 @@ impl JitRuntime {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
-        let source_line = if self.current_source_line.is_empty() {
-            self.source_text
-                .lines()
-                .nth((line as usize).saturating_sub(1))
-                .unwrap_or_default()
-                .to_string()
-        } else {
-            self.current_source_line.clone()
-        };
-        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        let source_line = self
+            .source_text
+            .lines()
+            .nth((line as usize).saturating_sub(1))
+            .filter(|source| !source.is_empty())
+            .unwrap_or(&self.current_source_line);
+        let report = contract_kernel::jet_runtime_stop_report(
             code,
             &self.source_file,
             line,
@@ -428,16 +425,8 @@ impl JitRuntime {
         self.stack_depth = self.source_frames.len();
         if self.stack_depth > LIMIT {
             let message = jet_foundation::Outcome::jet_stack_overflow_message(fn_name);
-            let report = jet_foundation::Outcome::jet_render_runtime_stop(
-                "E3012",
-                file,
-                line,
-                fn_name,
-                src_line,
-                1,
-                1,
-                &message,
-                "",
+            let report = contract_kernel::jet_runtime_stop_report(
+                "E3012", file, line, fn_name, src_line, 1, 1, &message, "",
             );
             self.stderr.push_str(&report.rendered);
             self.exit_code = Some(report.exit_code);
@@ -705,12 +694,11 @@ extern "C" fn jet_jit_mod_i64(a: i64, b: i64, line: u32) -> i64 {
 }
 
 extern "C" fn jet_jit_rem_i64(a: i64, b: i64, line: u32) -> i64 {
-    use jet_codegen::Comptime::MathLayout;
-    if let Some(message) = MathLayout::integer_remainder_trap(b) {
+    if b == 0 {
+        let message = contract_kernel::jet_arithmetic_message("divide_zero");
         with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
-    // D-MODSEM1=A: `MIN %% -1` is 0, the same answer `%` gives.
     a.wrapping_rem(b)
 }
 
@@ -770,11 +758,10 @@ extern "C" fn jet_jit_intn_binop(
         with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
         return 0;
     }
-    if mode == INTN_MODE_TRAP && op == BinOp::Rem {
-        if let Some(message) = MathLayout::integer_remainder_trap(right) {
-            with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
-            return 0;
-        }
+    if mode == INTN_MODE_TRAP && op == BinOp::Rem && right == 0 {
+        let message = contract_kernel::jet_arithmetic_message("divide_zero");
+        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
+        return 0;
     }
     let span = jet_codegen::Diagnostics::Span::new(0, 0);
     let result = match mode {
@@ -1299,7 +1286,7 @@ extern "C" fn jet_jit_rich_panic(
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let locals = rt.heap.clone_string(locals).unwrap_or_default();
         Concurrency::set_rich_panic_reason(msg.clone());
-        let report = jet_foundation::Outcome::jet_render_runtime_stop(
+        let report = contract_kernel::jet_runtime_stop_report(
             "E3001",
             &file,
             line.max(0) as u32,

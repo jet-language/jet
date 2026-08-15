@@ -1475,16 +1475,67 @@ fn check_bundle_opts_for_output_inner(
             &st.trait_reg,
         ));
     }
-    // D-BOUND-UNDO1=A: CFFI may re-home a foreign declaration into a synthetic
-    // module, while its Jet undo function remains in the source module. Validate
-    // against the complete post-registration function view so that re-homing and
-    // declaration order cannot change the rollback contract.
-    let all_funcs: HashMap<String, FuncSig> = states
-        .iter()
-        .flat_map(|state| state.funcs.iter().map(|(name, sig)| (name.clone(), sig.clone())))
-        .collect();
-    for module in bundle.modules.iter() {
-        validate_foreign_undo_contracts(&module.items, &all_funcs, &mut diags);
+    // D-BOUND-UNDO1=A: an inverse belongs to the module that owns the foreign
+    // binding. CFFI re-homes C declarations into a shared synthetic module, so
+    // use the import links to recover that owner rather than consulting a
+    // bundle-wide bare-name table.
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let importers = bundle
+            .cffi
+            .import_links
+            .iter()
+            .filter(|link| link.target_idx == module_idx)
+            .map(|link| link.importing_idx)
+            .collect::<std::collections::BTreeSet<_>>();
+        if importers.is_empty() {
+            validate_foreign_undo_contracts(
+                &module.items,
+                &states[module_idx].funcs,
+                &mut diags,
+            );
+            continue;
+        }
+
+        for contract in foreign_undo_contracts(&module.items) {
+            let owners = importers
+                .iter()
+                .copied()
+                .filter(|owner| states[*owner].funcs.contains_key(contract.inverse))
+                .collect::<Vec<_>>();
+            match owners.as_slice() {
+                [owner] => validate_foreign_undo_contract(
+                    &contract,
+                    &states[*owner].funcs,
+                    &mut diags,
+                ),
+                [] => validate_foreign_undo_contract(
+                    &contract,
+                    &states[module_idx].funcs,
+                    &mut diags,
+                ),
+                _ => {
+                    let modules = owners
+                        .iter()
+                        .map(|owner| bundle.modules[*owner].display.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    diags.push(Diagnostic::error(
+                        "E0105",
+                        format!(
+                            "undo function `{}` is ambiguous for foreign binding `{}`",
+                            contract.inverse, contract.forward_name
+                        ),
+                        format!(
+                            "the shared C binding is imported by more than one module that defines `{}`: {modules}",
+                            contract.inverse
+                        ),
+                        "give the foreign binding one uniquely named inverse in one defining module"
+                            .to_string(),
+                        Some(contract.inverse_span),
+                    ));
+                }
+            }
+        }
     }
     let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle, &name_ledger);
     for (state, auto_derives) in states.iter_mut().zip(&bundle_auto_derives) {

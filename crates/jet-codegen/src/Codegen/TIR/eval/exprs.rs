@@ -4714,7 +4714,7 @@ impl<'a> EvalCtx<'a> {
         }
         if self.runtime_execution && module == "core.process" && method == "exit" {
             let code = as_int(&self.eval_expr_child(&args[0], scope)?, source_span)?;
-            let code = jet_foundation::Outcome::jet_runtime_exit_code(code);
+            let code = super::contract_semantics::jet_runtime_exit_code(code);
             let Some(sink) = self.sink.as_ref() else {
                 return Err(unsupported("process exit runtime boundary", source_span));
             };

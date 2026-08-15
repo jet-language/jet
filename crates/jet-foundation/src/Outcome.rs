@@ -236,12 +236,6 @@ mod err_tests {
 
     }
 
-    #[test]
-    fn explicit_exit_cannot_claim_the_reserved_ice_status() {
-        assert_eq!(jet_runtime_exit_code(101), crate::ExitCodes::USER_ERROR);
-        assert_eq!(jet_runtime_exit_code(70), crate::ExitCodes::RUNTIME_PANIC);
-        assert_eq!(jet_runtime_exit_code(17), 17);
-    }
 }
 
 /// The clean report: no payload, nothing to say. This is what `T?` puts on the
@@ -408,21 +402,6 @@ pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut
     let pending = std::mem::take(handlers);
     for handler in pending {
         invoke(handler);
-    }
-}
-
-/// Project a user-requested Jet process status into the native process
-/// carrier. Exit 101 is reserved for Jet defects, so an explicit user exit
-/// cannot forge it; the request becomes the ordinary user-error status.
-pub fn jet_runtime_exit_code(code: i64) -> i32 {
-    const RESERVED_ICE: i32 = 101;
-    const USER_ERROR: i32 = 1;
-
-    let code = code as i32;
-    if code == RESERVED_ICE {
-        USER_ERROR
-    } else {
-        code
     }
 }
 

@@ -254,6 +254,22 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.service_values.clear();
 }
 
+fn take_host_fault_outcome(runtime: &mut JitRuntime) -> Option<RunOutcome> {
+    if !std::mem::take(&mut runtime.host_fault) {
+        return None;
+    }
+    runtime.trapped.take();
+    runtime.exit_code.take();
+    let stdout = runtime.stdout.clone();
+    reset_run_heap(runtime);
+    Some(RunOutcome::Problems(vec![
+        jet_foundation::Diagnostics::Diagnostic::runtime_host_fault(
+            stdout,
+            "the JIT runtime helper failed".to_string(),
+        ),
+    ]))
+}
+
 pub(crate) fn resident_teardown() {
     // The interrupt adapter stores raw resident-code addresses. Drain and clear
     // that registry before dropping the module so a dispatcher wake cannot call
@@ -401,23 +417,8 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 exit_code: 70,
             });
         }
-        if runtime.host_fault {
-            runtime.host_fault = false;
-            runtime.trapped.take();
-            runtime.exit_code.take();
-            let mut stderr = jet_foundation::Diagnostics::render_ice_report(
-                "the JIT runtime helper failed",
-                "",
-                false,
-            );
-            stderr.push('\n');
-            let stdout = runtime.stdout.clone();
-            reset_run_heap(runtime);
-            return Ok(RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code: jet_foundation::ExitCodes::ICE,
-            });
+        if let Some(outcome) = take_host_fault_outcome(runtime) {
+            return Ok(outcome);
         }
         if let Some(msg) = runtime.trapped.take() {
             // Rich require/panic already wrote AOT-matching stderr and set exit_code.
@@ -622,4 +623,31 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
         });
     });
     resident_invoke()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_helper_fault_discards_raw_rust_text_at_the_engine_boundary() {
+        let mut runtime = fresh_runtime();
+        runtime.stdout.push_str("before\n");
+        runtime.trapped =
+            Some("thread 'main' panicked at crates/jet-jit/src/jit/runtime_host.rs".into());
+        runtime.host_fault = true;
+
+        let RunOutcome::Problems(diagnostics) =
+            take_host_fault_outcome(&mut runtime).expect("host fault outcome")
+        else {
+            panic!("host helper fault returned the wrong outcome");
+        };
+        let (stdout, what) = diagnostics[0]
+            .runtime_host_fault_parts()
+            .expect("typed host fault");
+        assert_eq!(stdout, "before\n");
+        assert_eq!(what, "the JIT runtime helper failed");
+        assert!(!what.contains("thread 'main' panicked"));
+        assert!(!what.contains("runtime_host.rs"));
+    }
 }

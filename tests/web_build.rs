@@ -2225,6 +2225,69 @@ fn web_edge_target_is_build_fact_not_runtime_probe() {
 }
 
 #[test]
+fn malformed_wasm_error_json_preserves_typed_host_status() {
+    if !have_tool("node") {
+        eprintln!("note: skipping malformed Wasm error test (need node)");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_web_malformed_wasm_error_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("build")).unwrap();
+    fs::write(
+        dir.join("build/jet_dom_runtime.mjs"),
+        include_str!("../crates/jet-codegen/src/Prelude/DomRuntime.js"),
+    )
+    .unwrap();
+    let mut runtime_stop =
+        include_str!("../crates/jet-codegen/src/Prelude/Core/RuntimeStop.js").to_string();
+    runtime_stop.push_str("\nexport { jet_web_wasm_host_error };\n");
+    fs::write(dir.join("build/runtime_stop.mjs"), runtime_stop).unwrap();
+
+    let stdout = run_node_harness(
+        &dir,
+        "malformed_wasm_error_harness.mjs",
+        r#"
+import { takeWasmError } from "./jet_dom_runtime.mjs";
+import { jet_web_wasm_host_error } from "./runtime_stop.mjs";
+
+const bytes = new TextEncoder().encode("{bad");
+const memory = { buffer: new ArrayBuffer(64) };
+new Uint8Array(memory.buffer, 8, bytes.length).set(bytes);
+let status = 73;
+let cleared = 0;
+const wasm = {
+  memory,
+  jet_wasm_error_len: () => bytes.length,
+  jet_wasm_error_ptr: () => 8,
+  jet_wasm_error_status: () => status,
+  jet_wasm_error_clear: () => { cleared += 1; status = 0; },
+};
+const outcome = takeWasmError(wasm);
+const error = jet_web_wasm_host_error(outcome, null, outcome.status);
+console.log(JSON.stringify({
+  tag: outcome.tag,
+  status: outcome.status,
+  cleared,
+  name: error.name,
+  code: error.code,
+  errorStatus: error.status,
+  exitCode: error.exitCode,
+  frame: error.frame,
+}));
+"#,
+    );
+    assert_eq!(
+        stdout,
+        r#"{"tag":"Host","status":73,"cleared":1,"name":"JetHostError","code":"__malformed_wasm_error__","errorStatus":73,"exitCode":73,"frame":"{bad"}"#
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_js_try_reaches_typed_edge() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping JS fallible-edge test (need rustc + node)");

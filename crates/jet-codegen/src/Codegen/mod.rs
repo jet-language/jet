@@ -3800,7 +3800,7 @@ pub fn emit_bundle_dbg(
             &extern_funcs,
         );
         populate_cx_guarantee_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle);
+        cx.foreign_undos = bundle_foreign_undos(bundle, i);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         register_bundle_reflect_paths(&mut cx, bundle, i);
@@ -3856,7 +3856,7 @@ pub fn emit_bundle_dbg(
         &extern_funcs,
     );
     populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle);
+    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4102,7 +4102,7 @@ fn emit_bundle_tests_cov_inner(
             &extern_funcs,
         );
         populate_cx_guarantee_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle);
+        cx.foreign_undos = bundle_foreign_undos(bundle, i);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4156,7 +4156,7 @@ fn emit_bundle_tests_cov_inner(
         &extern_funcs,
     );
     populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle);
+    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4373,7 +4373,7 @@ pub fn emit_bundle_fuzz(
             &extern_funcs,
         );
         populate_cx_guarantee_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle);
+        cx.foreign_undos = bundle_foreign_undos(bundle, i);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4424,7 +4424,7 @@ pub fn emit_bundle_fuzz(
         &extern_funcs,
     );
     populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle);
+    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4712,7 +4712,7 @@ fn emit_bundle_benches_inner(
             &extern_funcs,
         );
         populate_cx_guarantee_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle);
+        cx.foreign_undos = bundle_foreign_undos(bundle, i);
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.module_alias = module.alias.clone();
         cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
@@ -4764,7 +4764,7 @@ fn emit_bundle_benches_inner(
         &extern_funcs,
     );
     populate_cx_guarantee_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle);
+    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.module_alias = entry.alias.clone();
     cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");

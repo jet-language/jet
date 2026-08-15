@@ -453,6 +453,81 @@ pub(crate) fn register_extern_fn(
     funcs.insert(ef.name.clone(), extern_to_sig(ef, is_c_abi));
 }
 
+pub(crate) struct ForeignUndoContract<'a> {
+    pub forward_name: &'a str,
+    pub forward_params: &'a [Param],
+    pub inverse: &'a str,
+    pub inverse_span: Span,
+}
+
+pub(crate) fn foreign_undo_contracts(items: &[Item]) -> Vec<ForeignUndoContract<'_>> {
+    fn collect<'a>(items: &'a [Item], contracts: &mut Vec<ForeignUndoContract<'a>>) {
+        for item in items {
+            match item {
+                Item::Func(function) if function.inline_foreign.is_some() => {
+                    if let Some((inverse, inverse_span)) = &function.undo {
+                        contracts.push(ForeignUndoContract {
+                            forward_name: &function.name,
+                            forward_params: &function.params,
+                            inverse,
+                            inverse_span: *inverse_span,
+                        });
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        collect(body, contracts);
+                    }
+                }
+                Item::ExternRust(block) => {
+                    for foreign in &block.functions {
+                        if let Some((inverse, inverse_span)) = &foreign.undo {
+                            contracts.push(ForeignUndoContract {
+                                forward_name: &foreign.name,
+                                forward_params: &foreign.params,
+                                inverse,
+                                inverse_span: *inverse_span,
+                            });
+                        }
+                    }
+                }
+                Item::CModule(module) => {
+                    for foreign in &module.functions {
+                        if let Some((inverse, inverse_span)) = &foreign.undo {
+                            contracts.push(ForeignUndoContract {
+                                forward_name: &foreign.name,
+                                forward_params: &foreign.params,
+                                inverse,
+                                inverse_span: *inverse_span,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut contracts = Vec::new();
+    collect(items, &mut contracts);
+    contracts
+}
+
+pub(crate) fn validate_foreign_undo_contract(
+    contract: &ForeignUndoContract<'_>,
+    funcs: &HashMap<String, FuncSig>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    validate_undo_target_parts(
+        contract.forward_name,
+        contract.forward_params,
+        contract.inverse,
+        contract.inverse_span,
+        funcs,
+        diags,
+    );
+}
+
 /// D-BOUND-UNDO1=A: validate foreign undo targets after the complete module
 /// registration pass. A target may be declared later in the file, so checking
 /// while the foreign item is registered would make source order observable.
@@ -461,73 +536,26 @@ pub(crate) fn validate_foreign_undo_contracts(
     funcs: &HashMap<String, FuncSig>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    for item in items {
-        match item {
-            Item::Func(function) if function.inline_foreign.is_some() => {
-                validate_undo_target(function, funcs, diags);
-            }
-            Item::CodeModule(module) => {
-                if let Some(body) = &module.body {
-                    validate_foreign_undo_contracts(body, funcs, diags);
-                }
-            }
-            Item::ExternRust(block) => {
-                for foreign in &block.functions {
-                    validate_undo_target_parts(
-                        &foreign.name,
-                        &foreign.params,
-                        foreign.undo.as_ref(),
-                        funcs,
-                        diags,
-                    );
-                }
-            }
-            Item::CModule(module) => {
-                for foreign in &module.functions {
-                    validate_undo_target_parts(
-                        &foreign.name,
-                        &foreign.params,
-                        foreign.undo.as_ref(),
-                        funcs,
-                        diags,
-                    );
-                }
-            }
-            _ => {}
-        }
+    for contract in foreign_undo_contracts(items) {
+        validate_foreign_undo_contract(&contract, funcs, diags);
     }
-}
-
-fn validate_undo_target(function: &Func, funcs: &HashMap<String, FuncSig>, diags: &mut Vec<Diagnostic>) {
-    if function.undo.is_none() {
-        return;
-    }
-    validate_undo_target_parts(
-        &function.name,
-        &function.params,
-        function.undo.as_ref(),
-        funcs,
-        diags,
-    );
 }
 
 fn validate_undo_target_parts(
     forward_name: &str,
     forward_params: &[Param],
-    undo: Option<&(String, Span)>,
+    inverse: &str,
+    span: Span,
     funcs: &HashMap<String, FuncSig>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let Some((inverse, span)) = undo else {
-        return;
-    };
     let Some(inverse_sig) = funcs.get(inverse) else {
         diags.push(Diagnostic::error(
             "E0102",
             format!("undo function `{inverse}` is not defined"),
             "rollback must call a function that is registered in the same program".to_string(),
             format!("define `fn {inverse}(…) {{ … }}` or correct the `#Undo` name"),
-            Some(*span),
+            Some(span),
         ));
         return;
     };
@@ -554,7 +582,7 @@ fn validate_undo_target_parts(
             "the compensating call receives the same captured arguments as the foreign call"
                 .to_string(),
             format!("give `{inverse}` the same parameter count as `{forward_name}`"),
-            Some(*span),
+            Some(span),
         ));
         return;
     }
@@ -592,7 +620,7 @@ fn validate_undo_target_parts(
                     "make parameter {} of `{inverse}` use the same type and access convention as `{forward_name}`",
                     index + 1,
                 ),
-                Some(*span),
+                Some(span),
             ));
         }
     }
@@ -607,7 +635,7 @@ fn validate_undo_target_parts(
             "rollback invokes the inverse for its side effect and cannot use a returned value"
                 .to_string(),
             format!("remove `{}` from `{inverse}` so it returns Unit", return_type.name()),
-            Some(*span),
+            Some(span),
         ));
     }
 }

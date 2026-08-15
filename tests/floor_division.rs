@@ -9,8 +9,8 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_with_env,
-    jit_run_with_env_args,
+    assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_traced,
+    jit_run_with_env, jit_run_with_env_args,
 };
 
 /// A function the checker cannot see through, so its result is a runtime value
@@ -370,6 +370,43 @@ fn run() {{
     }
 }
 
+/// Returning from a native callee must restore the caller's complete source
+/// frame before a later shared-Prelude stop is rendered.
+#[test]
+fn jit_restores_caller_source_after_nested_return() {
+    let src = r#"fn leaf(value: Int) => Int {
+    return value
+}
+fn caller() {
+    values := [String:Int].{ "ok": 7 }
+    _ :: leaf(7)
+    print(values["missing"])
+}
+fn run() {
+    caller()
+}
+"#;
+    let (code, out, err) = jit_run_traced("jit_nested_source_restore", src);
+    assert_eq!(code, 70, "nested stop must exit 70: out={out} err={err}");
+    assert!(
+        err.lines()
+            .any(|line| line.starts_with("leaf") && line.contains("tier1 native")),
+        "leaf did not run natively: {err}"
+    );
+    assert!(
+        err.lines()
+            .any(|line| line.starts_with("caller") && line.contains("tier1 native")),
+        "caller did not run natively: {err}"
+    );
+    assert!(err.contains("Stop [E3001]") && err.contains("missing"), "{err}");
+    assert!(
+        err.contains("jit_nested_source_restore.jet:7 in caller()")
+            && err.contains(r#"7 |     print(values["missing"])"#),
+        "stop kept incomplete callee context instead of the caller source location: {err}"
+    );
+    assert!(!err.contains("jit_nested_source_restore.jet:7 in leaf()"), "{err}");
+}
+
 /// #1483: `env.get` under `jet run` reads the live process environment — not a
 /// value frozen at build time (I9 with AOT).
 #[test]
@@ -411,33 +448,39 @@ fn run() {{
     );
 }
 
-/// D-EXPSEM1=A / D-FLOORDIV1=A / D-MODSEM1=A: the Prelude files are the one
-/// home for these rules, but three tiers cannot include them — the comptime
-/// interpreter, the Cranelift host, and the JS preamble. Each carries the trap
-/// wording separately, so each is a place the wording can drift.
-///
-/// This pins all four copies to the same strings at once. It fails if any
-/// Prelude file drops a wording, if the JS preamble drifts, or if a tier stops
-/// reading the shared constant and inlines its own literal — the JIT host is
-/// checked by grep because its strings are compiled into a different crate.
+/// D-EXPSEM1=A / D-FLOORDIV1=A / D-MODSEM1=A: Rust execution tiers read
+/// arithmetic stop wording from the shared Prelude contract kernel. The Web
+/// target carries the same text in its generated JavaScript preamble.
 #[test]
 fn every_tier_reports_one_trap_wording() {
     use jet::Comptime::MathLayout;
+    let contracts = include_str!("../crates/jet-codegen/src/Prelude/Core/Contracts.rs");
     let power = include_str!("../crates/jet-codegen/src/Prelude/Core/Power.rs");
     let division = include_str!("../crates/jet-codegen/src/Prelude/Core/Division.rs");
+    let evaluator = include_str!("../crates/jet-codegen/src/Codegen/TIR/eval/mod.rs");
     let web = include_str!("../crates/jet-codegen/src/Codegen/Web.rs");
     let jit_host = include_str!("../crates/jet-jit/src/jit/runtime_host.rs");
 
-    // 1. Each Prelude file still spells every wording its operators can report.
-    for (source, name, wording) in [
-        (power, "Power.rs", MathLayout::INTEGER_POWER_NEGATIVE),
-        (power, "Power.rs", MathLayout::INTEGER_POWER_OVERFLOW),
-        (division, "Division.rs", MathLayout::INTEGER_DIVIDE_ZERO),
-        (division, "Division.rs", MathLayout::INTEGER_DIVIDE_OVERFLOW),
+    // 1. The shared Prelude kernel is the one Rust wording owner. Its AOT
+    // adapters name those constants instead of repeating their literals.
+    for (wording, symbol) in [
+        (MathLayout::INTEGER_POWER_NEGATIVE, "JET_ARITHMETIC_POWER_NEGATIVE"),
+        (MathLayout::INTEGER_POWER_OVERFLOW, "JET_ARITHMETIC_POWER_OVERFLOW"),
+        (MathLayout::INTEGER_DIVIDE_ZERO, "JET_ARITHMETIC_DIVIDE_ZERO"),
+        (
+            MathLayout::INTEGER_DIVIDE_OVERFLOW,
+            "JET_ARITHMETIC_DIVIDE_OVERFLOW",
+        ),
     ] {
+        assert!(contracts.contains(wording), "contract kernel lost: {wording}");
         assert!(
-            source.contains(wording),
-            "Prelude/Core/{name} no longer carries a wording other tiers report: {wording}"
+            power.contains(symbol) || division.contains(symbol),
+            "AOT adapter no longer reads {symbol}"
+        );
+        assert!(!power.contains(&format!("{wording:?}")), "Power.rs duplicated {wording}");
+        assert!(
+            !division.contains(&format!("{wording:?}")),
+            "Division.rs duplicated {wording}"
         );
     }
 
@@ -458,29 +501,28 @@ fn every_tier_reports_one_trap_wording() {
         );
     }
 
-    // 3. The Cranelift host reads the shared constants rather than inlining a
-    //    sentence of its own. A literal quote of any wording here would mean a
-    //    fourth copy that nothing keeps in step.
+    // 3. The evaluator and Cranelift host compile the same Prelude kernel;
+    // neither adapter owns a second wording table.
+    assert!(
+        evaluator.contains("include!(\"../../../Prelude/Core/Contracts.rs\")"),
+        "the evaluator stopped importing the shared arithmetic contract"
+    );
+    assert!(
+        jit_host.contains("include!(\"../../../jet-codegen/src/Prelude/Core/Contracts.rs\")"),
+        "the Cranelift host stopped importing the shared arithmetic contract"
+    );
+    assert!(jit_host.contains("contract_kernel::jet_arithmetic_message"));
+    assert!(jit_host.contains("contract_kernel::jet_runtime_stop_report"));
+    assert!(evaluator.contains("contract_semantics::jet_runtime_stop_report"));
     for wording in [
+        MathLayout::INTEGER_POWER_NEGATIVE,
         MathLayout::INTEGER_POWER_OVERFLOW,
         MathLayout::INTEGER_DIVIDE_ZERO,
         MathLayout::INTEGER_DIVIDE_OVERFLOW,
     ] {
         assert!(
             !jit_host.contains(&format!("{wording:?}")),
-            "the Cranelift host inlined a trap wording instead of reading the shared \
-             constant, so the two can now drift: {wording}"
-        );
-    }
-    for symbol in [
-        "INTEGER_POWER_NEGATIVE",
-        "INTEGER_POWER_OVERFLOW",
-        "INTEGER_DIVIDE_ZERO",
-        "INTEGER_DIVIDE_OVERFLOW",
-    ] {
-        assert!(
-            jit_host.contains(symbol),
-            "the Cranelift host no longer reports {symbol}, so that trap can drift"
+            "the Cranelift host duplicated the shared wording: {wording}"
         );
     }
 }

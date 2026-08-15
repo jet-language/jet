@@ -23,6 +23,25 @@ fn emit_run_output(stdout: &str, stderr: &str) {
         eprint!("{stderr}");
     }
 }
+fn emit_internal_fault(stdout: &str, what: &str) -> ! {
+    emit_run_output(stdout, "");
+    let _ = std::io::stdout().flush();
+    eprintln!(
+        "{}",
+        jet::Diagnostics::render_ice_report(what, "", false)
+    );
+    exit(ExitCodes::ICE);
+}
+fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
+    if let Some((stdout, what)) = diagnostics
+        .iter()
+        .find_map(jet::Diagnostics::Diagnostic::runtime_host_fault_parts)
+    {
+        emit_internal_fault(stdout, what);
+    }
+}
+
+
 
 /// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
 /// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
@@ -210,6 +229,7 @@ fn run_due_tasks(
                 }
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
+                exit_if_internal_fault(&diags);
                 let src = fs::read_to_string(file).unwrap_or_default();
                 report_problems(mode, file, &src, &diags);
             }
@@ -442,6 +462,7 @@ fn run_resident_swap(
             true
         }
         Err(diags) => {
+            exit_if_internal_fault(&diags);
             let src = fs::read_to_string(file).unwrap_or_default();
             report_problems(mode, file, &src, &diags);
             false
@@ -555,6 +576,7 @@ fn render_dev_outcome(
             emit_run_output(stdout, stderr);
         }
         jet::Interpreter::RunOutcome::Problems(diags) => {
+            exit_if_internal_fault(diags);
             let src = fs::read_to_string(file).unwrap_or_default();
             report_problems(mode, file, &src, diags);
         }
@@ -564,7 +586,8 @@ fn render_dev_outcome(
 fn exit_dev_outcome(outcome: jet::Interpreter::RunOutcome) {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { exit_code, .. } => exit(exit_code),
-        jet::Interpreter::RunOutcome::Problems(_) => {
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            exit_if_internal_fault(&diags);
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -641,6 +664,7 @@ fn render_outcome_timed(
             }
         }
         jet::Interpreter::RunOutcome::Problems(diags) => {
+            exit_if_internal_fault(&diags);
             let src = fs::read_to_string(file).unwrap_or_default();
             report_problems(mode, file, &src, &diags);
         }

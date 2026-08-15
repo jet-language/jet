@@ -151,6 +151,9 @@ pub enum StructuredDiagnostic {
         expected: Option<&'static str>,
         actual: Option<i128>,
     },
+    RuntimeHostFault {
+        stdout: String,
+    },
 }
 
 /// Stable identity for one report named in a dependent's cause chain. The
@@ -402,6 +405,25 @@ impl Diagnostic {
             span,
         )
     }
+    /// Compiler-private transport from a resident engine to the CLI boundary.
+    /// The engine discards the caught Rust payload; the driver renders `what`
+    /// through the one branded ICE renderer and exits 101.
+    pub fn runtime_host_fault(stdout: String, what: String) -> Self {
+        let mut diagnostic =
+            Self::internal_sentinel("RUNTIME_HOST_FAULT", what, String::new(), None);
+        diagnostic.structured = Some(StructuredDiagnostic::RuntimeHostFault { stdout });
+        diagnostic
+    }
+
+    pub fn runtime_host_fault_parts(&self) -> Option<(&str, &str)> {
+        match self.structured.as_ref()? {
+            StructuredDiagnostic::RuntimeHostFault { stdout } => {
+                Some((stdout.as_str(), self.what.as_str()))
+            }
+            _ => None,
+        }
+    }
+
 
     /// D-LAYOUT-FACTS1=B: physical byte values are optional facts. Tooling
     /// uses this registered diagnostic when the typed layout model carries a
