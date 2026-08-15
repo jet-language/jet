@@ -2991,13 +2991,11 @@ fn cranelift_backend_matches_hello() {
         return;
     }
     let file = "examples/features/basics/hello.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("hello bundle should load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "hello must type-check");
+    // Load and check on the canonical compiler worker: doing it inline here is
+    // what aborted the whole dev binary, since a 2 MiB libtest worker cannot
+    // hold the loader and sema recursion. `checked_bundle_from_path` also
+    // asserts the fixture type-checks, which is what the inline block did.
+    let bundle = checked_bundle_from_path(file);
 
     let expected = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
