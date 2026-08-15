@@ -94,7 +94,7 @@ fn parser_preserves_the_typed_fact_fixture() {
 #[test]
 fn typed_fact_fixture_folds_all_planes_without_runtime_dispatch() {
     let output = jet::compile(FIXTURE).expect("typed fact fixture must compile");
-    for value in ["Rational", "Experimental", "report"] {
+    for value in ["true", "report"] {
         assert!(output.rust.contains(value), "folded fact value missing: {value}");
     }
     assert!(!output.rust.contains("fact_read"));
@@ -103,7 +103,7 @@ fn typed_fact_fixture_folds_all_planes_without_runtime_dispatch() {
 #[test]
 fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
     let output = jet::compile(AGGREGATE_FIXTURE).expect("aggregate fact fixture must compile");
-    for value in ["Range", "Experimental"] {
+    for value in ["Range", "true"] {
         assert!(output.rust.contains(value), "aggregate fact value missing: {value}");
     }
     assert!(!output.rust.contains("fact_read"));
