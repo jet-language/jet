@@ -5030,7 +5030,11 @@ impl LowerCtx<'_, '_> {
                                 )?;
                                 return Ok(());
                             }
-                            return Err("jit binding conjunction unsupported".to_string());
+                            // A plain `&&` chain binds nothing: it is one
+                            // short-circuited condition value, the same law AOT
+                            // gets structurally by nesting `if` heads
+                            // (`TIR/emit/statements.rs::emit_tir_if`).
+                            self.lower_plain_conjunction_value(cond)?
                         }
                         TIfCond::IsNone { subj } => {
                             // Legacy options use 0 = None; tagged options use the
@@ -12898,9 +12902,9 @@ impl LowerCtx<'_, '_> {
                     }
                     let cond_val = match cond.as_ref() {
                         TIfCond::Plain(cond) => self.lower_expr(cond)?,
-                        TIfCond::And { .. } => {
-                            return Err("jit if-expression binding conjunction unsupported".to_string())
-                        }
+                        // Same plain `&&` chain as the statement path — one
+                        // short-circuited condition value feeding the phi below.
+                        TIfCond::And { .. } => self.lower_plain_conjunction_value(cond.as_ref())?,
                         TIfCond::IfLet { pattern, subj } => {
                             return self.lower_if_let_expr(
                                 pattern,
@@ -26238,6 +26242,43 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().bor(strict, equal)
                 }
             }
+            // Auto-derived `Comparable` orders each field with `<` then `>`
+            // (`Sema/Registration/Derives.rs::struct_derive_items`), so a struct
+            // with a `Bool` field reaches the resident tier as an ordering over
+            // the i8 0/1 carrier. Rust orders `false < true`, which is exactly
+            // the unsigned compare on that carrier.
+            (Type::Bool, BinOp::Lt) => self.bool_from_icmp(IntCC::UnsignedLessThan, l, r),
+            (Type::Bool, BinOp::Gt) => self.bool_from_icmp(IntCC::UnsignedGreaterThan, l, r),
+            (Type::Bool, BinOp::Le) => self.bool_from_icmp(IntCC::UnsignedLessThanOrEqual, l, r),
+            (Type::Bool, BinOp::Ge) => self.bool_from_icmp(IntCC::UnsignedGreaterThanOrEqual, l, r),
+            // Auto-derived `Equatable` compares each field with `==`, so an
+            // optional field reaches the resident tier as `T? == T?`. Rust's
+            // `Option: PartialEq` is presence-then-payload; a raw compare of the
+            // carrier word would call two equal-content `String` handles unequal.
+            (Type::Option(inner), BinOp::Eq | BinOp::Ne) => {
+                let left_result = self.uses_result_option_abi(lhs);
+                let right_result = self.uses_result_option_abi(rhs);
+                let equal = self.lower_option_eq(inner, l, r, left_result, right_result)?;
+                if matches!(op, BinOp::Ne) {
+                    let one = self.b.ins().iconst(types::I8, 1);
+                    self.b.ins().isub(one, equal)
+                } else {
+                    equal
+                }
+            }
+            // D-UNIONTYPE1=A: `A | B` is one compiler-generated enum, so a
+            // derived `equal` over a union field is same-arm-then-payload — the
+            // law AOT gets from that enum's `PartialEq`. Same `String` caveat as
+            // `Option`: the packed word is not the value.
+            (Type::Union(members), BinOp::Eq | BinOp::Ne) => {
+                let equal = self.lower_union_eq(members, l, r)?;
+                if matches!(op, BinOp::Ne) {
+                    let one = self.b.ins().iconst(types::I8, 1);
+                    self.b.ins().isub(one, equal)
+                } else {
+                    equal
+                }
+            }
             _ => return Err("jit binary op unsupported".to_string()),
         })
     }
@@ -26271,6 +26312,167 @@ impl LowerCtx<'_, '_> {
         } else {
             Ok(acc)
         }
+    }
+
+    /// Value-level equality for one operand type. This is the same law the
+    /// `lower_binary` table encodes for a top-level `==`; the `Option` and
+    /// `Union` rows need it again on a payload that is already an SSA value.
+    fn lower_value_eq(&mut self, ty: &Type, l: Value, r: Value) -> Result<Value, String> {
+        let ty = self.erase_distinct_ty(ty);
+        Ok(match &ty {
+            Type::Int | Type::IntN { .. } | Type::Char | Type::Bool => {
+                self.bool_from_icmp(IntCC::Equal, l, r)
+            }
+            Type::Float | Type::Float32 => self.bool_from_fcmp(FloatCC::Equal, l, r),
+            Type::String => self.call_host(self.host.str_eq, &[l, r]),
+            Type::Named(_) | Type::Apply { .. } => self.bool_from_icmp(IntCC::Equal, l, r),
+            Type::List(elem) | Type::FixedList { elem, .. } => {
+                let host = match self.erase_distinct_ty(elem) {
+                    Type::String => self.host.coll.list_eq_str,
+                    Type::Float | Type::Float32 => self.host.coll.list_eq_f64,
+                    _ => self.host.coll.list_eq,
+                };
+                self.call_host(host, &[l, r])
+            }
+            Type::Union(members) => self.lower_union_eq(members, l, r)?,
+            other => return Err(format!("jit value equality unsupported: {other:?}")),
+        })
+    }
+
+    /// 1 when this `Option` carrier holds a value. `result_abi` selects the
+    /// tagged result arena; otherwise the legacy `0 = None, bits + 1 = Some`
+    /// i64 word. Same two tests the `TIfCond::IsNone` statement path uses.
+    fn option_present_flag(&mut self, value: Value, result_abi: bool) -> Value {
+        if result_abi {
+            let is_ok = self.call_host(self.host.result_is_ok, &[value]);
+            let zero = self.b.ins().iconst(types::I8, 0);
+            self.bool_from_icmp(IntCC::NotEqual, is_ok, zero)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.bool_from_icmp(IntCC::NotEqual, value, zero)
+        }
+    }
+
+    /// Rust's `Option: PartialEq` — both absent is equal, a presence mismatch is
+    /// unequal, both present compares the payloads. Each side names its own
+    /// carrier because the operand expressions choose it independently.
+    fn lower_option_eq(
+        &mut self,
+        inner: &Type,
+        l: Value,
+        r: Value,
+        left_result: bool,
+        right_result: bool,
+    ) -> Result<Value, String> {
+        let left_present = self.option_present_flag(l, left_result);
+        let right_present = self.option_present_flag(r, right_result);
+        let both_present = self.b.ins().band(left_present, right_present);
+        let same_presence = self.bool_from_icmp(IntCC::Equal, left_present, right_present);
+
+        let payload_block = self.b.create_block();
+        let presence_block = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, types::I8);
+        self.b
+            .ins()
+            .brif(both_present, payload_block, &[], presence_block, &[]);
+
+        // Neither side present, or exactly one: presence alone decides.
+        self.b.switch_to_block(presence_block);
+        self.b.seal_block(presence_block);
+        self.b.ins().jump(done, &[same_presence]);
+
+        self.b.switch_to_block(payload_block);
+        self.b.seal_block(payload_block);
+        let left_payload = if left_result {
+            self.result_payload(l, inner)?
+        } else {
+            self.unpack_option_payload(l, inner)?
+        };
+        let right_payload = if right_result {
+            self.result_payload(r, inner)?
+        } else {
+            self.unpack_option_payload(r, inner)?
+        };
+        let equal = self.lower_value_eq(inner, left_payload, right_payload)?;
+        self.b.ins().jump(done, &[equal]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(self.b.block_params(done)[0])
+    }
+
+    /// D-UNIONTYPE1=A: a union value is one compiler-generated enum, so equal is
+    /// same arm and equal payload. The arm walk mirrors
+    /// `lower_jet_show_union_value` so both read the carrier the same way.
+    fn lower_union_eq(&mut self, members: &[Type], l: Value, r: Value) -> Result<Value, String> {
+        if members.is_empty() {
+            return Err("jit union equality on an empty union".to_string());
+        }
+        let enum_name = jet_codegen::AST::union_enum_name(members);
+        let heap_payload = members
+            .iter()
+            .any(|member| self.meta.clif_ty(member) == Some(types::F64));
+        let left_disc = self.enum_discriminant(l, heap_payload);
+        let right_disc = self.enum_discriminant(r, heap_payload);
+        let same_arm = self.bool_from_icmp(IntCC::Equal, left_disc, right_disc);
+
+        let arms_block = self.b.create_block();
+        let mismatch_block = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, types::I8);
+        self.b
+            .ins()
+            .brif(same_arm, arms_block, &[], mismatch_block, &[]);
+
+        self.b.switch_to_block(mismatch_block);
+        self.b.seal_block(mismatch_block);
+        let zero = self.b.ins().iconst(types::I8, 0);
+        self.b.ins().jump(done, &[zero]);
+
+        self.b.switch_to_block(arms_block);
+        self.b.seal_block(arms_block);
+        for (index, member) in members.iter().enumerate() {
+            let variant = jet_codegen::AST::union_member_tag(member);
+            let expected = self
+                .meta
+                .enum_variant_index(&enum_name, &variant)
+                .ok_or_else(|| format!("jit union equality variant `{enum_name}::{variant}`"))?;
+            let arm = self.b.create_block();
+            let next = if index + 1 == members.len() {
+                self.b.ins().jump(arm, &[]);
+                None
+            } else {
+                let next = self.b.create_block();
+                let tag = self.b.ins().iconst(types::I64, expected);
+                let matches = self.b.ins().icmp(IntCC::Equal, left_disc, tag);
+                self.b.ins().brif(matches, arm, &[], next, &[]);
+                Some(next)
+            };
+
+            self.b.switch_to_block(arm);
+            self.b.seal_block(arm);
+            let left_payload = if heap_payload {
+                self.unpack_enum_scalar(l, member)?
+            } else {
+                self.b.ins().sshr_imm(l, 8)
+            };
+            let right_payload = if heap_payload {
+                self.unpack_enum_scalar(r, member)?
+            } else {
+                self.b.ins().sshr_imm(r, 8)
+            };
+            let equal = self.lower_value_eq(member, left_payload, right_payload)?;
+            self.b.ins().jump(done, &[equal]);
+
+            if let Some(next) = next {
+                self.b.switch_to_block(next);
+                self.b.seal_block(next);
+            }
+        }
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(self.b.block_params(done)[0])
     }
 
     fn bool_from_icmp(&mut self, cc: IntCC, l: Value, r: Value) -> Value {
@@ -28538,6 +28740,68 @@ impl LowerCtx<'_, '_> {
             self.dead = true;
         }
         Ok(())
+    }
+
+    /// A plain `&&` chain as one short-circuited i8 condition value.
+    ///
+    /// TIR folds every top-level `&&` into a right-nested `TIfCond::And`
+    /// whether or not a term binds (`TIR/lower/control_flow.rs::flatten_and`),
+    /// so `a && b` and `a && b && c` both arrive here as `And { Plain, … }`.
+    /// AOT short-circuits structurally by nesting `if` heads
+    /// (`TIR/emit/statements.rs::emit_tir_if`); the resident tier gets the same
+    /// law from this diamond, and the single value it yields drops into the
+    /// `brif` that the statement and if-expression paths already build.
+    fn lower_plain_conjunction_value(&mut self, cond: &TIfCond) -> Result<Value, String> {
+        const SHAPE: &str = "jit `&&` conjunction: only plain conditions compose, \
+                             and only a leading `if let` may bind";
+        match cond {
+            TIfCond::Plain(expr) => self.lower_expr(expr),
+            TIfCond::And { left, right } => {
+                let TIfCond::Plain(head) = left.as_ref() else {
+                    return Err(SHAPE.to_string());
+                };
+                let head_val = self.lower_expr(head)?;
+                // A diverging head term leaves the current block already
+                // terminated. Hand the value back and let the caller's existing
+                // `self.dead` check skip the branch, exactly as the single
+                // `TIfCond::Plain` path does.
+                if self.dead {
+                    return Ok(head_val);
+                }
+                let rest_block = self.b.create_block();
+                let short_block = self.b.create_block();
+                let done = self.b.create_block();
+                self.b
+                    .ins()
+                    .brif(head_val, rest_block, &[], short_block, &[]);
+
+                self.b.switch_to_block(rest_block);
+                self.b.seal_block(rest_block);
+                let rest = self.lower_plain_conjunction_value(right)?;
+                let rest_ty = self.b.func.dfg.value_type(rest);
+                self.b.append_block_param(done, rest_ty);
+                if self.dead {
+                    // The rest of the chain diverged, so `rest_block` is
+                    // already terminated. The short-circuit edge below still
+                    // reaches `done`, which makes the conjunction live again.
+                    self.dead = false;
+                } else {
+                    self.b.ins().jump(done, &[rest]);
+                }
+
+                // Left term false: the chain is false without evaluating the
+                // rest, which is what keeps a host call in a later term unrun.
+                self.b.switch_to_block(short_block);
+                self.b.seal_block(short_block);
+                let zero = self.b.ins().iconst(rest_ty, 0);
+                self.b.ins().jump(done, &[zero]);
+
+                self.b.switch_to_block(done);
+                self.b.seal_block(done);
+                Ok(self.b.block_params(done)[0])
+            }
+            _ => Err(SHAPE.to_string()),
+        }
     }
 
     /// `if x == .Ok(v)` / `.Err(e)` on Result, or `if opt == Val(v)` on Option.
