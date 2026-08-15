@@ -1811,11 +1811,10 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(soft_public_use(&display_type_name, span));
         }
-        let def_fields: Vec<(String, Span, Type)> = self
+        let Some(def_fields) = self
             .struct_fields_of(owner_mod, type_name)
             .map(|fields| fields.to_vec())
-            .unwrap_or_default();
-        if def_fields.is_empty() {
+        else {
             self.diags.push(Diagnostic::error(
                 "E0119",
                 format!("there's no type called `{}`", display_type_name),
