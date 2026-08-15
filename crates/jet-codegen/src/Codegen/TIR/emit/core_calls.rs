@@ -18,18 +18,11 @@ use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::TExpr;
 
 fn reflect_field_type(cx: &Cx, owner_ty: &Type, declared: &Type) -> Type {
-    let Type::Apply { name, args } = owner_ty else {
-        return declared.clone();
-    };
-    let Some(params) = cx.struct_type_param_order.get(name) else {
-        return declared.clone();
-    };
-    let subst = params
-        .iter()
-        .zip(args)
-        .map(|(param, arg)| (param.clone(), arg.clone()))
-        .collect();
-    crate::Generics::substitute_type(declared, &subst)
+    crate::Codegen::TIR::substitute_reflect_field_type(
+        &cx.struct_type_param_order,
+        owner_ty,
+        declared,
+    )
 }
 
 fn reflect_nested_value(cx: &Cx, ty: &Type, value: &str) -> String {

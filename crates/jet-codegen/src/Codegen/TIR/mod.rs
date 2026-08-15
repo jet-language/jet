@@ -36,6 +36,27 @@ pub use eval::{
     run_program_with_structs, set_native_call_hook, stable_memo_field_slot,
     stable_place_address, tir_place_address_key, MemoState, NativeCallHook,
 };
+
+/// Resolve a reflected row through its enclosing generic owner. AOT, Web, and
+/// the interpreter call this one substitution seam before building carriers.
+pub(crate) fn substitute_reflect_field_type(
+    struct_type_params: &std::collections::HashMap<String, Vec<String>>,
+    owner_ty: &Type,
+    declared: &Type,
+) -> Type {
+    let Type::Apply { name, args } = owner_ty else {
+        return declared.clone();
+    };
+    let Some(params) = struct_type_params.get(name) else {
+        return declared.clone();
+    };
+    let substitutions = params
+        .iter()
+        .zip(args)
+        .map(|(param, arg)| (param.clone(), arg.clone()))
+        .collect();
+    crate::Generics::substitute_type(declared, &substitutions)
+}
 mod lower;
 mod subset;
 

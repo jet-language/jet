@@ -177,31 +177,6 @@ fn reflect_inner(recv: &CtValue) -> Option<&CtValue> {
     }
 }
 
-fn reflect_field_names(recv: &CtValue) -> Option<Vec<String>> {
-    let CtValue::Struct { type_name, fields } = recv else {
-        return None;
-    };
-    if type_name != "__Reflect" {
-        return None;
-    }
-    fields.iter().find_map(|(name, value)| {
-        if name != "field_names" {
-            return None;
-        }
-        let CtValue::List(names) = value else {
-            return None;
-        };
-        Some(
-            names
-                .iter()
-                .filter_map(|value| match value {
-                    CtValue::Str(name) => Some(name.clone()),
-                    _ => None,
-                })
-                .collect(),
-        )
-    })
-}
 
 fn reflected_type_name(recv: &CtValue) -> Option<String> {
     let CtValue::Struct { type_name, fields } = recv else {
@@ -254,11 +229,12 @@ fn reflect_path_for_type(
     }
 }
 
-fn reflect_value_carrier(
+pub(super) fn reflect_value_carrier(
     value: &CtValue,
     declared_type: Option<&Type>,
     reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
     reflect_paths: Option<&HashMap<String, String>>,
+    struct_type_params: Option<&HashMap<String, Vec<String>>>,
 ) -> CtValue {
     let inferred_type;
     let ty = if let Some(ty) = declared_type {
@@ -276,15 +252,51 @@ fn reflect_value_carrier(
         ),
     ];
     if let Some(rows) = reflection_rows(value, reflection_fields) {
-        fields.push((
-            "field_names".to_string(),
-            CtValue::List(
-                rows
-                    .iter()
-                    .map(|field| CtValue::Str(field.name.clone()))
-                    .collect(),
-            ),
-        ));
+        if let CtValue::Struct {
+            fields: value_fields,
+            ..
+        } = value
+        {
+            let reflected_fields = rows
+                .iter()
+                .filter_map(|field| {
+                    let field_value = value_fields.iter().find_map(|(actual, value)| {
+                        (actual == &field.name
+                            || actual.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                == Some(field.name.as_str()))
+                        .then_some(value)
+                    })?;
+                    let declared = struct_type_params.map_or_else(
+                        || field.ty.clone(),
+                        |params| {
+                            crate::Codegen::TIR::substitute_reflect_field_type(
+                                params, ty, &field.ty,
+                            )
+                        },
+                    );
+                    Some(CtValue::Struct {
+                        type_name: "__ReflectField".to_string(),
+                        fields: vec![
+                            ("name".to_string(), CtValue::Str(field.name.clone())),
+                            (
+                                "value".to_string(),
+                                reflect_value_carrier(
+                                    field_value,
+                                    Some(&declared),
+                                    reflection_fields,
+                                    reflect_paths,
+                                    struct_type_params,
+                                ),
+                            ),
+                        ],
+                    })
+                })
+                .collect();
+            fields.push((
+                "__reflected_fields".to_string(),
+                CtValue::List(reflected_fields),
+            ));
+        }
     }
     CtValue::Struct {
         type_name: "__Reflect".to_string(),
@@ -301,13 +313,7 @@ fn reflect_path(recv: &CtValue) -> Option<CtValue> {
     }
 }
 
-fn reflect_handle(
-    recv: &CtValue,
-    method: &str,
-    span: Span,
-    reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
-    reflect_paths: Option<&HashMap<String, String>>,
-) -> Result<CtValue, Diagnostic> {
+fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
     match method {
         "type_name" => reflected_type_name(recv)
             .map(CtValue::Str)
@@ -319,50 +325,15 @@ fn reflect_handle(
         // HandleMethod evaluator routes it through `EvalCtx::show_value`; a
         // context-free fallback would silently use JetShow instead.
         "display" => Err(unsupported("reflect display evaluator", span)),
-        "fields" => {
-            let value = reflect_inner(recv).ok_or_else(|| unsupported("reflect value", span))?;
-            let rows = reflection_rows(value, reflection_fields);
-            let Some(field_names) = reflect_field_names(recv) else {
-                return Ok(CtValue::List(Vec::new()));
-            };
-            let fields = match value {
-                CtValue::Struct { fields, .. } => fields,
-                _ => return Ok(CtValue::List(Vec::new())),
-            };
-            Ok(CtValue::List(
-                field_names
-                    .into_iter()
-                    .filter_map(|name| {
-                        let value = fields.iter().find_map(|(actual, value)| {
-                            (actual == &name
-                                || actual.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(name.as_str()))
-                                .then_some(value)
-                        })?;
-                        let declared_type = rows
-                            .and_then(|rows| rows.iter().find(|field| field.name == name))
-                            .map(|field| &field.ty);
-                        Some(CtValue::Struct {
-                            type_name: "__ReflectField".to_string(),
-                            fields: vec![
-                                ("name".to_string(), CtValue::Str(name)),
-                                // Keep the actual field value as the nested
-                                // runtime Value. `display()` is a later
-                                // projection, never the stored field value.
-                                (
-                                    "value".to_string(),
-                                    reflect_value_carrier(
-                                        value,
-                                        declared_type,
-                                        reflection_fields,
-                                        reflect_paths,
-                                    ),
-                                ),
-                            ],
-                        })
-                    })
-                    .collect(),
-            ))
-        }
+        "fields" => match recv {
+            CtValue::Struct { type_name, fields } if type_name == "__Reflect" => Ok(fields
+                .iter()
+                .find_map(|(name, value)| {
+                    (name == "__reflected_fields").then_some(value.clone())
+                })
+                .unwrap_or_else(|| CtValue::List(Vec::new()))),
+            _ => Err(unsupported("reflect value", span)),
+        },
         "name" => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__ReflectField" => fields
                 .iter()
@@ -638,8 +609,6 @@ pub(super) fn eval_handle_with_type_and_sink(
     span: Span,
     resolved_ret: Option<&Type>,
     sink: Option<&Arc<Mutex<DevSink>>>,
-    reflection_fields: Option<&HashMap<String, Vec<ReflectionField>>>,
-    reflect_paths: Option<&HashMap<String, String>>,
 ) -> Result<CtValue, Diagnostic> {
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
@@ -1225,24 +1194,14 @@ pub(super) fn eval_handle_with_type_and_sink(
             Err(unsupported("handle `TerminalSessionResize`", span))
         }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
-        THandleOp::ReflectValueTypeName => {
-            reflect_handle(recv, "type_name", span, reflection_fields, reflect_paths)
-        }
-        THandleOp::ReflectValuePath => {
-            reflect_handle(recv, "path", span, reflection_fields, reflect_paths)
-        }
+        THandleOp::ReflectValueTypeName => reflect_handle(recv, "type_name", span),
+        THandleOp::ReflectValuePath => reflect_handle(recv, "path", span),
         // Handled before this context-free dispatch in `eval/exprs.rs`, where
         // the Display-aware evaluator is available.
         THandleOp::ReflectValueDisplay => Err(unsupported("reflect display evaluator", span)),
-        THandleOp::ReflectValueFields => {
-            reflect_handle(recv, "fields", span, reflection_fields, reflect_paths)
-        }
-        THandleOp::ReflectFieldName => {
-            reflect_handle(recv, "name", span, reflection_fields, reflect_paths)
-        }
-        THandleOp::ReflectFieldValue => {
-            reflect_handle(recv, "value", span, reflection_fields, reflect_paths)
-        }
+        THandleOp::ReflectValueFields => reflect_handle(recv, "fields", span),
+        THandleOp::ReflectFieldName => reflect_handle(recv, "name", span),
+        THandleOp::ReflectFieldValue => reflect_handle(recv, "value", span),
         THandleOp::TaskJoin => match recv {
             CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
                 .iter()
@@ -1483,9 +1442,10 @@ mod tests {
             Some(&declared),
             None,
             None,
+            None,
         );
         assert_eq!(
-            reflect_handle(&carrier, "type_name", Span::new(0, 0), None, None)
+            reflect_handle(&carrier, "type_name", Span::new(0, 0))
                 .expect("reflected field type name"),
             CtValue::Str("Int(0..10)".to_string())
         );

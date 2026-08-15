@@ -4515,47 +4515,13 @@ impl<'a> EvalCtx<'a> {
     /// and comptime `T.reflect()` read; storage fields never become the field
     /// name source.
     fn reflect_value(&self, value: CtValue, ty: &Type) -> CtValue {
-        let path = match ty {
-            Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
-                .reflect_paths
-                .get(type_name)
-                .cloned()
-                .unwrap_or_else(|| type_name.clone()),
-            _ => ty.name(),
-        };
-        let field_names = match ty {
-            Type::Named(type_name) | Type::Apply { name: type_name, .. } => self
-                .reflection_fields
-                .get(type_name)
-                .or_else(|| {
-                    self.reflection_fields.get(
-                        type_name
-                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                            .unwrap_or(type_name),
-                    )
-                })
-                .map(|fields| {
-                    CtValue::List(
-                        fields
-                            .iter()
-                            .map(|field| CtValue::Str(field.name.clone()))
-                            .collect(),
-                    )
-                }),
-            _ => None,
-        };
-        let mut fields = vec![
-            ("value".to_string(), value),
-            ("type_name".to_string(), CtValue::Str(ty.leaf_name())),
-            ("path".to_string(), CtValue::Str(path)),
-        ];
-        if let Some(field_names) = field_names {
-            fields.push(("field_names".to_string(), field_names));
-        }
-        CtValue::Struct {
-            type_name: "__Reflect".to_string(),
-            fields,
-        }
+        handles::reflect_value_carrier(
+            &value,
+            Some(ty),
+            Some(&self.reflection_fields),
+            Some(&self.reflect_paths),
+            Some(&self.struct_type_params),
+        )
     }
 
     fn apply_core_call_with_policy(
@@ -6207,8 +6173,6 @@ impl<'a> EvalCtx<'a> {
                     self.span(),
                     Some(&expr.ty),
                     self.sink.as_ref(),
-                    Some(&self.reflection_fields),
-                    Some(&self.reflect_paths),
                 )?;
                 let http_json = matches!(
                     op,
