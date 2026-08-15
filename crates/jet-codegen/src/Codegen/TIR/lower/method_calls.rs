@@ -4741,33 +4741,6 @@ fn lower_method_call_impl(
             }
         }
     }
-    // Sema rewrites built-in operator syntax to its selected trait method.
-    // Once a generic body is specialized, lower that proved hook back through
-    // the one canonical typed operator path so overflow, precise numerics, and
-    // every execution tier keep the same Prelude-backed semantics.
-    let trait_operator = match (recv_type.as_deref(), method, args.len()) {
-        (Some(crate::Syntax::TRAIT_ADD), "add", 1) => Some(crate::AST::BinOp::Add),
-        (Some(crate::Syntax::TRAIT_SUB), "sub", 1) => Some(crate::AST::BinOp::Sub),
-        (Some(crate::Syntax::TRAIT_MUL), "mul", 1) => Some(crate::AST::BinOp::Mul),
-        (Some(crate::Syntax::TRAIT_DIV), "div", 1) => Some(crate::AST::BinOp::Div),
-        (Some(crate::Syntax::TRAIT_EQUATABLE), "equal", 1) => {
-            Some(crate::AST::BinOp::Eq)
-        }
-        (Some(crate::Syntax::TRAIT_COMPARABLE), "compare", 1) => {
-            Some(crate::AST::BinOp::Compare)
-        }
-        _ => None,
-    };
-    if let Some(op) = trait_operator {
-        let operator = Expr::Binary(
-            op,
-            Box::new(receiver.clone()),
-            Box::new(args[0].expr.clone()),
-            method_span,
-        );
-        return lower_expr(&operator, cx, env);
-    }
-
     // Core enum equality is represented by the shared Prelude's native
     // `PartialEq` value operation. Sema has already proved the Equatable
     // contract; preserve it as the existing typed equality node so emitters do
@@ -6214,41 +6187,51 @@ fn lower_method_call_impl(
     // retain their full parameter/return facts in `Cx`, so dynamic calls use the same
     // convention-aware argument lowering as static calls.
     if let Some(ty) = recv_type {
-        if cx.trait_names.contains(ty) {
+        if cx.trait_names.contains(ty) || crate::Generics::is_builtin_trait(ty) {
             let key = (ty.clone(), method.to_string());
             let sig = cx.method_sigs.get(&key).cloned().unwrap_or_default();
             let sig = instantiated_sig
                 .map(|sig| sig.to_vec())
                 .unwrap_or_else(|| instantiate_method_sig(cx, ty, method, &sig, &[], type_args));
-            let ret_ty = cx
-                .method_rets
-                .get(&key)
+            let ret_ty = resolved_ret
                 .cloned()
-                .flatten()
+                .or_else(|| cx.method_rets.get(&key).cloned().flatten())
                 .unwrap_or_else(unit_type);
             let mut recv = lower_expr(receiver, cx, env);
+            let mut targs = lower_method_args(args, &sig, env, cx);
+            let builtin_operator = crate::Generics::is_builtin_trait(ty)
+                && matches!(method, "add" | "sub" | "mul" | "div" | "equal" | "compare");
+            if builtin_operator {
+                if let Some(rhs) = targs.first_mut() {
+                    rhs.borrow = true;
+                }
+            }
             // A specialized generic/variadic parameter can retain the trait as
             // `recv_type` while its lowered TIR type is the exact concrete
             // implementation. Keep that concrete ABI and dispatch directly;
             // only genuine trait-object values use the boxed dynamic ABI.
-            if let Type::Named(concrete) = &recv.ty {
-                if !cx.trait_names.contains(concrete) {
-                    let targs = lower_method_args(args, &sig, env, cx);
-                    return TExpr {
-                        ty: ret_ty,
-                        kind: TExprKind::MethodCall {
-                            recv: Box::new(recv),
-                            method: TMethodRef::bare(method),
-                            type_args: type_args.to_vec(),
-                            args: targs,
-                            source_first_string_literal: first_string_literal_arg(args),
-                            operator_line: None,
-                        },
-                    };
+            let direct_bound_dispatch = match &recv.ty {
+                Type::Named(concrete) => {
+                    !cx.trait_names.contains(concrete)
+                        && !crate::Generics::is_builtin_trait(concrete)
                 }
+                Type::TraitObject(_) => false,
+                _ => true,
+            };
+            if direct_bound_dispatch {
+                return TExpr {
+                    ty: ret_ty,
+                    kind: TExprKind::MethodCall {
+                        recv: Box::new(recv),
+                        method: TMethodRef::trait_method(ty, method),
+                        type_args: type_args.to_vec(),
+                        args: targs,
+                        source_first_string_literal: first_string_literal_arg(args),
+                        operator_line: None,
+                    },
+                };
             }
             recv.ty = Type::TraitObject(vec![ty.clone()]);
-            let targs = lower_method_args(args, &sig, env, cx);
             return TExpr {
                 ty: ret_ty,
                 kind: TExprKind::MethodCall {

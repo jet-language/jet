@@ -6783,6 +6783,46 @@ impl<'a> EvalCtx<'a> {
                 if method.name == "clone" {
                     return self.clone_structural_value(r, &recv.ty);
                 }
+                let native_trait_operator = match (
+                    method.trait_owner.as_deref(),
+                    method.name.as_str(),
+                    &recv.ty,
+                ) {
+                    (Some(crate::Syntax::TRAIT_ADD), "add", ty) if ty.is_numeric() => {
+                        Some(BinOp::Add)
+                    }
+                    (Some(crate::Syntax::TRAIT_SUB), "sub", ty) if ty.is_numeric() => {
+                        Some(BinOp::Sub)
+                    }
+                    (Some(crate::Syntax::TRAIT_MUL), "mul", ty) if ty.is_numeric() => {
+                        Some(BinOp::Mul)
+                    }
+                    (Some(crate::Syntax::TRAIT_DIV), "div", ty) if ty.is_numeric() => {
+                        Some(BinOp::Div)
+                    }
+                    (Some(crate::Syntax::TRAIT_EQUATABLE), "equal", ty)
+                        if matches!(
+                            ty,
+                            Type::Int
+                                | Type::IntN { .. }
+                                | Type::Float
+                                | Type::Bool
+                                | Type::String
+                                | Type::Char
+                        ) =>
+                    {
+                        Some(BinOp::Eq)
+                    }
+                    (Some(crate::Syntax::TRAIT_COMPARABLE), "compare", ty)
+                        if ty.is_numeric() =>
+                    {
+                        Some(BinOp::Compare)
+                    }
+                    _ => None,
+                };
+                if let (Some(op), [rhs]) = (native_trait_operator, argv.as_slice()) {
+                    return self.eval_runtime_binop(op, r, rhs.clone(), self.span());
+                }
                 let distinct_numeric_operator = matches!(
                     &recv.ty,
                     Type::Named(name)
