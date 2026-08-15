@@ -739,6 +739,29 @@ fn main() {
 }
 
 #[test]
+fn hosted_allocator_reservations_are_cumulative_and_released() {
+    if !common::have_rustc() {
+        return;
+    }
+    let ran = compile_program_allocator_harness(
+        r#"
+fn main() {
+    let ((), facts) = allocator::jet_with_host_program_allocator(Some(64), || {
+        assert!(allocator::jet_host_program_allocator_try_reserve(48));
+        assert!(!allocator::jet_host_program_allocator_try_reserve(32));
+        assert_eq!(allocator::JET_HOST_PROGRAM_ALLOCATOR.facts().live_bytes, 48);
+    });
+    assert_eq!(facts.live_bytes, 0);
+    assert_eq!(allocator::JET_HOST_PROGRAM_ALLOCATOR.facts().live_bytes, 0);
+    println!("ok");
+}
+"#,
+    );
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
+}
+
+#[test]
 fn program_allocator_default_blocks_survive_counting_swap_without_tracking() {
     if !common::have_rustc() {
         return;

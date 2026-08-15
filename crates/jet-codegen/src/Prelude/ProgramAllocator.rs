@@ -36,6 +36,7 @@ pub struct JetProgramAllocator {
     requested_bytes: std::sync::atomic::AtomicUsize,
     live_bytes: std::sync::atomic::AtomicUsize,
     high_water_bytes: std::sync::atomic::AtomicUsize,
+    hosted_reserved_bytes: std::sync::atomic::AtomicUsize,
 }
 
 /// The resident allocator instance. Native CLI binaries install a reference to
@@ -52,6 +53,7 @@ struct JetProgramAllocatorConfigGuard {
 
 impl Drop for JetProgramAllocatorConfigGuard {
     fn drop(&mut self) {
+        JET_HOST_PROGRAM_ALLOCATOR.release_hosted_reservations();
         JET_HOST_PROGRAM_ALLOCATOR.restore(self.previous);
     }
 }
@@ -76,15 +78,21 @@ pub fn jet_with_host_program_allocator<R>(
         _lock: lock,
     };
     let output = run();
+    JET_HOST_PROGRAM_ALLOCATOR.release_hosted_reservations();
     let facts = JET_HOST_PROGRAM_ALLOCATOR.facts();
     drop(guard);
     (output, facts)
 }
-/// Canonical hosted preflight for fallible Prelude allocations. Engines pass
-/// this function into the same `*_defaulted` collection kernel AOT uses; the
-/// checked package fact has already configured the resident allocator.
-pub fn jet_host_program_allocator_allows(requested: usize) -> bool {
-    JET_HOST_PROGRAM_ALLOCATOR.allows(requested)
+/// Reserve bytes for one resident/interpreter fallible allocation through the
+/// canonical allocator. The hosted runtime retains these reservations until
+/// its run scope ends, then the configuration guard releases them together.
+pub fn jet_host_program_allocator_try_reserve(requested: usize) -> bool {
+    JET_HOST_PROGRAM_ALLOCATOR.reserve_hosted(requested)
+}
+
+/// Roll back a hosted reservation when the system allocation itself fails.
+pub fn jet_host_program_allocator_cancel_reservation(requested: usize) {
+    JET_HOST_PROGRAM_ALLOCATOR.cancel_hosted_reservation(requested);
 }
 
 impl JetProgramAllocator {
@@ -111,6 +119,7 @@ impl JetProgramAllocator {
             requested_bytes: std::sync::atomic::AtomicUsize::new(0),
             live_bytes: std::sync::atomic::AtomicUsize::new(0),
             high_water_bytes: std::sync::atomic::AtomicUsize::new(0),
+            hosted_reserved_bytes: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -167,13 +176,6 @@ impl JetProgramAllocator {
         (cap == 0 || next <= cap).then_some(next)
     }
 
-    fn allows(&self, requested: usize) -> bool {
-        use std::sync::atomic::Ordering;
-        self.mode.load(Ordering::Acquire) == JET_PROGRAM_ALLOCATOR_SYSTEM
-            || self
-                .next_live_bytes(self.live_bytes.load(Ordering::Acquire), requested)
-                .is_some()
-    }
 
     fn reserve(&self, requested: usize) -> Option<bool> {
         use std::sync::atomic::Ordering;
@@ -207,6 +209,44 @@ impl JetProgramAllocator {
                 }
                 Err(current) => live = current,
             }
+        }
+    }
+
+    fn reserve_hosted(&self, requested: usize) -> bool {
+        use std::sync::atomic::Ordering;
+        match self.reserve(requested) {
+            Some(true) => {
+                let _ = self.hosted_reserved_bytes.fetch_update(
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                    |value| value.checked_add(requested),
+                );
+                true
+            }
+            Some(false) => true,
+            None => false,
+        }
+    }
+
+    fn release_hosted_reservations(&self) {
+        let requested = self
+            .hosted_reserved_bytes
+            .swap(0, std::sync::atomic::Ordering::AcqRel);
+        if requested != 0 {
+            self.release(requested);
+        }
+    }
+
+    fn cancel_hosted_reservation(&self, requested: usize) {
+        use std::sync::atomic::Ordering;
+        if self
+            .hosted_reserved_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_sub(requested)
+            })
+            .is_ok()
+        {
+            self.release(requested);
         }
     }
 

@@ -202,7 +202,8 @@ pub(super) fn eval_builtin(
             };
             match CollectionEval::try_list_with_capacity_defaulted::<CtValue>(
                 *capacity,
-                crate::program_allocator::jet_host_program_allocator_allows,
+                crate::program_allocator::jet_host_program_allocator_try_reserve,
+                crate::program_allocator::jet_host_program_allocator_cancel_reservation,
             ) {
                 Ok(values) => Ok(CtValue::Present(Box::new(CtValue::List(values)))),
                 Err(error) => Ok(alloc_failure(error)),

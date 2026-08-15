@@ -130,9 +130,14 @@ mod collection_semantics {
 
     pub(super) fn try_list_with_capacity_defaulted<T>(
         capacity: i64,
-        program_allocator_allows: impl FnOnce(usize) -> bool,
+        program_allocator_reserve: impl FnOnce(usize) -> bool,
+        program_allocator_cancel: impl FnOnce(usize),
     ) -> JetOutcome<Vec<T>, AllocError> {
-        jet_list_try_with_capacity_defaulted(capacity, program_allocator_allows)
+        jet_list_try_with_capacity_defaulted(
+            capacity,
+            program_allocator_reserve,
+            program_allocator_cancel,
+        )
     }
 
     pub(super) fn try_list_push<T>(values: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
@@ -208,11 +213,13 @@ pub fn try_list_with_capacity<T>(
 
 pub fn try_list_with_capacity_defaulted<T>(
     capacity: i64,
-    program_allocator_allows: impl FnOnce(usize) -> bool,
+    program_allocator_reserve: impl FnOnce(usize) -> bool,
+    program_allocator_cancel: impl FnOnce(usize),
 ) -> Result<Vec<T>, jet_foundation::Outcome::AllocError> {
     collection_semantics::try_list_with_capacity_defaulted(
         capacity,
-        program_allocator_allows,
+        program_allocator_reserve,
+        program_allocator_cancel,
     )
 }
 

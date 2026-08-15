@@ -225,7 +225,8 @@ mod collection_semantics {
     pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
         jet_list_try_with_capacity_defaulted(
             capacity,
-            jet_codegen::program_allocator::jet_host_program_allocator_allows,
+            jet_codegen::program_allocator::jet_host_program_allocator_try_reserve,
+            jet_codegen::program_allocator::jet_host_program_allocator_cancel_reservation,
         )
     }
 
