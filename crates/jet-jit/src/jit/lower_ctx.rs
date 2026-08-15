@@ -9558,7 +9558,7 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(push, &[buf_id, text]);
                         continue;
                     }
-                    if matches!(&push_ty, Type::Int) {
+                    if matches!(&push_ty, Type::Int | Type::InlineRange { .. }) {
                         let text = self.call_host(self.host.num.int_to_string, &[val]);
                         self.push_str_value(buf_id, text);
                         continue;
@@ -9751,7 +9751,7 @@ impl LowerCtx<'_, '_> {
                     }
                     Type::Bool => self.call_host(self.host.struct_get_bool, &[handle, idx]),
                     Type::Char => self.call_host(self.host.struct_get_char, &[handle, idx]),
-                    Type::Int
+                    Type::Int | Type::InlineRange { .. }
                     | Type::IntN { .. }
                     | Type::String
                     | Type::Named(_)
@@ -9820,7 +9820,7 @@ impl LowerCtx<'_, '_> {
                 inner,
                 matches!(inner.as_ref(), Type::IntN { .. }),
             ),
-            Type::Int => {
+            Type::Int | Type::InlineRange { .. } => {
                 let text = self.call_host(self.host.num.int_to_string, &[value]);
                 self.push_str_value(buf_id, text);
                 Ok(())
@@ -9906,7 +9906,7 @@ impl LowerCtx<'_, '_> {
 
     fn debug_list_kind(elem: &Type) -> Option<i64> {
         Some(match elem {
-            Type::Int => 0,
+            Type::Int | Type::InlineRange { .. } => 0,
             Type::String => 1,
             Type::IntN { signed: true, .. } => 2,
             Type::IntN { signed: false, .. } => 3,
