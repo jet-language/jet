@@ -711,6 +711,18 @@ pub(crate) fn collect_core_expr(
             if c.name == Syntax::BUILTIN_INPUT {
                 note_core_usage(used, spans, "core.term::input", Some(c.name_span));
             }
+            // D-TYPE2-UNCERT1=A: the canonical source constructor lowers to
+            // the existing `core.units::from` Measurement route. Record that
+            // route here so every emitter includes the same Prelude closure.
+            if c.name == "measurement"
+                && matches!(
+                    c.resolved_ret.as_ref(),
+                    Some(Type::Apply { name, args })
+                        if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float]
+                )
+            {
+                note_core_usage(used, spans, "core.units::from", Some(c.name_span));
+            }
             // D-BOUND-HEAD1=A: sema rewrites typed boundary heads to their
             // ordinary alternating literal/hole call before this reachability
             // walk. The Syntax descriptor selects the owning prelude fragment.
