@@ -8922,13 +8922,19 @@ fn cranelift_covers_shield_region() {
 fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
     // Prefer resident JIT; silent deopt to the interpreter is still I9-legal
     // when a nested Shield/channel shape is outside the resident subset.
+    // `ch`/`ack_sender` cross into the task as bare captures, so they must be
+    // `::` bindings: a `:=` binding is a changeable alias the owner could still
+    // write, and D-CONC-FREEZE1=A refuses that crossing with E1101 before the
+    // program ever runs. `::` is what every `examples/features/concurrency`
+    // channel fixture uses; `^`/`freeze` are for values that really are owned
+    // away or snapshotted, which is not what this test is about.
     with_jit_test_scope(|| {
         let out = run_cranelift_outcome(
             r#"use core.tasks as tasks
 fn run() {
-    (sender, ch) := tasks.channel<Int>()
-    (ack_sender, ack) := tasks.channel<Int>()
-    slow := task {
+    (sender, ch) :: tasks.channel<Int>()
+    (ack_sender, ack) :: tasks.channel<Int>()
+    slow :: task {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
