@@ -56,9 +56,20 @@ impl BuildPlan {
     }
 
     /// Generated modules reachable from the selected target's explicit source
-    /// list or selected action outputs. Merely registering `b.generate` does
-    /// not make an unselected module part of the runtime program.
+    /// list or selected action outputs. A plan with no targets augments the
+    /// canonical batteries program, so all of its generated modules are
+    /// selected; once a target exists, unrelated generated modules stay out.
     pub fn selected_generated_modules(&self) -> Result<Vec<&BuildGeneratedModule>, BuildError> {
+        if self.targets.is_empty() {
+            let mut selected = self.generated_modules.iter().collect::<Vec<_>>();
+            selected.sort_by(|left, right| {
+                left.path
+                    .as_str()
+                    .cmp(right.path.as_str())
+                    .then_with(|| left.name.cmp(&right.name))
+            });
+            return Ok(selected);
+        }
         let mut paths = self.selected_sources()?.into_iter()
             .map(|path| path.as_str().to_string())
             .collect::<BTreeSet<_>>();
