@@ -90,11 +90,13 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
-    // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves a method on a bounded
-    // type parameter to the synthetic Reader/Writer/Driver contract and records
-    // that type parameter in `recv_type`. Rust emits the real trait-bound call.
+    // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves bounded dispatch to
+    // either the type parameter (legacy metadata) or the selected trait owner.
+    // Both lower through the same trait-bound call; specialization erases the
+    // type parameter but deliberately retains the trait owner.
     if recv_type.as_ref().is_some_and(|name| {
         cx.current_type_params.borrow().contains(name.as_str())
+            || cx.trait_names.contains(name)
     }) && matches!(
         method,
         "read"
