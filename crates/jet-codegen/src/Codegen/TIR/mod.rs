@@ -550,22 +550,19 @@ fn register_union_type(
     }
 }
 
-/// c139 M3: every lowered function the JIT may compile from the entry module.
+/// c139 M3: the single lowered function selected without argv dispatch.
 ///
-/// Returns `None` when there is no runnable top-level `run`, or when `run` is
-/// outside the existing `tir_covers` gate.
+/// Program-struct CLIs return `None`: their entry is one of several commands
+/// selected later from the checked schema, not a synthetic top-level `run`.
 pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
-    lower_jit_program(bundle).map(|p| {
+    lower_jit_program(bundle).and_then(|p| {
         let entry = p.entry;
         let entry = if entry == super::mangle_generated("cli_main") {
             "run".to_string()
         } else {
             entry
         };
-        p.funcs
-            .into_iter()
-            .find(|f| f.name == entry)
-            .expect("lower_jit_program always includes its selected entry")
+        p.funcs.into_iter().find(|f| f.name == entry)
     })
 }
 
@@ -1287,29 +1284,26 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => None,
         })
     });
-    let cli_run = zero_arg_entry.is_none().then(|| {
-        let has_cli_schema = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
+    let cli_schema = zero_arg_entry
+        .is_none()
+        .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
+        .flatten();
+    let cli_run = cli_schema.as_ref().and_then(|_| {
         module.items.iter().find_map(|item| match item {
-            Item::Func(function)
-                if function.name == "run" && has_cli_schema =>
-            {
-                Some(function.name.clone())
-            }
+            Item::Func(function) if function.name == "run" => Some(function.name.clone()),
             Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
                 (output.selected
                     && output.module == bundle.entry
-                    && output.params.len() == 1
-                    && has_cli_schema)
-                .then(|| output.semantic_name.clone())
+                    && output.params.len() == 1)
+                    .then(|| output.semantic_name.clone())
             }),
             _ => None,
         })
-    })
-    .flatten();
-    let entry_name = match (zero_arg_entry, cli_run) {
-        (Some(name), _) => name,
-        (None, Some(_)) => super::mangle_generated("cli_main"),
-        (None, None) => return None,
+    });
+    let entry_name = match (zero_arg_entry, cli_run, cli_schema.is_some()) {
+        (Some(name), _, _) => name,
+        (None, Some(_), _) | (None, None, true) => super::mangle_generated("cli_main"),
+        (None, None, false) => return None,
     };
     cx.jit_spawn_lambdas.borrow_mut().clear();
     cx.jit_spawn_sites.borrow_mut().clear();
@@ -1543,7 +1537,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
     specialize_generic_free_functions(&module.items, &cx, &mut funcs);
     let entry_ok = if entry_name == super::mangle_generated("cli_main") {
-        funcs.iter().any(|function| function.name == "run")
+        // A program-struct CLI has no literal `run`: argv selects one of its
+        // lowered methods or bound functions at execution time. `cli::prepare`
+        // resolves that target from the checked schema, and the evaluator
+        // reports a missing selected TIR entry instead of rejecting the whole
+        // program before dispatch.
+        cli_schema.is_some() || funcs.iter().any(|function| function.name == "run")
     } else {
         funcs.iter().any(|function| function.name == entry_name)
     };

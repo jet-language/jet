@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v2";
+const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v3";
 const CRATE_NAME: &str = "jet_runtime";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
@@ -151,50 +151,59 @@ fn prepare_at(
         });
     }
 
+    // The lock serializes ordinary writers; the private directory also keeps
+    // a slow compile safe if another process eventually reaps a stale lock.
+    // Stable leaf names plus one remapped directory give rustc the same input
+    // and output identity in every clean cache.
     let temporary_id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let source = entry.join(format!(
-        ".runtime.{}.{temporary_id}.rs",
+    let staging = entry.join(format!(
+        ".build.{}.{temporary_id}",
         std::process::id()
     ));
-    let staged_rlib = entry.join(format!(
-        ".lib{CRATE_NAME}.{}.{temporary_id}.rlib",
-        std::process::id()
-    ));
-    fs::write(&source, format!("{RUNTIME_CRATE_PREFIX}{exported}"))
-        .map_err(|error| Error::Cache(format!("could not write {}: {error}", source.display())))?;
+    fs::create_dir_all(&staging)
+        .map_err(|error| Error::Cache(format!("could not create {}: {error}", staging.display())))?;
+    let source = staging.join("runtime.rs");
+    let staged_rlib = staging.join(format!("lib{CRATE_NAME}.rlib"));
+    fs::write(&source, format!("{RUNTIME_CRATE_PREFIX}{exported}")).map_err(|error| {
+        let _ = fs::remove_dir_all(&staging);
+        Error::Cache(format!("could not write {}: {error}", source.display()))
+    })?;
 
     let mut command = Command::new(rustc);
     command
         .args(["--edition", "2021", "--crate-name", CRATE_NAME, "--crate-type", "rlib"])
         .args(rustc_flags);
-    if let Ok(source_prefix) = fs::canonicalize(&source) {
+    if let Ok(staging_prefix) = fs::canonicalize(&staging) {
         command
             .arg("--remap-path-prefix")
-            .arg(format!("{}=jet-runtime.rs", source_prefix.display()));
+            .arg(format!("{}=jet-runtime-build", staging_prefix.display()));
     }
     command.arg(&source).arg("-o").arg(&staged_rlib);
     for (name, value) in rustc_env {
         command.env(name, value);
     }
     let output = command.output().map_err(|error| {
-        let _ = fs::remove_file(&source);
-        let _ = fs::remove_file(&staged_rlib);
+        let _ = fs::remove_dir_all(&staging);
         Error::Tool(format!("could not run rustc for cached runtime: {error}"))
     })?;
     let _ = fs::remove_file(&source);
     if !output.status.success() {
-        let _ = fs::remove_file(&staged_rlib);
+        let _ = fs::remove_dir_all(&staging);
         // A cache-only rustc rejection must never replace a valid inline build.
         return Ok(PreparedRuntime::inline(generated));
     }
 
     let bytes = fs::read(&staged_rlib).map_err(|error| {
+        let _ = fs::remove_dir_all(&staging);
         Error::Cache(format!("could not read {}: {error}", staged_rlib.display()))
     })?;
     let digest = sha256_hex(&bytes);
     let _ = fs::remove_file(&rlib);
-    fs::rename(&staged_rlib, &rlib)
-        .map_err(|error| Error::Cache(format!("could not publish {}: {error}", rlib.display())))?;
+    fs::rename(&staged_rlib, &rlib).map_err(|error| {
+        let _ = fs::remove_dir_all(&staging);
+        Error::Cache(format!("could not publish {}: {error}", rlib.display()))
+    })?;
+    let _ = fs::remove_dir_all(&staging);
     publish(&entry.join("artifact.sha256"), format!("{digest}\n").as_bytes())?;
     publish(
         &entry.join("runtime.rs"),
