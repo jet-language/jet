@@ -67,7 +67,7 @@ fn repl_accepts_and_runs_freeze() {
         &["source := 41", "frozen :: freeze(source)", "print(frozen)"],
         None,
     );
-    assert_eq!(transcript, "ok\nok\n41\n");
+    assert_eq!(transcript, "41\n");
 }
 
 #[test]

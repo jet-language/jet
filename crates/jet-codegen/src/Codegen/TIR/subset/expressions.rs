@@ -107,6 +107,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                         && expr_in_subset(&arg.expr, cx, locals)
                 });
             }
+            // D-CONC-FREEZE1=A: `freeze` lowers to the existing owned-value
+            // clone/materialization TIR nodes. Keep the coverage proof aligned
+            // with that canonical lowering path and recurse into its operand.
+            if c.name == Syntax::KW_FREEZE
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() == 1
+            {
+                return expr_in_subset(&c.args[0].expr, cx, locals);
+            }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
             // parses as `Expr::Call { name: "f" }`, NOT `Expr::CallValue`. The AST path
             // (`emit_call`, env-contains-name branch) emits `(place)(args)` with args
