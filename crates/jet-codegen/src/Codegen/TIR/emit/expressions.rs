@@ -2486,6 +2486,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
+            // Rust cannot derive recursive enum equality merely to compare an
+            // optional reference against `None`: `Option<&Node> == None`
+            // unnecessarily requires `Node: PartialEq`. Presence is the Jet
+            // operation here, so emit it directly without changing the shared
+            // typed comparison seen by the resident evaluator.
+            if matches!(op, BinOp::Eq | BinOp::Ne) {
+                let optional = match (&lhs.ty, &rhs.kind, &lhs.kind, &rhs.ty) {
+                    (Type::Option(_), TExprKind::Absent, _, _) => Some(ls.as_str()),
+                    (_, _, TExprKind::Absent, Type::Option(_)) => Some(rs.as_str()),
+                    _ => None,
+                };
+                if let Some(optional) = optional {
+                    let probe = if *op == BinOp::Eq {
+                        "is_none"
+                    } else {
+                        "is_some"
+                    };
+                    return format!("({optional}).{probe}()");
+                }
+            }
             let packed_int = matches!((&lhs.ty, &rhs.ty, &e.ty),
                 (Type::Int, Type::Int, Type::Int)
             );
