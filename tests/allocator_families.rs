@@ -31,6 +31,20 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
         std::fs::read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap();
     let sentry = std::fs::read_to_string("crates/jet-foundation/src/MemSentry.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
+    // Registry.rs depends on the full Foundation Diagnostics and Policy graph,
+    // which this standalone rustc harness intentionally does not embed. Keep
+    // Outcome.rs on its canonical typed seam; these memory tests exercise the
+    // sentry renderer, so no registered generic runtime row is active here.
+    let registry = r#"
+#[allow(non_snake_case)]
+mod Registry {
+    pub fn active_runtime_diagnostic(
+        _code: &str,
+    ) -> Option<&'static super::JetRuntimeDiagnosticRow> {
+        None
+    }
+}
+"#;
     let runtime_stop = r#"
 fn jet_sentry_runtime_stop(
     code: &str,
@@ -61,6 +75,7 @@ fn jet_sentry_runtime_stop(
     let source_text = format!(
         r#"#![allow(dead_code)]
 {observe}
+{registry}
 {outcome}
 {fault_injection}
 {runtime_stop}
