@@ -7739,6 +7739,211 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Pin the CLIF Jet emits at a site that once produced verifier-invalid code
+/// (#1989, #1990, #1991).
+///
+/// This failure class is INVISIBLE from stdout alone. Cranelift's verifier
+/// rejects the function, the tier silently deopts to the canonical
+/// interpreter, and the program still prints the right answer — which is
+/// exactly how the nine census members survived. Correct output is therefore
+/// necessary but nowhere near sufficient; four facts have to hold together:
+///
+///   1. the repaired site is actually inside the emitted program, so a green
+///      run is evidence about *that* site (`jit_program_func_names`),
+///   2. every emitted function passes the verifier — `try_compile_bundle`
+///      hands back the verifier's own text, so a regression names its own
+///      instruction and both disagreeing types instead of returning silently,
+///   3. the tier plan binds the whole program to resident Cranelift, and
+///   4. the run really executed native code: no deopt, no fallback.
+///
+/// Invalid CLIF that Jet itself emitted is a compiler bug of I2's severity, so
+/// every one of these is a hard failure rather than a recorded gap.
+fn assert_resident_clif_shape(
+    tag: &str,
+    source: &str,
+    require_funcs: &[&str],
+    expected_stdout: &str,
+) {
+    let dir = std::env::temp_dir().join(format!("jet_clif_shape_{tag}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(format!("{tag}.jet"));
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+
+    let funcs = jet_jit::jit_program_func_names(&bundle);
+    for want in require_funcs {
+        assert!(
+            funcs.iter().any(|name| name.as_str() == *want),
+            "`{tag}` no longer emits `{want}`, so it cannot pin that site; emitted: {funcs:?}"
+        );
+    }
+
+    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|reason| {
+        panic!("`{tag}` emitted CLIF that Cranelift's own verifier rejects: {reason}")
+    });
+
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    assert!(
+        !plan.whole_interp && plan.deopt.is_empty(),
+        "`{tag}` must plan entirely on the resident tier or its output proves nothing \
+         about emitted CLIF: whole_interp={}, deopt={:?}, safety={:?}",
+        plan.whole_interp,
+        plan.deopt,
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, tag);
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "`{tag}` did not execute resident Cranelift"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "`{tag}` used deopt or fallback, so its output is not resident-JIT evidence"
+    );
+    assert_eq!(
+        resident.stdout, expected_stdout,
+        "`{tag}` resident JIT output drifted (stderr: {:?})",
+        resident.stderr
+    );
+    assert_eq!(
+        resident.exit_code, 0,
+        "`{tag}` resident JIT exited {} (stderr: {:?})",
+        resident.exit_code, resident.stderr
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #1989 — two independent sites, both "one type source for the host".
+///
+/// `Size` is a CORE struct with no TIR entry, so TIR leaves `Type::Int` on
+/// `size.width` while the field lowering recovers the declared slot and emits
+/// an `f64`. `emit_print`'s integer fast path used to key on the raw `inner.ty`
+/// and hand that `f64` to `int_to_string`, declared `i64`.
+///
+/// Separately, the compiler-written `Frame::decode` decodes a `[Float#4]`
+/// field: `result_payload` yields `f64` while `lower_datatree_decode_list_items`
+/// hardcoded `list_push`, declared `i64`. The codec is generated for every
+/// structurally eligible struct (D-META-AUTO1=A), so declaring `Frame` emits
+/// that site — `require_funcs` proves it rather than assuming it.
+#[test]
+fn resident_jit_1989_print_and_decode_host_types_pass_the_verifier() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+
+    assert_resident_clif_shape(
+        "clif_1989_core_struct_float_field_print",
+        r#"use core.ui as ui
+
+fn run() {
+    backend :: ui.null_backend()
+    node :: ui.node("hello", 100.0, 20.0)
+    constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)
+    size :: backend.measure(node, constraint)
+    print(size.width)
+    print(size.height)
+}
+"#,
+        &["run"],
+        "100.0\n20.0\n",
+    );
+
+    assert_resident_clif_shape(
+        "clif_1989_fixed_float_list_decode_push",
+        r#"struct Frame {
+    values: [Float#4]
+}
+
+fn run() {
+    frame :: Frame.{values: [Float#4].{1.5, 2.5, 3.5, 4.5}}
+    print(frame.values[3])
+}
+"#,
+        &["Frame::decode"],
+        "4.5\n",
+    );
+}
+
+/// #1990 — `core.regex.flags` declares three `i64` parameters, and Jet lowers
+/// `Bool` to `i8`. `lower_recorded_core_call_values` built the call straight
+/// from `lower_expr` results with no reconciliation against the callee's
+/// declared `AbiParam` list, so three `iconst.i8` went into `i64` slots. The
+/// hand-written `core.regex` branch has widened since ec4c9c460, but the
+/// registry path runs first and shadows it, which is how a real fix coexisted
+/// with a live bug — so the fixture must go through `re.flags`, not a
+/// hand-lowered spelling.
+///
+/// `rx.flags()` reads back all three marshalled arguments (`i`, `m`, no `s`),
+/// and `count("A")` is 1 only if `case_insensitive` genuinely reached the
+/// engine, so a truncated or garbage extension shows in stdout as well.
+#[test]
+fn resident_jit_1990_bool_core_call_args_pass_the_verifier() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+
+    assert_resident_clif_shape(
+        "clif_1990_bool_core_call_args",
+        r#"use core.regex as re
+
+fn run() {
+    flag_set :: re.flags(true, true, false)
+    rx :: re.compile_with("[a-z]+", flag_set) ?? panic("bad pattern")
+    print(rx.flags())
+    print(rx.count("A"))
+}
+"#,
+        &["run"],
+        "im\n1\n",
+    );
+}
+
+/// #1991 — a sema-proved-dead edge still has to hand a value to the slot it
+/// flows into. An exhaustive `Float` match lowers to nested if-let expressions
+/// whose final else is `Unreachable`, and it merges on an `f64` block
+/// parameter; `Unreachable` returned `iconst.i64 0` regardless, so the jump
+/// passed an `i64` into an `f64` block parameter. The arms must therefore be
+/// exhaustive (no `else`), and the match must yield `Float`.
+#[test]
+fn resident_jit_1991_dead_edge_zero_passes_the_verifier() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
+
+    assert_resident_clif_shape(
+        "clif_1991_dead_edge_zero_merge_type",
+        r#"enum Shape {
+    Circle(Float)
+    Square(Float)
+    Empty
+}
+
+fn area(s: Shape) => Float {
+    return if s == {
+        .Circle(r) -> r * r
+        .Square(side) -> side * side
+        .Empty -> 0.0
+    }
+}
+
+fn run() {
+    print(area(.Circle(3.0)))
+    print(area(.Square(4.0)))
+    print(area(.Empty))
+}
+"#,
+        &["area"],
+        "9.0\n16.0\n0.0\n",
+    );
+}
+
 #[test]
 fn resident_jit_safety_detail_smoke() {
     for stem in [
