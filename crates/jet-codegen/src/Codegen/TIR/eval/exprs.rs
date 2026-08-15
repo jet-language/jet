@@ -9628,8 +9628,10 @@ impl<'a> EvalCtx<'a> {
                 }
             }
         }
-        if let Some(text) = crate::Comptime::display_core_pure_value(v) {
-            return Ok(text);
+        if !matches!(v, CtValue::Struct { .. } | CtValue::Enum { .. }) {
+            if let Some(text) = crate::Comptime::display_core_pure_value(v) {
+                return Ok(text);
+            }
         }
         // `JetDisplay` is recursive for containers.  Calling `jet_show()` on
         // the outer value loses a user Display implementation held inside a
