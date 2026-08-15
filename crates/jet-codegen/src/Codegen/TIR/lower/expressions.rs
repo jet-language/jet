@@ -2106,6 +2106,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty,
             }
         }
+        // Derive-template unit enums retain their comptime-substitution node so
+        // canonical compiler facts can fold before dispatch. Non-fact enums
+        // resume the same ordinary typed enum path as an author-written literal.
+        Expr::ComptimeName {
+            value:
+                Some(crate::AST::CtValue::Enum {
+                    type_name,
+                    variant,
+                    args,
+                }),
+            ..
+        } if args.is_empty() => {
+            let resolved_type = cx
+                .core_qualified_rust_type_name(type_name)
+                .unwrap_or(type_name.as_str());
+            TExpr {
+                ty: Type::Named(resolved_type.to_string()),
+                kind: TExprKind::EnumLit {
+                    enum_type: resolved_type.to_string(),
+                    variant: variant.clone(),
+                    payload: TEnumPayload::Unit,
+                },
+            }
+        }
         Expr::ComptimeName {
             value: Some(value), ..
         } => {

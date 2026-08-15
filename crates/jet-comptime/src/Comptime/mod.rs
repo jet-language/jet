@@ -2165,7 +2165,21 @@ fn scope_value<'a>(scope: &'a HashMap<String, CtValue>, name: &str) -> Option<&'
         .or_else(|| scope.get(&format!("@{name}")))
 }
 
-fn comptime_literal_expr(value: CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
+fn comptime_literal_expr(
+    value: CtValue,
+    span: crate::Diagnostics::Span,
+) -> Option<crate::AST::Expr> {
+    // Keep unit enum substitutions distinguishable from author-written enum
+    // literals until the shared typed boundary. TIR uses canonical fact
+    // metadata to fold compiler fact comparisons; other enum substitutions
+    // resume ordinary enum lowering there.
+    if matches!(&value, CtValue::Enum { args, .. } if args.is_empty()) {
+        return Some(crate::AST::Expr::ComptimeName {
+            name: String::new(),
+            span,
+            value: Some(value),
+        });
+    }
     build_fact_expr(value, span)
 }
 
