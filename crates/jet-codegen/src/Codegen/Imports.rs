@@ -1741,6 +1741,20 @@ pub(crate) fn emit_program_items(
     include_main: bool,
     include_runtime_owned_traits: bool,
 ) {
+    // Imported trait impl methods use Rust method syntax. Bring each canonical
+    // owning trait into scope anonymously so same-named traits from multiple
+    // modules remain collision-free while method lookup sees the real impl.
+    let mut imported_traits = cx.imported_traits.iter().collect::<Vec<_>>();
+    imported_traits.sort();
+    for (module, trait_name) in imported_traits {
+        out.push_str(&format!(
+            "use crate::{module}::{} as _;\n",
+            crate::Codegen::mangle(trait_name)
+        ));
+    }
+    if !cx.imported_traits.is_empty() {
+        out.push('\n');
+    }
     let has_serde_protocol_impl = items.iter().any(|item| match item {
         Item::Func(f) => f.type_params.iter().any(|param| param.bounds.iter().any(|bound| {
             matches!(bound.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE)

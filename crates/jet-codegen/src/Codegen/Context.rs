@@ -280,6 +280,9 @@ pub(crate) struct Cx {
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
+    /// Imported trait definitions Rust method lookup must bring into scope,
+    /// keyed by generated module and trait name.
+    pub(crate) imported_traits: HashSet<(String, String)>,
     /// D-TXN-ROLLBACK layer 2: user types that implement the `Rollback` trait.
     /// Populated in `build_cx_items` from `Item::Impl` blocks with
     /// `trait_name == Some("Rollback")` and from inline `struct { impl Rollback }`.
@@ -3350,16 +3353,23 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
     imported.sort_unstable();
     imported.dedup();
     for target in imported {
+        let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
         for item in &bundle.modules[target].items {
-            let (owner, methods): (&str, Vec<(&Func, bool)>) = match item {
+            let (owner, methods): (&str, Vec<(&Func, Option<&str>, bool)>) = match item {
                 Item::Struct(definition) => {
                     let mut methods = definition
                         .methods
                         .iter()
-                        .map(|method| (method, false))
+                        .map(|method| (method, None, false))
                         .collect::<Vec<_>>();
                     methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-                        implementation.methods.iter().map(|method| (method, true))
+                        implementation.methods.iter().map(|method| {
+                            (
+                                method,
+                                Some(implementation.trait_name.as_str()),
+                                implementation.compiler_generated,
+                            )
+                        })
                     }));
                     (&definition.name, methods)
                 }
@@ -3367,10 +3377,16 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                     let mut methods = definition
                         .methods
                         .iter()
-                        .map(|method| (method, false))
+                        .map(|method| (method, None, false))
                         .collect::<Vec<_>>();
                     methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-                        implementation.methods.iter().map(|method| (method, true))
+                        implementation.methods.iter().map(|method| {
+                            (
+                                method,
+                                Some(implementation.trait_name.as_str()),
+                                implementation.compiler_generated,
+                            )
+                        })
                     }));
                     (&definition.name, methods)
                 }
@@ -3379,7 +3395,7 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                     definition
                         .methods
                         .iter()
-                        .map(|method| (method, definition.trait_name.is_some()))
+                        .map(|method| (method, definition.trait_name.as_deref(), false))
                         .collect(),
                 ),
                 _ => continue,
@@ -3389,18 +3405,22 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 .nominal_identity(target, owner)
                 .expect("name ledger must contain every loaded module");
             let owner_visible = bundle.name_ledger.visible(module_idx, target, owner);
-            for (method, trait_impl) in methods {
+            for (method, trait_name, import_trait) in methods {
                 let method_visible = bundle.name_ledger.visible(
                     module_idx,
                     target,
                     &format!("{}.{}", owner, method.name),
                 );
-                if !method_visible && !(trait_impl && owner_visible) {
+                if !method_visible && !(trait_name.is_some() && owner_visible) {
                     continue;
                 }
                 let key = (owner_identity.clone(), method.name.clone());
-                if trait_impl {
+                if let Some(trait_name) = trait_name {
                     cx.trait_methods.insert(key.clone());
+                    if import_trait {
+                        cx.imported_traits
+                            .insert((rust_mod.clone(), trait_name.to_string()));
+                    }
                 }
                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
                 {
@@ -3842,6 +3862,7 @@ pub(crate) fn build_cx_items(
         inline_reexport_core: HashMap::new(),
         inline_reexport_foreign: HashMap::new(),
         trait_methods: HashSet::new(),
+        imported_traits: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),
         close_types: HashSet::new(),
