@@ -624,7 +624,7 @@ pub enum FactRead {
 impl FactRead {
     /// The closed reflection kind carried by this read. Build rows have no
     /// reflected value kind because they are selected from the build snapshot.
-    pub const fn reflection_kind(self) -> Option<&'static str> {
+    pub fn reflection_kind(self) -> Option<&'static str> {
         match self {
             Self::Layout => Some("Layout"),
             Self::Name => Some("Nominal"),
