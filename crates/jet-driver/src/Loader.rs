@@ -414,6 +414,7 @@ fn load_entry_with_overlays_mode_with_sink(
         package_policy,
         package_lints_deny,
         package_guarantees,
+        program_allocator,
     ) = if let Some(manifest_dir) = manifest_root
     {
         // Found a Package root — validate it and collect dep source paths.
@@ -499,6 +500,22 @@ fn load_entry_with_overlays_mode_with_sink(
                             "invalid package guarantee policy".to_string(),
                             detail,
                             "use `policy: .{ contain: [\"dependency\"], harden: true }` in `package.jet`; these keys are package-only and tighten-only".to_string(),
+                            None,
+                        )],
+                    ),
+                ));
+            }
+            Err(crate::Package::PackageParseError::BadAllocatorPolicy { detail }) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &pack_path.display().to_string(),
+                        &raw,
+                        vec![Diagnostic::error(
+                            "E1206",
+                            "invalid hosted program allocator".to_string(),
+                            detail,
+                            "use `allocator: mem.Heap` or `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)` in `package.jet`".to_string(),
                             None,
                         )],
                     ),
@@ -741,6 +758,7 @@ fn load_entry_with_overlays_mode_with_sink(
                     policy,
                     package_lints_deny,
                     package_guarantees,
+                    package_manifest.allocator.clone(),
                 )
             }
         }
@@ -802,6 +820,7 @@ fn load_entry_with_overlays_mode_with_sink(
             organization_policy,
             Vec::new(),
             PackageGuarantees::default(),
+            crate::TargetMachine::AllocatorPolicy::HostedDefault,
         )
     };
 
@@ -1041,6 +1060,7 @@ fn load_entry_with_overlays_mode_with_sink(
         web_partition_report: None,
         dep_roots,
         package_guarantees,
+        program_allocator,
         // D-OSTARGET2=B: default to the host OS; the driver overrides this from
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
         active_os: Syntax::OSTarget::host(),

@@ -129,45 +129,54 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         }
     }
     let mut sink = crate::Comptime::DevSink::new();
-    let outcome = match crate::Comptime::TirBridge::run_bundle(
-        bundle,
-        &mut sink,
-        jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
-    ) {
-        Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
-            let rendered = error
-                .to_jet_err()
-                .map(|error| jet_foundation::Outcome::jet_render_err(&error))
-                .unwrap_or_else(|| {
-                    crate::Comptime::display_core_pure_value(&error)
-                        .unwrap_or_else(|| error.jet_show())
-                });
-            sink.stderr.push_str(&rendered);
-            sink.stderr.push('\n');
-            RunOutcome::Ran {
+    let cap_bytes = match &bundle.program_allocator {
+        jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } => {
+            Some(cap.map_or(0, |size| size.bytes))
+        }
+        _ => None,
+    };
+    let (outcome, _) = crate::program_allocator::jet_with_host_program_allocator(
+        cap_bytes,
+        || match crate::Comptime::TirBridge::run_bundle(
+            bundle,
+            &mut sink,
+            jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
+        ) {
+            Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
+                let rendered = error
+                    .to_jet_err()
+                    .map(|error| jet_foundation::Outcome::jet_render_err(&error))
+                    .unwrap_or_else(|| {
+                        crate::Comptime::display_core_pure_value(&error)
+                            .unwrap_or_else(|| error.jet_show())
+                    });
+                sink.stderr.push_str(&rendered);
+                sink.stderr.push('\n');
+                RunOutcome::Ran {
+                    stdout: sink.stdout,
+                    stderr: sink.stderr,
+                    exit_code: 1,
+                }
+            }
+            Ok(_) => RunOutcome::Ran {
                 stdout: sink.stdout,
                 stderr: sink.stderr,
-                exit_code: 1,
-            }
-        }
-        Ok(_) => RunOutcome::Ran {
-            stdout: sink.stdout,
-            stderr: sink.stderr,
-            exit_code: sink.exit_code.unwrap_or(0),
+                exit_code: sink.exit_code.unwrap_or(0),
+            },
+            Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
+                stdout: sink.stdout,
+                stderr: sink.stderr,
+                exit_code: sink
+                    .exit_code
+                    .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
+            },
+            // Whole-program interpret traps are live-program stops. The fallback
+            // still enters the Foundation renderer when an older E0953 boundary
+            // reaches this adapter.
+            Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
+            Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
         },
-        Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
-            stdout: sink.stdout,
-            stderr: sink.stderr,
-            exit_code: sink
-                .exit_code
-                .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
-        },
-        // Whole-program interpret traps are live-program stops. The fallback
-        // still enters the Foundation renderer when an older E0953 boundary
-        // reaches this adapter.
-        Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
-        Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
-    };
+    );
     if jet_jit::trace_tiers_enabled() && matches!(&outcome, RunOutcome::Ran { .. }) {
         jet_jit::record_trace(vec![jet_jit::TierRow {
             function: "run".to_string(),
@@ -245,7 +254,15 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
         }
     }
     let core_imports = crate::Codegen::core_imports_for_bundle(bundle);
-    match crate::Codegen::TIR::run_program_with_structs(
+    let cap_bytes = match &bundle.program_allocator {
+        jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } => {
+            Some(cap.map_or(0, |size| size.bytes))
+        }
+        _ => None,
+    };
+    let (outcome, _) = crate::program_allocator::jet_with_host_program_allocator(
+        cap_bytes,
+        || match crate::Codegen::TIR::run_program_with_structs(
         &program,
         &bundle.project_root,
         &mut sink,
@@ -310,7 +327,9 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
         },
         Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
-    }
+        },
+    );
+    outcome
 }
 
 /// D-SCHEDULE1: the `#Job`/`#Every(…)` facts the dev loop's due-job tick

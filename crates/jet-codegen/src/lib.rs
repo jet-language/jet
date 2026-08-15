@@ -18,6 +18,11 @@ mod BrowserHost;
 pub mod fault_injection {
     include!("Prelude/FaultInjection.rs");
 }
+/// D-ALLOC-PROGRAM1=A: canonical whole-program allocator policy compiled from
+/// the same Prelude source that generated AOT programs embed.
+pub mod program_allocator {
+    include!("Prelude/ProgramAllocator.rs");
+}
 /// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the
 /// generated program; this module compiles that same source for the Cranelift
 /// JIT and the interpreter's ambient host, so no tier can drift (I9).

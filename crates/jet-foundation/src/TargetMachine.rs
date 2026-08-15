@@ -581,19 +581,32 @@ impl LinkerInput {
     }
 }
 
+/// D-TARGET-ALLOC1 / D-ALLOC-PROGRAM1=A: one typed allocator fact for
+/// freestanding targets and hosted programs. Hosted programs may wrap the
+/// hidden system heap with the built-in counting allocator and an optional
+/// hard cap; no fact keeps the existing hidden heap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AllocatorPolicy {
     HostedDefault,
     Unspecified,
     None,
     Fixed { region: String, size: ByteSize },
+    Counting { cap: Option<ByteSize> },
+}
+
+impl Default for AllocatorPolicy {
+    fn default() -> Self {
+        Self::HostedDefault
+    }
 }
 
 impl AllocatorPolicy {
     pub fn provides_heap(&self) -> bool {
         matches!(
             self,
-            AllocatorPolicy::HostedDefault | AllocatorPolicy::Fixed { .. }
+            AllocatorPolicy::HostedDefault
+                | AllocatorPolicy::Fixed { .. }
+                | AllocatorPolicy::Counting { .. }
         )
     }
 
@@ -604,7 +617,7 @@ impl AllocatorPolicy {
         }
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             AllocatorPolicy::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             AllocatorPolicy::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -613,6 +626,10 @@ impl AllocatorPolicy {
                 "{{\"kind\":\"fixed\",\"region\":{},\"size_bytes\":{}}}",
                 json_str(region),
                 size.bytes
+            ),
+            AllocatorPolicy::Counting { cap } => format!(
+                "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":{}}}",
+                cap.map_or_else(|| "null".to_string(), |size| size.bytes.to_string())
             ),
         }
     }
@@ -711,6 +728,7 @@ pub enum TargetMachineError {
         requested_bytes: u64,
         available_bytes: u64,
     },
+    HostedAllocatorRequiresOs,
     MissingPanicPolicy,
     RamOverflow {
         used_bytes: u64,
@@ -807,6 +825,9 @@ fn validate_allocator(machine: &TargetMachine, errors: &mut Vec<TargetMachineErr
     match &machine.allocator {
         AllocatorPolicy::Unspecified if machine.no_os => {
             errors.push(TargetMachineError::MissingAllocatorPolicy)
+        }
+        AllocatorPolicy::Counting { .. } if machine.no_os => {
+            errors.push(TargetMachineError::HostedAllocatorRequiresOs)
         }
         AllocatorPolicy::Fixed { region, size } => {
             match machine.memory.iter().find(|r| r.name == *region) {
@@ -1098,6 +1119,27 @@ mod tests {
         };
         assert_eq!(machine.max_runtime_layer(), RuntimeLayer::Std);
         assert!(machine.validate(&usage).is_empty());
+    }
+
+    #[test]
+    fn hosted_counting_allocator_is_typed_and_auditable() {
+        let mut machine = TargetMachine::hosted("x86_64-unknown-linux-gnu");
+        machine.allocator = AllocatorPolicy::Counting {
+            cap: Some(ByteSize::bytes(2 * 1024 * 1024 * 1024)),
+        };
+        assert!(machine.validate(&TargetMachineUse::default()).is_empty());
+        assert_eq!(
+            machine.allocator.audit_json(),
+            "{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}"
+        );
+    }
+
+    #[test]
+    fn freestanding_machine_rejects_hosted_counting_wrapper() {
+        let mut machine = valid_machine();
+        machine.allocator = AllocatorPolicy::Counting { cap: None };
+        let errors = machine.validate(&TargetMachineUse::default());
+        assert!(errors.contains(&TargetMachineError::HostedAllocatorRequiresOs));
     }
 
     #[test]

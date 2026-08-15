@@ -93,6 +93,51 @@ mod jet_mem {{
     Command::new(binary).output().unwrap()
 }
 
+fn compile_program_allocator_harness(body: &str) -> std::process::Output {
+    let dir = temp_dir("program_allocator");
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("main.rs");
+    let binary = dir.join("main");
+    let allocator =
+        std::fs::read_to_string("crates/jet-codegen/src/Prelude/ProgramAllocator.rs").unwrap();
+    std::fs::write(
+        &source,
+        format!(
+            "#![allow(dead_code)]\nmod allocator {{\n{allocator}\n}}\n{body}\n"
+        ),
+    )
+    .unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "program allocator harness failed to compile:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    Command::new(binary).output().unwrap()
+}
+
+fn write_program_allocator_project(label: &str, allocator: Option<&str>) -> std::path::PathBuf {
+    let root = temp_dir(label);
+    std::fs::create_dir_all(&root).unwrap();
+    let allocator = allocator
+        .map(|value| format!("allocator: {value}\n"))
+        .unwrap_or_default();
+    std::fs::write(
+        root.join("package.jet"),
+        format!("name: \"{label}\"\nversion: \"0.1.0\"\n{allocator}"),
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    std::fs::write(&entry, "fn run() { print(\"ok\") }\n").unwrap();
+    entry
+}
+
 fn compile_jet(src: &str) -> Result<jet::CompileOutput, Vec<String>> {
     let dir = temp_dir("jet");
     std::fs::create_dir_all(&dir).unwrap();
@@ -605,4 +650,138 @@ fn main() {
     );
     assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
+}
+
+#[test]
+fn program_allocator_fact_selects_counting_wrapper_for_aot() {
+    let entry = write_program_allocator_project(
+        "program_allocator_counting",
+        Some("mem.Counting.over(mem.Heap, cap: 2.kb)"),
+    );
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    assert!(matches!(
+        bundle.program_allocator,
+        jet::TargetMachine::AllocatorPolicy::Counting {
+            cap: Some(jet::TargetMachine::ByteSize { bytes: 2048 })
+        }
+    ));
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:?}");
+    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    assert!(rust.contains(
+        "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"
+    ));
+}
+
+#[test]
+fn missing_program_allocator_keeps_hidden_system_heap() {
+    let entry = write_program_allocator_project("program_allocator_default", None);
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    assert_eq!(
+        bundle.program_allocator,
+        jet::TargetMachine::AllocatorPolicy::HostedDefault
+    );
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:?}");
+    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    assert!(!rust.contains("__JET_PROGRAM_ALLOCATOR"));
+}
+
+#[test]
+fn invalid_program_allocator_fact_is_a_teaching_diagnostic() {
+    let entry =
+        write_program_allocator_project("program_allocator_invalid", Some("mem.Mystery"));
+    let diagnostics = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E1206")
+        .expect("invalid allocator fact must use the registered manifest diagnostic");
+    assert_eq!(diagnostic.what, "invalid hosted program allocator");
+    assert!(diagnostic.fix.contains("mem.Counting.over"));
+}
+
+#[test]
+fn program_allocator_kernel_caps_fallible_allocations() {
+    if !common::have_rustc() {
+        return;
+    }
+    let ran = compile_program_allocator_harness(
+        r#"
+use std::alloc::{GlobalAlloc, Layout};
+
+fn main() {
+    let allocator = allocator::JetProgramAllocator::counting(64);
+    let first_layout = Layout::from_size_align(48, 16).unwrap();
+    let second_layout = Layout::from_size_align(32, 16).unwrap();
+    let first = unsafe { GlobalAlloc::alloc(&allocator, first_layout) };
+    assert!(!first.is_null());
+    let exhausted = unsafe { GlobalAlloc::alloc(&allocator, second_layout) };
+    assert!(exhausted.is_null());
+    let facts = allocator.facts();
+    assert_eq!(facts.allocations, 1);
+    assert_eq!(facts.requested_bytes, 48);
+    assert_eq!(facts.live_bytes, 48);
+    assert_eq!(facts.high_water_bytes, 48);
+    unsafe { GlobalAlloc::dealloc(&allocator, first, first_layout) };
+    assert_eq!(allocator.facts().live_bytes, 0);
+    println!("ok");
+}
+"#,
+    );
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
+}
+
+#[test]
+fn program_allocator_example_matches_aot_jit_and_interpreter() {
+    if !common::have_rustc() {
+        return;
+    }
+    let project = std::path::Path::new("examples/features/memory/program_allocator");
+    let expected =
+        std::fs::read_to_string("examples/features/expected/memory/program_allocator.out")
+            .unwrap();
+    for (name, args) in [
+        ("jit", &["run", "main.jet"][..]),
+        ("interpreter", &["run", "--interpret", "main.jet"][..]),
+        ("aot", &["run", "--release", "main.jet"][..]),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(args)
+            .current_dir(project)
+            .env("NO_COLOR", "1")
+            .env("JET_RUN_CACHE_DIR", temp_dir(&format!("program_allocator_{name}")))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected, "{name}");
+    }
+    let dossier = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "dossier", "main.jet", "run", "--json"])
+        .current_dir(project)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        dossier.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dossier.stderr)
+    );
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    assert!(
+        dossier.contains(
+            "\"program_allocator\":{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}"
+        ),
+        "{dossier}"
+    );
 }

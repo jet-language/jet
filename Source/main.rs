@@ -18,6 +18,13 @@ use jet::Diagnostics::{ColorChoice, Diagnostic, ReportPath};
 use jet::ExitCodes;
 use jet_foundation::BuildEffect;
 
+// D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
+// JIT/interpreter entry points only marshal the checked package fact into the
+// same Prelude kernel; they never implement allocation policy.
+#[global_allocator]
+static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
+    jet::program_allocator::JetHostProgramAllocator;
+
 mod CmdCodemod;
 mod CmdBudget;
 mod CmdCompile;

@@ -173,6 +173,9 @@ pub struct PackageFacts {
     pub description: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
+    /// D-ALLOC-PROGRAM1=A: optional hosted whole-program allocator fact.
+    /// The hidden system heap remains the default.
+    pub allocator: crate::TargetMachine::AllocatorPolicy,
     /// D-WEBDEFAULT1: this package's default CLI backend target.
     pub target: Option<String>,
     /// D-RINGLAYER1=A: optional runtime ceiling (`core`/`alloc`/`hosted`).
@@ -367,6 +370,8 @@ pub enum PackageParseError {
     RetiredPolicyField { field: String, replacement: String },
     /// D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
     BadGuaranteePolicy { detail: String },
+    /// D-ALLOC-PROGRAM1=A: malformed hosted whole-program allocator fact.
+    BadAllocatorPolicy { detail: String },
 }
 
 impl fmt::Display for PackageParseError {
@@ -402,6 +407,7 @@ impl fmt::Display for PackageParseError {
                 write!(f, "`{field}` is retired; use `{replacement}`")
             }
             Self::BadGuaranteePolicy { detail } => f.write_str(detail),
+            Self::BadAllocatorPolicy { detail } => f.write_str(detail),
         }
     }
 }
@@ -1677,6 +1683,10 @@ fn parse_common(
             "repository" => return Err(PackageParseError::UnknownField(field.clone())),
             "target" if !config => facts.target = Some(scalar(&value)),
             "target" => return Err(PackageParseError::UnknownField(field.clone())),
+            "allocator" if !config => {
+                facts.allocator = Blocks::parse_program_allocator(&value)?;
+            }
+            "allocator" => return Err(PackageParseError::UnknownField(field.clone())),
             "runtime" if !config => {
                 let raw = scalar(&value);
                 facts.layer = Some(crate::Syntax::RuntimeLayer::parse_manifest(&raw).ok_or_else(

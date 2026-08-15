@@ -142,6 +142,73 @@ fn bad_guarantee(detail: impl Into<String>) -> PackageParseError {
     PackageParseError::BadGuaranteePolicy { detail: detail.into() }
 }
 
+fn bad_allocator(detail: impl Into<String>) -> PackageParseError {
+    PackageParseError::BadAllocatorPolicy { detail: detail.into() }
+}
+
+/// D-ALLOC-PROGRAM1=A: parse the hosted program allocator as one typed fact.
+/// v1 ships the hidden system heap and its counting/capping wrapper; unknown
+/// values fail closed instead of becoming strings that engines reinterpret.
+pub(super) fn parse_program_allocator(
+    value: &str,
+) -> Result<crate::TargetMachine::AllocatorPolicy, PackageParseError> {
+    use crate::TargetMachine::{AllocatorPolicy, ByteSize};
+
+    let compact = value.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    if compact == "mem.Heap" {
+        return Ok(AllocatorPolicy::HostedDefault);
+    }
+    let Some(args) = compact
+        .strip_prefix("mem.Counting.over(")
+        .and_then(|value| value.strip_suffix(')'))
+    else {
+        return Err(bad_allocator(
+            "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`",
+        ));
+    };
+    let args = top_level_commas(args);
+    if args.is_empty() || args[0] != "mem.Heap" || args.len() > 2 {
+        return Err(bad_allocator(
+            "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument",
+        ));
+    }
+    let cap = match args.get(1) {
+        None => None,
+        Some(value) => {
+            let Some(value) = value.strip_prefix("cap:") else {
+                return Err(bad_allocator(
+                    "the counting allocator's optional argument is spelled `cap:`",
+                ));
+            };
+            Some(ByteSize::bytes(parse_allocator_bytes(value)?))
+        }
+    };
+    Ok(AllocatorPolicy::Counting { cap })
+}
+
+fn parse_allocator_bytes(value: &str) -> Result<u64, PackageParseError> {
+    let (digits, multiplier) = match value.rsplit_once('.') {
+        Some((digits, "bytes")) => (digits, 1u64),
+        Some((digits, "kb" | "kib")) => (digits, 1024u64),
+        Some((digits, "mb" | "mib")) => (digits, 1024u64.pow(2)),
+        Some((digits, "gb" | "gib")) => (digits, 1024u64.pow(3)),
+        Some(_) => {
+            return Err(bad_allocator(
+                "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity",
+            ))
+        }
+        None => (value, 1u64),
+    };
+    let digits = digits.replace('_', "");
+    let count = digits.parse::<u64>().map_err(|_| {
+        bad_allocator("`cap:` must be a positive whole-byte quantity such as `2.gb`")
+    })?;
+    let bytes = count.checked_mul(multiplier).filter(|bytes| *bytes > 0).ok_or_else(|| {
+        bad_allocator("`cap:` must be a positive byte quantity that fits in 64 bits")
+    })?;
+    Ok(bytes)
+}
+
 // ── deps: … (D-JPK23, D-JPK-REF1, S59/D-CFFI2) ──────────────────────────────
 
 /// Where a dependency resolves from.
@@ -1092,6 +1159,7 @@ const MANIFEST_SCALAR_FIELDS: &[&str] = &[
     "repository",
     "target",
     "runtime",
+    "allocator",
     "members",
     "configs",
 ];

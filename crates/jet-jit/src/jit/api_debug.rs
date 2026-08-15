@@ -264,13 +264,13 @@ pub fn run_resident_strict_for_test(bundle: &ProgramBundle) -> Result<RunOutcome
             plan.whole_interp, plan.deopt
         ));
     }
-    match try_resident(bundle) {
+    crate::with_program_allocator(bundle, || match try_resident(bundle) {
         Ok(outcome) => Ok(outcome),
         Err(plan) => Err(plan
             .gap
             .map(|gap| format!("{}: {}", gap.function, gap.reason))
             .unwrap_or_else(|| "resident Cranelift execution failed".to_string())),
-    }
+    })
 }
 
 /// Test hook: lowered function names in the JIT program.

@@ -1417,6 +1417,20 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str(MEM_PRELUDE);
     out.push_str("\n}\n");
 }
+
+const PROGRAM_ALLOCATOR_PRELUDE: &str = include_str!("../Prelude/ProgramAllocator.rs");
+
+fn push_program_allocator_prelude(out: &mut String, bundle: &ProgramBundle) {
+    let crate::TargetMachine::AllocatorPolicy::Counting { cap } = &bundle.program_allocator else {
+        return;
+    };
+    let cap_bytes = cap.map_or(0, |size| size.bytes);
+    out.push_str(PROGRAM_ALLOCATOR_PRELUDE);
+    out.push_str("\n#[global_allocator]\n");
+    out.push_str(&format!(
+        "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting({cap_bytes});\n\n"
+    ));
+}
 /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
 const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
 
@@ -3020,6 +3034,7 @@ mod tests {
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
             package_guarantees: Default::default(),
+            program_allocator: Default::default(),
             active_os: crate::Syntax::OSTarget::host(),
             build_facts: Default::default(),
             edition: "2027".to_string(),
@@ -3106,6 +3121,7 @@ mod tests {
             web_partition_report: None,
             dep_roots: HashMap::new(),
             package_guarantees: Default::default(),
+            program_allocator: Default::default(),
             active_os: crate::Syntax::OSTarget::host(),
             build_facts: Default::default(),
             edition: "2027".to_string(),
@@ -3752,6 +3768,7 @@ pub fn emit_bundle_dbg(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
+    push_program_allocator_prelude(&mut out, bundle);
     push_cached_runtime(&mut out, link);
     if needs_embedded_runtime(bundle) {
         push_corelib_prelude(&mut out, &bundle.used_core, force_corelib_prelude(bundle));

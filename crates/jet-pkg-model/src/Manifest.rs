@@ -243,6 +243,8 @@ pub struct PackageMeta {
     pub repository: Option<String>,
     /// D-RINGLAYER1=A: optional runtime ceiling from `runtime:` in the Package.
     pub layer: Option<crate::Syntax::RuntimeLayer>,
+    /// D-ALLOC-PROGRAM1=A: selected hosted whole-program allocator.
+    pub allocator: crate::TargetMachine::AllocatorPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -499,6 +501,13 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::BadGuaranteePolicy { detail } => e1206(
             &file,
             &format!("package guarantee policy is malformed: {detail}"),
+        ),
+        PackageParseError::BadAllocatorPolicy { detail } => Diagnostic::error(
+            "E1206",
+            "invalid hosted program allocator",
+            detail.clone(),
+            "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`".to_string(),
+            None,
         ),
     }
 }

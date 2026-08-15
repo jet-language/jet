@@ -137,11 +137,13 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
                     .unwrap_or("run")
             });
             let dossier = idx.dossier(target);
-            let (budgets, command) = auxiliary_projections(&abs);
+            let (budgets, command, allocator) = auxiliary_projections(&abs);
             if json {
                 let mut value = dossier.to_json();
                 if value.ends_with('}') {
                     value.pop();
+                    value.push_str(",\"program_allocator\":");
+                    value.push_str(&allocator.audit_json());
                     value.push_str(",\"performance_budgets\":");
                     value.push_str(&budgets.to_json());
                     value.push_str(",\"command_schema\":");
@@ -151,6 +153,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
                 println!("{value}");
             } else {
                 print!("{}", dossier.render_text());
+                print!("{}", allocator_text(&allocator));
                 print!("{}", command_text(command.as_ref()));
                 print!("{}", budgets.render_text());
             }
@@ -179,14 +182,23 @@ fn auxiliary_projections(
 ) -> (
     jet::BudgetView::BudgetProjection,
     Option<jet_foundation::CLISchema::CLICommandSchema>,
+    jet::TargetMachine::AllocatorPolicy,
 ) {
     let entry_text = entry.to_string_lossy();
     let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error) {
-        return (jet::BudgetView::BudgetProjection::default(), None);
+        return (
+            jet::BudgetView::BudgetProjection::default(),
+            None,
+            jet::TargetMachine::AllocatorPolicy::HostedDefault,
+        );
     }
     let Some(bundle) = bundle else {
-        return (jet::BudgetView::BudgetProjection::default(), None);
+        return (
+            jet::BudgetView::BudgetProjection::default(),
+            None,
+            jet::TargetMachine::AllocatorPolicy::HostedDefault,
+        );
     };
     let command = entry_command_schema(&bundle);
     let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
@@ -195,7 +207,24 @@ fn auxiliary_projections(
         let path = module.path.strip_prefix(&root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
         (path, jet::SHA256::sha256_hex(module.source.as_bytes()))
     }).collect::<Vec<_>>();
-    (jet::BudgetView::read_compatible(&root, &sources), command)
+    (
+        jet::BudgetView::read_compatible(&root, &sources),
+        command,
+        bundle.program_allocator.clone(),
+    )
+}
+
+fn allocator_text(allocator: &jet::TargetMachine::AllocatorPolicy) -> String {
+    use jet::TargetMachine::AllocatorPolicy;
+    match allocator {
+        AllocatorPolicy::Counting { cap: Some(cap) } => {
+            format!("program allocator: counting(system), cap={} bytes\n", cap.bytes)
+        }
+        AllocatorPolicy::Counting { cap: None } => {
+            "program allocator: counting(system), uncapped\n".to_string()
+        }
+        _ => "program allocator: hidden system heap\n".to_string(),
+    }
 }
 
 fn entry_command_schema(

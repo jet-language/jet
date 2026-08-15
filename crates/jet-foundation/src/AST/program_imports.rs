@@ -608,6 +608,10 @@ pub struct ProgramBundle {
     /// checked package seam into every execution tier. Single-file bundles
     /// use the empty default; engines never rediscover package.jet.
     pub package_guarantees: PackageGuarantees,
+    /// D-ALLOC-PROGRAM1=A: the canonical package allocator fact projected by
+    /// Loader. Engines marshal this value into the shared Prelude kernel and
+    /// never read package.jet themselves.
+    pub program_allocator: crate::TargetMachine::AllocatorPolicy,
     /// D-OSTARGET2 (=B, ratified 2026-07-03): the active native OS bucket for
     /// this build — resolved from `--target=<triple>` (host OS when absent or a
     /// web/wasm pseudo-target). Seeded by the driver right after load; defaults
