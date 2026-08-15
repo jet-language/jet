@@ -256,6 +256,39 @@ fn registered_code_rows() -> Vec<(String, usize)> {
         .collect()
 }
 
+#[test]
+fn diagnostic_code_identity_accepts_numeric_and_named_error_and_lint_ids() {
+    use jet_foundation::Diagnostics::Severity;
+
+    for (code, severity) in [
+        ("E0043", Severity::Error),
+        ("E-CALL-VALUE", Severity::Error),
+        ("L0302", Severity::Lint),
+        ("L-NAMED-PROBE", Severity::Lint),
+    ] {
+        assert_eq!(
+            jet_foundation::Registry::diagnostic_code_severity(code),
+            Some(severity),
+            "{code} must keep its leading-letter severity identity"
+        );
+    }
+    for code in ["", "E", "L", "W0001", "X-NAMED"] {
+        assert_eq!(
+            jet_foundation::Registry::diagnostic_code_severity(code),
+            None,
+            "{code:?} is not an E/L diagnostic identity"
+        );
+    }
+    for row in jet_foundation::Registry::diagnostic_rows() {
+        assert_eq!(
+            jet_foundation::Registry::diagnostic_code_severity(row.code),
+            Some(row.severity),
+            "registered code {} disagrees with its severity",
+            row.code
+        );
+    }
+}
+
 fn is_snake_case(name: &str) -> bool {
     if name.is_empty() {
         return false;

@@ -844,12 +844,16 @@ pub fn diagnostic_registry_rows() -> impl Iterator<Item = &'static RegistryRow> 
     rows().iter().filter(|row| row.kind() == RowKind::Diagnostic)
 }
 
-fn diagnostic_code_severity(code: &str) -> Option<Severity> {
-    let bytes = code.as_bytes();
-    if bytes.len() != 5 || !bytes[1..].iter().all(u8::is_ascii_digit) {
+/// Classify a diagnostic identity by its severity prefix.
+///
+/// Numeric (`E0043`, `L0302`) and named (`E-CALL-VALUE`) identities share
+/// the same leading-letter law. The registry owns the complete valid set.
+pub fn diagnostic_code_severity(code: &str) -> Option<Severity> {
+    let (prefix, rest) = code.as_bytes().split_first()?;
+    if rest.is_empty() {
         return None;
     }
-    match bytes[0] {
+    match *prefix {
         b'E' => Some(Severity::Error),
         b'L' => Some(Severity::Lint),
         _ => None,
