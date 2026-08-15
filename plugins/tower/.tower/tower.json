@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1975,
-    "rev": 37458,
+    "rev": 37459,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -108524,6 +108524,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-15",
+          "by": "fable-e3-burndown",
+          "text": "Orchestrator finding at master 14eaf0bad, builder-verified: the ledger's emptiness is itself the false closure this card names, and it is still live. tests/jit_gaps.txt declares \"gaps: 0, run_gaps: 0\", but cargo test --test dev jit_coverage_audit OBSERVES 51 real gaps, each with a concrete reason -- e.g. basics/first_hour \"TourArgs::compare: jit binary op unsupported\"; collections/filter_map \"run: Duplicate definition of identifier __jet___lambda_571_595\"; collections/iter_adapters a Cranelift verifier error \"uses value v1072 from non-dominating inst1390\"; comptime/computed_constants a verifier arg-type mismatch \"arg 1 has type f64, expected i64\"; concurrency/pipeline \"jit result ?? type unsupported\"; effects/effect_levers \"jit unknown local f\". So #1363 was not merely closed with entries still on file: the entries were later deleted while the gaps remained, which is strictly worse than the state this card was written to correct, because the ratchet now reads clean.\n\nThe compile_covered set is also stale in both directions. The audit observes 388 covered stems against 391 recorded, but the sets differ by 80 in each direction -- 80 recorded stems are not covered (many now appear in the 51-gap list with reasons; the net/*, serde/* and ui/* families are simply not attempted) and 80 covered stems are unrecorded (basics/body_rules, memory/entity_tree, reflection/reflect-value and 77 more). The ledger therefore cannot be trusted as either a gap list or a coverage list, and the audit's drift assertion is the only honest signal.\n\nThree gaps WERE genuinely closed this session and are no longer reported: collections/set (SetSort read result 0 of a void host signature and panicked instead of declining), and types/unit_family plus types/capability_bundles (\"jit missing method Usd::add\" -- a #Numeric distinct type's operator has no lowerable Jet body, so func_ids could never contain it under any spelling). Fixes in c697a15a8. A fourth, modules/generic_modules, was closed by deff0ae64 (list ordering had no JIT arm, so a derived compare over a [T#capacity] field declined).\n\nCriterion 1 and 3 cannot honestly be met by editing the file: 51 gaps must actually close first, and per AGENTS.md I9 they may not be parked. This card should be treated as the umbrella it warns against becoming only after those 51 are minted as real cards."
+        },
+        {
           "at": "2026-08-14",
           "by": "codex-luna",
           "text": "#1653 implementation is present on master in 057a4480e6: value-position TIfCond::Matches uses lower_pattern_condition, resident safety recognizes it, and exactly four gap rows are removed (branch_dispatch_bench, enum_dot, enum_dot_patterns, enums). #1653 adds explicit four-stem tier parity coverage; runtime proof remains pending because its worker was instructed not to run tests."
@@ -108606,8 +108611,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:17:01.497Z",
-      "updated": "2026-08-14T07:52:44.827Z",
-      "updatedBy": "codex-luna",
+      "updated": "2026-08-15T16:14:40.974Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 206
     },
     {
@@ -172488,6 +172493,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-15T16:14:40.974Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02ur7xi",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-15T15:37:58.406Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -175979,13 +175991,6 @@
       "action": "card.criteria-meet",
       "ref": "c08q9a90",
       "note": "#5"
-    },
-    {
-      "at": "2026-08-14T19:02:00.745Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
