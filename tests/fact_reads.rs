@@ -111,7 +111,7 @@ fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
 
 #[test]
 fn typed_fact_fixture_matches_aot_default_and_interpreter() {
-    tir_support::assert_tiers_agree("reflection/fact_reads", FIXTURE, FIXTURE_EXPECTED);
+    tir_support::assert_tiers_agree("fact_reads", FIXTURE, FIXTURE_EXPECTED);
 }
 
 #[test]

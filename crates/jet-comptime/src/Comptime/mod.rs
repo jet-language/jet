@@ -800,6 +800,7 @@ fn build_fact_expr(value: CtValue, span: crate::Diagnostics::Span) -> Option<cra
     Some(match value {
         CtValue::Bool(value) => crate::AST::Expr::Bool(value, span),
         CtValue::Int(value) => crate::AST::Expr::Int(value, span, None, None),
+        CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false),
         CtValue::Char(value) => crate::AST::Expr::Char(value, span),
         CtValue::Str(value) => {
             crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value)], span)
@@ -2165,14 +2166,7 @@ fn scope_value<'a>(scope: &'a HashMap<String, CtValue>, name: &str) -> Option<&'
 }
 
 fn comptime_literal_expr(value: CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
-    Some(match value {
-        CtValue::Int(value) => crate::AST::Expr::Int(value, span, None, None),
-        CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false),
-        CtValue::Bool(value) => crate::AST::Expr::Bool(value, span),
-        CtValue::Char(value) => crate::AST::Expr::Char(value, span),
-        CtValue::Str(value) => crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value)], span),
-        _ => return None,
-    })
+    build_fact_expr(value, span)
 }
 
 fn expand_template_type(
