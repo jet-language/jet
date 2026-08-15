@@ -1075,12 +1075,11 @@ fn web_wasm_expr_supported(
                     Type::Named(type_name)
                         if bundle_has_explicit_unit_display(bundle, type_name)
                 );
-            let inherent = method.mangled
-                && matches!(
-                    &recv.ty,
-                    Type::Named(type_name)
-                        if bundle_has_inherent_method(bundle, type_name, &method.name)
-                );
+            let inherent = matches!(
+                &recv.ty,
+                Type::Named(type_name)
+                    if bundle_has_inherent_method(bundle, type_name, &method.name)
+            );
             (computed || display || inherent)
                 && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
                 && args.iter().all(|arg| {
@@ -2484,6 +2483,10 @@ fn items_have_inherent_method(items: &[Item], type_name: &str, method_name: &str
         Item::Struct(def) => {
             def.name == type_name && def.methods.iter().any(|method| method.name == method_name)
         }
+        Item::Impl(def) if def.trait_name.is_none() => {
+            def.type_name == type_name
+                && def.methods.iter().any(|method| method.name == method_name)
+        }
         Item::CodeModule(module) => module
             .body
             .as_ref()
@@ -2998,24 +3001,35 @@ fn emit_wasm_uninit_storage(out: &mut String) {
 /// Covered inherent methods use the same TIR-owned Rust bodies in Web Wasm as
 /// native AOT. This includes sema-synthesized computed getters and derive
 /// methods; the Web expression emitter only marshals the already-resolved call.
+fn emit_wasm_inherent_method_block(
+    owner: &str,
+    methods: &[Func],
+    cx: &Cx,
+    out: &mut String,
+) {
+    let methods = methods
+        .iter()
+        .filter(|method| TIR::tir_covers_method(method, owner, cx))
+        .collect::<Vec<_>>();
+    if methods.is_empty() {
+        return;
+    }
+    out.push_str(&format!("impl {} {{\n", mangle_path(owner)));
+    for method in methods {
+        let tir = TIR::lower_method(method, owner, cx);
+        TIR::emit_tir_func(&tir, cx, out);
+    }
+    out.push_str("}\n\n");
+}
+
 fn emit_wasm_inherent_methods(items: &[Item], cx: &Cx, out: &mut String) {
     for item in items {
         match item {
             Item::Struct(def) if def.type_params.is_empty() => {
-                let methods = def
-                    .methods
-                    .iter()
-                    .filter(|method| TIR::tir_covers_method(method, &def.name, cx))
-                    .collect::<Vec<_>>();
-                if methods.is_empty() {
-                    continue;
-                }
-                out.push_str(&format!("impl {} {{\n", mangle_path(&def.name)));
-                for method in methods {
-                    let tir = TIR::lower_method(method, &def.name, cx);
-                    TIR::emit_tir_func(&tir, cx, out);
-                }
-                out.push_str("}\n\n");
+                emit_wasm_inherent_method_block(&def.name, &def.methods, cx, out);
+            }
+            Item::Impl(def) if def.trait_name.is_none() => {
+                emit_wasm_inherent_method_block(&def.type_name, &def.methods, cx, out);
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
