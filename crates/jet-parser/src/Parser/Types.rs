@@ -490,16 +490,88 @@ impl<'a> Parser<'a> {
                         value: Box::new(value),
                     }
                 } else if matches!(self.peek().kind, TokKind::Hash) {
-                    // S76 / D-META-CONST1: `[T#expr]` fixed-size list. Sema
-                    // evaluates the expression through the ordinary comptime
-                    // evaluator after names and module values are known.
+                    // D-TYPE2-MEASURE1=A: a type measure is declared data,
+                    // not a user-code comptime expression.
                     self.bump(); // consume `#`
-                    let len_expr = self.expr()?;
+                    let len = match self.peek().kind.clone() {
+                        TokKind::Int(value, _)
+                            if value >= 0
+                                && matches!(self.peek2().kind, TokKind::RBracket) =>
+                        {
+                            self.bump();
+                            crate::AST::Measure::literal("length", value as u64)
+                        }
+                        TokKind::Ident(name)
+                            if matches!(self.peek2().kind, TokKind::RBracket) =>
+                        {
+                            self.bump();
+                            crate::AST::Measure::symbol("length", name)
+                        }
+                        TokKind::LParen => {
+                            self.bump();
+                            let left = match self.bump().kind {
+                                TokKind::Ident(name) => {
+                                    crate::AST::Measure::symbol("length", name)
+                                }
+                                TokKind::Int(value, _) if value >= 0 => {
+                                    crate::AST::Measure::literal("length", value as u64)
+                                }
+                                _ => {
+                                    return Err(Diagnostic::error(
+                                        "E0963",
+                                        "a fixed-size list combination needs a declared measure"
+                                            .to_string(),
+                                        "only literals and module value parameters can participate in a type measure rule"
+                                            .to_string(),
+                                        "write `(N + M)` using declared Int value parameters"
+                                            .to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                }
+                            };
+                            self.expect(TokKind::Plus, "in the additive length rule `(N + M)`")?;
+                            let right = match self.bump().kind {
+                                TokKind::Ident(name) => {
+                                    crate::AST::Measure::symbol("length", name)
+                                }
+                                TokKind::Int(value, _) if value >= 0 => {
+                                    crate::AST::Measure::literal("length", value as u64)
+                                }
+                                _ => {
+                                    return Err(Diagnostic::error(
+                                        "E0963",
+                                        "a fixed-size list combination needs a declared measure"
+                                            .to_string(),
+                                        "only literals and module value parameters can participate in a type measure rule"
+                                            .to_string(),
+                                        "write `(N + M)` using declared Int value parameters"
+                                            .to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                }
+                            };
+                            self.expect(TokKind::RParen, "after the additive length rule")?;
+                            left.combine(&right, crate::AST::MeasureRule::Add)
+                                .expect("both length measures use the same kind")
+                        }
+                        _ => {
+                            let expression = self.expr()?;
+                            return Err(Diagnostic::error(
+                                "E0963",
+                                "a fixed-size list length must be a declared measure"
+                                    .to_string(),
+                                "type measures are integer literals or module value parameters; user code cannot compute a type"
+                                    .to_string(),
+                                "write an integer literal, or pass an Int value parameter to the module"
+                                    .to_string(),
+                                Some(expression.span()),
+                            ));
+                        }
+                    };
                     self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
                     Type::FixedList {
                         elem: Box::new(first),
-                        len: 0,
-                        len_expr: Some(Box::new(len_expr)),
+                        len,
                     }
                 } else {
                     self.expect(TokKind::RBracket, "after the element type in `[T]`")?;

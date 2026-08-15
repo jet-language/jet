@@ -1565,21 +1565,20 @@ Most unit scales are exact ratios. Degree uses the exact symbolic definition
 pinned BIPM/CODATA central value, standard uncertainty, and source. A measured
 crossing requires an explicit rounded conversion and is never labeled exact.
 
-### `core.units` — measured numeric values (D-TYPE2-UNCERT1)
+### Measured numeric values (D-TYPE2-UNCERT1)
 
-`measurement.from(value, uncertainty)` is the canonical measured-value
-constructor. An exact value enters the measured grade with uncertainty `0.0`.
-Arithmetic uses first-order linear propagation with uncorrelated inputs.
-Correlated errors are out of scope. Ordinary numeric code keeps its existing
-meaning until a measured value enters it.
+`measurement(value, uncertainty: standard_uncertainty)` is the canonical
+measured-value constructor. An exact value enters the measured grade with
+uncertainty `0.0`. Arithmetic operators and `core.math.sqrt` use first-order
+linear propagation with uncorrelated inputs. Correlated errors are out of
+scope. Ordinary numeric code keeps its existing meaning until a measured
+value enters it.
 
 ```jet
-use core.units as measurement
-
 fn run() {
-    gravity :: measurement.from(9.8, 0.1)
-    exact_scale :: measurement.from(2.0, 0.0)
-    print(exact_scale.mul(gravity)) // 19.6 ± 0.2
+    gravity :: measurement(9.8, uncertainty: 0.1)
+    exact_scale :: measurement(2.0, uncertainty: 0.0)
+    print(exact_scale * gravity) // 19.6 ± 0.2
 }
 ```
 

@@ -1758,6 +1758,7 @@ extern "C" fn jet_jit_measurement_arithmetic(left: i64, right: i64, op: i64) -> 
             1 => measurement_kernel::jet_measurement_kernel_sub(left, right),
             2 => measurement_kernel::jet_measurement_kernel_mul(left, right),
             3 => measurement_kernel::jet_measurement_kernel_div(left, right),
+            4 => measurement_kernel::jet_measurement_kernel_sqrt(left),
             _ => {
                 rt.set_trap("the JIT received an invalid Measurement operation");
                 return 0;

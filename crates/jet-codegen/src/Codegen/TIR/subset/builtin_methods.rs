@@ -220,14 +220,11 @@ pub(crate) fn is_process_handle_method_name(
     }
 }
 
-/// D-HONESTNUM1=A: is `(method, nargs)` a `Measurement<Float>` method?
-/// `.add/sub/mul/div(m)` (1 arg), `.value()/.uncertainty()` (0 args).
-/// Always keyed with `recv_type == Some("Measurement")`.
+/// D-TYPE2-UNCERT1=A: the source-visible Measurement observations.
+/// Arithmetic lowers directly from the ordinary operators to the resident
+/// Measurement handle op, so this table does not keep named arithmetic aliases.
 pub(crate) fn is_measurement_method_name(method: &str, nargs: usize) -> bool {
-    matches!(
-        (method, nargs),
-        ("add" | "sub" | "mul" | "div", 1) | ("value" | "uncertainty", 0)
-    )
+    matches!((method, nargs), ("value" | "uncertainty", 0))
 }
 
 /// D-PENDING1=B: is `(method, nargs)` a `Loadable<T,E>` method?

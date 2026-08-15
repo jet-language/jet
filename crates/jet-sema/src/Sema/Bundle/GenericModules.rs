@@ -420,17 +420,33 @@ fn specialize_module_type(
     let mut resolved = crate::Generics::substitute_type(ty, types);
     fn lengths(ty: &mut Type, types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) {
         match ty {
-            Type::FixedList { elem, len_expr, .. } => {
+            Type::FixedList { elem, len } => {
                 lengths(elem, types, values);
-                if let Some(expr) = len_expr.as_mut() {
-                    substitute_expr(expr, types, values);
-                }
+                *len = len.resolve_symbols(&|name| {
+                    values.get(name).and_then(|value| match value {
+                        crate::AST::CtValue::Int(value) => u64::try_from(*value).ok(),
+                        _ => None,
+                    })
+                });
             }
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => lengths(inner, types, values),
             Type::Map { key, value, .. } => { lengths(key, types, values); lengths(value, types, values); }
             Type::Result { ok, err } => { lengths(ok, types, values); lengths(err, types, values); }
             Type::Fn { params, ret, .. } => { for param in params { lengths(param, types, values); } if let Some(ret) = ret { lengths(ret, types, values); } }
-            Type::Apply { args, .. } => args.iter_mut().for_each(|arg| lengths(arg, types, values)),
+            Type::Apply { name, args } => {
+                if matches!(name.as_str(), "Vec" | "Matrix") {
+                    for argument in args.iter_mut() {
+                        if let Type::Named(symbol) = argument {
+                            if let Some(crate::AST::CtValue::Int(value)) = values.get(symbol) {
+                                if let Ok(value) = u64::try_from(*value) {
+                                    *argument = Type::compute_dimension_type(value);
+                                }
+                            }
+                        }
+                    }
+                }
+                args.iter_mut().for_each(|arg| lengths(arg, types, values));
+            }
             Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, types, values)),
             Type::Tagged { marker, inner } => {
                 // Only a user-written tag name (D-QUAL4) can coincide with a

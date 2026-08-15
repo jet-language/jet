@@ -897,10 +897,9 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
                 .map(|(name, ty)| (name, Box::new(core_crypto_nominal(*ty))))
                 .collect(),
         ),
-        Type::FixedList { elem, len, len_expr } => Type::FixedList {
+        Type::FixedList { elem, len } => Type::FixedList {
             elem: Box::new(core_crypto_nominal(*elem)),
             len,
-            len_expr,
         },
         Type::Fn {
             params,
@@ -1788,8 +1787,7 @@ mod tests {
                 Type::Shared(Box::new(Type::Named("Secret".to_string()))),
                 Type::FixedList {
                     elem: Box::new(Type::Named("SigningKey".to_string())),
-                    len: 1,
-                    len_expr: None,
+                    len: crate::AST::Measure::literal("length", 1),
                 },
                 Type::Tagged {
                     marker: TagMarker::User("Audit".to_string()),

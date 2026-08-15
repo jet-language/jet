@@ -66,13 +66,11 @@ fn builtin_math_family_has_named_field_parity_on_both_lenses() {
 #[test]
 fn measured_values_propagate_first_order_uncertainty() {
     let source = r#"
-use core.units as measurement
-
 fn run() {
-    gravity :: measurement.from(9.8, 0.1)
-    time :: measurement.from(2.0, 0.05)
-    squared_time :: time.mul(time)
-    height :: measurement.from(0.5, 0.0).mul(gravity).mul(squared_time)
+    gravity :: measurement(9.8, uncertainty: 0.1)
+    time :: measurement(2.0, uncertainty: 0.05)
+    squared_time :: time * time
+    height :: measurement(0.5, uncertainty: 0.0) * gravity * squared_time
     print(height)
 }
 "#;

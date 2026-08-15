@@ -671,7 +671,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.event", "scope", "jet_std::JetEventScope::new", true, &[]), // D-EVENT1=D: first-party typed Event/Hook constructors.
     CoreCallRecord::new("core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[]),
     CoreCallRecord::new("core.units", "from", "jet_std::JetMeasurement::new", true, &[false, false])
-        .with_pure_route(CoreCallPureRoute::Measurement), // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
+        .with_pure_route(CoreCallPureRoute::Measurement), // D-TYPE2-UNCERT1=A: internal route for canonical `measurement(value, uncertainty: u)`.
     CoreCallRecord::new("core.math", "fraction", "jet_fraction_new", true, &[false, false])
         .with_pure_route(CoreCallPureRoute::Math), // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → exact parse.
     CoreCallRecord::new("core.math", "decimal", "jet_decimal_from_str", true, &[true])

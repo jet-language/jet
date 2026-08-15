@@ -227,10 +227,9 @@ impl<'a> Checker<'a> {
                         .map(|(n, t)| (n, Box::new(self.resolve_type(*t))))
                         .collect(),
                 ),
-                Type::FixedList { elem, len, len_expr } => Type::FixedList {
+                Type::FixedList { elem, len } => Type::FixedList {
                     elem: Box::new(self.resolve_type(*elem)),
                     len,
-                    len_expr,
                 },
                 Type::InlineRange { base, lo, hi } => Type::InlineRange {
                     base: Box::new(self.resolve_type(*base)),

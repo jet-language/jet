@@ -656,8 +656,7 @@ fn mk() {
         };
         let fl = Type::FixedList {
             elem: Box::new(Type::Int),
-            len: 3,
-            len_expr: None,
+            len: crate::AST::Measure::literal("length", 3),
         };
         // param/return helper coverage:
         assert!(is_subset_param_ty(&fl, &mk("fn f(){}")));

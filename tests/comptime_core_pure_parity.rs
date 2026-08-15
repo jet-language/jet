@@ -18,17 +18,17 @@ const CIVIL_FN: &str = "fn civil_view() => String {\n    d :: date.parse(\"2024-
 const CIVIL_DECLS: &str = "use core.time as time\nuse core.time as date\nuse core.time as datetime\nfn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
 const CIVIL_EXPR: &str = "civil_view()";
 const CIVIL_DEV_DECLS: &str = "use core.time as date\nuse core.time as datetime\nfn civil_dev_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
-const MEASUREMENT_FN: &str = "fn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
-const MEASUREMENT_DECLS: &str = "use core.units as measurement\nfn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const MEASUREMENT_FN: &str = "fn measurement_math() => String {\n    a :: measurement(3.0, uncertainty: 4.0)\n    b :: measurement(0.0, uncertainty: 3.0)\n    q :: measurement(8.0, uncertainty: 0.0) / measurement(2.0, uncertainty: 0.0)\n    return \"{(a + b).value()}|{(a + b).uncertainty()}|{(a - b).value()}|{(a - b).uncertainty()}|{(a * b).value()}|{(a * b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const MEASUREMENT_DECLS: &str = MEASUREMENT_FN;
 const MEASUREMENT_EXPR: &str = "measurement_math()";
 const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) => Measurement<Float> {
     hits += 1
-    return measurement.from(1.0, 0.0)
+    return measurement(1.0, uncertainty: 0.0)
 }
 fn add_argument_once_view() => String {
     hits := 0
-    measured :: measurement.from(2.0, 0.0)
-    sum :: measured.add(counted_measurement(&hits))
+    measured :: measurement(2.0, uncertainty: 0.0)
+    sum :: measured + counted_measurement(&hits)
     return "{sum.value()}|{hits}"
 }"#;
 const SCALAR_DECLS: &str = r#"fn scalar_view() => String {
@@ -481,7 +481,6 @@ fn public_transcript_covers_remaining_core_pure_families() {
         "use core.time as time",
         "use core.time as date",
         "use core.time as datetime",
-        "use core.units as measurement",
         "mime.from_extension(\".PNG\") ?? \"none\"",
         "mime.extension(\"Text/HTML; charset=UTF-8\") ?? \"none\"",
         "mime.parse(\"Text/HTML; charset=UTF-8\")",
@@ -497,7 +496,7 @@ fn public_transcript_covers_remaining_core_pure_families() {
         "date.parse(\"2024-02-29\")",
         "datetime.from_timestamp(-1)",
         "time.from_unix_ms(-1)",
-        "measurement.from(12.5, 0.25).value()",
+        "measurement(12.5, uncertainty: 0.25).value()",
     ]);
     assert_eq!(
         values,
@@ -599,7 +598,6 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
         "use core.time as datetime",
         CIVIL_FN,
         CIVIL_EXPR,
-        "use core.units as measurement",
         MEASUREMENT_FN,
         MEASUREMENT_EXPR,
     ]);
@@ -615,7 +613,6 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
 #[test]
 fn public_transcript_evaluates_pure_add_arguments_once() {
     let values = exact_values(&[
-        "use core.units as measurement",
         ADD_ARGUMENT_ONCE_DECLS,
         "add_argument_once_view()",
     ]);
@@ -943,7 +940,7 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             "measurement/observable-methods",
             parity_source(
                 "measurement_view()",
-                "use core.units as measurement\nfn measurement_view() => String {\n    value :: measurement.from(12.5, 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
+                "fn measurement_view() => String {\n    value :: measurement(12.5, uncertainty: 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
             ),
         ),
     ];
@@ -1160,7 +1157,7 @@ fn rustc_backed_datetime_and_measurement_display_are_exact() {
     assert_eq!(
         check_aot_comptime(
             "measurement/interpolation-display",
-            "use core.units as measurement\n@value :: measurement.from(12.5, 0.25)\n@expected :: \"{value}\"\n\nfn run() {\n    actual :: measurement.from(12.5, 0.25)\n    print(expected)\n    print(actual)\n}\n",
+            "@value :: measurement(12.5, uncertainty: 0.25)\n@expected :: \"{value}\"\n\nfn run() {\n    actual :: measurement(12.5, uncertainty: 0.25)\n    print(expected)\n    print(actual)\n}\n",
         ),
         "12.5 ± 0.25"
     );

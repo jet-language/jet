@@ -1597,7 +1597,7 @@ impl LowerCtx<'_, '_> {
         }
         if let Type::FixedList { elem, len, .. } = target {
             let decoded = self.lower_datatree_decode_list(tree, elem)?;
-            let len = i64::try_from(*len)
+            let len = i64::try_from(len.require_literal())
                 .map_err(|_| format!("jit fixed-list length `{len}` exceeds I64"))?;
             let len = self.b.ins().iconst(types::I64, len);
             return Ok(self.call_host(self.host.encoding.decode_fixed_len, &[decoded, len]));
@@ -17199,7 +17199,7 @@ impl LowerCtx<'_, '_> {
                     let uninit_ref = self
                         .module
                         .declare_func_in_func(self.host.coll.list_uninit, self.b.func);
-                    let len = i64::try_from(*len)
+                    let len = i64::try_from(len.require_literal())
                         .map_err(|_| "jit fixed-list length exceeds i64".to_string())?;
                     let len = self.b.ins().iconst(types::I64, len);
                     let call = self.b.ins().call(uninit_ref, &[len]);
@@ -22688,6 +22688,13 @@ impl LowerCtx<'_, '_> {
                     };
                     let op = self.b.ins().iconst(types::I64, op);
                     Ok(self.call_host(self.host.measurement_arithmetic, &[recv_val, right, op]))
+                }
+                "sqrt" if args.is_empty() => {
+                    let op = self.b.ins().iconst(types::I64, 4);
+                    Ok(self.call_host(
+                        self.host.measurement_arithmetic,
+                        &[recv_val, recv_val, op],
+                    ))
                 }
                 _ => Err("jit handle method unsupported".to_string()),
             },

@@ -2320,6 +2320,70 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             let lhs = lower_expr(l, cx, env);
             let rhs = lower_expr(r, cx, env);
+            // D-TYPE2-MEASURE1=A: Matrix multiplication carries the composed
+            // outer measures in TIR while the shared compute Prelude owns the
+            // one fallible runtime operation.
+            if *op == BinOp::Mul {
+                if let (
+                    Type::Apply { name: left, .. },
+                    Type::Apply { name: right, .. },
+                    Some([rows, inner]),
+                    Some([right_inner, cols]),
+                ) = (
+                    &lhs.ty,
+                    &rhs.ty,
+                    lhs.ty
+                        .compute_shape_dimensions()
+                        .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+                    rhs.ty
+                        .compute_shape_dimensions()
+                        .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+                ) {
+                    if left == "Matrix" && right == "Matrix" && inner == right_inner {
+                        return TExpr {
+                            ty: Type::Result {
+                                ok: Box::new(Type::compute_shape_type("Matrix", &[rows, cols])),
+                                err: Box::new(Type::Named("ComputeError".to_string())),
+                            },
+                            kind: TExprKind::CoreCall {
+                                module: "core.compute".to_string(),
+                                method: "matmul".to_string(),
+                                args: vec![lhs, rhs],
+                                source_span: *span,
+                                widen_to_vec: vec![false, false],
+                            },
+                        };
+                    }
+                }
+            }
+            // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
+            // zero-uncertainty measurements. Reuse the resident measurement
+            // handle op so AOT, JIT, interpreter, comptime, REPL and web call
+            // the same Prelude kernel.
+            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+                && matches!((&lhs.ty, &rhs.ty), (
+                    Type::Apply { name: left, .. },
+                    Type::Apply { name: right, .. }
+                ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
+            {
+                return TExpr {
+                    ty: lhs.ty.clone(),
+                    kind: TExprKind::HandleMethod {
+                        recv: Box::new(lhs),
+                        op: THandleOp::MeasurementMethod {
+                            method: match op {
+                                BinOp::Add => "add",
+                                BinOp::Sub => "sub",
+                                BinOp::Mul => "mul",
+                                BinOp::Div => "div",
+                                _ => unreachable!(),
+                            }
+                            .to_string(),
+                        },
+                        args: vec![rhs],
+                    },
+                };
+            }
             // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
             // Multiplication/division unwrap nominal unit values and emit a
             // plain numeric operation; the normalized result type is retained
@@ -2656,6 +2720,33 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::NumericMethod {
                         recv: Box::new(source),
                         op,
+                    },
+                };
+            }
+            // D-TYPE2-UNCERT1=A: the canonical source constructor lowers to
+            // the same Prelude symbol every engine already uses. `core.units`
+            // is an internal route, not a second user-visible spelling.
+            if call.name == "measurement"
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+                && call.args.len() == 2
+            {
+                let args = call
+                    .args
+                    .iter()
+                    .map(|argument| lower_expr(&argument.expr, cx, env))
+                    .collect::<Vec<_>>();
+                return TExpr {
+                    ty: Type::Apply {
+                        name: Syntax::TYPE_MEASUREMENT.to_string(),
+                        args: vec![Type::Float],
+                    },
+                    kind: TExprKind::CoreCall {
+                        module: "core.units".to_string(),
+                        method: "from".to_string(),
+                        source_span: call.name_span,
+                        widen_to_vec: vec![false; args.len()],
+                        args,
                     },
                 };
             }

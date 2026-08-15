@@ -56,7 +56,7 @@ fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
 fn known_list_len(checker: &Checker<'_>, expr: &crate::AST::Expr) -> Option<usize> {
     match expr {
         crate::AST::Expr::Ident(name, _) => match &checker.lookup(name)?.ty {
-            Type::FixedList { len, .. } => usize::try_from(*len).ok(),
+            Type::FixedList { len, .. } => usize::try_from(len.require_literal()).ok(),
             _ => None,
         },
         crate::AST::Expr::Paren(inner, _) => known_list_len(checker, inner),
@@ -2460,12 +2460,27 @@ impl<'a> Checker<'a> {
                         return Some(Type::Float);
                     };
                     let ty = self.infer(&mut arg.expr)?;
+                    if name == "sqrt"
+                        && matches!(
+                            &ty,
+                            Type::Apply { name, args }
+                                if name == Syntax::TYPE_MEASUREMENT
+                                    && args == &[Type::Float]
+                        )
+                    {
+                        return Some(ty);
+                    }
                     if !matches!(ty, Type::Float | Type::Float32) {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`{}` needs Float or F32, not {}", name, ty.show()),
-                            "math functions in this family operate on floating-point numbers".to_string(),
-                            "pass a Float or F32 value".to_string(),
+                            format!(
+                                "`{}` needs Float, F32, or Measurement<Float>, not {}",
+                                name,
+                                ty.show()
+                            ),
+                            "math functions preserve their numeric knowledge grade".to_string(),
+                            "pass a Float or F32 value, or use `sqrt` with a measurement"
+                                .to_string(),
                             Some(arg.expr.span()),
                         ));
                         return None;
@@ -4738,23 +4753,6 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
                     return Some(Type::Named("ReservoirSampler".to_string()));
-                }
-                // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
-                ("core.units", "from") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("from", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("from", 0, &Type::Float, &mut args[0]);
-                    self.expect_core_arg("from", 1, &Type::Float, &mut args[1]);
-                    return Some(Type::Apply {
-                        name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
-                        args: vec![Type::Float],
-                    });
                 }
                 // D-NUMTYPE1=A: core.math.fraction(top, bottom) answers an exact
                 // ratio, or nothing when the bottom is zero.

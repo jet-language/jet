@@ -198,8 +198,7 @@ fn measure_rows_share_one_registry_and_all_tiers() {
     let plane = Registry::type_plane("Measure");
     let fixed = Type::FixedList {
         elem: Box::new(Type::Int),
-        len: 4,
-        len_expr: None,
+        len: jet::AST::Measure::literal("length", 4),
     };
     let matrix = Type::compute_shape_type("Matrix", &[2, 3]);
     let lanes = Type::Named("F32x4".to_string());

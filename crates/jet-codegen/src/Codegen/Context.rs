@@ -18,6 +18,7 @@ pub(crate) struct UnitFact {
     pub(crate) kind: crate::AST::QuantityKind,
     pub(crate) scale: crate::AST::UnitRatio,
     pub(crate) offset: crate::AST::UnitRatio,
+    pub(crate) scale_provenance: crate::AST::UnitScaleProvenance,
 }
 
 #[derive(Clone)]
@@ -77,6 +78,7 @@ fn unit_fact(
         } else {
             crate::AST::UnitRatio::zero()
         },
+        scale_provenance: member.scale_provenance.clone(),
     }
 }
 
@@ -1635,10 +1637,9 @@ impl Cx {
                 marker: marker.clone(),
                 inner: Box::new(self.expand_type_aliases(inner)),
             },
-            Type::FixedList { elem, len, .. } => Type::FixedList {
+            Type::FixedList { elem, len } => Type::FixedList {
                 elem: Box::new(self.expand_type_aliases(elem)),
-                len: *len,
-                len_expr: None,
+                len: len.clone(),
             },
             Type::InlineRange { base, lo, hi } => Type::InlineRange {
                 base: Box::new(self.expand_type_aliases(base)),
@@ -3814,6 +3815,7 @@ pub(crate) fn build_cx_items(
                 kind,
                 scale: crate::AST::UnitRatio::integer(1),
                 offset: crate::AST::UnitRatio::zero(),
+                scale_provenance: crate::AST::UnitScaleProvenance::Rational,
             },
         );
     }

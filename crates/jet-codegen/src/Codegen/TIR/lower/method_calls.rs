@@ -36,6 +36,20 @@ use crate::Codegen::TIR::is_sketch_method_name;
 use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 
+fn unit_ratio_as_f64(value: &crate::AST::UnitRatio) -> f64 {
+    let numerator = value
+        .num
+        .to_string()
+        .parse::<f64>()
+        .expect("validated unit numerator");
+    let denominator = value
+        .den
+        .to_string()
+        .parse::<f64>()
+        .expect("validated unit denominator");
+    numerator / denominator
+}
+
 fn progress_return_ty(args: &[TExpr]) -> Type {
     if matches!(args.first().map(|arg| &arg.ty), Some(Type::String)) {
         return Type::Result {
@@ -2544,6 +2558,28 @@ fn lower_method_call_impl(
                     env,
                 ) {
                     return transform;
+                }
+                if module == "core.math"
+                    && method == "sqrt"
+                    && args.len() == 1
+                    && matches!(
+                        resolved_ret,
+                        Some(Type::Apply { name, args })
+                            if name == Syntax::TYPE_MEASUREMENT
+                                && args == &[Type::Float]
+                    )
+                {
+                    let recv = lower_expr(&args[0].expr, cx, env);
+                    return TExpr {
+                        ty: recv.ty.clone(),
+                        kind: TExprKind::HandleMethod {
+                            recv: Box::new(recv),
+                            op: THandleOp::MeasurementMethod {
+                                method: "sqrt".to_string(),
+                            },
+                            args: Vec::new(),
+                        },
+                    };
                 }
                 // D-PIN1=A: `mem.pin(&place)` IS the exclusive borrow of
                 // `place`. Sema proved the no-move contract before lowering
@@ -5354,19 +5390,43 @@ fn lower_method_call_impl(
                     let offset = source.offset.sub(&destination.offset)
                         .and_then(|value| value.div(&destination.scale))
                         .expect("sema validated unit offset");
+                    let measured_scale_uncertainty = |fact: &crate::Codegen::UnitFact| {
+                        match &fact.scale_provenance {
+                            crate::AST::UnitScaleProvenance::Measured {
+                                standard_uncertainty,
+                                ..
+                            } => Some(*standard_uncertainty / unit_ratio_as_f64(&fact.scale).abs()),
+                            _ => None,
+                        }
+                    };
+                    let source_relative = measured_scale_uncertainty(source);
+                    let destination_relative = measured_scale_uncertainty(destination);
+                    let relative_uncertainty = if source_relative.is_some()
+                        || destination_relative.is_some()
+                    {
+                        Some(
+                            source_relative
+                                .unwrap_or(0.0)
+                                .hypot(destination_relative.unwrap_or(0.0)),
+                        )
+                    } else {
+                        None
+                    };
                     let fallible = matches!(resolved_ret, Some(Type::Result { .. }));
                     let rounding = rounding.map(|mode| {
                         (mode, Box::new(lower_expr(&args[2].expr, cx, env)))
                     });
                     return TExpr {
-                        ty: if fallible {
-                            Type::Result {
-                                ok: Box::new(Type::Float),
-                                err: Box::new(Type::String),
+                        ty: resolved_ret.clone().unwrap_or_else(|| {
+                            if fallible {
+                                Type::Result {
+                                    ok: Box::new(Type::Float),
+                                    err: Box::new(Type::String),
+                                }
+                            } else {
+                                Type::Float
                             }
-                        } else {
-                            Type::Float
-                        },
+                        }),
                         kind: TExprKind::UnitConvert {
                             destination: type_name,
                             arg: Box::new(lowered),
@@ -5374,6 +5434,7 @@ fn lower_method_call_impl(
                             offset,
                             rounding,
                             fallible,
+                            relative_uncertainty,
                             file: cx.file.clone(),
                             line: crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
                                 as u32,

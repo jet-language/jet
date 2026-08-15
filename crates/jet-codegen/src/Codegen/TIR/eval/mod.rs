@@ -31,6 +31,10 @@ mod range_semantics {
     include!("../../../Prelude/Core/RangeBounds.rs");
     include!("../../../Prelude/Core/InlineRange.rs");
 }
+mod measurement_semantics {
+    include!("../../../Prelude/Core/Measurement.rs");
+}
+
 
 mod disjoint_semantics {
     include!("../../../Prelude/Core/Disjoint.rs");

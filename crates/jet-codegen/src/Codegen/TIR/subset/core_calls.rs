@@ -149,8 +149,8 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.reflect" && method == "of" {
         return true;
     }
-    // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `JetMeasurement<f64>`. NOT in
-    // `core_fixed_sig` — the return type is `Measurement<Float>` (generic Apply).
+    // D-TYPE2-UNCERT1=A: internal route for canonical `measurement(value,
+    // uncertainty: u)` lowering; it is not a Core source surface.
     if module == "core.units" && method == "from" {
         return true;
     }

@@ -3465,6 +3465,9 @@ pub enum TExprKind {
         offset: crate::AST::UnitRatio,
         rounding: Option<(jet_foundation::UnitRoundingMode, Box<TExpr>)>,
         fallible: bool,
+        /// First-order relative standard uncertainty contributed by measured
+        /// unit scales. `None` keeps the ordinary exact quantity result.
+        relative_uncertainty: Option<f64>,
         file: String,
         line: u32,
     },

@@ -765,7 +765,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
             }
         }
-        // D-HONESTNUM1=A: `M.from(value, uncertainty)` → `Measurement<Float>`.
+        // D-TYPE2-UNCERT1=A: internal canonical measurement constructor route.
         ("core.units", "from") => {
             return Type::Apply {
                 name: Syntax::TYPE_MEASUREMENT.to_string(),

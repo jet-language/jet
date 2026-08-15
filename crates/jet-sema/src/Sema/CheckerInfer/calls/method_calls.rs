@@ -2417,6 +2417,32 @@ impl<'a> Checker<'a> {
                 }
             }
 
+            // D-TYPE2-MEASURE1=A: non-mutating fixed-list join declares the
+            // additive length rule on the shared measure substrate.
+            if method == "concat" && args.len() == 1 {
+                if let Type::FixedList {
+                    elem: left_elem,
+                    len: left_len,
+                } = &recv_ty
+                {
+                    if let Some(Type::FixedList {
+                        elem: right_elem,
+                        len: right_len,
+                    }) = self.infer(&mut args[0].expr)
+                    {
+                        self.check_type_assignable(left_elem, &right_elem, args[0].expr.span());
+                        if let Some(len) =
+                            left_len.combine(&right_len, crate::AST::MeasureRule::Add)
+                        {
+                            *recv_type_out = Some("List".to_string());
+                            return Some(Type::FixedList {
+                                elem: left_elem.clone(),
+                                len,
+                            });
+                        }
+                    }
+                }
+            }
             // E0964: length-changing methods are forbidden on a fixed-size [T#N].
             if let Type::FixedList { .. } = &recv_ty {
                 if matches!(method, "push" | "pop" | "insert" | "remove" | "clear") {
@@ -3856,38 +3882,15 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // D-HONESTNUM1=A: methods on `Measurement<Float>` (value ± uncertainty).
-            // `.add/sub/mul/div(m)` → Measurement<Float>; `.value()/.uncertainty()` → Float.
-            // Operator overloading is NOT extended here — I8 closed-family rule.
+            // D-TYPE2-UNCERT1=A: a Measurement exposes its two observations.
+            // Arithmetic is the ordinary operator surface; the old named
+            // add/sub/mul/div methods are not a second spelling.
             if let Type::Apply { name, .. } = &recv_ty {
-                if name == crate::Syntax::TYPE_MEASUREMENT {
-                    let meas_ty = recv_ty.clone();
-                    let ret = match (method, args.len()) {
-                        ("add" | "sub" | "mul" | "div", 1) => {
-                            let arg_ty = self.infer(&mut args[0].expr);
-                            if let Some(got) = &arg_ty {
-                                if got != &meas_ty {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0128",
-                                        format!(
-                                            "`.{}()` expects a `Measurement<Float>`, got `{}`",
-                                            method, got.name()
-                                        ),
-                                        "Measurement arithmetic requires both operands to have the same type".to_string(),
-                                        "wrap the value with `M.from(value, uncertainty)` first".to_string(),
-                                        Some(args[0].expr.span()),
-                                    ));
-                                }
-                            }
-                            Some(meas_ty.clone())
-                        }
-                        ("value" | "uncertainty", 0) => Some(Type::Float),
-                        _ => None,
-                    };
-                    if let Some(r) = ret {
-                        *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
-                        return Some(r);
-                    }
+                if name == crate::Syntax::TYPE_MEASUREMENT
+                    && matches!((method, args.len()), ("value" | "uncertainty", 0))
+                {
+                    *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
+                    return Some(Type::Float);
                 }
             }
             // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids`

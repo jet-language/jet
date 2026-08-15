@@ -2043,6 +2043,11 @@
             let (value, uncertainty) = super::jet_measurement_kernel_new(value, uncertainty);
             JetMeasurement { value, uncertainty }
         }
+        pub fn from_relative(value: f64, relative_uncertainty: f64) -> Self {
+            let (value, uncertainty) =
+                super::jet_measurement_kernel_from_relative(value, relative_uncertainty);
+            JetMeasurement { value, uncertainty }
+        }
         pub fn value(&self) -> f64 {
             self.value
         }
@@ -2078,6 +2083,11 @@
                 (self.value, self.uncertainty),
                 (other.value, other.uncertainty),
             );
+            JetMeasurement::new(value, uncertainty)
+        }
+        pub fn sqrt(&self) -> JetMeasurement<f64> {
+            let (value, uncertainty) =
+                super::jet_measurement_kernel_sqrt((self.value, self.uncertainty));
             JetMeasurement::new(value, uncertainty)
         }
     }

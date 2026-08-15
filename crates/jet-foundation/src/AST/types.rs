@@ -131,34 +131,41 @@ fn unescape_axis(axis: &str) -> Option<String> {
     Some(out)
 }
 
-fn fixed_list_symbol(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
-        _ => None,
-    }
-}
-
-fn fixed_list_measure(len: &u64, expr: Option<&Expr>) -> String {
-    if let Some(expr) = expr {
-        if let Some(name) = fixed_list_symbol(expr) {
-            return name;
-        }
-        return "<computed>".to_string();
-    }
-    len.to_string()
-}
 
 /// One compile-time number attached to a type. The measure plane owns the
-/// value; the use site gives it meaning through kind.
+/// value; the use site gives it meaning through `MeasureRule`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Measure {
     Literal { kind: String, value: u64 },
+    SignedLiteral { kind: String, value: i64 },
     Symbol { kind: String, name: String },
+    Combined {
+        kind: String,
+        rule: MeasureRule,
+        left: Box<Measure>,
+        right: Box<Measure>,
+    },
+}
+
+/// The closed combination algebra declared by measure-bearing type surfaces.
+/// User code supplies literals or module value parameters; it never selects a
+/// rule or evaluates an arbitrary expression into a type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasureRule {
+    Add,
+    Match,
 }
 
 impl Measure {
     pub fn literal(kind: impl Into<String>, value: u64) -> Self {
         Self::Literal {
+            kind: kind.into(),
+            value,
+        }
+    }
+
+    pub fn signed_literal(kind: impl Into<String>, value: i64) -> Self {
+        Self::SignedLiteral {
             kind: kind.into(),
             value,
         }
@@ -170,14 +177,113 @@ impl Measure {
             name: name.into(),
         }
     }
-
-    fn canonical(&self) -> String {
+    pub fn literal_value(&self) -> Option<u64> {
         match self {
-            Self::Literal { kind, value } => format!("{kind}:{value}"),
-            Self::Symbol { kind, name } => format!("{kind}:{name}"),
+            Self::Literal { value, .. } => Some(*value),
+            Self::Combined {
+                rule: MeasureRule::Add,
+                left,
+                right,
+                ..
+            } => left.literal_value()?.checked_add(right.literal_value()?),
+            _ => None,
         }
     }
+    pub fn require_literal(&self) -> u64 {
+        self.literal_value()
+            .expect("symbolic measure reached runtime type lowering before specialization")
+    }
+
+
+    pub fn symbol_name(&self) -> Option<&str> {
+        match self {
+            Self::Symbol { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+
+
+    pub fn combine(&self, rhs: &Self, rule: MeasureRule) -> Option<Self> {
+        let (left_kind, right_kind) = (self.kind(), rhs.kind());
+        if left_kind != right_kind {
+            return None;
+        }
+        match rule {
+            MeasureRule::Match => (self == rhs).then(|| self.clone()),
+            MeasureRule::Add => match (self.literal_value(), rhs.literal_value()) {
+                (Some(left), Some(right)) => left
+                    .checked_add(right)
+                    .map(|value| Self::literal(left_kind, value)),
+                _ => Some(Self::Combined {
+                    kind: left_kind.to_string(),
+                    rule,
+                    left: Box::new(self.clone()),
+                    right: Box::new(rhs.clone()),
+                }),
+            },
+        }
+    }
+
+    pub fn resolve_symbols(
+        &self,
+        resolve: &impl Fn(&str) -> Option<u64>,
+    ) -> Self {
+        match self {
+            Self::Symbol { kind, name } => resolve(name)
+                .map(|value| Self::literal(kind, value))
+                .unwrap_or_else(|| self.clone()),
+            Self::Combined {
+                rule,
+                left,
+                right,
+                ..
+            } => left
+                .resolve_symbols(resolve)
+                .combine(&right.resolve_symbols(resolve), *rule)
+                .unwrap_or_else(|| self.clone()),
+            _ => self.clone(),
+        }
+    }
+
+    pub fn kind(&self) -> &str {
+        match self {
+            Self::Literal { kind, .. }
+            | Self::SignedLiteral { kind, .. }
+            | Self::Symbol { kind, .. }
+            | Self::Combined { kind, .. } => kind,
+        }
+    }
+
+    pub fn expression(&self) -> String {
+        match self {
+            Self::Literal { value, .. } => value.to_string(),
+            Self::SignedLiteral { value, .. } => value.to_string(),
+            Self::Symbol { name, .. } => name.clone(),
+            Self::Combined {
+                rule: MeasureRule::Add,
+                left,
+                right,
+                ..
+            } => format!("({} + {})", left.expression(), right.expression()),
+            Self::Combined {
+                rule: MeasureRule::Match,
+                left,
+                right,
+                ..
+            } => format!("match({}, {})", left.expression(), right.expression()),
+        }
+    }
+
+    fn canonical(&self) -> String {
+        format!("{}:{}", self.kind(), self.expression())
+    }
 }
+impl std::fmt::Display for Measure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.expression())
+    }
+}
+
 
 /// The exactness grade carried by a numeric type. Exactness is compile-time
 /// knowledge; the runtime carrier remains the ordinary numeric type.
@@ -185,6 +291,7 @@ impl Measure {
 pub enum Exactness {
     Exact,
     Approximate { precision: u16 },
+    Measured,
 }
 
 /// Function obligations are facts about how a callable may be used. The
@@ -440,8 +547,8 @@ impl KnowledgeFact {
                 Exactness::Approximate { precision } => {
                     format!("exactness:approximate:{precision}")
                 }
+                Exactness::Measured => "exactness:measured".to_string(),
             },
-            Self::Dimension(dimension) => format!("dimension:{}", dimension.identity()),
             Self::Classification(name) => format!("classification:{name}"),
             Self::Nominal(name) => format!("nominal:{name}"),
             Self::Obligation(obligation) => {
@@ -799,14 +906,13 @@ pub enum Type {
     TraitObject(Vec<String>),
     /// S73 (D-SG7): named tuple `(x: Int, y: Int)` — fields stored sorted by name.
     Tuple(Vec<(String, Box<Type>)>),
-    /// S76 (2026-06-16): fixed-size list `[T#N]` — a compile-time refinement of
-    /// `[T]` with a statically-known length. Lowers to inline Rust `[T; N]`.
+    /// S76 / D-TYPE2-MEASURE1=A: fixed-size list `[T#N]`. `N` is the same
+    /// measure substrate used by shapes, lanes and exponents: either a
+    /// declared literal or a module value parameter, never an expression
+    /// evaluated by user code.
     FixedList {
         elem: Box<Type>,
-        len: u64,
-        /// D-META-CONST1: an arbitrary compile-time expression retained until
-        /// sema evaluates the fixed-list length.
-        len_expr: Option<Box<Expr>>,
+        len: Measure,
     },
     /// D-SG9/S42: explicit fixed-width integer. `Int` is exact and arbitrary
     /// precision; every fixed width, including `I64`, is an `IntN`.
@@ -1242,19 +1348,11 @@ impl Type {
                     },
                 );
             }
-            Type::FixedList {
-                elem,
-                len,
-                len_expr,
-            } => {
+            Type::FixedList { elem, len } => {
                 vector.extend_at(&["element".to_string()], &elem.knowledge_vector());
-                let measure = len_expr.as_deref().and_then(fixed_list_symbol)
-                    .map_or_else(|| Measure::literal("length", *len), |name| {
-                        Measure::symbol("length", name)
-                    });
                 vector.push(
                     crate::Registry::type_plane("Measure"),
-                    KnowledgeFact::Measure(measure),
+                    KnowledgeFact::Measure(len.clone()),
                 );
             }
             Type::Fn { params, ret, .. } => {
@@ -1280,6 +1378,13 @@ impl Type {
                     crate::Registry::type_plane("Dimension"),
                     KnowledgeFact::Dimension(dimension.clone()),
                 );
+                for (axis, exponent) in dimension.axes() {
+                    vector.push_at(
+                        &["exponent".to_string(), axis.to_string()],
+                        crate::Registry::type_plane("Measure"),
+                        KnowledgeFact::Measure(Measure::signed_literal("exponent", i64::from(exponent))),
+                    );
+                }
             }
             Type::ComputeDim(value) => {
                 vector.push(
@@ -1303,9 +1408,20 @@ impl Type {
                     KnowledgeFact::Classification(marker.to_string()),
                 );
             }
-            Type::Apply { args, .. } => {
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_MEASUREMENT && args.len() == 1 =>
+            {
+                vector.extend_at(&["value".to_string()], &args[0].knowledge_vector());
+                vector.push(
+                    crate::Registry::type_plane("Exactness"),
+                    KnowledgeFact::Exactness(Exactness::Measured),
+                );
+            }
+            Type::Apply { name, args } => {
                 for (index, arg) in args.iter().enumerate() {
-                    if matches!(arg, Type::ComputeDim(_)) {
+                    if matches!(name.as_str(), "Vec" | "Matrix")
+                        && matches!(arg, Type::ComputeDim(_) | Type::Named(_))
+                    {
                         continue;
                     }
                     vector.extend_at(
@@ -1313,17 +1429,14 @@ impl Type {
                         &arg.knowledge_vector(),
                     );
                 }
-                for (index, dimension) in self
-                    .compute_shape_dimensions()
-                    .into_iter()
-                    .flatten()
-                    .enumerate()
-                {
-                    vector.push_at(
-                        &["shape".to_string(), index.to_string()],
-                        crate::Registry::type_plane("Measure"),
-                        KnowledgeFact::Measure(Measure::literal("shape", dimension)),
-                    );
+                if let Some(measures) = self.compute_shape_measures() {
+                    for (index, measure) in measures.into_iter().enumerate() {
+                        vector.push_at(
+                            &["shape".to_string(), index.to_string()],
+                            crate::Registry::type_plane("Measure"),
+                            KnowledgeFact::Measure(measure),
+                        );
+                    }
                 }
             }
             Type::Named(name) => {
@@ -1606,10 +1719,9 @@ impl Type {
                     .map(|(name, ty)| (name.clone(), Box::new(ty.erased_inline_ranges())))
                     .collect(),
             ),
-            Type::FixedList { elem, len, len_expr } => Type::FixedList {
+            Type::FixedList { elem, len } => Type::FixedList {
                 elem: Box::new(elem.erased_inline_ranges()),
-                len: *len,
-                len_expr: len_expr.clone(),
+                len: len.clone(),
             },
             Type::InlineRange { base, .. } => base.erased_inline_ranges(),
             Type::Tagged { marker, inner } => Type::Tagged {
@@ -1712,8 +1824,8 @@ impl Type {
         }
     }
 
-    /// Return the dimensions carried by `Vec<N>` or `Matrix<M, N>`.
-    pub fn compute_shape_dimensions(&self) -> Option<Vec<u64>> {
+    /// Return the literal or symbolic measures carried by a compute shape.
+    pub fn compute_shape_measures(&self) -> Option<Vec<Measure>> {
         let Type::Apply { name, args } = self else {
             return None;
         };
@@ -1725,7 +1837,21 @@ impl Type {
         if args.len() != expected {
             return None;
         }
-        args.iter().map(Self::compute_dimension_value).collect()
+        args.iter()
+            .map(|argument| match argument {
+                Type::ComputeDim(value) => Some(Measure::literal("shape", *value)),
+                Type::Named(name) => Some(Measure::symbol("shape", name)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Return resolved dimensions carried by `Vec<N>` or `Matrix<M, N>`.
+    pub fn compute_shape_dimensions(&self) -> Option<Vec<u64>> {
+        self.compute_shape_measures()?
+            .iter()
+            .map(Measure::literal_value)
+            .collect()
     }
 
     /// Compute values all share the `JetTensor` storage substrate. An erased
@@ -1805,10 +1931,9 @@ impl Type {
             Type::Tuple(fields) => Type::Tuple(
                 fields.iter().map(|(name, ty)| (name.clone(), Box::new(ty.map_named_types(map)))).collect(),
             ),
-            Type::FixedList { elem, len, len_expr } => Type::FixedList {
+            Type::FixedList { elem, len } => Type::FixedList {
                 elem: Box::new(elem.map_named_types(map)),
-                len: *len,
-                len_expr: len_expr.clone(),
+                len: len.clone(),
             },
             Type::InlineRange { base, lo, hi } => Type::InlineRange {
                 base: Box::new(base.map_named_types(map)),
@@ -1900,7 +2025,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
-            Type::FixedList { elem, len, len_expr } => format!("[{}#{}]", elem.name(), fixed_list_measure(len, len_expr.as_deref())),
+            Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len.expression()),
             Type::IntN { signed, bits } => {
                 let (lo, hi) = int_range(*signed, *bits);
                 let article = if *bits == 8 { "an" } else { "a" };
@@ -1988,7 +2113,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
-            Type::FixedList { elem, len, len_expr } => format!("[{}#{}]", elem.name(), fixed_list_measure(len, len_expr.as_deref())),
+            Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len.expression()),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::InlineRange { base, lo, hi } => format!("{}({lo}..{hi})", base.name()),
             Type::Float32 => "F32".to_string(),

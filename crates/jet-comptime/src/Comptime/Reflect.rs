@@ -224,6 +224,7 @@ fn exactness_info(exactness: &Exactness) -> CtValue {
         Exactness::Approximate { precision } => {
             ("Approximate", Some(CtValue::Int(i64::from(*precision))))
         }
+        Exactness::Measured => ("Measured", None),
     };
     ct_struct(
         "ExactnessInfo",

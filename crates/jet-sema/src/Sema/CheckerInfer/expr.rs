@@ -1262,12 +1262,14 @@ impl<'a> Checker<'a> {
                                     args[2].label.as_ref(),
                                     Some((label, _)) if label == "digits"
                                 );
+                            let measured_crossing =
+                                source_fact.is_measured() || destination_fact.is_measured();
                             let rounded_gate = rounded
                                 && crate::Sema::knowledge_gate_allows(
                                     crate::Sema::KnowledgePlane::Unit,
                                     crate::Sema::KnowledgeGate::RoundedConversion,
                                 );
-                            if (exact || rounded_gate)
+                            if ((exact && !measured_crossing) || rounded_gate)
                                 && source_fact.package == destination_fact.package
                                 && source_fact.family == destination_fact.family
                                 && source_fact.dimension == destination_fact.dimension
@@ -1306,8 +1308,16 @@ impl<'a> Checker<'a> {
                                         ));
                                     }
                                 }
+                                let converted = if measured_crossing {
+                                    Type::Apply {
+                                        name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                                        args: vec![Type::Float],
+                                    }
+                                } else {
+                                    Type::Named(destination_name)
+                                };
                                 let ty = Type::Result {
-                                    ok: Box::new(Type::Named(destination_name)),
+                                    ok: Box::new(converted),
                                     err: Box::new(Type::String),
                                 };
                                 *resolved_ret = Some(ty.clone());
@@ -3740,25 +3750,27 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
-            if elems.len() as u64 != len {
-                self.diags.push(Diagnostic::error(
-                    "E0963",
-                    format!(
-                        "this list has {} element{}, but `[T#{}]` expects exactly {}",
-                        elems.len(),
-                        if elems.len() == 1 { "" } else { "s" },
-                        len,
-                        len,
-                    ),
-                    "a fixed-size list `[T#N]` requires exactly N elements".to_string(),
-                    format!(
-                        "provide exactly {} element{}",
-                        len,
-                        if len == 1 { "" } else { "s" }
-                    ),
-                    Some(span),
-                ));
-                return None;
+            if let Some(expected_len) = len.literal_value() {
+                if elems.len() as u64 != expected_len {
+                    self.diags.push(Diagnostic::error(
+                        "E0963",
+                        format!(
+                            "this list has {} element{}, but `[T#{}]` expects exactly {}",
+                            elems.len(),
+                            if elems.len() == 1 { "" } else { "s" },
+                            len.expression(),
+                            expected_len,
+                        ),
+                        "a fixed-size list `[T#N]` requires exactly N elements".to_string(),
+                        format!(
+                            "provide exactly {} element{}",
+                            expected_len,
+                            if expected_len == 1 { "" } else { "s" }
+                        ),
+                        Some(span),
+                    ));
+                    return None;
+                }
             }
             let saved = self.expected_type.clone();
             self.expected_type = Some((*expected_inner).clone());
@@ -3771,7 +3783,6 @@ impl<'a> Checker<'a> {
             return Some(Type::FixedList {
                 elem: expected_inner,
                 len,
-                len_expr: None,
             });
         }
         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
@@ -4209,13 +4220,14 @@ impl<'a> Checker<'a> {
             }
             // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
             Type::FixedList { elem, len, .. } => {
+                let len = len.require_literal();
                 *kind = IndexKind::List;
                 if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
                     if let Type::Named(name) = index_value_ty {
                         if let Some((lo, hi)) = self.registry.distinct_range(name) {
                             let base_is_int =
                                 matches!(self.registry.distinct_base(name), Some(Type::Int));
-                            if base_is_int && lo >= 0 && (hi as u64) < *len {
+                            if base_is_int && lo >= 0 && (hi as u64) < len {
                                 *kind = IndexKind::FixedListProof;
                                 return Some((**elem).clone());
                             }
@@ -4249,22 +4261,22 @@ impl<'a> Checker<'a> {
                     ));
                 } else if let Expr::Int(n, _, _, _) = index.as_ref() {
                     // E0965: compile-time out-of-bounds index.
-                    if *n < 0 || *n as u64 >= *len {
+                    if *n < 0 || *n as u64 >= len {
                         self.diags.push(Diagnostic::error(
                             "E0965",
                             format!(
                                 "index {} is out of range for a fixed-size list of {} element{}",
                                 n,
                                 len,
-                                if *len == 1 { "" } else { "s" }
+                                if len == 1 { "" } else { "s" }
                             ),
                             "the valid indexes for `[T#N]` are 0 through N-1".to_string(),
-                            format!("use an index between 0 and {}", len - 1),
+                            format!("use an index between 0 and {}", len.saturating_sub(1)),
                             Some(index.span()),
                         ));
                     }
                 } else if let Some((lo, hi)) = self.proven_integer_interval(index) {
-                    if lo >= 0 && hi < i128::from(*len) {
+                    if lo >= 0 && hi < i128::from(len) {
                         *kind = IndexKind::FixedListProof;
                         return Some((**elem).clone());
                     }

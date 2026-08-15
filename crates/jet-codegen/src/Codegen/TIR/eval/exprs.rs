@@ -487,7 +487,7 @@ fn sentry_layout(ty: &Type) -> (usize, usize) {
         Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => sentry_layout(inner),
         Type::FixedList { elem, len, .. } => {
             let (bytes, alignment) = sentry_layout(elem);
-            (bytes.saturating_mul(*len as usize).max(1), alignment)
+            (bytes.saturating_mul(len.require_literal() as usize).max(1), alignment)
         }
         Type::Tuple(fields) => {
             let mut bytes = 0usize;
@@ -3197,7 +3197,7 @@ impl<'a> EvalCtx<'a> {
                     unreachable!();
                 };
                 if let Type::FixedList { len, .. } = ty {
-                    if bytes.len() != *len as usize {
+                    if bytes.len() != len.require_literal() as usize {
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!(
@@ -3219,7 +3219,7 @@ impl<'a> EvalCtx<'a> {
                     ))));
                 };
                 if let Type::FixedList { len, .. } = ty {
-                    if values.len() != *len as usize {
+                    if values.len() != len.require_literal() as usize {
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!("expected a fixed list of length {len}, found {}", values.len()),
@@ -5463,7 +5463,7 @@ impl<'a> EvalCtx<'a> {
                 value
             }
             TExprKind::Uninit => match &expr.ty {
-                Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(*len as usize)),
+                Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(len.require_literal() as usize)),
                 _ => Ok(CtValue::Unit),
             },
             TExprKind::Unit | TExprKind::DefaultLit => Ok(CtValue::Unit),
@@ -7913,6 +7913,7 @@ impl<'a> EvalCtx<'a> {
                 offset,
                 rounding,
                 fallible,
+                relative_uncertainty,
                 ..
             } => {
                 let CtValue::Float(value) = self.eval_expr_child(arg, scope)? else {
@@ -7946,10 +7947,36 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| "unit conversion would round".to_string())
                 };
                 match converted {
-                    Ok(value) if *fallible || rounding.is_some() => Ok(CtValue::Present(Box::new(
-                        CtValue::Float(CtFloat::f64(value)),
-                    ))),
-                    Ok(value) => Ok(CtValue::Float(CtFloat::f64(value))),
+                    Ok(value) => {
+                        let value = relative_uncertainty.map_or_else(
+                            || CtValue::Float(CtFloat::f64(value)),
+                            |relative| {
+                                let (measured, uncertainty) =
+                                    super::measurement_semantics::jet_measurement_kernel_from_relative(
+                                        value,
+                                        relative,
+                                    );
+                                CtValue::Struct {
+                                    type_name: "Measurement".to_string(),
+                                    fields: vec![
+                                        (
+                                            "value".to_string(),
+                                            CtValue::Float(CtFloat::f64(measured)),
+                                        ),
+                                        (
+                                            "uncertainty".to_string(),
+                                            CtValue::Float(CtFloat::f64(uncertainty)),
+                                        ),
+                                    ],
+                                }
+                            },
+                        );
+                        Ok(if *fallible || rounding.is_some() {
+                            CtValue::Present(Box::new(value))
+                        } else {
+                            value
+                        })
+                    }
                     Err(error) if *fallible || rounding.is_some() => {
                         Ok(CtValue::failed(Box::new(CtValue::Str(error))))
                     }

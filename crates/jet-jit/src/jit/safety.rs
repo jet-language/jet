@@ -1874,7 +1874,11 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
             resident_safe_expr(arg, callees)
         }
-        TExprKind::UnitConvert { arg, .. } => resident_safe_expr(arg, callees),
+        TExprKind::UnitConvert {
+            arg,
+            relative_uncertainty,
+            ..
+        } => relative_uncertainty.is_none() && resident_safe_expr(arg, callees),
         TExprKind::PreciseBuiltin {
             type_name,
             func,
@@ -5292,7 +5296,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 if name == "Measurement" && targs.as_slice() == [Type::Float])
                 && matches!(
                     (method.as_str(), args.len()),
-                    ("value" | "uncertainty", 0) | ("add" | "sub" | "mul" | "div", 1)
+                    ("value" | "uncertainty" | "sqrt", 0)
+                        | ("add" | "sub" | "mul" | "div", 1)
                 )
         }
         THandleOp::PreciseMethod { type_name, method } => {

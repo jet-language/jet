@@ -114,14 +114,9 @@ impl<'a> Checker<'a> {
                     })
                     .collect(),
             ),
-            Type::FixedList {
-                elem,
-                len,
-                len_expr,
-            } => Type::FixedList {
+            Type::FixedList { elem, len } => Type::FixedList {
                 elem: Box::new(self.qualify_method_type(owner_mod, elem, generic_names)),
-                len: *len,
-                len_expr: len_expr.clone(),
+                len: len.clone(),
             },
             Type::Tagged { marker, inner } => Type::Tagged {
                 marker: marker.clone(),

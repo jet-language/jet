@@ -556,35 +556,11 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
-            Type::FixedList { elem, len, len_expr } => {
+            Type::FixedList { elem, len } => {
                 self.write("[");
                 self.fmt_type(elem);
                 self.write("#");
-                if let Some(expr) = len_expr {
-                    let mut expr = expr.as_ref();
-                    while let Expr::Paren(inner, _) = expr {
-                        expr = inner;
-                    }
-                    let atomic = matches!(
-                        expr,
-                        Expr::Ident(..)
-                            | Expr::ComptimeName { .. }
-                            | Expr::Int(..)
-                            | Expr::Float(..)
-                            | Expr::Bool(..)
-                            | Expr::Char(..)
-                            | Expr::Unary(..)
-                    );
-                    if !atomic {
-                        self.write("(");
-                    }
-                    self.fmt_expr(expr, Prec::OrFallback);
-                    if !atomic {
-                        self.write(")");
-                    }
-                } else {
-                    self.write(&len.to_string());
-                }
+                self.write(&len.expression());
                 self.write("]");
             }
             // D-QUAL4=A: `#TagName Type` — prefix value-tag.

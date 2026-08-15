@@ -504,7 +504,7 @@ pub(super) fn typed_decode_builtin_value(
                     unreachable!();
                 };
                 if let Type::FixedList { len, .. } = ty {
-                    if bytes.len() != *len as usize {
+                    if bytes.len() != len.require_literal() as usize {
                         return Some(Err(decode_error(format!(
                             "expected a fixed list of length {len}, found {}",
                             bytes.len()
@@ -525,7 +525,7 @@ pub(super) fn typed_decode_builtin_value(
                 ))));
             };
             if let Type::FixedList { len, .. } = ty {
-                if items.len() != *len as usize {
+                if items.len() != len.require_literal() as usize {
                     return Some(Err(decode_error(format!(
                         "expected a fixed list of length {len}, found {}",
                         items.len()
@@ -727,7 +727,7 @@ impl<'a> Interp<'a> {
                     )));
                 };
                 if let Type::FixedList { len, .. } = ty {
-                    if items.len() != *len as usize {
+                    if items.len() != len.require_literal() as usize {
                         return Err(decode_error(format!(
                             "expected a fixed list of length {len}, found {}",
                             items.len()

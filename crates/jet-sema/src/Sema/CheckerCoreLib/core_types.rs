@@ -452,7 +452,7 @@ pub fn core_fact_kind_variants(
             .into_iter()
             .map(str::to_string)
             .collect(),
-        "ExactnessKind" => ["Exact", "Approximate"]
+        "ExactnessKind" => ["Exact", "Approximate", "Measured"]
             .into_iter()
             .map(str::to_string)
             .collect(),

@@ -471,6 +471,7 @@ pub(super) fn evaluate_method(
         ("Measurement", "add" | "sub" | "mul" | "div", 1) => {
             measurement_arithmetic(recv, method, &args[0], span)
         }
+        ("Measurement", "sqrt", 0) => measurement_sqrt(recv, span),
         // D-APPROX1=A: non-mutating sketch queries (mutations write back in dispatch).
         ("HyperLogLog", "count", 0) => hll_count(recv, span),
         ("CountMinSketch", "count", 1) => cms_count(recv, args, span),
@@ -2290,6 +2291,26 @@ fn measurement_arithmetic(
         ],
     ))
 }
+fn measurement_sqrt(value: &CtValue, span: Span) -> EvalResult {
+    let measured = match field(value, "Measurement", "value") {
+        Some(CtValue::Float(value)) => value.as_f64(),
+        _ => return Err(unsupported("malformed Measurement.value value", span)),
+    };
+    let uncertainty = match field(value, "Measurement", "uncertainty") {
+        Some(CtValue::Float(value)) => value.as_f64(),
+        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
+    };
+    let (value, uncertainty) =
+        super::measurement_kernel::jet_measurement_kernel_sqrt((measured, uncertainty));
+    Ok(structure(
+        "Measurement",
+        vec![
+            ("value", CtValue::Float(CtFloat::f64(value))),
+            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
+        ],
+    ))
+}
+
 
 // ── XML canonicalization ───────────────────────────────────────────────────
 

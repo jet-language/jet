@@ -605,6 +605,47 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn is_measurement_type(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_MEASUREMENT && args == &[Type::Float]
+        )
+    }
+
+    fn zero_uncertainty(expr: &mut Box<Expr>, span: Span) {
+        let value = std::mem::replace(expr, Box::new(Expr::Absent(span)));
+        *expr = Box::new(Expr::Call(crate::AST::Call {
+            name: "measurement".to_string(),
+            name_span: span,
+            type_args: Vec::new(),
+            args: vec![
+                crate::AST::CallArg {
+                    convention: crate::AST::AccessConvention::Read,
+                    expr: *value,
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: None,
+                    spread: false,
+                },
+                crate::AST::CallArg {
+                    convention: crate::AST::AccessConvention::Read,
+                    expr: Expr::Float(0.0, span, false),
+                    span,
+                    flags: crate::AST::CallArgFlags::default(),
+                    label: Some(("uncertainty".to_string(), span)),
+                    spread: false,
+                },
+            ],
+            resolved_ret: Some(Type::Apply {
+                name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                args: vec![Type::Float],
+            }),
+            range_checked: false,
+            widen_approx: false,
+        }));
+    }
+
     /// Binary operators and type checking.
     pub(crate) fn infer_binary(
         &mut self,
@@ -748,6 +789,77 @@ impl<'a> Checker<'a> {
             if let Some(contextual) = self.contextualize_numeric_literal(rhs, &lt) {
                 rt = contextual;
             }
+        }
+
+        // D-TYPE2-MEASURE1=A: Matrix shape composition is the measure
+        // substrate's match/compose rule, not a compute-runtime heuristic.
+        if op == BinOp::Mul {
+            if let (Some([left_rows, left_inner]), Some([right_inner, right_cols])) = (
+                lt.compute_shape_dimensions()
+                    .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+                rt.compute_shape_dimensions()
+                    .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+            ) {
+                if matches!((&lt, &rt), (
+                    Type::Apply { name: left, .. },
+                    Type::Apply { name: right, .. }
+                ) if left == "Matrix" && right == "Matrix")
+                {
+                    let left = crate::AST::Measure::literal("shape", left_inner);
+                    let right = crate::AST::Measure::literal("shape", right_inner);
+                    if left
+                        .combine(&right, crate::AST::MeasureRule::Match)
+                        .is_none()
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E2512",
+                            format!(
+                                "matrix multiplication needs equal inner sides, but these are {left_inner} and {right_inner}"
+                            ),
+                            "the left column measure must match the right row measure".to_string(),
+                            format!(
+                                "use `Matrix<{left_rows}, {left_inner}> * Matrix<{left_inner}, {right_cols}>`"
+                            ),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                    return Some(Type::Result {
+                        ok: Box::new(Type::compute_shape_type(
+                            "Matrix",
+                            &[left_rows, right_cols],
+                        )),
+                        err: Box::new(Type::Named("ComputeError".to_string())),
+                    });
+                }
+            }
+        }
+
+        // D-TYPE2-UNCERT1=A: entering the measured grade is contagious.
+        // Ordinary Float values are exact with respect to uncertainty, so the
+        // checker inserts the canonical zero-uncertainty constructor.
+        if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+            && (Self::is_measurement_type(&lt) || Self::is_measurement_type(&rt))
+        {
+            if lt == Type::Float {
+                Self::zero_uncertainty(lhs, span);
+                lt = Type::Apply {
+                    name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                    args: vec![Type::Float],
+                };
+            }
+            if rt == Type::Float {
+                Self::zero_uncertainty(rhs, span);
+                rt = Type::Apply {
+                    name: crate::Syntax::TYPE_MEASUREMENT.to_string(),
+                    args: vec![Type::Float],
+                };
+            }
+            if Self::is_measurement_type(&lt) && Self::is_measurement_type(&rt) {
+                return Some(lt);
+            }
+            self.op_mismatch(op, &lt, &rt, span);
+            return None;
         }
 
         if matches!(op, BinOp::Eq | BinOp::Ne)

@@ -964,8 +964,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "policy_sync",
             "async_result",
         ],
-        // D-HONESTNUM1=A: Measurement<T> constructor.
-        "core.units" => &["from"],
         // D-PENDING1=B: Loadable<T,E> constructors.
         "core.reactive.loadable" => &["idle", "loading", "loaded", "failed"],
         // D-FIDELITY-API1=A: runtime-global fidelity signal.

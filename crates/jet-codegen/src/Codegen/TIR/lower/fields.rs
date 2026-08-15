@@ -151,14 +151,9 @@ fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
                 })
                 .collect(),
         ),
-        Type::FixedList {
-            elem,
-            len,
-            len_expr,
-        } => Type::FixedList {
+        Type::FixedList { elem, len } => Type::FixedList {
             elem: Box::new(rewrite_apply_heads(elem, qualify)),
-            len: *len,
-            len_expr: len_expr.clone(),
+            len: len.clone(),
         },
         Type::Tagged { marker, inner } => Type::Tagged {
             marker: marker.clone(),

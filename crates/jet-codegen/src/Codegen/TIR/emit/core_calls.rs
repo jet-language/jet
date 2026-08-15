@@ -924,8 +924,6 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
-        // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
-        
         ("core.reactive.loadable", "idle") => format!("JetLoadable::<(), ()>::Idle"),
         ("core.reactive.loadable", "loading") => format!("JetLoadable::<(), ()>::Loading"),
         ("core.reactive.loadable", "loaded") => {

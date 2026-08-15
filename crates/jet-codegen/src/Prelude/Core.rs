@@ -1569,6 +1569,25 @@ fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
     out.extend(right.iter().cloned());
     out
 }
+fn jet_fixed_list_concat<
+    T: Clone,
+    const LEFT: usize,
+    const RIGHT: usize,
+    const TOTAL: usize,
+>(
+    left: &[T; LEFT],
+    right: &[T; RIGHT],
+) -> [T; TOTAL] {
+    debug_assert_eq!(TOTAL, LEFT + RIGHT);
+    std::array::from_fn(|index| {
+        if index < LEFT {
+            left[index].clone()
+        } else {
+            right[index - LEFT].clone()
+        }
+    })
+}
+
 fn jet_char_len(s: &String) -> i64 {
     s.chars().count() as i64
 }

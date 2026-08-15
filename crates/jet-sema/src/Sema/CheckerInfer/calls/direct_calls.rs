@@ -239,7 +239,47 @@ impl<'a> Checker<'a> {
             Some(ty)
         }
     
+        /// D-TYPE2-UNCERT1=A: the one measured-value constructor. The
+        /// uncertainty label is semantic, so every entry point sees the same
+        /// checked call shape without a `core.units` module alias.
+        fn check_measurement(&mut self, call: &mut Call) -> Option<Type> {
+            if call.args.len() != 2
+                || call.args[0].label.is_some()
+                || !matches!(
+                    call.args[1].label.as_ref(),
+                    Some((label, _)) if label == "uncertainty"
+                )
+            {
+                for argument in &mut call.args {
+                    self.infer(&mut argument.expr);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    "`measurement` needs a value and labeled uncertainty".to_string(),
+                    "a measured value enters the exactness plane at one explicit constructor"
+                        .to_string(),
+                    "write `measurement(value, uncertainty: standard_uncertainty)`".to_string(),
+                    Some(call.name_span),
+                ));
+                return None;
+            }
+            self.expect_core_arg("measurement", 0, &Type::Float, &mut call.args[0]);
+            self.expect_core_arg("measurement", 1, &Type::Float, &mut call.args[1]);
+            let ty = Type::Apply {
+                name: Syntax::TYPE_MEASUREMENT.to_string(),
+                args: vec![Type::Float],
+            };
+            call.resolved_ret = Some(ty.clone());
+            Some(ty)
+        }
+
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+            if call.name == "measurement"
+                && self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+            {
+                return Some(self.check_measurement(call));
+            }
             if call.name == Syntax::KW_FREEZE
                 && self.funcs.get(&call.name).is_none()
                 && self.lookup(&call.name).is_none()

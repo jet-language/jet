@@ -361,8 +361,7 @@ fn registered_type_planes_reflect_as_typed_values() {
             "shape",
             Type::FixedList {
                 elem: Box::new(Type::Int),
-                len: 4,
-                len_expr: None,
+                len: jet::AST::Measure::literal("length", 4),
             },
         ),
         (

@@ -1195,6 +1195,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             offset,
             rounding,
             fallible,
+            relative_uncertainty,
             file,
             line,
         } => {
@@ -1207,17 +1208,29 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 offset.num.to_string(),
                 offset.den.to_string(),
             );
+            let converted = |name: &str| {
+                relative_uncertainty.map_or_else(
+                    || format!("{destination}({name})"),
+                    |relative| {
+                        format!(
+                            "jet_std::JetMeasurement::from_relative({name}, {relative:?})"
+                        )
+                    },
+                )
+            };
             if let Some((mode, digits)) = rounding {
                 let digits = emit_tir_expr(digits, cx);
+                let converted = converted("converted");
                 format!(
-                    "match jet_unit_conversion_rounded({args}, UnitRoundingMode::{mode:?}, {digits}) {{ Ok(converted) => Ok({destination}(converted)), Err(error) => Err(error.to_string()) }}"
+                    "match jet_unit_conversion_rounded({args}, UnitRoundingMode::{mode:?}, {digits}) {{ Ok(converted) => Ok({converted}), Err(error) => Err(error.to_string()) }}"
                 )
             } else if *fallible {
+                let converted = converted("converted");
                 format!(
-                    "match jet_unit_conversion_exact({args}) {{ Some(converted) => Ok({destination}(converted)), None => Err(\"unit conversion would round\".to_string()) }}"
+                    "match jet_unit_conversion_exact({args}) {{ Some(converted) => Ok({converted}), None => Err(\"unit conversion would round\".to_string()) }}"
                 )
             } else {
-                format!("{destination}(match jet_unit_conversion_exact({args}) {{ Some(converted) => converted, None => jet_panic({file:?}, {line}, \"unit conversion would round\") }})")
+                format!("{}(match jet_unit_conversion_exact({args}) {{ Some(converted) => converted, None => jet_panic({file:?}, {line}, \"unit conversion would round\") }})", destination)
             }
         }
         // D-SIMD2 / D-LINALG1: a math constructor / static method → the prelude free
@@ -1467,6 +1480,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv_is_list = matches!(&recv.ty, Type::List(_) | Type::FixedList { .. });
             let recv_is_compute_view_mut = is_compute_view_mut(&recv.ty);
+            let fixed_concat_shape = if matches!(op, TBuiltinOp::ConcatList) {
+                match (
+                    &recv.ty,
+                    args.first().map(|argument| &argument.ty),
+                    &e.ty,
+                ) {
+                    (
+                        Type::FixedList { len: left, .. },
+                        Some(Type::FixedList { len: right, .. }),
+                        Type::FixedList { len: total, .. },
+                    ) => Some((
+                        left.require_literal(),
+                        right.require_literal(),
+                        total.require_literal(),
+                    )),
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let recv_expr = recv;
             let recv = emit_tir_expr(recv_expr, cx);
             let a = |i: usize| {
@@ -1627,9 +1660,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::ExtendList => {
                     format!("({}).extend(({}).clone())", recv, a(0))
                 }
-                TBuiltinOp::ConcatList => {
-                    format!("jet_list_concat(&({}), &({}))", recv, a(0))
-                }
+                TBuiltinOp::ConcatList => match fixed_concat_shape {
+                    Some((left, right, total)) => format!(
+                        "jet_fixed_list_concat::<_, {left}, {right}, {total}>(&({}), &({}))",
+                        recv,
+                        a(0)
+                    ),
+                    None => format!("jet_list_concat(&({}), &({}))", recv, a(0)),
+                },
                 TBuiltinOp::GetMap => format!("jet_outcome_of(({}).get(&({}).clone()).cloned())", recv, a(0)),
                 TBuiltinOp::GetList => format!("jet_outcome_of(({}).get({} as usize).cloned())", recv, a(0)),
                 TBuiltinOp::First => {

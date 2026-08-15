@@ -181,12 +181,36 @@ fn run() { accept(1degree) }
     let measured = r#"
 fn run() {
     mass :: Kilogram.from_dalton_rounded(1dalton, .NearestEven, digits: 30) ?? panic("rounded measured conversion")
-    print(mass.raw())
+    print(mass.value())
+    print(mass.uncertainty())
 }
 "#;
     assert!(
         codes_of(measured).is_empty(),
-        "a written rounded conversion is the audit boundary for measured scales"
+        "a rounded measured-scale conversion must return a measured value"
+    );
+}
+
+#[test]
+fn measure_rules_cover_fixed_lengths_and_matrix_shapes() {
+    let lengths = r#"
+fn join(left: [Int#2], right: [Int#3]) => [Int#5] {
+    return left.concat(right)
+}
+"#;
+    assert!(
+        codes_of(lengths).is_empty(),
+        "fixed-list join must add the two length measures"
+    );
+
+    let matrices = r#"
+fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) => Result<Matrix<3, 2>, ComputeError> {
+    return left * right
+}
+"#;
+    assert!(
+        codes_of(matrices).is_empty(),
+        "matrix multiplication must match inner measures and compose outer measures"
     );
 }
 
