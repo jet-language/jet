@@ -242,7 +242,7 @@ fn run() {
 
 #[test]
 fn auto_derive_keeps_compile_and_binary_measurements_stable() {
-    let before = checked_project(
+    let explicit_bundle = checked_project(
         "auto_measure_before",
         "",
         r#"
@@ -256,7 +256,7 @@ fn run() {
 }
 "#,
     );
-    let after = checked_project(
+    let automatic_bundle = checked_project(
         "auto_measure_after",
         "",
         r#"
@@ -269,21 +269,21 @@ fn run() {
 }
 "#,
     );
-    let Some(before) = aot_measurement(&before, "auto_measure_before_aot") else {
+    let Some(explicit) = aot_measurement(&explicit_bundle, "auto_measure_before_aot") else {
         return;
     };
-    let Some(before_repeat) = aot_measurement(&before, "auto_measure_before_aot") else {
+    let Some(explicit_repeat) = aot_measurement(&explicit_bundle, "auto_measure_before_aot") else {
         return;
     };
-    let Some(after) = aot_measurement(&after, "auto_measure_after_aot") else {
+    let Some(automatic) = aot_measurement(&automatic_bundle, "auto_measure_after_aot") else {
         return;
     };
-    let Some(after_repeat) = aot_measurement(&after, "auto_measure_after_aot") else {
+    let Some(automatic_repeat) = aot_measurement(&automatic_bundle, "auto_measure_after_aot") else {
         return;
     };
     for (label, first, repeat) in [
-        ("explicit", &before, &before_repeat),
-        ("automatic", &after, &after_repeat),
+        ("explicit", &explicit, &explicit_repeat),
+        ("automatic", &automatic, &automatic_repeat),
     ] {
         assert_eq!(first.exit, repeat.exit, "{label} exit changed between runs");
         assert_eq!(first.stdout, repeat.stdout, "{label} stdout changed between runs");
@@ -298,15 +298,15 @@ fn run() {
             "{label} binary bytes changed between runs",
         );
     }
-    assert_eq!(before.exit, 0);
-    assert_eq!(after.exit, 0);
-    assert_eq!(before.stdout, after.stdout);
+    assert_eq!(explicit.exit, 0);
+    assert_eq!(automatic.exit, 0);
+    assert_eq!(explicit.stdout, automatic.stdout);
     assert_eq!(
-        before.binary_bytes,
-        after.binary_bytes,
+        explicit.binary_bytes,
+        automatic.binary_bytes,
         "before/after binary bytes: {} -> {}",
-        before.binary_bytes,
-        after.binary_bytes,
+        explicit.binary_bytes,
+        automatic.binary_bytes,
     );
 }
 
