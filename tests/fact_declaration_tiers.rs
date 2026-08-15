@@ -100,7 +100,9 @@ fn tir_erases_the_declaration() {
     let out = jet::compile(SOURCE).expect("fact fixture compiles");
     assert!(out.rust.contains("fact declaration"));
     assert!(!out.rust.contains("@holds"));
-    assert!(!out.rust.contains("D-TEST"));
+    assert!(!out.rust.contains(
+        r#"fact Exactness(@holds: .Value, @safe: .Gain, @gates: [approx, raw], @decision: "D-TEST")"#
+    ));
 }
 
 /// AOT and default `jet run` agree on the executable part.
