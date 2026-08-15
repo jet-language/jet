@@ -209,7 +209,7 @@ fn run() {
     let (code, _stdout, stderr) = build_and_run_debug("rich_panic", src);
     assert_eq!(code, 70, "expected exit 70");
     assert!(
-        stderr.contains("Stop [E3001]: panic: must be positive"),
+        stderr.contains("Stop [E3001]: `panic: must be positive` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values."),
         "wrong panic header: {}",
         stderr
     );
@@ -225,8 +225,8 @@ fn run() {
     );
     assert!(stderr.contains('^'), "caret missing: {}", stderr);
     assert!(
-        stderr.contains("Why: the program reached a panic stop")
-            && stderr.contains("Fix: check the source location"),
+        stderr.contains("Why: The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).")
+            && stderr.contains("Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects."),
         "shared stop guidance missing: {}",
         stderr
     );
@@ -366,7 +366,7 @@ fn run() {{
             "{name}: expected Jet panic, not a rustc ICE: {stderr}"
         );
         assert!(
-            stderr.contains("Stop [E3001]: panic: missing value"),
+            stderr.contains("Stop [E3001]: `panic: missing value` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values."),
             "{name}: missing exact Jet panic report: {stderr}"
         );
         assert!(
