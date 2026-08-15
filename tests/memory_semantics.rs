@@ -181,8 +181,7 @@ fn gc_promotions_append_to_the_configured_cross_run_memory_ledger() {
     std::fs::write(
         &source,
         r#"#Policy(gc)
-#!Equatable
-#!Comparable
+#[!Equatable, !Comparable]
 enum Link {
     End(Int)
     Next(Link)
