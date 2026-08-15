@@ -11,7 +11,9 @@
 //!   - preflight zero-write: one bad file among good ones writes NOTHING
 //!   - ignore: `vendor/` and other generated dirs are skipped on discovery
 //!   - idempotence: formatting twice equals once
-//!   - exit-code table: 0 = clean/formatted, 1 = preview/check dirty, 2 = error
+//!   - exit-code table: 0 = clean/formatted, 1 = check dirty or a `--check`
+//!     rejection (same user-error code as `jet check`), 2 = a writing run that
+//!     had to refuse
 
 mod common;
 
@@ -115,11 +117,26 @@ fn explicit_dir_reports_invalid_package_manifest() {
         .current_dir(&dir)
         .output()
         .unwrap();
+    // `jet fmt --check` reports a rejected file with the same user-error code
+    // as `jet check` (`check_parse_error_exits_1_like_check`); only the writing
+    // modes below use USAGE. Exit 1 is also the "would change" code, so pin the
+    // route as well: the manifest is named on stderr and no dirty listing is
+    // printed, which is what proves traversal did not quietly format it.
     assert_eq!(
         check.status.code(),
-        Some(2),
+        Some(jet::ExitCodes::USER_ERROR),
         "invalid package manifest must fail project formatting\nstderr: {}",
         String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&check.stderr).contains(jet::Syntax::PACKAGE_FILE),
+        "the rejection must name the manifest\nstderr: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        check.stdout.is_empty(),
+        "a rejected manifest must abort the run, not list dirty files\nstdout: {}",
+        String::from_utf8_lossy(&check.stdout)
     );
     assert_eq!(read(&source), UNFORMATTED);
     assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
@@ -682,16 +699,25 @@ fn check_json_output() {
     );
 }
 
+/// `jet audit copies` and `jet fmt --explicit-copies` must agree on the same
+/// site. The site here is D-MEM-COPYSEM1: `owner.after("@")` is a read view
+/// into `owner`'s buffer, and returning it through a `String` (a non-view
+/// slot) outlives that buffer, so the checker inserts an owning copy. The
+/// audit must list exactly that implicit copy, and `--explicit-copies` must
+/// spell it `~domain` at the same span.
 #[test]
 fn explicit_copy_format_matches_copy_audit() {
     let dir = tmpdir(&line!().to_string());
+    // `take` is the retired move keyword (D-CAP7, `Syntax::KW_MOVE`), so it can
+    // no longer name a function; `make` matches the canonical fixture in
+    // `tests/fixtures/policy_copies_explicit/run.jet`.
     let source = "\
-fn take() => String {
+fn make() => String {
     owner := \"a@b\"
     domain :: owner.after(\"@\")
     return domain
 }
-fn run() { print(take()) }
+fn run() { print(make()) }
 ";
     let file = write(&dir, "main.jet", source);
 

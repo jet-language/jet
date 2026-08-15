@@ -7778,75 +7778,94 @@ fn run() {
 
 #[test]
 fn resident_jit_safe_increment_decrement() {
-    let file = "examples/features/basics/increment.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "increment example must type-check");
-    assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
-        "prefix/postfix ++/-- should stay JIT-covered: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
-    );
+    // Front-end work belongs on Jet's canonical 32 MiB compiler worker
+    // (`jet_driver::COMPILER_STACK_SIZE`), the same hop `with_jit_test_scope`
+    // makes. TIR lowering is a mutually recursive descent whose debug frames
+    // are enormous — `lower_method_call_impl` 528 KiB, `lower_expr_inner`
+    // 272 KiB, `lower_stmt_plan` 256 KiB — so roughly two levels of method
+    // nesting exhaust libtest's 2 MiB worker stack. Reaching the front end
+    // straight from a test thread aborts the whole binary (SIGABRT), which
+    // reports every other in-flight test in this file as failed.
+    jet::run_compiler_work(|| {
+        let file = "examples/features/basics/increment.jet";
+        let mut bundle = jet::Loader::load_entry(file).expect("load");
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "increment example must type-check");
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "prefix/postfix ++/-- should stay JIT-covered: {}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+    });
 }
 
 #[test]
 fn resident_jit_safe_named_tuples() {
-    let file = "examples/features/basics/tuples.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "tuple example must type-check");
-    assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
-        "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
-    );
+    // Compiler worker required; see `resident_jit_safe_increment_decrement`.
+    jet::run_compiler_work(|| {
+        let file = "examples/features/basics/tuples.jet";
+        let mut bundle = jet::Loader::load_entry(file).expect("load");
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "tuple example must type-check");
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+    });
 }
 
 #[test]
 fn resident_jit_safe_zip_family() {
-    let file = "examples/features/collections/zip_family.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("zip family example");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "zip family example must type-check: {errors:#?}");
-    assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
-        "zip family must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
-    );
-    jet_jit::try_compile_bundle(&bundle)
-        .unwrap_or_else(|reason| panic!("zip family must JIT-compile: {reason}"));
+    // Compiler worker required; see `resident_jit_safe_increment_decrement`.
+    jet::run_compiler_work(|| {
+        let file = "examples/features/collections/zip_family.jet";
+        let mut bundle = jet::Loader::load_entry(file).expect("zip family example");
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "zip family example must type-check: {errors:#?}");
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "zip family must stay resident-safe: {}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+        jet_jit::try_compile_bundle(&bundle)
+            .unwrap_or_else(|reason| panic!("zip family must JIT-compile: {reason}"));
+    });
 }
 
 #[test]
 fn resident_jit_safe_chained_comparison() {
-    let file = "examples/features/operators/chained_comparison.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "chained comparison example must type-check"
-    );
-    assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
-        "same-direction chained comparisons should stay JIT-covered: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
-    );
+    // Compiler worker required; see `resident_jit_safe_increment_decrement`.
+    jet::run_compiler_work(|| {
+        let file = "examples/features/operators/chained_comparison.jet";
+        let mut bundle = jet::Loader::load_entry(file).expect("load");
+        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "chained comparison example must type-check"
+        );
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "same-direction chained comparisons should stay JIT-covered: {}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+    });
 }
 
 #[test]
