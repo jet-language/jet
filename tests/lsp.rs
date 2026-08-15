@@ -1340,7 +1340,7 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         ),
         "{diagnostics}"
     );
-    assert!(diagnostics.contains(r#""cause":[],"clears":0""#), "{diagnostics}");
+    assert!(diagnostics.contains(r#""cause":[],"clears":0"#), "{diagnostics}");
 
     send_msg(
         &mut stdin,
