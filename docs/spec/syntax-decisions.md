@@ -280,7 +280,7 @@ Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
 
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
-2026-08-13)*: a direct named or method call keeps its ordinary spelling
+2026-08-05)*: a direct named or method call keeps its ordinary spelling
 (`f(...)` or `value.method(...)`). A call result that is itself a function is
 invoked with `callee.call(...)`. Function-typed receivers gain the builtin
 projection, but a struct field or method literally named `call` shadows it.
@@ -6999,7 +6999,7 @@ and a range keeps it. `.solve(y)` answers square systems and
 and transforms use `core.linalg`. The proposal and all illustrative examples
 live in `docs/proposals/matrix-surface.md`; implementation is a later card.
 
-**2026-08-13 -- D-CALLVALUE1=B** *(card 1427)*: returned function call results
+**2026-08-05 -- D-CALLVALUE1=B** *(card 1427)*: returned function call results
 use `.call(...)`; direct named, method, field, index, and lambda calls keep their
 existing spelling. The retired adjacent-call form `)(` is rejected with
 `E-CALL-VALUE`, and the function-value projection is lowered through the

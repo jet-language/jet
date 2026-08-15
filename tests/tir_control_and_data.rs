@@ -180,6 +180,16 @@ fn run() {
     }
 }
 
+/// D-CALLVALUE1=B / I9: the named returned-function example exercises the
+/// canonical `.call(...)` projection through AOT, default `jet run`, and the
+/// forced interpreter against one checked-in byte oracle.
+#[test]
+fn returned_function_call_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "functions/returned_function_call",
+        include_str!("../examples/features/expected/functions/returned_function_call.out"),
+    );
+}
 /// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
 /// produces byte-identical output through AOT, default `jet run`, and the
 /// forced interpreter.

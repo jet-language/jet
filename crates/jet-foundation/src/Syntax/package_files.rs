@@ -114,7 +114,7 @@ pub const FIELD_OUTCOME_NOTES: &str = "notes";
 /// range-place spelling. #567 removes the remaining collection plumbing.
 pub const METHOD_VIEW: &str = "view";
 
-/// D-CALLVALUE1=B (ratified 2026-08-13): the callable projection for a
+/// D-CALLVALUE1=B (ratified 2026-08-05): the callable projection for a
 /// returned, stored, or otherwise function-valued expression. Sema recognizes
 /// `.call(…)` on function values; a member named `call` on a struct shadows it.
 pub const METHOD_CALL: &str = "call";
