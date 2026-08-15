@@ -992,6 +992,12 @@ fn collect_serde_codec_demands(
             TStmt::Let { init, .. } | TStmt::Assign { value: init, .. } => {
                 walk_expr(init, demands)
             }
+            TStmt::RefutableBind { init, fallback, .. } => {
+                walk_expr(init, demands);
+                for stmt in fallback {
+                    walk_stmt(stmt, demands);
+                }
+            }
             _ => {}
         }
     }
@@ -2914,6 +2920,15 @@ pub enum TStmt {
         /// D-OPTGC1=A: sema's complete automatic-promotion decision.
         gc_promotion: Option<crate::AST::GcPromotion>,
         gc_transferred: bool,
+    },
+    /// D-CHOOSE-TEST1=A: a subject-first pattern test whose miss route
+    /// diverges. Unlike an `if let`, Rust's `let ... else` keeps every capture
+    /// in the surrounding scope. The same node lets the interpreter bind into
+    /// its current scope before continuing, preserving tier parity.
+    RefutableBind {
+        pattern: TPattern,
+        init: TExpr,
+        fallback: Vec<TStmt>,
     },
     /// D-OPTGC1=A: assignment through a collector-owned bare value.
     GcEdit {

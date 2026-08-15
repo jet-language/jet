@@ -532,6 +532,37 @@ impl<'a> EvalCtx<'a> {
                 scope.insert(name.clone(), v);
                 Ok(Flow::Normal)
             }
+            TStmt::RefutableBind {
+                pattern,
+                init,
+                fallback,
+            } => {
+                let value = self.eval_expr(init, scope)?;
+                if let Some(ret) = self.pending_return.take() {
+                    return Ok(Flow::Return(ret));
+                }
+                let prior = pattern
+                    .pattern
+                    .binding_names()
+                    .into_iter()
+                    .map(|name| {
+                        let local = name.local_name().to_string();
+                        let value = scope.get(&local).cloned();
+                        (local, value)
+                    })
+                    .collect::<Vec<_>>();
+                if bind_match_pattern(&pattern.pattern, &value, scope)? {
+                    return Ok(Flow::Normal);
+                }
+                for (name, value) in prior {
+                    if let Some(value) = value {
+                        scope.insert(name, value);
+                    } else {
+                        scope.remove(&name);
+                    }
+                }
+                self.exec_stmts(fallback, scope)
+            }
             TStmt::Assign {
                 place,
                 op,

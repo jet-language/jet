@@ -18,6 +18,7 @@ use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
+use crate::Codegen::TIR::orfallback_rhs_in_subset;
 use crate::Codegen::TIR::fallible_pattern_binding;
 use crate::Codegen::TIR::struct_pattern_values_in_subset;
 use crate::Codegen::TIR::variant_pattern_enum;
@@ -90,18 +91,23 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     }
                     ok
                 }
-                // D-CHOOSE-TEST1=A: the refutable `Ok`/`value` binding is the
-                // same canonical `??` unwrap TIR as an ordinary fallible
-                // expression. Other pattern shapes remain on their existing
-                // pattern-control path until they have a payload extractor.
+                // D-CHOOSE-TEST1=A: Result/Option success bindings reuse the
+                // canonical `??` unwrap TIR. A user-enum variant uses the
+                // shared `RefutableBind` node so every tier keeps captures in
+                // the surrounding scope after the miss route diverges.
                 Some(BindPattern::Refutable {
-                    pattern: Pattern::Ok { .. } | Pattern::Present { .. },
+                    pattern:
+                        Pattern::Ok { .. }
+                        | Pattern::Present { .. }
+                        | Pattern::Variant { .. },
+                    fallback,
                     names,
                     ..
                 }) => {
                     let ok = !b.is_comptime
                         && !b.uninit
-                        && expr_in_subset(&b.init, cx, locals);
+                        && expr_in_subset(&b.init, cx, locals)
+                        && orfallback_rhs_in_subset(fallback, cx, locals);
                     for name in names {
                         locals.insert(name.local_name().to_string());
                     }

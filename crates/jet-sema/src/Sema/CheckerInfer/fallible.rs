@@ -561,6 +561,8 @@ impl<'a> Checker<'a> {
         // the context marker without declaring a local, so `err` receives the
         // dedicated E0408 instead of resolving an outer binding.
         let saved_fallback_has_err = self.fallback_has_err;
+        let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
+        self.fallback_is_shape_miss = false;
         self.fallback_has_err = Some(!*is_option);
         let ambient_scope = !*is_option;
         if ambient_scope {
@@ -602,6 +604,7 @@ impl<'a> Checker<'a> {
                         self.pop_scope();
                     }
                     self.fallback_has_err = saved_fallback_has_err;
+                    self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
                     return None;
                 };
                 if ft != payload {
@@ -763,6 +766,7 @@ impl<'a> Checker<'a> {
             self.pop_scope();
         }
         self.fallback_has_err = saved_fallback_has_err;
+        self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
         result
     }
 
@@ -776,6 +780,9 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         let saved_fallback_has_err = self.fallback_has_err;
+        let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
+        self.fallback_is_shape_miss =
+            !matches!(subject_ty, Type::Option(_) | Type::Result { .. });
         let has_err = matches!(subject_ty, Type::Result { .. });
         self.fallback_has_err = Some(has_err);
         if has_err {
@@ -910,6 +917,7 @@ impl<'a> Checker<'a> {
             self.pop_scope();
         }
         self.fallback_has_err = saved_fallback_has_err;
+        self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
     }
 
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {

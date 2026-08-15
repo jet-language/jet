@@ -2315,18 +2315,30 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-                // D-FAIL-BIND1=A: `err` is ambient only while checking the
-                // right side of `??`. An optional fallback has no report to
-                // expose, so keep the failure in sema rather than allowing an
-                // outer user binding (or rustc) to decide its meaning.
+                // D-FAIL-BIND1=A / D-CHOOSE-TEST1=A: `err` is ambient only
+                // while a failed Result payload exists. Optional absence and
+                // pure pattern misses have no report, but teach distinct fixes.
                 if name == Syntax::AMBIENT_ERR && self.fallback_has_err == Some(false) {
+                    let (code, what, why, fix) = if self.fallback_is_shape_miss {
+                        (
+                            "E0409",
+                            "`err` is not available after a pure pattern miss",
+                            "a shape test only reports whether the subject matched; it carries no failure value",
+                            "remove `err`, or return an explicit value from the miss route",
+                        )
+                    } else {
+                        (
+                            "E0408",
+                            "`err` is not available in an optional fallback",
+                            "an optional can be absent, but it has no failure report to name",
+                            "remove `err`, or use a fallible result when the fallback needs the failure",
+                        )
+                    };
                     self.diags.push(Diagnostic::error(
-                        "E0408",
-                        "`err` is not available in an optional fallback".to_string(),
-                        "an optional can be absent, but it has no failure report to name"
-                            .to_string(),
-                        "remove `err`, or use a fallible result when the fallback needs the failure"
-                            .to_string(),
+                        code,
+                        what.to_string(),
+                        why.to_string(),
+                        fix.to_string(),
                         Some(*span),
                     ));
                     return None;

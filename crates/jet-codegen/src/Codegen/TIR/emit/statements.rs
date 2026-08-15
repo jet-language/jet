@@ -695,6 +695,27 @@ fn emit_tir_stmt(
                 active_deferred_closes.push(ActiveCleanup::Resource(mangle(name)));
             }
         }
+        TStmt::RefutableBind {
+            pattern,
+            init,
+            fallback,
+        } => {
+            out.push_str(&format!(
+                "{}let {} = {} else {{\n",
+                pad,
+                emit_tir_pattern(pattern, cx),
+                emit_expr_with_cleanups(init, cx, active_deferred_closes),
+            ));
+            let mut fallback_cleanups = active_deferred_closes.clone();
+            emit_tir_stmts_nested(
+                fallback,
+                cx,
+                out,
+                indent + 1,
+                &mut fallback_cleanups,
+            );
+            out.push_str(&format!("{}}};\n", pad));
+        }
         TStmt::GcEdit {
             root,
             slot,

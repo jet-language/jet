@@ -1646,6 +1646,7 @@ fn check_func_body_bundle_scoped(
         no_prelude,
         in_pre_clause: false,
         fallback_has_err: None,
+        fallback_is_shape_miss: false,
         in_comptime: false,
         compiler_api_allowed: st.allow_compiler_api && f.name == "build",
         ret: f.return_type.clone(),

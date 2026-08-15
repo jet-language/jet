@@ -1,5 +1,5 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, PlaceAccess, Stmt, Type, UnOp};
+use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, PatSlot, Pattern, PlaceAccess, Stmt, Type, UnOp};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle_generated;
 #[cfg(test)]
@@ -21,6 +21,7 @@ use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
 use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
+use crate::Codegen::TIR::lower::lower_panic_stop;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::tracked_float_slot;
@@ -36,6 +37,8 @@ use crate::Codegen::TIR::TIndexFieldAssign;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TPlace;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TUnsafeGate;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
@@ -1255,6 +1258,9 @@ fn mark_resource_binding_mutability(stmt: &mut TStmt, targets: &HashSet<String>)
                 mark_resource_bindings_mutable(else_body, targets);
             }
         }
+        TStmt::RefutableBind { fallback, .. } => {
+            mark_resource_bindings_mutable(fallback, targets);
+        }
         TStmt::CountedLoop {
             init, step, body, ..
         } => {
@@ -1811,6 +1817,55 @@ fn refutable_binding_name<'a>(pattern: &'a Pattern, init: &TExpr) -> Option<&'a 
     }
 }
 
+fn is_direct_refutable_pattern(pattern: &Pattern) -> bool {
+    matches!(pattern, Pattern::Variant { .. })
+}
+
+fn lower_refutable_fallback(
+    fallback: &OrFallback,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> Vec<TStmt> {
+    let mut fallback_env = clone_env(env);
+    let unreachable = || TStmt::ExprStmt(TExpr {
+        ty: unit_type(),
+        kind: TExprKind::Unreachable { line: 0 },
+    });
+    match fallback {
+        OrFallback::Return(value, _) => vec![TStmt::Return(
+            value
+                .as_ref()
+                .map(|value| lower_expr(value, cx, &mut fallback_env)),
+        )],
+        OrFallback::Panic { name_span, args } => {
+            let (kind, loc) = lower_panic_stop(name_span, args, cx, &mut fallback_env);
+            debug_assert!(matches!(&kind, TRequireKind::Panic { .. }));
+            vec![TStmt::ExprStmt(TExpr {
+                ty: unit_type(),
+                kind: TExprKind::RequireStop {
+                    kind,
+                    loc,
+                    always_stops: true,
+                },
+            })]
+        }
+        OrFallback::Break(_) => vec![TStmt::Break(None)],
+        OrFallback::Continue(_) => vec![TStmt::Continue(None)],
+        OrFallback::BreakLabel(name, _) => vec![TStmt::Break(Some(name.clone()))],
+        OrFallback::ContinueLabel(name, _) => vec![TStmt::Continue(Some(name.clone()))],
+        OrFallback::Value(value) => vec![
+            TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)),
+            unreachable(),
+        ],
+        OrFallback::Block { body, value, .. } => {
+            let mut out = lower_stmts(body, cx, &mut fallback_env);
+            out.push(TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)));
+            out.push(unreachable());
+            out
+        }
+    }
+}
+
 #[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
@@ -2059,6 +2114,36 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 init,
                 gc_promotion: None,
                 gc_transferred: false,
+            });
+        }
+        Stmt::Val(b)
+            if matches!(
+                &b.pattern,
+                Some(BindPattern::Refutable { pattern, .. })
+                    if is_direct_refutable_pattern(pattern)
+            ) => {
+            let Some(BindPattern::Refutable {
+                pattern,
+                fallback,
+                ..
+            }) = &b.pattern
+            else {
+                unreachable!("direct refutable-binding guard lost its pattern")
+            };
+            let mut init = lower_expr(&b.init, cx, env);
+            if matches!(&b.init, Expr::Ident(name, _) if env.is_borrowed(name)) {
+                init = TExpr {
+                    ty: init.ty.clone(),
+                    kind: TExprKind::Clone(Box::new(init)),
+                };
+            }
+            let fallback = lower_refutable_fallback(fallback, cx, env);
+            let subject_ty = init.ty.clone();
+            super::patterns::tir_add_pattern_bindings(cx, pattern, env, Some(&subject_ty));
+            ready_return!(TStmt::RefutableBind {
+                pattern: TPattern::binding(pattern.clone()),
+                init,
+                fallback,
             });
         }
         Stmt::Val(b) => {

@@ -1508,9 +1508,12 @@ pub(crate) struct Checker<'a> {
     /// is E0144 instead of the normal "undefined name" error.
     in_pre_clause: bool,
     /// D-FAIL-BIND1=A: `None` means no fallback is being checked; `Some(true)`
-    /// is a fallible fallback with an ambient `err`; `Some(false)` is an
-    /// optional fallback, where the spelling is rejected by E0408.
+    /// is a fallible fallback with an ambient `err`; `Some(false)` has no
+    /// failure report and rejects the spelling with E0408 or E0409.
     pub(crate) fallback_has_err: Option<bool>,
+    /// D-CHOOSE-TEST1=A: distinguishes a pure pattern miss from an absent
+    /// Optional while `fallback_has_err == Some(false)`.
+    pub(crate) fallback_is_shape_miss: bool,
     /// True while inferring a comptime binding's RHS or inside a comptime
     /// context (D-META-STAGE1=B).
     in_comptime: bool,
