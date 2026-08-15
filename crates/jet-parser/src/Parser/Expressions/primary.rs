@@ -376,7 +376,15 @@ impl<'a> Parser<'a> {
                 // stays on the name here — a marked name and a plain name are
                 // two different names. Declaration positions consume the same
                 // token through `expect_ident`, so they bind the marked name.
-                TokKind::Ident(name) if Syntax::is_comptime_name(name.as_str()) => {
+                TokKind::Ident(name)
+                    if Syntax::is_comptime_name(name.as_str())
+                        && !(self.derive_template_depth > 0
+                            && allow_struct_lit
+                            && self
+                                .toks
+                                .get(self.pos + 1)
+                                .is_some_and(|token| matches!(&token.kind, TokKind::Lt))) =>
+                {
                     let span = self.bump().span;
                     Ok(Expr::ComptimeName {
                         name,
@@ -391,7 +399,9 @@ impl<'a> Parser<'a> {
                     let mut type_args = Vec::new();
                     if allow_struct_lit
                         && matches!(self.peek().kind, TokKind::Lt)
-                        && type_name.chars().next().is_some_and(|c| c.is_uppercase())
+                        && (type_name.chars().next().is_some_and(|c| c.is_uppercase())
+                            || (self.derive_template_depth > 0
+                                && Syntax::is_comptime_name(&type_name)))
                     {
                         self.expect_type_args_open(&type_name)?;
                         loop {
