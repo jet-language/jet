@@ -4394,6 +4394,11 @@ pub(crate) fn build(
     // into codegen.
     cmd.arg("--crate-name")
         .arg(jet::Syntax::sanitize_crate_name(&stem(file)));
+    // rustc keeps the spelling of a relative input path in ThinLTO bitcode.
+    // Remap both spellings so the per-process work-directory suffix cannot
+    // change a clean release binary.
+    cmd.arg("--remap-path-prefix")
+        .arg(format!("{}=build/.work", work.display()));
     if let Ok(work_prefix) = fs::canonicalize(&work) {
         cmd.arg("--remap-path-prefix")
             .arg(format!("{}=build/.work", work_prefix.display()));
