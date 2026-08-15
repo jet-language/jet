@@ -23,7 +23,7 @@ derive T.Summarize {
     method_track_origin :: info.methods[0].@track_origin.tracked
     method_view_mutable :: info.methods[0].@view_provenance.mutable
     method_maturity :: info.methods[0].@maturity.level
-    fn compile_field_names(self) => String :: "{@type_name}: {@first},{@second} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity:Debug}"
+    fn compile_field_names(self) => String :: "{@type_name}: {@first},{@second} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity == .Experimental}"
 }
 
 #Summarize
@@ -42,7 +42,7 @@ struct Point {
 fn run() {
     p :: Point.{x: 3, y: 4, level: 2}
     print(p.compile_field_names())
-    print("attribution={@attribution.source} scale={@unit_scale.kind:Debug}")
+    print("attribution={@attribution.source} scale={@unit_scale.kind == .Rational}")
     v :: reflect.of(p)
     print(v.type_name())
     print(v.path())
