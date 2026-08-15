@@ -1260,10 +1260,13 @@ pub(crate) fn method_call_in_subset(
     // `emit_builtin_method` whenever `recv_type == Some(T)` and `(T, method) ∈ method_sigs`
     // (the builtin-name-collision fix), so a user method SHADOWING a builtin name
     // (`get`/`len`/…) routes here, not through the name-keyed builtin path.
+    let metadata_ty = cx
+        .imported_type_metadata_name(ty)
+        .unwrap_or_else(|| ty.clone());
     let binding_method = cx
         .extern_funcs
         .contains_key(&foreign_binding_method_key(ty, method));
-    let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()));
+    let sig = cx.method_sigs.get(&(metadata_ty, method.to_string()));
     let distinct_numeric_operator = cx
         .distinct_types
         .get(ty)

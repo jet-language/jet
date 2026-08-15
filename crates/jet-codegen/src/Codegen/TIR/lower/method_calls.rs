@@ -6307,11 +6307,12 @@ fn lower_method_call_impl(
             },
         };
     };
-    // Sema preserves a qualified nominal name for imported receivers so type
-    // identity and Rust lowering stay collision-safe.  Imported method facts
-    // are registered by their declaration's bare owner name; use that key only
-    // for metadata lookup while retaining `ty_name` in the lowered receiver.
-    let lookup_ty_name = ty_name.rsplit_once('.').map_or(ty_name.as_str(), |(_, leaf)| leaf);
+    // Imported method metadata is keyed by the declaration's canonical nominal
+    // identity. Resolve the source-facing leaf once while retaining `ty_name`
+    // on the lowered receiver.
+    let lookup_ty_name = cx
+        .imported_type_metadata_name(&ty_name)
+        .unwrap_or_else(|| ty_name.clone());
     let sig = cx
         .method_sigs
         .get(&(lookup_ty_name.to_string(), method.to_string()))
@@ -6330,13 +6331,13 @@ fn lower_method_call_impl(
     };
     let owner_type_args = match &recv.ty {
         Type::Apply { name, args }
-            if name == &ty_name || name.as_str() == lookup_ty_name => args.as_slice(),
+            if name == &ty_name || name == &lookup_ty_name => args.as_slice(),
         _ => &[][..],
     };
     let sig = instantiated_sig
         .map(|sig| sig.to_vec())
         .unwrap_or_else(|| {
-            instantiate_method_sig(cx, &ty_name, method, &sig, owner_type_args, type_args)
+            instantiate_method_sig(cx, &lookup_ty_name, method, &sig, owner_type_args, type_args)
         });
     if matches!(&recv.ty, Type::Named(name) if cx.trait_names.contains(name)) {
         let trait_name = recv.ty.name();
@@ -6367,7 +6368,7 @@ fn lower_method_call_impl(
     let mut targs = lower_method_args(args, &sig, env, cx);
     let resolved_type_args = resolved_method_type_args(
         cx,
-        lookup_ty_name,
+        &lookup_ty_name,
         method,
         &sig,
         owner_type_args,
@@ -6387,9 +6388,9 @@ fn lower_method_call_impl(
     }
     let distinct_numeric_operator = cx
         .distinct_types
-        .get(lookup_ty_name)
+        .get(&lookup_ty_name)
         .is_some_and(|(_, numeric)| *numeric)
-        && !cx.distinct_ranges.contains_key(lookup_ty_name)
+        && !cx.distinct_ranges.contains_key(&lookup_ty_name)
         && matches!(method, "add" | "sub" | "mul" | "div")
         && args.len() == 1;
     if distinct_numeric_operator {
@@ -6417,7 +6418,7 @@ fn lower_method_call_impl(
     // but the TIR keeps it total per the design principle.
     let ret_ty = instantiate_method_ret(
         cx,
-        lookup_ty_name,
+        &lookup_ty_name,
         method,
         owner_type_args,
         &resolved_type_args,

@@ -831,7 +831,7 @@ impl Cx {
         matches.next().is_none().then_some(identity)
     }
 
-    fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
+    pub(crate) fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
         if name.contains("::") {
             return Some(name.to_string());
         }
@@ -3335,24 +3335,57 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
     imported.dedup();
     for target in imported {
         for item in &bundle.modules[target].items {
-            let (owner, methods) = match item {
-                Item::Struct(def) => (&def.name, &def.methods),
-                Item::Enum(def) => (&def.name, &def.methods),
-                Item::Impl(def) => (&def.type_name, &def.methods),
+            let (owner, methods): (&str, Vec<(&Func, bool)>) = match item {
+                Item::Struct(definition) => {
+                    let mut methods = definition
+                        .methods
+                        .iter()
+                        .map(|method| (method, false))
+                        .collect::<Vec<_>>();
+                    methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter().map(|method| (method, true))
+                    }));
+                    (&definition.name, methods)
+                }
+                Item::Enum(definition) => {
+                    let mut methods = definition
+                        .methods
+                        .iter()
+                        .map(|method| (method, false))
+                        .collect::<Vec<_>>();
+                    methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter().map(|method| (method, true))
+                    }));
+                    (&definition.name, methods)
+                }
+                Item::Impl(definition) => (
+                    &definition.type_name,
+                    definition
+                        .methods
+                        .iter()
+                        .map(|method| (method, definition.trait_name.is_some()))
+                        .collect(),
+                ),
                 _ => continue,
             };
             let owner_identity = bundle
                 .name_ledger
                 .nominal_identity(target, owner)
                 .expect("name ledger must contain every loaded module");
-            for method in methods.iter().filter(|method| {
-                bundle.name_ledger.visible(
+            let owner_visible = bundle.name_ledger.visible(module_idx, target, owner);
+            for (method, trait_impl) in methods {
+                let method_visible = bundle.name_ledger.visible(
                     module_idx,
                     target,
                     &format!("{}.{}", owner, method.name),
-                )
-            }) {
+                );
+                if !method_visible && !(trait_impl && owner_visible) {
+                    continue;
+                }
                 let key = (owner_identity.clone(), method.name.clone());
+                if trait_impl {
+                    cx.trait_methods.insert(key.clone());
+                }
                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
                 {
                     cx.method_self_convs
