@@ -2617,12 +2617,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Early comptime registration runs before sema annotates calls with
             // `widen_approx`. Recognize the unshadowed builtin here too; sema
             // still owns validation and gate recording, while TIR owns the one
-            // canonical marker erasure used by every evaluator tier.
+            // canonical Int-to-Float conversion used by every evaluator tier.
             let builtin_approx = call.name == Syntax::BUILTIN_APPROX
                 && !cx.sigs.contains_key(&call.name)
                 && !env.locals.contains_key(&call.name);
             if (call.widen_approx || builtin_approx) && call.args.len() == 1 {
-                return lower_expr(&call.args[0].expr, cx, env);
+                let source = lower_expr(&call.args[0].expr, cx, env);
+                let op = crate::Codegen::TIR::resolve_numeric_conversion_op("Float", "Int")
+                    .expect("Float.from_int is a registered numeric conversion");
+                return TExpr {
+                    ty: Type::Float,
+                    kind: TExprKind::NumericMethod {
+                        recv: Box::new(source),
+                        op,
+                    },
+                };
             }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
             // parses as `Expr::Call`. Function-type params are unmarked Read params.

@@ -1100,7 +1100,10 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
     let import_src = session.import_src();
     let item_src = session.item_srcs.join("\n");
     let stmt_body = session.stmt_srcs.join("\n");
-    let jet_src = if stmt_body.trim().is_empty() {
+    let has_run = session.func_defs.contains_key("run");
+    let jet_src = if has_run {
+        format!("{}{}\n", import_src, item_src)
+    } else if stmt_body.trim().is_empty() {
         format!("{}{}\nfn run() {{}}\n", import_src, item_src)
     } else {
         format!(
@@ -1161,7 +1164,10 @@ fn cmd_run_transcript(session: &Session) -> String {
     let import_src = session.import_src();
     let item_src = session.item_srcs.join("\n");
     let stmt_body = session.stmt_srcs.join("\n");
-    let jet_src = if stmt_body.trim().is_empty() {
+    let has_run = session.func_defs.contains_key("run");
+    let jet_src = if has_run {
+        format!("{}{}\n", import_src, item_src)
+    } else if stmt_body.trim().is_empty() {
         format!("{}{}\nfn run() {{}}\n", import_src, item_src)
     } else {
         format!(
