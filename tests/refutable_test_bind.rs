@@ -86,6 +86,27 @@ fn run() {
 }
 
 #[test]
+fn user_enum_capture_and_miss_route_match_all_tiers() {
+    let source = r#"
+enum Choice {
+    First(Int)
+    Second
+}
+
+fn select(choice: Choice) => Int {
+    choice == .First(value) ?? return 0
+    return value
+}
+
+fn run() {
+    print(select(Choice.First(7)))
+    print(select(Choice.Second))
+}
+"#;
+    tir_support::assert_tiers_agree("refutable-user-enum", source, "7\n0\n");
+}
+
+#[test]
 fn example_matches_aot_default_jit_and_interpreter() {
     tir_support::assert_example_cli_tiers_agree(
         "patterns/refutable_test_bind",

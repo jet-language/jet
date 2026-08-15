@@ -355,6 +355,10 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
                 ..
             } => collect_expr_ops(owner, out),
             TStmt::SplitViews { owner: None, .. } => {}
+            TStmt::RefutableBind { init, fallback, .. } => {
+                collect_expr_ops(init, out);
+                collect_stmt_ops(fallback, out);
+            }
             TStmt::Let { init, .. }
             | TStmt::TupleDestructure { init, .. }
             | TStmt::StructDestructure { init, .. }
@@ -716,6 +720,7 @@ pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
         TStmt::Contract { .. } => "Contract",
         TStmt::ContractScope { .. } => "ContractScope",
         TStmt::Let { .. } => "Let",
+        TStmt::RefutableBind { .. } => "RefutableBind",
         TStmt::SplitViews { .. } => "SplitViews",
         TStmt::Assign { .. } => "Assign",
         TStmt::IndexFieldAssign(_) => "IndexFieldAssign",

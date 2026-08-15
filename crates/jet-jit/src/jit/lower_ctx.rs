@@ -3949,6 +3949,13 @@ impl LowerCtx<'_, '_> {
                     self.contract_posts.pop();
                 }
             }
+            // Refutable bindings are classified as an interpreter tier in
+            // `resident_safe_stmt`, so the shared TIR evaluator owns their
+            // pattern and diverging-fallback semantics. Keep this defensive
+            // error explicit in case a caller bypasses tier planning.
+            TStmt::RefutableBind { .. } => {
+                return Err("jit refutable bind uses the canonical TIR evaluator".to_string());
+            }
             TStmt::Let {
                 name,
                 init,

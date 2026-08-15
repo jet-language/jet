@@ -4315,6 +4315,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::MathSwizzleAssign { base, value, .. } => {
             resident_safe_expr(base, callees) && resident_safe_expr(value, callees)
         }
+        // Pattern capture and the diverging miss route stay in the canonical
+        // TIR evaluator until Cranelift has a native pattern-binding lowering.
+        // Returning false here makes tier planning deopt the containing
+        // function instead of duplicating that policy in the resident engine.
+        TStmt::RefutableBind { .. } => false,
         _ => false,
     }
 }
@@ -4453,6 +4458,7 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
         TStmt::Contract { .. } => "Contract",
         TStmt::ContractScope { .. } => "ContractScope",
         TStmt::Let { .. } => "Let",
+        TStmt::RefutableBind { .. } => "RefutableBind",
         TStmt::Assign { .. } => "Assign",
         TStmt::IndexAssign { .. } => "IndexAssign",
         TStmt::IndexFieldAssign(_) => "IndexFieldAssign",
