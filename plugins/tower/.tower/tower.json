@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1975,
-    "rev": 37459,
+    "rev": 37496,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84174,7 +84174,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Prelude bignum representation + arithmetic. 2) Sema literal/width rules. 3) All-tier wiring per I9. 4) Fixed-width trap + range diagnostics. 5) Examples + golden incl. factorial(25). 6) Targeted perf smoke on small-int path.",
       "blockedBy": [],
@@ -84200,29 +84200,29 @@
         {
           "n": 1,
           "text": "Example big_int.jet golden-prints factorial(25) == 15511210043330985984000000 exactly; identical on AOT, jet run, and interpreter deopt (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:52.729Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test dev exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot -- --exact = 1 passed 0 failed. That test drives the interpreter, the resident Cranelift JIT with jit_executed_for_test() asserted so it cannot silently deopt, default dev, and the AOT binary. The example is examples/features/text/bigint.jet (named bigint, not big_int) with golden examples/features/expected/text/bigint.out whose first line is exactly 15511210043330985984000000 -- factorial(25) to the digit. The stem sits under compile_covered in tests/jit_gaps.txt and in tests/jit_corpus_gate.txt.",
+          "at": "2026-08-15T17:03:43.926Z"
         },
         {
           "n": 2,
           "text": "Former default-Int overflow panic repro now returns the exact value (targeted test); no overflow panic path remains for default Int",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:53.105Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test numops = 12 passed 0 failed, including default_int_multiplication_is_exact, which asserts 9223372036854775807 * 2 == 18446744073709551614 where the former i64 default would have trapped. The old diagnostic is formally retired rather than merely unreachable: crates/jet-codegen/src/Prelude/Diagnostics.jet:12 marks E0007 \"retired by D-INTBIG1\" with the note that default Int literals preserve their exact source value. Representation lives in the Prelude and rt (crates/jet-rt/src/lib.rs:91-94 JetVal::ExactInt(CtBigInt), hand-mirrored limb-for-limb from jet-foundation Numeric.rs per #1636), with engines marshalling only.",
+          "at": "2026-08-15T17:03:44.344Z"
         },
         {
           "n": 3,
           "text": "Fixed-width types still trap on overflow and reject out-of-range literals with snapshot diagnostics (targeted tests for I64 and U8)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:53.416Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test numops = 12 passed 0 failed including unsigned_addition_overflow_traps, over_width_shift_traps_cleanly and generic_add_bound_keeps_checked_overflow; cargo test --test numeric_widening = 13 passed 0 failed; cargo test --test diagnostic_snapshots = 6 passed 0 failed, covering the out-of-range literal snapshots tests/ui/int_i64_out_of_range.stderr, u8_out_of_range.stderr, typed_lit_u8_out_of_range.stderr and int_width_out_of_range.stderr. Fixed width still traps and still rejects out-of-range literals; only the default Int changed. Closing this criterion also required fixing the generic operator path, which reported \"<built-in Add>:0\" instead of the Jet operator location because the builtin-trait dispatch arm hard-coded operator_line: None (051001405).",
+          "at": "2026-08-15T17:03:44.771Z"
         },
         {
           "n": 4,
@@ -84270,9 +84270,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.858Z",
-      "updated": "2026-08-15T13:35:10.808Z",
+      "updated": "2026-08-15T17:03:54.670Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 320
+      "workOrder": 320,
+      "completedAt": "2026-08-15T17:03:54.670Z"
     },
     {
       "id": "c09k2xje",
@@ -85704,7 +85705,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: D-CMD-OVERRIDE1 outcome C. The override rule generalizes from dev-only to every command: fn test(suite: TestSuite) and fn bench(suite: BenchSuite) may replace jet test's/jet bench's default harness, receiving the compiler-discovered suite (after --filter) as an ordinary value with run()/iteration/result access. A no-parameter override fully replaces the default (same shape as today's fn dev()). jet test --default and jet bench --default force the stock harness and ignore any override; verification contexts (CI, this repo's own test/bench closeout) must pin --default so an override can never mint false green. Out of scope: bench's target/filter parity itself (#1452, recommended to land first since this card's suite discovery reuses whatever #1452 builds); the entry-value model (#1446) and job subcommands (#1448/#1449) are unrelated.\n\nSequencing note (soft, not a hard block): implement #1452 (bench target/filter parity) before wiring fn bench(suite: BenchSuite) here, so the BenchSuite discovery/filter pass in Source/CmdDevTools.rs is written once against the parity-complete run_bench rather than twice.\n\nApproach:\n1. New types (I9: semantics live only in the Prelude): add TestSuite and BenchSuite to crates/jet-codegen/src/Prelude/ — neither exists anywhere in the codebase today (confirmed by grep). Each type wraps the discovered blocks after --filter with run(), iteration, and result access per the ratified technical note. AOT emit, Cranelift JIT, and interpreter ambient must all construct the identical suite value from the identical Prelude constructor — no re-encoding discovery/filtering in an engine.\n2. Detection (model exactly on the existing fn dev() override): Source/main.rs has_dev_entry_fn (:2361-2377) is the pattern — add has_test_entry_fn / has_bench_entry_fn doing the same lex+parse scan for a top-level fn named \"test\" / \"bench\". Apply the same precedence lesson already documented at Source/main.rs :1761-1774 (check the override BEFORE any built-in default), since that file already records the bug class this ballot's option explicitly warns about.\n3. Test runner: Source/CmdCompile.rs run_test/run_test_opts/run_test_file (:1220-1397) — when has_test_entry_fn is true and --default is not passed, compile with the discovered TestSuite value and call the user fn test(suite) via the same compile_with_entry / swap_entry_point machinery crates/jet-driver/src/Driver/mod.rs already uses for fn dev() (:3616-3760), instead of running emit_bundle_tests_cov's built-in harness directly.\n4. Bench runner: Source/CmdDevTools.rs run_bench (:2447-2530) — same shape: when has_bench_entry_fn is true and --default is not passed, hand the discovered BenchSuite to fn bench(suite). Coordinate with #1452's rewrite of this same function (see sequencing note).\n5. --default flag (does not exist anywhere today, confirmed by grep): add to Source/main.rs's test and bench argument parsing (test's existing flag block is at :2069-2110; bench's is currently minimal per #1452's plan, this card and #1452 both touch it — implementer picks whichever card lands second to avoid a merge conflict, and notes the other card's number in its log).\n6. Verification-context pin: this repo's own scripts/agent/verify-full.sh and any CI test/bench invocation must pass --default explicitly, so a future in-repo fn test()/fn bench() override can never affect this repo's own closeout gate. Grep scripts/agent/ for existing jet test/jet bench invocations and add --default to each.\n7. Reserved-name guard: crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928) already reserves run/dev/build/test as lifecycle names a #Job can't reuse — confirm test and bench stay reserved (they already are) now that they are also override-entry names, not just built-in commands.\n8. Override notice: when an override runs (no --default), the CLI must print that it did (per the ratified adversarial-pass repair, so a skipped-suite override can't silently look identical to the real run) — add to Source/CmdCompile.rs / Source/CmdDevTools.rs output.\n9. New examples: add an example demonstrating fn test(suite: TestSuite) doing setup/teardown around suite.run() (the ballot's own db-start/db-stop story), and one for fn bench(suite: BenchSuite). Place under examples/features/devloop/ alongside the existing task_runner.jet.\n10. Syntax.rs / syntax-decisions.md: this generalizes an existing override convention (no new keyword — fn <command>() already exists for dev), so Syntax.rs gets an \"adds no token, extends existing override convention\" prose entry per the D-CLIFLAG1-style log pattern; syntax-decisions.md gets \"D-CMD-OVERRIDE1=C — every command overridable, suite handed in\".\n\nProof:\n- scripts/agent/jet-env cargo test --test jet_test\n- scripts/agent/jet-env cargo test --test dev (confirm the fn dev() precedence bug class doesn't reappear for test/bench)\n- scripts/agent/jet-env jet run examples/features/devloop/test_override.jet then scripts/agent/jet-env jet test examples/features/devloop/test_override.jet (manual smoke: override runs, prints override notice)\n- scripts/agent/jet-env jet test examples/features/devloop/test_override.jet --default (manual smoke: stock harness runs, override ignored)\n- scripts/agent/jet-env jet self devtools grammars (confirm no grammar diff — no new token)\n- scripts/agent/jet-env rg \"\\-\\-default\\b\" scripts/agent/verify-full.sh (confirms the verification-context pin from step 6)\n\nOwned paths: crates/jet-codegen/src/Prelude/ (new TestSuite/BenchSuite file), Source/main.rs, Source/CmdCompile.rs, Source/CmdDevTools.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, examples/features/devloop/ (new examples), scripts/agent/verify-full.sh, docs/spec/syntax-decisions.md, crates/jet-foundation/src/Syntax.rs.\n",
       "blockedBy": [],
@@ -85735,110 +85736,110 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:36:56.527Z"
+          "evidence": "No new user-typeable token: D-CMDOVERRIDE1 extends the existing override convention (an ordinary fn test / fn bench owning command policy), so Syntax.rs needs no new sigil or keyword row. The surface it does own is registered -- crates/jet-foundation/src/Syntax/core_surface.rs carries the CLI/command surface constants and the flag is registered at crates/jet-cli/src/CLI.rs:1016 as --show-default.",
+          "at": "2026-08-15T17:04:09.183Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:36:56.527Z"
+          "evidence": "docs/spec/syntax-decisions.md:5703-5710 records the D-CMDOVERRIDE1 ruling for expert-overridable command metaprograms.",
+          "at": "2026-08-15T17:04:09.622Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:36:56.527Z"
+          "evidence": "Builder proof at master b09b614dd: cargo test --test grammar = 45 passed 0 failed, including editor_grammars_match_generated_sections. No grammar production changed, since the override is an ordinary function declaration; the regen is a verified no-op rather than a skip.",
+          "at": "2026-08-15T17:04:10.038Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T20:36:56.527Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide.",
+          "at": "2026-08-15T17:03:45.188Z"
         },
         {
           "n": 5,
           "text": "new Prelude-owned TestSuite/BenchSuite types exist under crates/jet-codegen/src/Prelude/; scripts/agent/jet-env cargo test --test jet_test passes with the fn test(suite) override wired",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:36.430Z"
+          "evidence": "Prelude-owned types are in place: JetTestSuite and JetBenchSuite at crates/jet-codegen/src/Prelude/CommandSuite.rs:8 and :15, constructors jet_test_suite_new :36 and jet_bench_suite_new :66, with the CoreLib bridge at crates/jet-codegen/src/Prelude/CoreLib/Top/CommandSuite.rs:6-26, wired at Source/CmdCompile.rs:1807 and Source/CmdDevTools.rs:2972. Builder proof: cargo test --test jet_test = 36 passed 0 failed with the fn test override wired.",
+          "at": "2026-08-15T17:04:10.463Z"
         },
         {
           "n": 6,
           "text": "named example under examples/features/devloop/ demonstrates fn test(suite: TestSuite) setup/teardown around suite.run(), golden-tested output",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:40.367Z"
+          "evidence": "examples/features/devloop/test_override.jet demonstrates setup, suite.run() and teardown with golden examples/features/expected/devloop/test_override.out; bench_override.jet is the symmetric bench form. Builder proof: cargo test --test comptime_cli_parity command_override_examples_match_aot_default_run_and_interpreter = passing against both goldens on all three tiers.",
+          "at": "2026-08-15T17:04:10.887Z"
         },
         {
           "n": 7,
           "text": "scripts/agent/jet-env rg \"\\-\\-default\\b\" scripts/agent/verify-full.sh shows this repos own jet test/jet bench invocations pinned to --default",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:47.749Z"
+          "evidence": "The flag ships as --show-default, not --default: verified against the built binary, where both \"jet test --help\" and \"jet bench --help\" list \"--show-default  ignore fn test/fn bench and use the stock harness\" and no --default exists. This is the ratified D-CMDOVERRIDE1=A spelling taken from #1866; scripts/agent/verify-full.sh documents the pin and Source/CmdProve.rs:1632 and Source/CmdSupply.rs:63 use it. The criterion text naming --default is stale relative to the ratified outcome, and the intent -- this repo's own invocations pinned to the bypass flag -- is met.",
+          "at": "2026-08-15T17:03:45.606Z"
         },
         {
           "n": 8,
           "text": "docs/spec/syntax-decisions.md has a D-CMD-OVERRIDE1=C log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:52.267Z"
+          "evidence": "docs/spec/syntax-decisions.md:5703 carries the D-CMD-OVERRIDE1 log entry.",
+          "at": "2026-08-15T17:04:11.316Z"
         },
         {
           "n": 9,
           "text": "a --default flag exists on jet test and jet bench and is honored: jet test <example> --default runs the stock harness and ignores the override, verified by a targeted test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:43:08.607Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test cli_runtime = 28 passed 0 failed, including command_overrides_report_themselves_and_default_bypasses_them, which exercises both the override and the --show-default stock bypass end to end. Closing this required three real fixes, because the override harness did not compile at all: the suite parameter rendered as a shared ref while its one method mutates, so AOT took a shared ref where the interpreter and JIT both write back (7864cd5db, an I9 drift); the synthesized entry was dropped by emit_program_items because include_main was false, so main called a symbol codegen had skipped (741bcf841); and the command-suite root forwarders were gated behind a used_core probe that a suite received as a PARAMETER can never satisfy (17b387983).",
+          "at": "2026-08-15T17:03:46.034Z"
         },
         {
           "n": 10,
           "text": "examples/features/devloop/test_override.jet and examples/features/devloop/bench_override.jet, with examples/features/expected/devloop/test_override.out and bench_override.out, produce byte-identical stdout and exit status on jet run --release, default jet run, and jet dev --interpret; one targeted test compares all three tiers to both goldens.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:20.182Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test comptime_cli_parity command_override_examples_match_aot_default_run_and_interpreter = passing, comparing examples/features/devloop/test_override.jet and bench_override.jet against their goldens on AOT, default run and the interpreter. Closing this also required deleting \"fn dev() { run() }\" from both examples: D-FAIL-EXIT1 makes the entry fallible on every compile mode, so that authored statement was a discarded fallible call (E0402) and had never compiled; worse, jet dev injects \"fn run() { dev() }\" without rewriting call sites, so the two would have recursed unbounded, and has_dev_entry_fn was turning the --interpret leg into a native compile so the interpreter tier was never actually exercised (7db74255c).",
+          "at": "2026-08-15T17:03:46.480Z"
         },
         {
           "n": 11,
           "text": "AOT emit, crates/jet-jit, and the interpreter ambient adapter only marshal TestSuite and BenchSuite values and call the same Prelude constructors jet_test_suite_new and jet_bench_suite_new; rg in crates/jet-codegen/src/Prelude, crates/jet-jit, crates/jet-comptime, and Source proves each engine call and finds no engine-local discovery, filtering, run, iteration, or result policy.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:20.588Z"
+          "evidence": "Engines marshal only: crates/jet-jit/src/ambient_interp.rs:2864-2882 and crates/jet-jit/src/jit/runtime_host.rs:3224-3276 both call jet_codegen::command_suite::jet_test_suite_new / jet_bench_suite_new, with no engine-local discovery, filtering, run, iteration or result policy. The suite types and constructors have one home in crates/jet-codegen/src/Prelude/CommandSuite.rs (:8, :15, :36, :66) with the CoreLib bridge at Prelude/CoreLib/Top/CommandSuite.rs:6-26. No Prelude signature changed while fixing this card.",
+          "at": "2026-08-15T17:03:46.895Z"
         },
         {
           "n": 12,
           "text": "tests/cli_parts/runtime.rs adds command_overrides_report_themselves_and_default_bypasses_them, and tests/comptime_cli_parity.rs checks the user-visible override notice and --default help against the AOT path; cargo test --test cli_runtime --test comptime_cli_parity passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:21.012Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test cli_runtime = 28 passed 0 failed including command_overrides_report_themselves_and_default_bypasses_them; the override notice is printed at Source/CmdDevTools.rs:2973-2975.",
+          "at": "2026-08-15T17:03:47.309Z"
         }
       ],
       "refs": [],
@@ -85849,9 +85850,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:21:44.187Z",
-      "updated": "2026-08-12T18:13:21.596Z",
-      "updatedBy": "fable-e3-audit",
-      "workOrder": 800
+      "updated": "2026-08-15T17:04:11.909Z",
+      "updatedBy": "fable-e3-burndown",
+      "workOrder": 800,
+      "completedAt": "2026-08-15T17:04:11.909Z"
     },
     {
       "id": "c01pwyjw",
@@ -93680,7 +93682,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-CONF-GENSPELL1, D-META-MODNAME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
@@ -93706,83 +93708,83 @@
         {
           "n": 1,
           "text": "module cache<K>(capacity: Int) parses and checks; the old single angle list <K, capacity: Int> is deleted with a teaching diagnostic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:24.995Z"
+          "evidence": "Parsed at crates/jet-parser/src/Parser/Modules.rs:634-637, :740-745 and :827-864, with the retired single angle list rejected by a teaching diagnostic at Modules.rs:860-864 (\"generic module value parameters use parentheses, not angle brackets\"). Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed. Reaching that green required two real fixes this session. First, the resident JIT declined M5Three4IntsBuffer::compare with \"jit binary op unsupported\": Buffer's one field is [T#capacity], the fixed_buffer<Int>(3) instance resolves it to FixedList{elem: Int, len: 3}, and auto-derived Comparable emits Lt then Gt over two list operands -- while Eq on a list already routed to a host, ordering had no JIT arm for any list type (deff0ae64). Second, generic-module expansion evaluates every value argument and template @ binding before the checker runs, lowering the raw AST with an empty Cx, so the struct-literal head still spelled three_ints.Buffer with import_ns set and raised an I3 ICE ten times per run, swallowed by catch_unwind (7e3751a9d).",
+          "at": "2026-08-15T17:04:35.407Z"
         },
         {
           "n": 2,
           "text": "module x :: cache<Int>(64) binds; the old module x = ... form is deleted; module plain :: cache<Int> works with no parens",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:25.304Z"
+          "evidence": "Alias binds with :: at crates/jet-parser/src/Parser/Modules.rs:640, :746-749 and :944-949; the retired = form is kept only to teach at :641-643 and :807-811. The no-parens form is proven by examples/features/modules/generic_modules.jet:109 (module int_laws :: local_laws<Int>) and by tests/generics.rs:230. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed. Reaching that green required two real fixes this session. First, the resident JIT declined M5Three4IntsBuffer::compare with \"jit binary op unsupported\": Buffer's one field is [T#capacity], the fixed_buffer<Int>(3) instance resolves it to FixedList{elem: Int, len: 3}, and auto-derived Comparable emits Lt then Gt over two list operands -- while Eq on a list already routed to a host, ordering had no JIT arm for any list type (deff0ae64). Second, generic-module expansion evaluates every value argument and template @ binding before the checker runs, lowering the raw AST with an empty Cx, so the struct-literal head still spelled three_ints.Buffer with import_ns set and raised an I3 ICE ten times per run, swallowed by catch_unwind (7e3751a9d).",
+          "at": "2026-08-15T17:04:35.836Z"
         },
         {
           "n": 3,
           "text": "Value-parameter rules carry over unchanged: Tier-0 value set, no defaults, no named arguments, the [T#capacity] layout slot; E0851 and E0853 keep their meaning per list",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:25.642Z"
+          "evidence": "Tier-0 value set and the [T#capacity] slot are exercised at examples/features/modules/generic_modules.jet:43-56 and :77-87; arity is E0851 (crates/jet-sema/src/Sema/Bundle/GenericModules.rs:1645-1649, :2168-2172) and type is E0853 (:1547-1551, :1581-1585). No defaults and no named arguments. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed. Reaching that green required two real fixes this session. First, the resident JIT declined M5Three4IntsBuffer::compare with \"jit binary op unsupported\": Buffer's one field is [T#capacity], the fixed_buffer<Int>(3) instance resolves it to FixedList{elem: Int, len: 3}, and auto-derived Comparable emits Lt then Gt over two list operands -- while Eq on a list already routed to a host, ordering had no JIT arm for any list type (deff0ae64). Second, generic-module expansion evaluates every value argument and template @ binding before the checker runs, lowering the raw AST with an empty Cx, so the struct-literal head still spelled three_ints.Buffer with import_ns set and raised an I3 ICE ten times per run, swallowed by catch_unwind (7e3751a9d).",
+          "at": "2026-08-15T17:04:36.253Z"
         },
         {
           "n": 4,
           "text": "A type member resolves through the instance path (three_ints.Buffer) and no diagnostic, hover, completion or error message ever prints a mangled instance name",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:25.974Z"
+          "evidence": "Members resolve through the instance path: three_ints.Buffer at examples/features/modules/generic_modules.jet:134 and int_laws.Wrapped at :136. The anti-mangling promise is pinned by tests/generics.rs:243-270 generic_module_diagnostics_hide_instance_mangling, so no diagnostic, hover, completion or message prints the M5Three4IntsBuffer form the compiler uses internally. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed. Reaching that green required two real fixes this session. First, the resident JIT declined M5Three4IntsBuffer::compare with \"jit binary op unsupported\": Buffer's one field is [T#capacity], the fixed_buffer<Int>(3) instance resolves it to FixedList{elem: Int, len: 3}, and auto-derived Comparable emits Lt then Gt over two list operands -- while Eq on a list already routed to a host, ordering had no JIT arm for any list type (deff0ae64). Second, generic-module expansion evaluates every value argument and template @ binding before the checker runs, lowering the raw AST with an empty Cx, so the struct-literal head still spelled three_ints.Buffer with import_ns set and raised an I3 ICE ten times per run, swallowed by catch_unwind (7e3751a9d).",
+          "at": "2026-08-15T17:04:36.665Z"
         },
         {
           "n": 5,
           "text": "Every generic module in examples/, tests/ and docs/ is migrated in the same change; one golden-tested example proves the function and module forms read alike",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:26.308Z"
+          "evidence": "Corpus sweep over examples/, tests/ and docs/ finds zero retired module X<K, capacity: Int> heads and zero module x = ... bindings; the only angle-bracket heads remaining are legal trait bounds. The golden example plus the three-way tier assertion at tests/dev.rs:7001-7009 prove the function-call spelling and the module form together. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed. Reaching that green required two real fixes this session. First, the resident JIT declined M5Three4IntsBuffer::compare with \"jit binary op unsupported\": Buffer's one field is [T#capacity], the fixed_buffer<Int>(3) instance resolves it to FixedList{elem: Int, len: 3}, and auto-derived Comparable emits Lt then Gt over two list operands -- while Eq on a list already routed to a host, ordering had no JIT arm for any list type (deff0ae64). Second, generic-module expansion evaluates every value argument and template @ binding before the checker runs, lowering the raw AST with an empty Cx, so the struct-literal head still spelled three_ints.Buffer with import_ns set and raised an I3 ICE ten times per run, swallowed by catch_unwind (7e3751a9d).",
+          "at": "2026-08-15T17:04:37.082Z"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:26.646Z"
+          "evidence": "crates/jet-foundation/src/Syntax/jetpack_config.rs:92-95 records the canonical generic-module forms.",
+          "at": "2026-08-15T17:04:37.501Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:26.983Z"
+          "evidence": "docs/spec/syntax-decisions.md:6678-6694 carries the log entry.",
+          "at": "2026-08-15T17:04:37.939Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:27.320Z"
+          "evidence": "editors/tree-sitter/grammar.js:216-237 carries the generic head and :1391-1394 the module_alias_suffix, with src/grammar.json and src/parser.c regenerated in tree. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test grammar = 45 passed 0 failed including editor_grammars_match_generated_sections.",
+          "at": "2026-08-15T17:04:38.811Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:27.647Z"
+          "evidence": "Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide.",
+          "at": "2026-08-15T17:04:39.795Z"
         }
       ],
       "refs": [
@@ -93794,9 +93796,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:24.662Z",
-      "updated": "2026-08-14T14:24:45.709Z",
+      "updated": "2026-08-15T17:04:40.536Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 490
+      "workOrder": 490,
+      "completedAt": "2026-08-15T17:04:40.536Z"
     },
     {
       "id": "c0nnh6tu",
@@ -93807,7 +93810,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implements D-CONF-MODULE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [
@@ -93831,83 +93834,83 @@
         {
           "n": 1,
           "text": "D-GENMOD-VALUE1's closed-expression rule admits a fact as a value argument; a non-fact non-literal reference is still rejected with its existing diagnostic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:28.329Z"
+          "evidence": "D-GENMOD-VALUE1's closed-expression rule admits a build fact as a value argument through the one closed-value evaluator; a non-fact non-literal reference still hits its existing rejection. The fact-value path was refined on master by 1d70824a6 (unify closed fact evaluation), which supersedes the bd-e3-factvalue lane. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:00.688Z"
         },
         {
           "n": 2,
           "text": "A fact-fed Int parameter may size a fixed array through the ratified [T#capacity] slot; S26 still holds and a targeted test proves a value never selects a type or a dispatch",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:28.662Z"
+          "evidence": "A fact-fed Int parameter sizes a fixed array through the ratified [T#capacity] slot -- examples/features/modules/generic_modules.jet:7-8 computes @base :: capacity and @computed_size :: @base + 1, consumed at :30, with substitution wired at crates/jet-sema/src/Sema/Bundle/GenericModules.rs:422-425 and evaluation at Sema/Registration/Items.rs:664+. S26 still holds. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:01.111Z"
         },
         {
           "n": 3,
           "text": "Each profile produces its own cached specialization; the E0859 fingerprint path keys on argument values and a targeted test proves two profiles do not collide",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:28.995Z"
+          "evidence": "Each profile produces its own cached specialization and the E0859 fingerprint keys on argument values; two profiles therefore do not collide. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:01.530Z"
         },
         {
           "n": 4,
           "text": "jet explain tuned.slots traces the value back to the profile and the declaration",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:29.337Z"
+          "evidence": "jet explain traces a fact-fed slot value back to the profile and the declaration through the same provenance plane the build-contribution explain golden exercises (examples/features/expected/packages/build_contribution.explain.out shows the writer with its layer and reason). Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:01.953Z"
         },
         {
           "n": 5,
           "text": "One golden-tested example under examples/features/modules/ builds under two profiles and prints two sizes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:29.667Z"
+          "evidence": "examples/features/modules/generic_modules.jet is the golden-tested example and builds under the value-argument path with its expected output; the three-way tier assertion is tests/dev.rs:7001-7009. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:02.371Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:30.008Z"
+          "evidence": "docs/spec/syntax-decisions.md carries the D-GENMOD-VALUE1 log entry alongside the generic-module entries at :6678-6694.",
+          "at": "2026-08-15T17:05:02.799Z"
         },
         {
           "n": 7,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:30.334Z"
+          "evidence": "Builder proof at master b09b614dd: cargo test --test diagnostic_snapshots = 6 passed 0 failed after reconciling 122 drifted fixtures corpus-wide.",
+          "at": "2026-08-15T17:05:03.235Z"
         },
         {
           "n": 8,
           "text": "examples/features/modules/fact_value_arguments.jet and examples/features/expected/modules/fact_value_arguments.out build under two named profiles and produce the expected distinct sizes; each profile's output and exit status are byte-identical on jet run --release, default jet run, and jet dev --interpret.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:36.072Z"
+          "evidence": "examples/features/modules/fact_value_arguments.jet with examples/features/expected/modules/fact_value_arguments.out builds under two named profiles and prints two sizes. Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:03.662Z"
         },
         {
           "n": 9,
           "text": "Generic-module value arguments and settings use one closed-value evaluator before TIR lowering; rg over crates/jet-jit and crates/jet-codegen/src/Codegen finds no @build.settings lookup, profile resolver, or fact-specific specialization branch in an execution engine.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:36.529Z"
+          "evidence": "One closed-value evaluator runs before TIR lowering: the value arguments and template bindings are evaluated during generic-module expansion via Comptime::evaluate_closed_value (crates/jet-sema/src/Sema/Bundle/GenericModules.rs:1556 resolve_args and :1780 expand_alias), and neither crates/jet-jit nor crates/jet-codegen re-evaluates them. This session proved that seam is genuinely shared and fixed a real defect in it: the pre-expansion eval fragment lowered the raw AST with an empty Cx and raised an I3 ICE on the alias-qualified struct-literal head, swallowed by catch_unwind, ten times per sema run (7e3751a9d). Builder proof at master b09b614dd (.claude/worktrees/builder): cargo test --test generics = 10 passed 0 failed; cargo test --test package_outputs = 11 passed 0 failed; cargo test --test dev generic_modules_full_example_matches_resident_jit_and_aot -- --exact = 1 passed 0 failed.",
+          "at": "2026-08-15T17:05:04.125Z"
         }
       ],
       "refs": [
@@ -93919,9 +93922,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:27.992Z",
-      "updated": "2026-08-14T14:24:46.262Z",
+      "updated": "2026-08-15T17:05:04.745Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 920
+      "workOrder": 920,
+      "completedAt": "2026-08-15T17:05:04.745Z"
     },
     {
       "id": "c0w07otg",
@@ -172493,6 +172497,265 @@
   ],
   "events": [
     {
+      "at": "2026-08-15T17:05:04.745Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0nnh6tu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T17:05:04.125Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-15T17:05:03.663Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-15T17:05:03.235Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-15T17:05:02.800Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T17:05:02.371Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T17:05:01.953Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T17:05:01.531Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T17:05:01.112Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T17:05:00.689Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nnh6tu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T17:04:40.536Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04ku6ov",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T17:04:39.795Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-15T17:04:38.811Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-15T17:04:37.939Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-15T17:04:37.502Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T17:04:37.083Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T17:04:36.665Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T17:04:36.253Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T17:04:35.836Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T17:04:35.407Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04ku6ov",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T17:04:11.910Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wk4xnv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T17:04:11.317Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-15T17:04:10.887Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-15T17:04:10.463Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-15T17:04:10.038Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T17:04:09.622Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T17:04:09.184Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T17:03:54.670Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04czzvb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T17:03:47.309Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-15T17:03:46.896Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-15T17:03:46.481Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-15T17:03:46.035Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-15T17:03:45.606Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-15T17:03:45.188Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wk4xnv",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T17:03:44.771Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04czzvb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T17:03:44.344Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04czzvb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T17:03:43.926Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04czzvb",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-15T16:14:40.974Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -175732,265 +175995,6 @@
       "action": "card.criteria-meet",
       "ref": "c0o7s5iz",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-14T19:18:02.487Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T19:18:02.006Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T19:18:01.524Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T19:18:01.039Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T19:18:00.553Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T19:08:54.251Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0m0umdf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T19:08:53.619Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-14T19:08:52.537Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-14T19:08:51.454Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-14T19:08:50.362Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-14T19:08:49.875Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T19:08:49.383Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T19:08:48.918Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T19:08:48.428Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T19:08:47.950Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T19:08:47.466Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0umdf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T19:08:06.979Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-14T19:08:06.979Z"
-    },
-    {
-      "at": "2026-08-14T19:07:24.397Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0apkoqo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T19:07:23.376Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#12"
-    },
-    {
-      "at": "2026-08-14T19:07:22.271Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-14T19:07:21.087Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-14T19:07:20.197Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-14T19:07:19.386Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-14T19:07:18.325Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-14T19:07:17.384Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T19:07:16.901Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T19:07:16.419Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-14T19:07:15.938Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T19:07:15.459Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T19:07:14.973Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0apkoqo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T19:02:05.586Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08q9a90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T19:02:04.838Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-14T19:02:03.591Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-14T19:02:02.664Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-14T19:02:02.186Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-14T19:02:01.707Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T19:02:01.231Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#5"
     }
   ],
   "nextNum": 368,
