@@ -1370,6 +1370,23 @@ fn check_bundle_opts_for_output_inner(
         }
 
         st.consts.extend(comptime_types);
+        // D-UNIONTYPE1=A / R11: materialize every anonymous union seen after
+        // typed derive/marker expansion as a sema-owned hidden enum. Its
+        // representation remains backend sugar; its codec members are normal
+        // checked Jet impl items, just like named serde types.
+        let union_item_start = module.items.len();
+        super::super::Registration::inject_anonymous_union_items(&mut module.items);
+        for item in module.items.iter().skip(union_item_start) {
+            if let Item::Enum(definition) = item {
+                register_enum(
+                    definition,
+                    &mut st.registry,
+                    &mut diags,
+                    &st.funcs,
+                    &st.consts,
+                );
+            }
+        }
         // D-ONCE-DERIVE1=A / I3: built-in capability requests re-enter as
         // ordinary Jet impl blocks before the final trait registration pass.
         let known_functions: HashSet<String> = module

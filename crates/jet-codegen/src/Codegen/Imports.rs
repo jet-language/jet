@@ -1778,6 +1778,7 @@ pub(crate) fn emit_program_items(
                 cx.rust_type_with_view_lifetime_assoc(ty, assoc)
             }),
             Item::Struct(s) => emit_struct(cx, s, out),
+            Item::Enum(e) if e.name.starts_with("__JetUnion_") => {}
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
             Item::CModule(cm) => emit_c_module(cx, cm, out),

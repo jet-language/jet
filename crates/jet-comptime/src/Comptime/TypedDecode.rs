@@ -15,7 +15,7 @@
 //! exactly AOT's `DataTree` shape (see `datatree_from_json`), so no separate
 //! value type is needed at this tier.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::AST::{CtFloat, CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -301,8 +301,58 @@ fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &Str
                 .collect();
             json_variant("Object", Some(CtValue::Map(entries.into_iter().map(|(k, v)| (CtKey::Str(k), v)).collect())))
         }
+        CtValue::Enum { type_name, args, .. } if type_name.starts_with("__JetUnion_") => args
+            .first()
+            .map(|(_, value)| encode_ct_value(value, structs))
+            .unwrap_or_else(|| json_variant("Null", None)),
         _ => json_variant("Null", None),
     }
+}
+
+/// D-SERDE-ENGINE1 / D-UNIONTYPE1=A: mirror the sema-known outer wire-shape
+/// table for the interpreter's direct typed decode adapter.
+fn typed_union_wire_shapes(
+    ty: &Type,
+    structs: &HashMap<String, &StructDef>,
+    distinct_bases: &HashMap<String, Type>,
+) -> Vec<&'static str> {
+    let mut shapes = match ty {
+        Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => vec!["Int"],
+        Type::Float | Type::Float32 => vec!["Float"],
+        Type::Bool => vec!["Bool"],
+        Type::String | Type::Char => vec!["Text"],
+        Type::Named(name) if name == "Decimal" => vec!["Text"],
+        Type::List(_) | Type::FixedList { .. } => vec!["Array"],
+        Type::Map { .. } | Type::Tuple(_) => vec!["Object"],
+        Type::Shared(inner) | Type::Quantity { base: inner, .. } | Type::Tagged { inner, .. } => {
+            typed_union_wire_shapes(inner, structs, distinct_bases)
+        }
+        Type::Option(inner) => {
+            let mut shapes = vec!["Null"];
+            shapes.extend(typed_union_wire_shapes(inner, structs, distinct_bases));
+            shapes
+        }
+        Type::Union(members) => members
+            .iter()
+            .flat_map(|member| typed_union_wire_shapes(member, structs, distinct_bases))
+            .collect(),
+        Type::Named(name) => distinct_bases
+            .get(name)
+            .map(|base| typed_union_wire_shapes(base, structs, distinct_bases))
+            .or_else(|| structs.contains_key(name).then_some(vec!["Object"]))
+            .unwrap_or_default(),
+        Type::Apply { name, .. } => structs
+            .contains_key(name)
+            .then_some(vec!["Object"])
+            .unwrap_or_default(),
+        Type::Result { .. }
+        | Type::Fn { .. }
+        | Type::TraitObject(_)
+        | Type::ComputeDim(_) => Vec::new(),
+    };
+    shapes.sort_unstable();
+    shapes.dedup();
+    shapes
 }
 
 // ── decoding primitives (mirrors `EncodingTraits.rs`'s scalar `__jet_Decode` impls) ─
@@ -582,6 +632,12 @@ impl<'a> Interp<'a> {
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
                 }),
             ),
+            CtValue::Enum { type_name, args, .. } if type_name.starts_with("__JetUnion_") => {
+                let Some((_, value)) = args.first() else {
+                    return Err(unsupported("this union has no payload", span));
+                };
+                self.encode_value(value, span)?
+            }
             CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => {
                 return Err(unsupported(
                     "this value has no comptime Encode implementation",
@@ -636,6 +692,29 @@ impl<'a> Interp<'a> {
             return decoded;
         }
         match ty {
+            Type::Union(members) => {
+                let name = crate::AST::union_enum_name(members);
+                if let Some(decoded) = self.decode_user_value(&name, tree) {
+                    return decoded;
+                }
+                let shape = datatree_kind_for(tree);
+                let Some(member) = members
+                    .iter()
+                    .find(|member| {
+                        typed_union_wire_shapes(member, self.structs, self.distinct_bases)
+                            .contains(&shape)
+                    })
+                    .cloned()
+                else {
+                    return Err(decode_error("no matching union member"));
+                };
+                let value = self.typed_decode_value(&member, tree, span)?;
+                Ok(CtValue::Enum {
+                    type_name: name,
+                    variant: crate::AST::union_member_tag(&member),
+                    args: vec![(None, value)],
+                })
+            }
             Type::Option(inner) => match variant_of(tree) {
                 Some(("Null", _)) => Ok(CtValue::absent((**inner).clone())),
                 _ => Ok(CtValue::Present(Box::new(self.typed_decode_value(inner, tree, span)?))),
@@ -699,6 +778,7 @@ impl<'a> Interp<'a> {
                 }
             }
             Type::Map { .. } => Err(decode_error("comptime maps require String keys")),
+            Type::Quantity { base, .. } => self.typed_decode_value(base, tree, span),
             Type::Named(name) => self
                 .decode_user_value(name, tree)
                 .unwrap_or_else(|| self.typed_decode_struct(name, tree, span)),

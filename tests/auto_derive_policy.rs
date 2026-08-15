@@ -288,6 +288,78 @@ fn run() {
 }
 
 #[test]
+fn structural_defaults_cover_codable_and_refusals_are_silent() {
+    let bundle = checked_project(
+        "structural_defaults",
+        "",
+        r#"
+struct Plain { value: Int }
+
+#!Codable
+struct Refused { value: Int }
+
+struct Opaque { value: Shared<Int> }
+
+fn run() {}
+"#,
+    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    for selected in [
+        &facts.auto_printable,
+        &facts.auto_debug,
+        &facts.auto_equatable,
+        &facts.auto_comparable,
+        &facts.auto_encode,
+        &facts.auto_decode,
+    ] {
+        assert!(selected.contains("Plain"), "{selected:?}");
+        assert!(!selected.contains("Opaque"), "{selected:?}");
+    }
+    for selected in [
+        &facts.auto_printable,
+        &facts.auto_debug,
+        &facts.auto_equatable,
+        &facts.auto_comparable,
+    ] {
+        assert!(selected.contains("Refused"), "{selected:?}");
+    }
+    assert!(!facts.auto_encode.contains("Refused"));
+    assert!(!facts.auto_decode.contains("Refused"));
+}
+
+#[test]
+fn project_refusal_is_a_default_fact_and_explicit_codable_still_wins() {
+    let bundle = checked_project(
+        "project_refusal_fact",
+        "policy: .{ lints: .{ deny: [auto_derive] } }",
+        r#"
+struct Defaulted { value: Int }
+
+#Codable
+struct Explicit { value: Int }
+
+fn run() {}
+"#,
+    );
+    let mut defaults = Vec::new();
+    collect_struct_defaults(
+        &bundle.modules[bundle.entry].items,
+        &mut defaults,
+    );
+    assert_eq!(
+        defaults,
+        vec![("Defaulted".to_string(), false), ("Explicit".to_string(), false)]
+    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
+    let facts = &facts[bundle.entry];
+    assert!(!facts.auto_encode.contains("Defaulted"));
+    assert!(!facts.auto_decode.contains("Defaulted"));
+    assert!(facts.auto_encode.contains("Explicit"));
+    assert!(facts.auto_decode.contains("Explicit"));
+}
+
+#[test]
 fn generic_deny_list_refuses_auto_derive() {
     let bundle = checked_project(
         "package_off",

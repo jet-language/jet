@@ -1,9 +1,292 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, CallArg, CallArgFlags, CtReport, CtValue, EnumLitArg,
-    Expr, ForKind, Func, ImplDef, IndexKind, Item, LValue, Param, PatSlot, Pattern, Stmt,
-    SwitchArm, TryConvert, Type, TypeParam, VariantPayload,
+    AccessConvention, BinOp, CallArg, CallArgFlags, CtReport, CtValue, EnumDef, EnumLitArg,
+    Expr, ForKind, Func, ImplDef, IndexKind, Item, LValue, Param, PatSlot, Pattern,
+    Stmt, SwitchArm, TryConvert, Type, TypeParam, Variant, VariantPayload,
 };
+
+/// D-UNIONTYPE1=A / R11: anonymous unions are compiler-owned enum sugar, but
+/// their declaration is still an ordinary sema item. The backend keeps the
+/// existing representation emitter; codec methods are generated here so they
+/// take the same checked Jet AST path as named structs and enums.
+pub(crate) fn inject_anonymous_union_items(items: &mut Vec<Item>) {
+    let unions = collect_anonymous_unions(items);
+    let (encodes, decodes) = union_codec_needs(items);
+    let mut existing = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Enum(e) if e.name.starts_with("__JetUnion_") => Some(e.name.clone()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let span = crate::Diagnostics::Span::new(0, 0);
+    for (name, members) in unions {
+        if !existing.insert(name.clone()) {
+            continue;
+        }
+        let mut derives = Vec::new();
+        if encodes.contains(&name) {
+            derives.push((crate::Generics::ENCODE.to_string(), span));
+        }
+        if decodes.contains(&name) {
+            derives.push((crate::Generics::DECODE.to_string(), span));
+        }
+        let variants = members
+            .into_iter()
+            .map(|member| Variant {
+                name: crate::AST::union_member_tag(&member),
+                name_span: span,
+                payload: VariantPayload::Single(member, span),
+                discriminant: None,
+                discriminant_expr: None,
+                serde_markers: Vec::new(),
+            })
+            .collect();
+        items.push(Item::Enum(EnumDef {
+            span,
+            is_pub: false,
+            is_package_pub: false,
+            name,
+            name_span: span,
+            type_params: Vec::new(),
+            variants,
+            methods: Vec::new(),
+            trait_impls: Vec::new(),
+            derives,
+            auto_derive_default: false,
+            is_single_use: false,
+            single_use_span: None,
+            is_must_use: false,
+            must_use_span: None,
+            serde_markers: Vec::new(),
+            type_markers: Vec::new(),
+            groups: Vec::new(),
+        }));
+    }
+}
+
+fn collect_anonymous_unions(items: &[Item]) -> std::collections::BTreeMap<String, Vec<Type>> {
+    fn walk_type(
+        ty: &Type,
+        unions: &mut std::collections::BTreeMap<String, Vec<Type>>,
+    ) {
+        match ty {
+            Type::Union(members) => {
+                let name = crate::AST::union_enum_name(members);
+                unions.entry(name).or_insert_with(|| members.clone());
+                for member in members {
+                    walk_type(member, unions);
+                }
+            }
+            Type::List(inner)
+            | Type::Shared(inner)
+            | Type::Option(inner)
+            | Type::Tagged { inner, .. }
+            | Type::FixedList { elem: inner, .. }
+            | Type::InlineRange { base: inner, .. }
+            | Type::Quantity { base: inner, .. } => walk_type(inner, unions),
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                walk_type(key, unions);
+                walk_type(value, unions);
+            }
+            Type::Fn { params, ret, .. } => {
+                for param in params {
+                    walk_type(param, unions);
+                }
+                if let Some(ret) = ret {
+                    walk_type(ret, unions);
+                }
+            }
+            Type::Apply { args, .. } => {
+                for arg in args {
+                    walk_type(arg, unions);
+                }
+            }
+            Type::Tuple(fields) => {
+                for (_, field) in fields {
+                    walk_type(field, unions);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_item(item: &Item, unions: &mut std::collections::BTreeMap<String, Vec<Type>>) {
+        match item {
+            Item::Struct(s) => {
+                for field in &s.fields {
+                    walk_type(&field.ty, unions);
+                }
+            }
+            Item::Enum(e) => {
+                for variant in &e.variants {
+                    match &variant.payload {
+                        VariantPayload::Single(ty, _) => walk_type(ty, unions),
+                        VariantPayload::Named(fields) => {
+                            for field in fields {
+                                walk_type(&field.ty, unions);
+                            }
+                        }
+                        VariantPayload::Unit => {}
+                    }
+                }
+            }
+            Item::Func(f) => {
+                for param in &f.params {
+                    walk_type(&param.ty, unions);
+                }
+                if let Some(ret) = &f.return_type {
+                    walk_type(ret, unions);
+                }
+            }
+            Item::Impl(i) => {
+                for method in &i.methods {
+                    for param in &method.params {
+                        walk_type(&param.ty, unions);
+                    }
+                    if let Some(ret) = &method.return_type {
+                        walk_type(ret, unions);
+                    }
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    for item in body {
+                        walk_item(item, unions);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut unions = std::collections::BTreeMap::new();
+    for item in items {
+        walk_item(item, &mut unions);
+    }
+    unions
+}
+
+fn union_codec_needs(
+    items: &[Item],
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    fn collect_type(
+        ty: &Type,
+        encode: bool,
+        decode: bool,
+        encodes: &mut std::collections::BTreeSet<String>,
+        decodes: &mut std::collections::BTreeSet<String>,
+    ) {
+        if let Type::Union(members) = ty {
+            let name = crate::AST::union_enum_name(members);
+            if encode {
+                encodes.insert(name.clone());
+            }
+            if decode {
+                decodes.insert(name);
+            }
+        }
+        match ty {
+            Type::List(inner)
+            | Type::Shared(inner)
+            | Type::Option(inner)
+            | Type::Tagged { inner, .. }
+            | Type::FixedList { elem: inner, .. }
+            | Type::InlineRange { base: inner, .. }
+            | Type::Quantity { base: inner, .. } => {
+                collect_type(inner, encode, decode, encodes, decodes)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                collect_type(key, encode, decode, encodes, decodes);
+                collect_type(value, encode, decode, encodes, decodes);
+            }
+            Type::Apply { args, .. } | Type::Union(args) => {
+                for arg in args {
+                    collect_type(arg, encode, decode, encodes, decodes);
+                }
+            }
+            Type::Tuple(fields) => {
+                for (_, field) in fields {
+                    collect_type(field, encode, decode, encodes, decodes);
+                }
+            }
+            Type::Fn { params, ret, .. } => {
+                for param in params {
+                    collect_type(param, encode, decode, encodes, decodes);
+                }
+                if let Some(ret) = ret {
+                    collect_type(ret, encode, decode, encodes, decodes);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn walk_items(
+        items: &[Item],
+        auto: &crate::Traits::TraitRegistry,
+        encodes: &mut std::collections::BTreeSet<String>,
+        decodes: &mut std::collections::BTreeSet<String>,
+    ) {
+        for item in items {
+            match item {
+                Item::Struct(s) => {
+                    let encode = s.derives.iter().any(|(name, _)| {
+                        matches!(name.as_str(), crate::Generics::ENCODE | "Codable")
+                    }) || auto.auto_encode.contains(&s.name);
+                    let decode = s.derives.iter().any(|(name, _)| {
+                        matches!(name.as_str(), crate::Generics::DECODE | "Codable")
+                    }) || auto.auto_decode.contains(&s.name);
+                    for field in &s.fields {
+                        if !field
+                            .serde_markers
+                            .iter()
+                            .any(|marker| marker.name == crate::Syntax::MARKER_SKIP)
+                        {
+                            collect_type(&field.ty, encode, decode, encodes, decodes);
+                        }
+                    }
+                }
+                Item::Enum(e) => {
+                    let encode = e.derives.iter().any(|(name, _)| {
+                        matches!(name.as_str(), crate::Generics::ENCODE | "Codable")
+                    }) || auto.auto_encode.contains(&e.name);
+                    let decode = e.derives.iter().any(|(name, _)| {
+                        matches!(name.as_str(), crate::Generics::DECODE | "Codable")
+                    }) || auto.auto_decode.contains(&e.name);
+                    for variant in &e.variants {
+                        match &variant.payload {
+                            VariantPayload::Single(ty, _) => {
+                                collect_type(ty, encode, decode, encodes, decodes)
+                            }
+                            VariantPayload::Named(fields) => {
+                                for field in fields {
+                                    collect_type(&field.ty, encode, decode, encodes, decodes);
+                                }
+                            }
+                            VariantPayload::Unit => {}
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        walk_items(body, auto, encodes, decodes);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut encodes = std::collections::BTreeSet::new();
+    let mut decodes = std::collections::BTreeSet::new();
+    let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+    walk_items(items, &auto, &mut encodes, &mut decodes);
+    (encodes, decodes)
+}
 
 /// D-SERDE2=A / I3: built-in codecs are ordinary Jet AST items. The builder
 /// below shares the same method/body representation as hand-written codecs;
@@ -17,6 +300,10 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
             }
         }
     }
+    // Comptime evaluation expands a private clone before the bundle pipeline
+    // registers synthetic union enums. Materialize those declarations here as
+    // well so the clone receives the same checked codec bodies as production.
+    inject_anonymous_union_items(items);
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     let (encode_unions, decode_unions) = union_codec_needs(items, &auto);
     let union_defs = anonymous_union_defs(items, &encode_unions, &decode_unions);
@@ -74,7 +361,11 @@ pub(crate) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags: &mut Vec<
                     &derived.name,
                     derived.name_span,
                 );
-                generated_items.extend(enum_codec_items(&derived));
+                if derived.name.starts_with("__JetUnion_") {
+                    generated_items.extend(union_codec_items(&derived, &snapshot));
+                } else {
+                    generated_items.extend(enum_codec_items(&derived));
+                }
             }
             _ => {}
         }
@@ -544,6 +835,120 @@ fn enum_codec_items(e: &crate::AST::EnumDef) -> Vec<Item> {
         )));
     }
     out
+}
+
+fn union_codec_items(e: &crate::AST::EnumDef, items: &[Item]) -> Vec<Item> {
+    let encode = has_derive(&e.derives, crate::Generics::ENCODE);
+    let decode = has_derive(&e.derives, crate::Generics::DECODE);
+    let span = e
+        .derives
+        .iter()
+        .find(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE))
+        .map(|(_, span)| *span)
+        .unwrap_or(e.name_span);
+    let mut out = Vec::new();
+    if encode {
+        out.push(Item::Impl(serde_impl(
+            &e.name,
+            crate::Generics::ENCODE,
+            serde_method(
+                "encode",
+                Vec::new(),
+                vec![self_param(span)],
+                Some(data_tree_type()),
+                union_encode_body(e, span),
+                span,
+            ),
+            span,
+        )));
+    }
+    if decode {
+        out.push(Item::Impl(serde_impl(
+            &e.name,
+            crate::Generics::DECODE,
+            serde_method(
+                "decode",
+                Vec::new(),
+                vec![named_param("tree", data_tree_type(), span)],
+                Some(result_type(target_type(&e.name, &e.type_params), span)),
+                union_decode_body(e, items, span),
+                span,
+            ),
+            span,
+        )));
+    }
+    out
+}
+
+fn union_encode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
+    let arms = e
+        .variants
+        .iter()
+        .map(|variant| {
+            let binding = format!("jet_serde_union_{}", variant.name.replace('.', "_"));
+            SwitchArm {
+                cond: pattern_test("self", variant, vec![binding.clone()], span),
+                body: vec![ret(method(ident(&binding, span), "encode", Vec::new(), span), span)],
+                span,
+            }
+        })
+        .collect();
+    vec![Stmt::Switch {
+        subject: ident("self", span),
+        arms,
+        else_body: None,
+        span,
+    }]
+}
+
+fn union_decode_body(e: &crate::AST::EnumDef, items: &[Item], span: Span) -> Vec<Stmt> {
+    let mut body = Vec::new();
+    for (index, variant) in e.variants.iter().enumerate() {
+        let VariantPayload::Single(member, _) = &variant.payload else {
+            continue;
+        };
+        let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+            continue;
+        };
+        for shape in shapes {
+            let value_name = format!("jet_serde_union_value_{index}");
+            let decode = try_expr(
+                method_with_type_args(
+                    copy(ident("tree", span), span),
+                    "decode",
+                    vec![member.clone()],
+                    span,
+                ),
+                span,
+            );
+            let branch = vec![
+                binding(&value_name, None, decode, false, span),
+                ret(
+                    ok(enum_constructor_from_binding(
+                        variant,
+                        &value_name,
+                        &e.name,
+                        span,
+                    ), span),
+                    span,
+                ),
+            ];
+            let bindings = match shape {
+                crate::AST::SerdeWireShape::Null => Vec::new(),
+                _ => vec![format!("jet_serde_union_wire_{index}")],
+            };
+            body.push(pattern_switch(
+                copy(ident("tree", span), span),
+                shape.name(),
+                bindings,
+                branch,
+                Some(Vec::new()),
+                span,
+            ));
+        }
+    }
+    body.push(no_matching_union(span));
+    body
 }
 
 fn serde_impl(type_name: &str, trait_name: &str, method: Func, span: Span) -> ImplDef {
@@ -1295,6 +1700,16 @@ fn enum_constructor_named(
 fn no_matching_enum(span: Span) -> Stmt {
     ret(
         err(list_literal(vec![field_error("", "no matching enum variant", span)], span), span),
+        span,
+    )
+}
+
+fn no_matching_union(span: Span) -> Stmt {
+    ret(
+        err(
+            list_literal(vec![field_error("", "no matching union member", span)], span),
+            span,
+        ),
         span,
     )
 }

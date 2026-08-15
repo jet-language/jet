@@ -2539,6 +2539,56 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
+    /// D-SERDE-ENGINE1 / D-UNIONTYPE1=A: the sema union validator has already
+    /// proved that member wire shapes do not collide. The TIR adapter keeps
+    /// that same primitive/container shape table for direct decode, instead
+    /// of trying members until one happens to accept a coercion.
+    fn union_wire_shapes(&self, ty: &Type) -> Vec<&'static str> {
+        let mut shapes = match ty {
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => vec!["Int"],
+            Type::Float | Type::Float32 => vec!["Float"],
+            Type::Bool => vec!["Bool"],
+            Type::String | Type::Char => vec!["Text"],
+            Type::Named(name) if name == "Decimal" => vec!["Text"],
+            Type::List(_) | Type::FixedList { .. } => vec!["Array"],
+            Type::Map { .. } | Type::Tuple(_) => vec!["Object"],
+            Type::Shared(inner) | Type::Quantity { base: inner, .. } | Type::Tagged { inner, .. } => {
+                self.union_wire_shapes(inner)
+            }
+            Type::Option(inner) => {
+                let mut shapes = vec!["Null"];
+                shapes.extend(self.union_wire_shapes(inner));
+                shapes
+            }
+            Type::Union(members) => members
+                .iter()
+                .flat_map(|member| self.union_wire_shapes(member))
+                .collect(),
+            Type::Named(name) => self
+                .distinct_bases
+                .get(name)
+                .map(|base| self.union_wire_shapes(base))
+                .or_else(|| {
+                    self.struct_field_types
+                        .contains_key(name)
+                        .then_some(vec!["Object"])
+                })
+                .unwrap_or_default(),
+            Type::Apply { name, .. } => self
+                .struct_field_types
+                .contains_key(name)
+                .then_some(vec!["Object"])
+                .unwrap_or_default(),
+            Type::Result { .. }
+            | Type::Fn { .. }
+            | Type::TraitObject(_)
+            | Type::ComputeDim(_) => Vec::new(),
+        };
+        shapes.sort_unstable();
+        shapes.dedup();
+        shapes
+    }
+
     fn eval_serde_encode_value(
         &mut self,
         value: CtValue,
@@ -2547,7 +2597,9 @@ impl<'a> EvalCtx<'a> {
         match ty {
             Type::Named(name) if name == "DataTree" || name == "JSON" => Ok(value),
             Type::Int | Type::IntN { .. } => Ok(datatree("Int", Some(value))),
-            Type::InlineRange { base, .. } => self.eval_serde_encode_value(value, base),
+            Type::InlineRange { base, .. } | Type::Quantity { base, .. } => {
+                self.eval_serde_encode_value(value, base)
+            }
             Type::Float | Type::Float32 => Ok(datatree("Float", Some(value))),
             Type::Bool => Ok(datatree("Bool", Some(value))),
             Type::String => Ok(datatree("Text", Some(value))),
@@ -2560,6 +2612,21 @@ impl<'a> EvalCtx<'a> {
                 CtValue::Failed(CtReport::Clean(_)) => Ok(datatree("Null", None)),
                 _ => Err(unsupported("Encode Option value", self.span())),
             },
+            Type::Union(members) => {
+                let CtValue::Enum { variant, args, .. } = value else {
+                    return Err(unsupported("Encode union value", self.span()));
+                };
+                let Some((_, payload)) = args.into_iter().next() else {
+                    return Err(unsupported("Encode empty union value", self.span()));
+                };
+                let Some(member) = members
+                    .iter()
+                    .find(|member| crate::AST::union_member_tag(member) == variant)
+                else {
+                    return Err(unsupported("Encode unknown union member", self.span()));
+                };
+                self.eval_serde_encode_value(payload, member)
+            }
             Type::List(inner) | Type::FixedList { elem: inner, .. }
                 if matches!(
                     inner.as_ref(),
@@ -2934,6 +3001,9 @@ impl<'a> EvalCtx<'a> {
                     other => Ok(other),
                 }
             }
+            Type::Quantity { base, .. } => {
+                return self.eval_datatree_decode_status(tree, base, status);
+            }
             Type::Int | Type::IntN { .. } => {
                 let decoded = match datatree_variant(&tree) {
                     Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Int(*value)),
@@ -3092,6 +3162,28 @@ impl<'a> EvalCtx<'a> {
                     _ => unreachable!(),
                 },
             },
+            Type::Union(members) => {
+                let shape = datatree_kind_for(&tree);
+                let Some(member) = members
+                    .iter()
+                    .find(|member| self.union_wire_shapes(member).contains(&shape))
+                    .cloned()
+                else {
+                    return Ok(CtValue::failed(Box::new(decode_error(
+                        "",
+                        "no matching union member",
+                    ))));
+                };
+                match self.eval_datatree_decode(tree, &member)? {
+                    CtValue::Present(value) => Ok(CtValue::Enum {
+                        type_name: crate::AST::union_enum_name(members),
+                        variant: crate::AST::union_member_tag(&member),
+                        args: vec![(None, *value)],
+                    }),
+                    CtValue::Failed(CtReport::Told(error)) => Err(*error),
+                    _ => unreachable!("Decode protocol returns Result"),
+                }
+            }
             Type::List(inner) | Type::FixedList { elem: inner, .. }
                 if matches!(
                     inner.as_ref(),

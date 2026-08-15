@@ -1659,7 +1659,12 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                     walk(m, seen, out_members);
                 }
             }
-            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) | Type::Tagged { inner, .. } => {
+            Type::List(inner)
+            | Type::Shared(inner)
+            | Type::Option(inner)
+            | Type::Tagged { inner, .. }
+            | Type::InlineRange { base: inner, .. }
+            | Type::Quantity { base: inner, .. } => {
                 walk(inner, seen, out_members)
             }
             Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {

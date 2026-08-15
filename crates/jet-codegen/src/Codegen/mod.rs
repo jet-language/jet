@@ -2344,6 +2344,10 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
                 cx.rust_type_with_view_lifetime_assoc(ty, assoc)
             }),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
+            // D-UNIONTYPE1=A: the sema hidden enum carries checked Jet codec
+            // items, while emit_anonymous_unions owns its structural Rust
+            // representation. Emit that representation once.
+            Item::Enum(e) if e.name.starts_with("__JetUnion_") => {}
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
             // D-QUAL3: emit one distinct newtype per unit-family member.
@@ -3215,6 +3219,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
                 cx.rust_type_with_view_lifetime_assoc(ty, assoc)
             }),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
+            Item::Enum(e) if e.name.starts_with("__JetUnion_") => {}
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
             // D-QUAL3: emit one distinct newtype per unit-family member.

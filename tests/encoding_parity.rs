@@ -406,6 +406,13 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
                 "{\"raw\":9}\n3\n",
             ),
         ),
+        (
+            "serde/codable_default",
+            concat!(
+                "{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n",
+                "web\n[80, 443]\nprod\n[8080]\n",
+            ),
+        ),
     ] {
         let jet_path = root.join("examples/features").join(format!("{stem}.jet"));
         let expected_path = root
