@@ -65,6 +65,24 @@ use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
+/// Run one branch body in its own stack frame.
+///
+/// At `opt-level=0` rustc emits no `llvm.lifetime` markers, so LLVM's
+/// StackColoring pass never runs and one giant `match`/gate chain reserves the
+/// SUM of every branch's locals in a single frame instead of the maximum.
+/// `lower_expr` -> `lower_expr_inner` -> `lower_method_call_impl` ->
+/// `lower_expr` is a recursive cycle, so that sum is multiplied by source
+/// nesting depth and a debug-built test binary overflowed libtest's 2 MiB
+/// worker stack after two levels. Wrapping a branch body here keeps its locals
+/// in the closure's own frame, so one nesting level costs the ONE branch it
+/// takes rather than all of them.
+///
+/// `#[inline(never)]` keeps the call boundary at every optimization level; at
+/// `opt-level=0`, where the overflow lives, the closure is a plain call.
+#[inline(never)]
+pub(crate) fn in_own_frame<R>(body: impl FnOnce() -> R) -> R {
+    body()
+}
 
 fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
     match expr {
@@ -1929,26 +1947,28 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     }
     match e {
         Expr::Int(n, _, width, raw) => {
-            // D-INTBIG1: the lexer preserves a decimal literal that does not
-            // fit its token fast path. Keep it as a normal `Int` literal and
-            // let the packed Prelude constructor own the spill.
-            if width.is_none() {
-                if let Some(raw) = raw.as_deref() {
-                    let raw = raw.replace('_', "");
-                    if raw.parse::<i64>().is_err() {
-                        if let Ok(value) = jet_foundation::Numeric::CtBigInt::from_literal(&raw) {
-                            return TExpr {
-                                ty: Type::Int,
-                                kind: TExprKind::CtLit(CtValue::BigInt(value)),
-                            };
+            in_own_frame(|| {
+                // D-INTBIG1: the lexer preserves a decimal literal that does not
+                // fit its token fast path. Keep it as a normal `Int` literal and
+                // let the packed Prelude constructor own the spill.
+                if width.is_none() {
+                    if let Some(raw) = raw.as_deref() {
+                        let raw = raw.replace('_', "");
+                        if raw.parse::<i64>().is_err() {
+                            if let Ok(value) = jet_foundation::Numeric::CtBigInt::from_literal(&raw) {
+                                return TExpr {
+                                    ty: Type::Int,
+                                    kind: TExprKind::CtLit(CtValue::BigInt(value)),
+                                };
+                            }
                         }
                     }
                 }
-            }
-            TExpr {
-                ty: int_lit_type(width),
-                kind: TExprKind::IntLit(*n, *width),
-            }
+                TExpr {
+                    ty: int_lit_type(width),
+                    kind: TExprKind::IntLit(*n, *width),
+                }
+            })
         }
         Expr::Float(v, _, is_f32) => TExpr {
             // D-FLOATW1: sema resolves F32 context and writes `is_f32=true` on the
@@ -1989,106 +2009,116 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             kind: TExprKind::CharLit(*c),
         },
         Expr::Str(parts, _) => {
-            let tparts = parts
-                .iter()
-                .map(|p| match p {
-                    StrPart::Lit(s) => TStrPart::Lit(s.clone()),
-                    StrPart::Interp(e, crate::AST::StrFormat::Fixed(precision)) => {
-                        let source_span = e.span();
-                        let formatted = TExpr {
-                            ty: Type::String,
-                            kind: TExprKind::CoreCall {
-                                module: "core.text.fmt".to_string(),
-                                method: "decimal".to_string(),
-                                args: vec![
-                                    lower_expr(e, cx, env),
-                                    TExpr {
-                                        ty: Type::Int,
-                                        kind: TExprKind::IntLit(*precision, None),
-                                    },
-                                ],
-                                source_span,
-                                widen_to_vec: vec![false, false],
-                            },
-                        };
-                        TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
-                    }
-                    StrPart::Interp(e, crate::AST::StrFormat::Unit(style)) => {
-                        let value = lower_expr(e, cx, env);
-                        TStrPart::Interp(
-                            lower_unit_text(value, *style, cx),
-                            crate::AST::StrFormat::Display,
-                        )
-                    }
-                    StrPart::Interp(e, crate::AST::StrFormat::Display) => {
-                        TStrPart::Interp(
-                            lower_display_value(lower_expr(e, cx, env), cx),
-                            crate::AST::StrFormat::Display,
-                        )
-                    }
-                    StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
-                })
-                .collect();
-            TExpr {
-                ty: Type::String,
-                kind: TExprKind::StrLit(tparts),
-            }
+            in_own_frame(|| {
+                let tparts = parts
+                    .iter()
+                    .map(|p| match p {
+                        StrPart::Lit(s) => TStrPart::Lit(s.clone()),
+                        StrPart::Interp(e, crate::AST::StrFormat::Fixed(precision)) => {
+                            let source_span = e.span();
+                            let formatted = TExpr {
+                                ty: Type::String,
+                                kind: TExprKind::CoreCall {
+                                    module: "core.text.fmt".to_string(),
+                                    method: "decimal".to_string(),
+                                    args: vec![
+                                        lower_expr(e, cx, env),
+                                        TExpr {
+                                            ty: Type::Int,
+                                            kind: TExprKind::IntLit(*precision, None),
+                                        },
+                                    ],
+                                    source_span,
+                                    widen_to_vec: vec![false, false],
+                                },
+                            };
+                            TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
+                        }
+                        StrPart::Interp(e, crate::AST::StrFormat::Unit(style)) => {
+                            let value = lower_expr(e, cx, env);
+                            TStrPart::Interp(
+                                lower_unit_text(value, *style, cx),
+                                crate::AST::StrFormat::Display,
+                            )
+                        }
+                        StrPart::Interp(e, crate::AST::StrFormat::Display) => {
+                            TStrPart::Interp(
+                                lower_display_value(lower_expr(e, cx, env), cx),
+                                crate::AST::StrFormat::Display,
+                            )
+                        }
+                        StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
+                    })
+                    .collect();
+                TExpr {
+                    ty: Type::String,
+                    kind: TExprKind::StrLit(tparts),
+                }
+            })
         }
         Expr::Ident(name, _) => {
-            if let Some((temp, ty)) = env.binder_ref(name).cloned() {
-                return TExpr {
-                    ty,
-                    kind: TExprKind::Local(TLocal::user(&temp)),
-                };
-            }
-            // c109 Phase 24: a comptime CONST inlines its pre-rendered value FIRST (the
-            // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
-            // check — so a const takes precedence even over a same-named local, matching
-            // byte-for-byte). The evaluated value supplies the total scalar type so an
-            // inlined F32 keeps its width in every TIR consumer.
-            // parity: guard tests/tir_patterns_and_fields.rs::comptime_local_is_literal_data
-            if cx.consts.contains_key(name) {
-                let value = cx.const_values.get(name);
-                let ty = env
-                    .ty_of(name)
-                    .or_else(|| value.map(crate::AST::CtValue::jet_type))
-                    .unwrap_or(Type::Int);
-                return TExpr {
-                    kind: lower_comptime_scalar(value, Some(&ty))
-                        .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
-                    ty,
-                };
-            }
-            // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
-            // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
-            // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
-            if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-                if let Some(ft @ Type::Fn { .. }) = cx.fn_types.get(name) {
+            in_own_frame(|| {
+                if let Some((temp, ty)) = env.binder_ref(name).cloned() {
                     return TExpr {
-                        ty: ft.clone(),
-                        kind: TExprKind::FnValue {
-                            kind: TFnValueKind::NamedFn {
-                                wrapper: emit_named_fn_value(cx, name, ft),
-                                name: Some(name.clone()),
-                                lambda: None,
-                            },
-                        },
+                        ty,
+                        kind: TExprKind::Local(TLocal::user(&temp)),
                     };
                 }
-            }
-            let ty = env.ty_of(name).unwrap_or(Type::Int);
-            if env.is_gc(name) {
-                return TExpr {
+                // c109 Phase 24: a comptime CONST inlines its pre-rendered value FIRST (the
+                // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
+                // check — so a const takes precedence even over a same-named local, matching
+                // byte-for-byte). The evaluated value supplies the total scalar type so an
+                // inlined F32 keeps its width in every TIR consumer.
+                // parity: guard tests/tir_patterns_and_fields.rs::comptime_local_is_literal_data
+                if cx.consts.contains_key(name) {
+                    return in_own_frame(|| {
+                        let value = cx.const_values.get(name);
+                        let ty = env
+                            .ty_of(name)
+                            .or_else(|| value.map(crate::AST::CtValue::jet_type))
+                            .unwrap_or(Type::Int);
+                        return TExpr {
+                            kind: lower_comptime_scalar(value, Some(&ty))
+                                .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
+                            ty,
+                        };
+                    });
+                }
+                // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
+                // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
+                // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
+                if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
+                    if let Some(ft @ Type::Fn { .. }) = cx.fn_types.get(name) {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: ft.clone(),
+                                kind: TExprKind::FnValue {
+                                    kind: TFnValueKind::NamedFn {
+                                        wrapper: emit_named_fn_value(cx, name, ft),
+                                        name: Some(name.clone()),
+                                        lambda: None,
+                                    },
+                                },
+                            };
+                        });
+                    }
+                }
+                let ty = env.ty_of(name).unwrap_or(Type::Int);
+                if env.is_gc(name) {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty,
+                            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::GcRead {
+                                root: env.place_of(name),
+                            })),
+                        };
+                    });
+                }
+                TExpr {
                     ty,
-                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::GcRead {
-                        root: env.place_of(name),
-                    })),
-                };
-            }
-            TExpr {
-                ty,
-                kind: TExprKind::Local(env.local_of(name)),
-            }
+                    kind: TExprKind::Local(env.local_of(name)),
+                }
+            })
         }
         // Fragment eval must win over the sema value stamp: a baked CtLit is a
         // value, not a place, so a marked receiver could never advance
@@ -2118,17 +2148,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }),
             ..
         } if args.is_empty() => {
-            let resolved_type = cx
-                .core_qualified_rust_type_name(type_name)
-                .unwrap_or(type_name.as_str());
-            TExpr {
-                ty: Type::Named(resolved_type.to_string()),
-                kind: TExprKind::EnumLit {
-                    enum_type: resolved_type.to_string(),
-                    variant: variant.clone(),
-                    payload: TEnumPayload::Unit,
-                },
-            }
+            in_own_frame(|| {
+                let resolved_type = cx
+                    .core_qualified_rust_type_name(type_name)
+                    .unwrap_or(type_name.as_str());
+                TExpr {
+                    ty: Type::Named(resolved_type.to_string()),
+                    kind: TExprKind::EnumLit {
+                        enum_type: resolved_type.to_string(),
+                        variant: variant.clone(),
+                        payload: TEnumPayload::Unit,
+                    },
+                }
+            })
         }
         Expr::ComptimeName {
             value: Some(value), ..
@@ -2139,14 +2171,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr { ty, kind }
         }
         Expr::ComptimeName { name, .. } if super::is_eval_fragment() => {
-            // `@name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
-            if !env.locals.contains_key(name) {
-                env.bind(name, TLocal::user(name), None);
-            }
-            TExpr {
-                ty: Type::Int,
-                kind: TExprKind::Local(env.local_of(name)),
-            }
+            in_own_frame(|| {
+                // `@name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
+                if !env.locals.contains_key(name) {
+                    env.bind(name, TLocal::user(name), None);
+                }
+                TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::Local(env.local_of(name)),
+                }
+            })
         }
         Expr::ComptimeName { .. } => TExpr {
             ty: Type::Int,
@@ -2164,15 +2198,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             env,
         ),
         Expr::Unary(op, inner, _) => {
-            let operand = lower_expr(inner, cx, env);
-            let ty = operand.ty.clone();
-            TExpr {
-                ty,
-                kind: TExprKind::Unary {
-                    op: *op,
-                    operand: Box::new(operand),
-                },
-            }
+            in_own_frame(|| {
+                let operand = lower_expr(inner, cx, env);
+                let ty = operand.ty.clone();
+                TExpr {
+                    ty,
+                    kind: TExprKind::Unary {
+                        op: *op,
+                        operand: Box::new(operand),
+                    },
+                }
+            })
         }
         Expr::IncDec {
             op,
@@ -2180,499 +2216,521 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             postfix,
             ..
         } => {
-            let read = lower_expr(operand, cx, env);
-            let place = lower_incdec_place(operand, cx, env);
-            TExpr {
-                ty: read.ty.clone(),
-                kind: TExprKind::IncDec {
-                    op: *op,
-                    place,
-                    postfix: *postfix,
-                    ty: read.ty,
-                },
-            }
+            in_own_frame(|| {
+                let read = lower_expr(operand, cx, env);
+                let place = lower_incdec_place(operand, cx, env);
+                TExpr {
+                    ty: read.ty.clone(),
+                    kind: TExprKind::IncDec {
+                        op: *op,
+                        place,
+                        postfix: *postfix,
+                        ty: read.ty,
+                    },
+                }
+            })
         }
         // D-CAP9: postfix `p.*` deref. Result type is the pointer's element type.
         Expr::Deref(inner, _) => {
-            let operand = lower_expr(inner, cx, env);
-            let ty = crate::Sema::ptr_elem(&operand.ty).unwrap_or_else(|| operand.ty.clone());
-            TExpr {
-                ty,
-                kind: TExprKind::Deref(Box::new(operand)),
-            }
+            in_own_frame(|| {
+                let operand = lower_expr(inner, cx, env);
+                let ty = crate::Sema::ptr_elem(&operand.ty).unwrap_or_else(|| operand.ty.clone());
+                TExpr {
+                    ty,
+                    kind: TExprKind::Deref(Box::new(operand)),
+                }
+            })
         }
         // D-CAP9: prefix `*x` raw-pointer-of. Result type is `*T` (`Ptr<T>`).
         Expr::RawOf(inner, _) => {
-            let operand = lower_expr(inner, cx, env);
-            let ty = crate::Sema::ptr_type(operand.ty.clone());
-            TExpr {
-                ty,
-                kind: TExprKind::RawOf(Box::new(operand)),
-            }
+            in_own_frame(|| {
+                let operand = lower_expr(inner, cx, env);
+                let ty = crate::Sema::ptr_type(operand.ty.clone());
+                TExpr {
+                    ty,
+                    kind: TExprKind::RawOf(Box::new(operand)),
+                }
+            })
         }
         // D-CAP2 (D-MEM1/S4): `~x` — a fresh, independent value. Keep this
         // signal distinct from compiler-inserted Clone nodes: Tensor's explicit
         // copy is a Prelude storage operation, while ordinary Clone shares its
         // Arc-backed storage.
         Expr::Copy(inner, copy_span) => {
-            let operand = lower_expr(inner, cx, env);
-            let view_owned_ty = match &operand.ty {
-                Type::Apply { name, args } if name == "View" && args.len() == 1 => {
-                    Some(if matches!(&args[0], Type::Named(element) if element == "str") {
-                        Type::String
-                    } else {
-                        Type::List(Box::new(args[0].clone()))
-                    })
-                }
-                _ => None,
-            };
-            let is_view_type = view_owned_ty.is_some();
-            let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
-            // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
-            // read-only views use the shared materialization path. A string
-            // view's Rust place is a bare `&str`, so cloning it would return
-            // another `&str`; the Prelude must produce the owned `String`.
-            let is_view_copy = is_view_type
-                || matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name))
-                || matches!(
-                    &**inner,
-                    Expr::Ident(name, _)
-                        if matches!(
-                            env.split_view_handle(name),
-                            Some(Type::Apply { name, .. }) if name == "View"
-                        )
-                );
-            // Parser-created `~` spans begin at the sigil. Sema-created
-            // ownership clones reuse the operand span. Preserve that
-            // existing provenance fact as a TIR distinction; do not inspect
-            // source text or make a backend guess.
-            let explicit = *copy_span != inner.span();
-            let kind = if is_view_copy {
-                TExprKind::MaterializeView(Box::new(operand))
-            } else if explicit {
-                env.note_clone(&ty);
-                TExprKind::ExplicitCopy(Box::new(operand))
-            } else {
-                env.note_clone(&ty);
-                TExprKind::Clone(Box::new(operand))
-            };
-            TExpr { ty, kind }
+            in_own_frame(|| {
+                let operand = lower_expr(inner, cx, env);
+                let view_owned_ty = match &operand.ty {
+                    Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                        Some(if matches!(&args[0], Type::Named(element) if element == "str") {
+                            Type::String
+                        } else {
+                            Type::List(Box::new(args[0].clone()))
+                        })
+                    }
+                    _ => None,
+                };
+                let is_view_type = view_owned_ty.is_some();
+                let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
+                // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
+                // read-only views use the shared materialization path. A string
+                // view's Rust place is a bare `&str`, so cloning it would return
+                // another `&str`; the Prelude must produce the owned `String`.
+                let is_view_copy = is_view_type
+                    || matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name))
+                    || matches!(
+                        &**inner,
+                        Expr::Ident(name, _)
+                            if matches!(
+                                env.split_view_handle(name),
+                                Some(Type::Apply { name, .. }) if name == "View"
+                            )
+                    );
+                // Parser-created `~` spans begin at the sigil. Sema-created
+                // ownership clones reuse the operand span. Preserve that
+                // existing provenance fact as a TIR distinction; do not inspect
+                // source text or make a backend guess.
+                let explicit = *copy_span != inner.span();
+                let kind = if is_view_copy {
+                    TExprKind::MaterializeView(Box::new(operand))
+                } else if explicit {
+                    env.note_clone(&ty);
+                    TExprKind::ExplicitCopy(Box::new(operand))
+                } else {
+                    env.note_clone(&ty);
+                    TExprKind::Clone(Box::new(operand))
+                };
+                TExpr { ty, kind }
+            })
         }
         Expr::Place(inner, access, span) => {
-            if let Expr::Slice {
-                base,
-                start,
-                end,
-                range,
-                ..
-            } = inner.as_ref()
-            {
-                let recv = lower_expr(base, cx, env);
-                // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
-                // Prelude. The foundation predicate is exact, so ordinary
-                // generics cannot accidentally enter the tensor-view path.
-                let is_tensor = recv.ty.is_compute_tensor_family();
-                let elem = if is_tensor {
-                    Type::Float
-                } else {
-                    match &recv.ty {
-                        Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
-                        _ => Type::Int,
-                    }
-                };
-                let mutable = *access == crate::AST::PlaceAccess::Write;
-                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-                let args = if let Some(range) = range {
-                    vec![lower_expr(range, cx, env)]
-                } else {
-                    vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
-                };
-                TExpr {
-                    ty: Type::Apply {
-                        name: if mutable && is_tensor {
-                            "ComputeViewMut"
-                        } else if mutable {
-                            "ViewMut"
-                        } else {
-                            "View"
-                        }
-                        .to_string(),
-                        args: vec![elem],
-                    },
-                    kind: TExprKind::BuiltinMethod {
-                        recv: Box::new(recv),
-                        op: if mutable {
-                            if is_tensor {
-                                TBuiltinOp::ComputeViewMutNew { line }
-                            } else {
-                                TBuiltinOp::ViewMutNew { line }
-                            }
-                        } else {
-                            if is_tensor {
-                                TBuiltinOp::ComputeViewNew { line }
-                            } else {
-                                TBuiltinOp::ViewNew { line }
-                            }
-                        },
-                        args,
-                    },
-                }
-            } else {
-                let place = lower_expr(inner, cx, env);
-                TExpr {
-                    ty: place.ty.clone(),
-                    kind: TExprKind::Borrow {
-                        place: Box::new(place),
-                        mutable: *access == crate::AST::PlaceAccess::Write,
-                    },
-                }
-            }
-        }
-        Expr::Binary(op, l, r, span) => {
-            // D-FACT-ENUM-TIR: derive expansion has already substituted the
-            // fact read with a typed comptime enum value. Fold it here at the
-            // shared typed boundary; compiler-only fact enums never become a
-            // runtime TExprKind::EnumLit.
-            if let Some(value) =
-                crate::Codegen::TIR::fold_typed_fact_enum_equality(*op, l, r)
-            {
-                return TExpr {
-                    ty: Type::Bool,
-                    kind: TExprKind::BoolLit(value),
-                };
-            }
-            let lhs = lower_expr(l, cx, env);
-            let mut rhs = lower_expr(r, cx, env);
-            // Imported method signatures retain their declaration-module
-            // nominal. Apply that canonical owner to a contextually typed enum
-            // literal; its source node carries only the visible leaf.
-            let expected_enum = match &lhs.ty {
-                Type::Named(name) | Type::Apply { name, .. } if name.contains("::") => {
-                    Some(name.clone())
-                }
-                _ => None,
-            };
-            if let (
-                Some(expected_enum),
-                TExprKind::EnumLit {
-                    enum_type,
-                    variant,
+            in_own_frame(|| {
+                if let Expr::Slice {
+                    base,
+                    start,
+                    end,
+                    range,
                     ..
-                },
-            ) = (expected_enum, &mut rhs.kind)
-            {
-                let visible_owner_has_variant = cx
-                    .enum_variants
-                    .get(enum_type)
-                    .is_some_and(|variants| variants.iter().any(|(name, _)| name == variant));
-                if crate::Codegen::nominal_leaf(enum_type)
-                    == crate::Codegen::nominal_leaf(&expected_enum)
-                    && visible_owner_has_variant
+                } = inner.as_ref()
                 {
-                    *enum_type = expected_enum;
-                    rhs.ty = lhs.ty.clone();
-                }
-            }
-            // D-TYPE2-MEASURE1=A: Matrix multiplication carries the composed
-            // outer measures in TIR while the shared compute Prelude owns the
-            // one fallible runtime operation.
-            if *op == BinOp::Mul {
-                if let (
-                    Type::Apply { name: left, .. },
-                    Type::Apply { name: right, .. },
-                    Some([rows, inner]),
-                    Some([right_inner, cols]),
-                ) = (
-                    &lhs.ty,
-                    &rhs.ty,
-                    lhs.ty
-                        .compute_shape_dimensions()
-                        .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
-                    rhs.ty
-                        .compute_shape_dimensions()
-                        .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
-                ) {
-                    if left == "Matrix" && right == "Matrix" && inner == right_inner {
-                        return TExpr {
-                            ty: Type::Result {
-                                ok: Box::new(Type::compute_shape_type("Matrix", &[rows, cols])),
-                                err: Box::new(Type::Named("ComputeError".to_string())),
-                            },
-                            kind: TExprKind::CoreCall {
-                                module: "core.compute".to_string(),
-                                method: "matmul".to_string(),
-                                args: vec![lhs, rhs],
-                                source_span: *span,
-                                widen_to_vec: vec![false, false],
-                            },
-                        };
-                    }
-                }
-            }
-            // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
-            // zero-uncertainty measurements. Reuse the resident measurement
-            // handle op so AOT, JIT, interpreter, comptime, REPL and web call
-            // the same Prelude kernel.
-            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-                && matches!((&lhs.ty, &rhs.ty), (
-                    Type::Apply { name: left, .. },
-                    Type::Apply { name: right, .. }
-                ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
-            {
-                return TExpr {
-                    ty: lhs.ty.clone(),
-                    kind: TExprKind::HandleMethod {
-                        recv: Box::new(lhs),
-                        op: THandleOp::MeasurementMethod {
-                            method: match op {
-                                BinOp::Add => "add",
-                                BinOp::Sub => "sub",
-                                BinOp::Mul => "mul",
-                                BinOp::Div => "div",
-                                _ => unreachable!(),
+                    let recv = lower_expr(base, cx, env);
+                    // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
+                    // Prelude. The foundation predicate is exact, so ordinary
+                    // generics cannot accidentally enter the tensor-view path.
+                    let is_tensor = recv.ty.is_compute_tensor_family();
+                    let elem = if is_tensor {
+                        Type::Float
+                    } else {
+                        match &recv.ty {
+                            Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                            _ => Type::Int,
+                        }
+                    };
+                    let mutable = *access == crate::AST::PlaceAccess::Write;
+                    let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                    let args = if let Some(range) = range {
+                        vec![lower_expr(range, cx, env)]
+                    } else {
+                        vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
+                    };
+                    TExpr {
+                        ty: Type::Apply {
+                            name: if mutable && is_tensor {
+                                "ComputeViewMut"
+                            } else if mutable {
+                                "ViewMut"
+                            } else {
+                                "View"
                             }
                             .to_string(),
+                            args: vec![elem],
                         },
-                        args: vec![rhs],
-                    },
-                };
-            }
-            // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
-            // Multiplication/division unwrap nominal unit values and emit a
-            // plain numeric operation; the normalized result type is retained
-            // only as a TIR fact and `rust_type` erases it to the numeric base.
-            let ldim = cx.quantity_dimension(&lhs.ty);
-            let rdim = cx.quantity_dimension(&rhs.ty);
-            if (ldim.is_some() || rdim.is_some()) && matches!(op, BinOp::Mul | BinOp::Div) {
-                let raw = |expr: TExpr| {
-                    if cx.quantity_dimension(&expr.ty).is_some()
-                        && matches!(expr.ty, Type::Named(_))
-                    {
-                        if matches!(&expr.ty, Type::Named(name) if name == crate::Syntax::DURATION_TYPE) {
-                            return TExpr {
-                                ty: Type::Float,
-                                kind: TExprKind::HandleMethod {
-                                    recv: Box::new(expr),
-                                    op: THandleOp::DurationSecondsValue,
-                                    args: Vec::new(),
-                                },
-                            };
-                        }
-                        TExpr {
-                            ty: Type::Float,
-                            kind: TExprKind::DistinctRaw(Box::new(expr)),
-                        }
-                    } else {
-                        expr
-                    }
-                };
-                let lhs = raw(lhs);
-                let rhs = raw(rhs);
-                let left = ldim.unwrap_or_else(crate::AST::Dimension::scalar);
-                let right = rdim.unwrap_or_else(crate::AST::Dimension::scalar);
-                let dimension = if *op == BinOp::Mul {
-                    left.multiply(&right)
-                } else {
-                    left.divide(&right)
-                }
-                .expect("sema checked physical dimension exponent bounds");
-                let ty = if dimension == crate::AST::Dimension::scalar() {
-                    Type::Float
-                } else {
-                    Type::quantity(Type::Float, dimension)
-                };
-                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
-                return TExpr {
-                    ty,
-                    kind: TExprKind::Binary {
-                        op: *op,
-                        overflow: false,
-                        line,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    },
-                };
-            }
-            // D-LAYOUT1 / D-LAYOUT-GATES1: layout-typed `+`/`-`/`>=`/`<=`/`==`.
-            // Recompute via the SAME table sema used (mirrors the math/Int
-            // early-return pattern below) rather than trusting `lhs.ty.clone()`
-            // — that default is wrong here: e.g. `16.0 + label.right` has a
-            // plain `Float` LEFT operand, so the result axis (`HVar`) comes
-            // from the RIGHT side. Comparisons need a DEDICATED node
-            // (`LayoutCompare`) since Rust's `>=`/`==` can't return a custom
-            // type; `+`/`-` stay plain `Binary` (`jet_layout::LinExpr`
-            // implements `std::ops::{Add,Sub}`).
-            {
-                let l_axis =
-                    matches!(&lhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
-                let r_axis =
-                    matches!(&rhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
-                if (l_axis || r_axis)
-                    && matches!(
-                        op,
-                        BinOp::Ge | BinOp::Le | BinOp::Eq | BinOp::Add | BinOp::Sub
-                    )
-                {
-                    if let Some(Ok(result_ty)) =
-                        crate::Sema::layout_binop_result(*op, &lhs.ty, &rhs.ty)
-                    {
-                        // A bare `Int`/`Float` operand (axis-neutral) isn't a
-                        // `jet_layout::LinExpr` at the Rust level yet — wrap it
-                        // so `+`/`-`/`ge`/`le`/`eq_` only ever see `LinExpr`.
-                        let wrap = |t: TExpr| -> TExpr {
-                            if matches!(t.ty, Type::Int | Type::Float) {
-                                TExpr {
-                                    ty: Type::Named(
-                                        crate::Syntax::LAYOUT_LENGTHVAR_TYPE.to_string(),
-                                    ),
-                                    kind: TExprKind::LayoutLit { inner: Box::new(t) },
+                        kind: TExprKind::BuiltinMethod {
+                            recv: Box::new(recv),
+                            op: if mutable {
+                                if is_tensor {
+                                    TBuiltinOp::ComputeViewMutNew { line }
+                                } else {
+                                    TBuiltinOp::ViewMutNew { line }
                                 }
                             } else {
-                                t
+                                if is_tensor {
+                                    TBuiltinOp::ComputeViewNew { line }
+                                } else {
+                                    TBuiltinOp::ViewNew { line }
+                                }
+                            },
+                            args,
+                        },
+                    }
+                } else {
+                    let place = lower_expr(inner, cx, env);
+                    TExpr {
+                        ty: place.ty.clone(),
+                        kind: TExprKind::Borrow {
+                            place: Box::new(place),
+                            mutable: *access == crate::AST::PlaceAccess::Write,
+                        },
+                    }
+                }
+            })
+        }
+        Expr::Binary(op, l, r, span) => {
+            in_own_frame(|| {
+                // D-FACT-ENUM-TIR: derive expansion has already substituted the
+                // fact read with a typed comptime enum value. Fold it here at the
+                // shared typed boundary; compiler-only fact enums never become a
+                // runtime TExprKind::EnumLit.
+                if let Some(value) =
+                    crate::Codegen::TIR::fold_typed_fact_enum_equality(*op, l, r)
+                {
+                    return TExpr {
+                        ty: Type::Bool,
+                        kind: TExprKind::BoolLit(value),
+                    };
+                }
+                let lhs = lower_expr(l, cx, env);
+                let mut rhs = lower_expr(r, cx, env);
+                // Imported method signatures retain their declaration-module
+                // nominal. Apply that canonical owner to a contextually typed enum
+                // literal; its source node carries only the visible leaf.
+                let expected_enum = match &lhs.ty {
+                    Type::Named(name) | Type::Apply { name, .. } if name.contains("::") => {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                };
+                if let (
+                    Some(expected_enum),
+                    TExprKind::EnumLit {
+                        enum_type,
+                        variant,
+                        ..
+                    },
+                ) = (expected_enum, &mut rhs.kind)
+                {
+                    let visible_owner_has_variant = cx
+                        .enum_variants
+                        .get(enum_type)
+                        .is_some_and(|variants| variants.iter().any(|(name, _)| name == variant));
+                    if crate::Codegen::nominal_leaf(enum_type)
+                        == crate::Codegen::nominal_leaf(&expected_enum)
+                        && visible_owner_has_variant
+                    {
+                        *enum_type = expected_enum;
+                        rhs.ty = lhs.ty.clone();
+                    }
+                }
+                // D-TYPE2-MEASURE1=A: Matrix multiplication carries the composed
+                // outer measures in TIR while the shared compute Prelude owns the
+                // one fallible runtime operation.
+                if *op == BinOp::Mul {
+                    if let (
+                        Type::Apply { name: left, .. },
+                        Type::Apply { name: right, .. },
+                        Some([rows, inner]),
+                        Some([right_inner, cols]),
+                    ) = (
+                        &lhs.ty,
+                        &rhs.ty,
+                        lhs.ty
+                            .compute_shape_dimensions()
+                            .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+                        rhs.ty
+                            .compute_shape_dimensions()
+                            .and_then(|shape| <[u64; 2]>::try_from(shape).ok()),
+                    ) {
+                        if left == "Matrix" && right == "Matrix" && inner == right_inner {
+                            return in_own_frame(|| {
+                                return TExpr {
+                                    ty: Type::Result {
+                                        ok: Box::new(Type::compute_shape_type("Matrix", &[rows, cols])),
+                                        err: Box::new(Type::Named("ComputeError".to_string())),
+                                    },
+                                    kind: TExprKind::CoreCall {
+                                        module: "core.compute".to_string(),
+                                        method: "matmul".to_string(),
+                                        args: vec![lhs, rhs],
+                                        source_span: *span,
+                                        widen_to_vec: vec![false, false],
+                                    },
+                                };
+                            });
+                        }
+                    }
+                }
+                // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
+                // zero-uncertainty measurements. Reuse the resident measurement
+                // handle op so AOT, JIT, interpreter, comptime, REPL and web call
+                // the same Prelude kernel.
+                if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+                    && matches!((&lhs.ty, &rhs.ty), (
+                        Type::Apply { name: left, .. },
+                        Type::Apply { name: right, .. }
+                    ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
+                {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: lhs.ty.clone(),
+                            kind: TExprKind::HandleMethod {
+                                recv: Box::new(lhs),
+                                op: THandleOp::MeasurementMethod {
+                                    method: match op {
+                                        BinOp::Add => "add",
+                                        BinOp::Sub => "sub",
+                                        BinOp::Mul => "mul",
+                                        BinOp::Div => "div",
+                                        _ => unreachable!(),
+                                    }
+                                    .to_string(),
+                                },
+                                args: vec![rhs],
+                            },
+                        };
+                    });
+                }
+                // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
+                // Multiplication/division unwrap nominal unit values and emit a
+                // plain numeric operation; the normalized result type is retained
+                // only as a TIR fact and `rust_type` erases it to the numeric base.
+                let ldim = cx.quantity_dimension(&lhs.ty);
+                let rdim = cx.quantity_dimension(&rhs.ty);
+                if (ldim.is_some() || rdim.is_some()) && matches!(op, BinOp::Mul | BinOp::Div) {
+                    return in_own_frame(|| {
+                        let raw = |expr: TExpr| {
+                            if cx.quantity_dimension(&expr.ty).is_some()
+                                && matches!(expr.ty, Type::Named(_))
+                            {
+                                if matches!(&expr.ty, Type::Named(name) if name == crate::Syntax::DURATION_TYPE) {
+                                    return TExpr {
+                                        ty: Type::Float,
+                                        kind: TExprKind::HandleMethod {
+                                            recv: Box::new(expr),
+                                            op: THandleOp::DurationSecondsValue,
+                                            args: Vec::new(),
+                                        },
+                                    };
+                                }
+                                TExpr {
+                                    ty: Type::Float,
+                                    kind: TExprKind::DistinctRaw(Box::new(expr)),
+                                }
+                            } else {
+                                expr
                             }
                         };
-                        let lhs = wrap(lhs);
-                        let rhs = wrap(rhs);
-                        if matches!(op, BinOp::Add | BinOp::Sub) {
-                            let line =
-                                crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
-                            return TExpr {
-                                ty: result_ty,
-                                kind: TExprKind::Binary {
-                                    op: *op,
-                                    overflow: false,
-                                    line,
-                                    lhs: Box::new(lhs),
-                                    rhs: Box::new(rhs),
-                                },
-                            };
+                        let lhs = raw(lhs);
+                        let rhs = raw(rhs);
+                        let left = ldim.unwrap_or_else(crate::AST::Dimension::scalar);
+                        let right = rdim.unwrap_or_else(crate::AST::Dimension::scalar);
+                        let dimension = if *op == BinOp::Mul {
+                            left.multiply(&right)
+                        } else {
+                            left.divide(&right)
                         }
+                        .expect("sema checked physical dimension exponent bounds");
+                        let ty = if dimension == crate::AST::Dimension::scalar() {
+                            Type::Float
+                        } else {
+                            Type::quantity(Type::Float, dimension)
+                        };
+                        let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
                         return TExpr {
-                            ty: result_ty,
-                            kind: TExprKind::LayoutCompare {
+                            ty,
+                            kind: TExprKind::Binary {
                                 op: *op,
+                                overflow: false,
+                                line,
                                 lhs: Box::new(lhs),
                                 rhs: Box::new(rhs),
                             },
                         };
-                    }
+                    });
                 }
-            }
-            // D-TYPE2-IMAG1=A: mirror `Checker::complexize_operand`. Sema
-            // promotes the scalar operand of `3 + 4i` through the explicit
-            // `Complex` constructor before the precise rule below fires, but a
-            // comptime item or TirBridge fragment lowers the raw AST first
-            // (`eval_comptime_items` runs early), so the mix still arrives here.
-            let (lhs, rhs) = complexize_operands(*op, lhs, rhs, cx);
-            // Overflow decision for trapping JetArith helpers. Prefer the
-            // resolved TIR operand types so call results, fields, and other
-            // shapes the AST replay cannot see still trap (I2 / #1484). The
-            // AST replay remains for cases where lowering types are not yet
-            // integer-shaped but the source operand structurally is.
-            // D-INTBIG1/D-NUMOPS1: fixed-width `+`/`-`/`*`/`/` trap on value
-            // overflow; exact default `Int` uses packed Prelude helpers.
-            // Fixed-width `<<`/`>>` trap on a bit-count out of the type's width
-            // (both via the `JetArith` helpers, so no raw Rust overflow panic
-            // leaks — I2). A shift's
-            // overflow is governed by its LEFT operand's integer-ness (the value),
-            // never the count.
-            // D-INTDIV1=A: `Int / Int` is widened to Float before lowering, so
-            // those operands are not `is_integer()` here and keep bare `/`.
-            // Fixed-width `IntN` keeps same-width `/` and must trap via jet_div.
-            // D-MODSEM1=A: `%` and `%%` always call their Prelude helper above.
-            let tir_integer = lhs.ty.is_integer() || rhs.ty.is_integer();
-            let arith_overflow = matches!(
-                op,
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
-            ) && (tir_integer
-                || ast_operand_is_integer(l, env) == Some(true)
-                || ast_operand_is_integer(r, env) == Some(true));
-            let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)
-                && (lhs.ty.is_integer() || ast_operand_is_integer(l, env) == Some(true));
-            let overflow = arith_overflow || shift_overflow;
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
-            // A comparison/logical op yields Bool; arithmetic keeps the operand type.
-            // D-SIMD2 / D-LINALG1: a math-type operator's result follows the closed
-            // family's rule (e.g. `Mat3 * Vec3 → Vec3`), not the left operand — read
-            // it from the same sema table so the node's `ty` stays honest.
-            let canonical_time_ty = match (&lhs.ty, &rhs.ty) {
-                (Type::Named(left), Type::Named(right))
-                    if matches!(left.as_str(), "Duration" | "Instant")
-                        && matches!(right.as_str(), "Duration" | "Instant") => {
-                    let left_kind = cx.unit_facts.get(left).map(|fact| fact.kind);
-                    let right_kind = cx.unit_facts.get(right).map(|fact| fact.kind);
-                    match (*op, left_kind, right_kind) {
-                        (BinOp::Add | BinOp::Sub, Some(crate::AST::QuantityKind::Delta), Some(crate::AST::QuantityKind::Delta))
-                        | (BinOp::Sub, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Point)) => {
-                            Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
-                        }
-                        (BinOp::Add, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Delta))
-                        | (BinOp::Sub, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Delta))
-                        | (BinOp::Add, Some(crate::AST::QuantityKind::Delta), Some(crate::AST::QuantityKind::Point)) => {
-                            Some(Type::Named(crate::Syntax::TYPE_INSTANT.to_string()))
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
-            let ty = if *op == BinOp::Compare {
-                Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
-            } else if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
-                Type::Bool
-            } else if let Some(ty) = canonical_time_ty {
-                ty
-            } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
-                let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
-                let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
-                if lm || rm {
-                    crate::Sema::math_binop_result(*op, ln, rn).unwrap_or_else(|| lhs.ty.clone())
-                } else if ln == rn
-                    && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
+                // D-LAYOUT1 / D-LAYOUT-GATES1: layout-typed `+`/`-`/`>=`/`<=`/`==`.
+                // Recompute via the SAME table sema used (mirrors the math/Int
+                // early-return pattern below) rather than trusting `lhs.ty.clone()`
+                // — that default is wrong here: e.g. `16.0 + label.right` has a
+                // plain `Float` LEFT operand, so the result axis (`HVar`) comes
+                // from the RIGHT side. Comparisons need a DEDICATED node
+                // (`LayoutCompare`) since Rust's `>=`/`==` can't return a custom
+                // type; `+`/`-` stay plain `Binary` (`jet_layout::LinExpr`
+                // implements `std::ops::{Add,Sub}`).
                 {
-                    lhs.ty.clone()
+                    let l_axis =
+                        matches!(&lhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
+                    let r_axis =
+                        matches!(&rhs.ty, Type::Named(n) if crate::Sema::is_layout_axis_type(n));
+                    if (l_axis || r_axis)
+                        && matches!(
+                            op,
+                            BinOp::Ge | BinOp::Le | BinOp::Eq | BinOp::Add | BinOp::Sub
+                        )
+                    {
+                        if let Some(Ok(result_ty)) =
+                            crate::Sema::layout_binop_result(*op, &lhs.ty, &rhs.ty)
+                        {
+                            return in_own_frame(|| {
+                                // A bare `Int`/`Float` operand (axis-neutral) isn't a
+                                // `jet_layout::LinExpr` at the Rust level yet — wrap it
+                                // so `+`/`-`/`ge`/`le`/`eq_` only ever see `LinExpr`.
+                                let wrap = |t: TExpr| -> TExpr {
+                                    if matches!(t.ty, Type::Int | Type::Float) {
+                                        TExpr {
+                                            ty: Type::Named(
+                                                crate::Syntax::LAYOUT_LENGTHVAR_TYPE.to_string(),
+                                            ),
+                                            kind: TExprKind::LayoutLit { inner: Box::new(t) },
+                                        }
+                                    } else {
+                                        t
+                                    }
+                                };
+                                let lhs = wrap(lhs);
+                                let rhs = wrap(rhs);
+                                if matches!(op, BinOp::Add | BinOp::Sub) {
+                                    return in_own_frame(|| {
+                                        let line =
+                                            crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                                        return TExpr {
+                                            ty: result_ty,
+                                            kind: TExprKind::Binary {
+                                                op: *op,
+                                                overflow: false,
+                                                line,
+                                                lhs: Box::new(lhs),
+                                                rhs: Box::new(rhs),
+                                            },
+                                        };
+                                    });
+                                }
+                                return TExpr {
+                                    ty: result_ty,
+                                    kind: TExprKind::LayoutCompare {
+                                        op: *op,
+                                        lhs: Box::new(lhs),
+                                        rhs: Box::new(rhs),
+                                    },
+                                };
+                            });
+                        }
+                    }
+                }
+                // D-TYPE2-IMAG1=A: mirror `Checker::complexize_operand`. Sema
+                // promotes the scalar operand of `3 + 4i` through the explicit
+                // `Complex` constructor before the precise rule below fires, but a
+                // comptime item or TirBridge fragment lowers the raw AST first
+                // (`eval_comptime_items` runs early), so the mix still arrives here.
+                let (lhs, rhs) = complexize_operands(*op, lhs, rhs, cx);
+                // Overflow decision for trapping JetArith helpers. Prefer the
+                // resolved TIR operand types so call results, fields, and other
+                // shapes the AST replay cannot see still trap (I2 / #1484). The
+                // AST replay remains for cases where lowering types are not yet
+                // integer-shaped but the source operand structurally is.
+                // D-INTBIG1/D-NUMOPS1: fixed-width `+`/`-`/`*`/`/` trap on value
+                // overflow; exact default `Int` uses packed Prelude helpers.
+                // Fixed-width `<<`/`>>` trap on a bit-count out of the type's width
+                // (both via the `JetArith` helpers, so no raw Rust overflow panic
+                // leaks — I2). A shift's
+                // overflow is governed by its LEFT operand's integer-ness (the value),
+                // never the count.
+                // D-INTDIV1=A: `Int / Int` is widened to Float before lowering, so
+                // those operands are not `is_integer()` here and keep bare `/`.
+                // Fixed-width `IntN` keeps same-width `/` and must trap via jet_div.
+                // D-MODSEM1=A: `%` and `%%` always call their Prelude helper above.
+                let tir_integer = lhs.ty.is_integer() || rhs.ty.is_integer();
+                let arith_overflow = matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
+                ) && (tir_integer
+                    || ast_operand_is_integer(l, env) == Some(true)
+                    || ast_operand_is_integer(r, env) == Some(true));
+                let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)
+                    && (lhs.ty.is_integer() || ast_operand_is_integer(l, env) == Some(true));
+                let overflow = arith_overflow || shift_overflow;
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                // A comparison/logical op yields Bool; arithmetic keeps the operand type.
+                // D-SIMD2 / D-LINALG1: a math-type operator's result follows the closed
+                // family's rule (e.g. `Mat3 * Vec3 → Vec3`), not the left operand — read
+                // it from the same sema table so the node's `ty` stays honest.
+                let canonical_time_ty = in_own_frame(|| match (&lhs.ty, &rhs.ty) {
+                    (Type::Named(left), Type::Named(right))
+                        if matches!(left.as_str(), "Duration" | "Instant")
+                            && matches!(right.as_str(), "Duration" | "Instant") => {
+                        let left_kind = cx.unit_facts.get(left).map(|fact| fact.kind);
+                        let right_kind = cx.unit_facts.get(right).map(|fact| fact.kind);
+                        match (*op, left_kind, right_kind) {
+                            (BinOp::Add | BinOp::Sub, Some(crate::AST::QuantityKind::Delta), Some(crate::AST::QuantityKind::Delta))
+                            | (BinOp::Sub, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Point)) => {
+                                Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
+                            }
+                            (BinOp::Add, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Delta))
+                            | (BinOp::Sub, Some(crate::AST::QuantityKind::Point), Some(crate::AST::QuantityKind::Delta))
+                            | (BinOp::Add, Some(crate::AST::QuantityKind::Delta), Some(crate::AST::QuantityKind::Point)) => {
+                                Some(Type::Named(crate::Syntax::TYPE_INSTANT.to_string()))
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                });
+                let ty = in_own_frame(|| if *op == BinOp::Compare {
+                    Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+                } else if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
+                    Type::Bool
+                } else if let Some(ty) = canonical_time_ty {
+                    ty
+                } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
+                    let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
+                    let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
+                    if lm || rm {
+                        crate::Sema::math_binop_result(*op, ln, rn).unwrap_or_else(|| lhs.ty.clone())
+                    } else if ln == rn
+                        && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
+                    {
+                        lhs.ty.clone()
+                    } else {
+                        lhs.ty.clone()
+                    }
                 } else {
                     lhs.ty.clone()
-                }
-            } else {
-                lhs.ty.clone()
-            };
-            // D-DECIMAL1 / D-TYPE2-IMAG1=A: precise arithmetic lowers through
-            // the shared typed-value Prelude helpers.
-            if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
-                if ln == rn
-                {
-                    if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
-                        if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) {
-                            let func = match op {
-                                BinOp::Add => "add",
-                                BinOp::Sub => "sub",
-                                BinOp::Mul => "mul",
-                                BinOp::Div => "div",
-                                _ => unreachable!(),
-                            };
-                            return TExpr {
-                                ty: result_ty,
-                                kind: TExprKind::PreciseBuiltin {
-                                    type_name: ln.clone(),
-                                    func: func.to_string(),
-                                    args: vec![lhs, rhs],
-                                },
-                            };
+                });
+                // D-DECIMAL1 / D-TYPE2-IMAG1=A: precise arithmetic lowers through
+                // the shared typed-value Prelude helpers.
+                if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
+                    if ln == rn
+                    {
+                        if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
+                            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) {
+                                let func = match op {
+                                    BinOp::Add => "add",
+                                    BinOp::Sub => "sub",
+                                    BinOp::Mul => "mul",
+                                    BinOp::Div => "div",
+                                    _ => unreachable!(),
+                                };
+                                return TExpr {
+                                    ty: result_ty,
+                                    kind: TExprKind::PreciseBuiltin {
+                                        type_name: ln.clone(),
+                                        func: func.to_string(),
+                                        args: vec![lhs, rhs],
+                                    },
+                                };
+                            }
                         }
                     }
                 }
-            }
-            TExpr {
-                ty,
-                kind: TExprKind::Binary {
-                    op: *op,
-                    overflow,
-                    line,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                },
-            }
+                TExpr {
+                    ty,
+                    kind: TExprKind::Binary {
+                        op: *op,
+                        overflow,
+                        line,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    },
+                }
+            })
         }
         // D-CHAINCMP1: `0 <= sev < 10` — lower each operand plainly, once each
         // (the shared-middle-operand single-evaluation guarantee is emit's
@@ -2684,825 +2742,883 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             hooks,
             ..
         } => {
-            let toperands: Vec<TExpr> = operands.iter().map(|e| lower_expr(e, cx, env)).collect();
-            TExpr {
-                ty: Type::Bool,
-                kind: TExprKind::CompareChain {
-                    operands: toperands,
-                    ops: ops.clone(),
-                    hooks: hooks.clone(),
-                },
-            }
+            in_own_frame(|| {
+                let toperands: Vec<TExpr> = operands.iter().map(|e| lower_expr(e, cx, env)).collect();
+                TExpr {
+                    ty: Type::Bool,
+                    kind: TExprKind::CompareChain {
+                        operands: toperands,
+                        ops: ops.clone(),
+                        hooks: hooks.clone(),
+                    },
+                }
+            })
         }
         Expr::Call(call) => {
-            // D-CONC-FREEZE1=A: sema has proved the source is an owned,
-            // deeply snapshot-able value. Reuse the existing structural
-            // clone/materialization nodes so every execution tier consumes
-            // one already-typed TIR representation. A nested freeze is the
-            // identity by law and therefore does not clone twice.
-            if call.name == Syntax::KW_FREEZE
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-                && call.args.len() == 1
-            {
-                let source = &call.args[0].expr;
-                if let Expr::Call(inner) = source {
-                    if inner.name == Syntax::KW_FREEZE && inner.args.len() == 1 {
-                        return lower_expr(source, cx, env);
-                    }
-                }
-                let operand = lower_expr(source, cx, env);
-                let view_owned_ty = match &operand.ty {
-                    Type::Apply { name, args } if name == "View" && args.len() == 1 => {
-                        Some(if matches!(&args[0], Type::Named(element) if element == "str") {
-                            Type::String
-                        } else {
-                            Type::List(Box::new(args[0].clone()))
-                        })
-                    }
-                    _ => None,
-                }
-                .or_else(|| match source {
-                    Expr::Ident(name, _)
-                        if matches!(
-                            env.split_view_handle(name),
-                            Some(Type::Apply { name, .. }) if name == "View"
-                        ) => env.split_view_handle(name).and_then(|ty| match ty {
-                            Type::Apply { args, .. } if args.len() == 1 => Some(
-                                if matches!(&args[0], Type::Named(element) if element == "str") {
+            in_own_frame(|| {
+                // D-CONC-FREEZE1=A: sema has proved the source is an owned,
+                // deeply snapshot-able value. Reuse the existing structural
+                // clone/materialization nodes so every execution tier consumes
+                // one already-typed TIR representation. A nested freeze is the
+                // identity by law and therefore does not clone twice.
+                if call.name == Syntax::KW_FREEZE
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                    && call.args.len() == 1
+                {
+                    return in_own_frame(|| {
+                        let source = &call.args[0].expr;
+                        if let Expr::Call(inner) = source {
+                            if inner.name == Syntax::KW_FREEZE && inner.args.len() == 1 {
+                                return lower_expr(source, cx, env);
+                            }
+                        }
+                        let operand = lower_expr(source, cx, env);
+                        let view_owned_ty = match &operand.ty {
+                            Type::Apply { name, args } if name == "View" && args.len() == 1 => {
+                                Some(if matches!(&args[0], Type::Named(element) if element == "str") {
                                     Type::String
                                 } else {
                                     Type::List(Box::new(args[0].clone()))
-                                },
-                            ),
+                                })
+                            }
                             _ => None,
-                        }),
-                    _ => None,
-                });
-                let string_view = matches!(source, Expr::Ident(name, _) if env.is_string_view_local(name));
-                let is_view = view_owned_ty.is_some();
-                let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
-                let kind = if is_view || string_view {
-                    TExprKind::MaterializeView(Box::new(operand))
-                } else if operand.ty.is_compute_tensor_family() {
-                    env.note_clone(&ty);
-                    TExprKind::ExplicitCopy(Box::new(operand))
-                } else {
-                    env.note_clone(&ty);
-                    TExprKind::Clone(Box::new(operand))
-                };
-                return TExpr { ty, kind };
-            }
-            // D-CALLPOLICY1=E: `apply` is a typed value transformation. Sema
-            // records the replacement on its final callable argument; lowering
-            // forwards that value through the one shared function-value seam.
-            if call.name == "apply"
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-                && call.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
-            {
-                return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
-            }
-            // Early comptime registration runs before sema annotates calls with
-            // `widen_approx`. Recognize the unshadowed builtin here too; sema
-            // still owns validation and gate recording, while TIR owns the one
-            // canonical Int-to-Float conversion used by every evaluator tier.
-            let builtin_approx = call.name == Syntax::BUILTIN_APPROX
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name);
-            if (call.widen_approx || builtin_approx) && call.args.len() == 1 {
-                let source = lower_expr(&call.args[0].expr, cx, env);
-                let op = crate::Codegen::TIR::resolve_numeric_conversion_op("Float", "Int")
-                    .expect("Float.from_int is a registered numeric conversion");
-                return TExpr {
-                    ty: Type::Float,
-                    kind: TExprKind::NumericMethod {
-                        recv: Box::new(source),
-                        op,
-                    },
-                };
-            }
-            // D-TYPE2-UNCERT1=A: the canonical source constructor lowers to
-            // the same Prelude symbol every engine already uses. `core.units`
-            // is an internal route, not a second user-visible spelling.
-            if call.name == "measurement"
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-                && call.args.len() == 2
-            {
-                let args = call
-                    .args
-                    .iter()
-                    .map(|argument| lower_expr(&argument.expr, cx, env))
-                    .collect::<Vec<_>>();
-                return TExpr {
-                    ty: Type::Apply {
-                        name: Syntax::TYPE_MEASUREMENT.to_string(),
-                        args: vec![Type::Float],
-                    },
-                    kind: TExprKind::CoreCall {
-                        module: "core.units".to_string(),
-                        method: "from".to_string(),
-                        source_span: call.name_span,
-                        widen_to_vec: vec![false; args.len()],
-                        args,
-                    },
-                };
-            }
-            // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
-            // parses as `Expr::Call`. Function-type params are unmarked Read params.
-            if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
-                let callee_ty = env.ty_of(&call.name).unwrap_or_else(unit_type);
-                let ret_ty = match &callee_ty {
-                    Type::Fn { ret: Some(r), .. } => (**r).clone(),
-                    _ => unit_type(),
-                };
-                let mut callee_t = TExpr {
-                    ty: callee_ty,
-                    kind: TExprKind::Local(env.local_of(&call.name)),
-                };
-                if env.is_send_fn(&call.name) {
-                    let ty = callee_t.ty.clone();
-                    callee_t = TExpr {
-                        ty,
-                        kind: TExprKind::FnValue {
-                            kind: TFnValueKind::Interrupt {
-                                value: Box::new(callee_t),
-                            },
-                        },
-                    };
+                        }
+                        .or_else(|| match source {
+                            Expr::Ident(name, _)
+                                if matches!(
+                                    env.split_view_handle(name),
+                                    Some(Type::Apply { name, .. }) if name == "View"
+                                ) => env.split_view_handle(name).and_then(|ty| match ty {
+                                    Type::Apply { args, .. } if args.len() == 1 => Some(
+                                        if matches!(&args[0], Type::Named(element) if element == "str") {
+                                            Type::String
+                                        } else {
+                                            Type::List(Box::new(args[0].clone()))
+                                        },
+                                    ),
+                                    _ => None,
+                                }),
+                            _ => None,
+                        });
+                        let string_view = matches!(source, Expr::Ident(name, _) if env.is_string_view_local(name));
+                        let is_view = view_owned_ty.is_some();
+                        let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
+                        let kind = if is_view || string_view {
+                            TExprKind::MaterializeView(Box::new(operand))
+                        } else if operand.ty.is_compute_tensor_family() {
+                            env.note_clone(&ty);
+                            TExprKind::ExplicitCopy(Box::new(operand))
+                        } else {
+                            env.note_clone(&ty);
+                            TExprKind::Clone(Box::new(operand))
+                        };
+                        return TExpr { ty, kind };
+                    });
                 }
-                let params = match &callee_t.ty {
-                    Type::Fn { params, .. } => Some(params.as_slice()),
-                    _ => None,
-                };
-                let conventions = match &callee_t.ty {
-                    Type::Fn {
-                        call_metadata: Some(metadata),
-                        ..
-                    } => Some(metadata.conventions.as_slice()),
-                    _ => None,
-                };
-                let targs = call
+                // D-CALLPOLICY1=E: `apply` is a typed value transformation. Sema
+                // records the replacement on its final callable argument; lowering
+                // forwards that value through the one shared function-value seam.
+                if call.name == "apply"
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                    && call.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
+                {
+                    return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
+                }
+                // Early comptime registration runs before sema annotates calls with
+                // `widen_approx`. Recognize the unshadowed builtin here too; sema
+                // still owns validation and gate recording, while TIR owns the one
+                // canonical Int-to-Float conversion used by every evaluator tier.
+                let builtin_approx = call.name == Syntax::BUILTIN_APPROX
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name);
+                if (call.widen_approx || builtin_approx) && call.args.len() == 1 {
+                    return in_own_frame(|| {
+                        let source = lower_expr(&call.args[0].expr, cx, env);
+                        let op = crate::Codegen::TIR::resolve_numeric_conversion_op("Float", "Int")
+                            .expect("Float.from_int is a registered numeric conversion");
+                        return TExpr {
+                            ty: Type::Float,
+                            kind: TExprKind::NumericMethod {
+                                recv: Box::new(source),
+                                op,
+                            },
+                        };
+                    });
+                }
+                // D-TYPE2-UNCERT1=A: the canonical source constructor lowers to
+                // the same Prelude symbol every engine already uses. `core.units`
+                // is an internal route, not a second user-visible spelling.
+                if call.name == "measurement"
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                    && call.args.len() == 2
+                {
+                    return in_own_frame(|| {
+                        let args = call
+                            .args
+                            .iter()
+                            .map(|argument| lower_expr(&argument.expr, cx, env))
+                            .collect::<Vec<_>>();
+                        return TExpr {
+                            ty: Type::Apply {
+                                name: Syntax::TYPE_MEASUREMENT.to_string(),
+                                args: vec![Type::Float],
+                            },
+                            kind: TExprKind::CoreCall {
+                                module: "core.units".to_string(),
+                                method: "from".to_string(),
+                                source_span: call.name_span,
+                                widen_to_vec: vec![false; args.len()],
+                                args,
+                            },
+                        };
+                    });
+                }
+                // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
+                // parses as `Expr::Call`. Function-type params are unmarked Read params.
+                if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+                    return in_own_frame(|| {
+                        let callee_ty = env.ty_of(&call.name).unwrap_or_else(unit_type);
+                        let ret_ty = match &callee_ty {
+                            Type::Fn { ret: Some(r), .. } => (**r).clone(),
+                            _ => unit_type(),
+                        };
+                        let mut callee_t = TExpr {
+                            ty: callee_ty,
+                            kind: TExprKind::Local(env.local_of(&call.name)),
+                        };
+                        if env.is_send_fn(&call.name) {
+                            let ty = callee_t.ty.clone();
+                            callee_t = TExpr {
+                                ty,
+                                kind: TExprKind::FnValue {
+                                    kind: TFnValueKind::Interrupt {
+                                        value: Box::new(callee_t),
+                                    },
+                                },
+                            };
+                        }
+                        let params = match &callee_t.ty {
+                            Type::Fn { params, .. } => Some(params.as_slice()),
+                            _ => None,
+                        };
+                        let conventions = match &callee_t.ty {
+                            Type::Fn {
+                                call_metadata: Some(metadata),
+                                ..
+                            } => Some(metadata.conventions.as_slice()),
+                            _ => None,
+                        };
+                        let targs = call
+                            .args
+                            .iter()
+                            .enumerate()
+                            .map(|(i, a)| {
+                                let conv = params
+                                    .and_then(|ps| ps.get(i))
+                                    .cloned()
+                                    .map(|ty| {
+                                        (
+                                            conventions
+                                                .and_then(|cs| cs.get(i))
+                                                .copied()
+                                                .unwrap_or(AccessConvention::Read),
+                                            ty,
+                                        )
+                                    });
+                                lower_one_call_arg(a, conv, env, cx)
+                            })
+                            .collect();
+                        let lowered = TExpr {
+                            ty: ret_ty,
+                            kind: TExprKind::FnValue {
+                                kind: TFnValueKind::Call {
+                                    callee: Box::new(callee_t),
+                                    args: targs,
+                                },
+                            },
+                        };
+                        return match source_arg_order(&call.args) {
+                            Some(order) => preserve_source_arg_order(
+                                lowered, &order, call.args.len(), call.name_span.start as u32,
+                            ),
+                            None => lowered,
+                        };
+                    });
+                }
+                if call.name == Syntax::RESOURCE_CLOSE
+                    && call.args.len() == 1
+                {
+                    return in_own_frame(|| {
+                        let resource = match &call.args[0].expr {
+                            Expr::Ident(name, _) if env.is_resource(name) => TExpr {
+                                ty: env.ty_of(name).unwrap_or_else(unit_type),
+                                kind: TExprKind::ResourceTake(env.resource_take_place(name)),
+                            },
+                            expr => lower_expr(expr, cx, env),
+                        };
+                        return TExpr {
+                            ty: unit_type(),
+                            kind: TExprKind::Close(Box::new(resource)),
+                        };
+                    });
+                }
+                // D-BOUND-SINK1=A: sema has already checked the declared head and
+                // encoded every hole. The nominal carrier is erased here to the
+                // ordinary String expression on every execution tier.
+                if call.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP && call.args.len() == 1 {
+                    return in_own_frame(|| {
+                        let value = lower_expr(&call.args[0].expr, cx, env);
+                        return TExpr {
+                            ty: Type::String,
+                            kind: value.kind,
+                        };
+                    });
+                }
+                // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call sema rewrote a typed
+                // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
+                // alternate literal-segment, hole, literal-segment, ..., always closing
+                // on a literal (`literals.len() == holes.len() + 1`) — even index is a
+                // compile-time-known literal segment, odd index is a hole value. A hole
+                // never re-enters the template text: `SQL` keeps it as a separate bound
+                // param, `HTML` HTML-escapes it before joining.
+                if let Some(kind) = Syntax::typed_head_kind(&call.name)
+                    .filter(|kind| kind.is_interpolated_template())
+                    .filter(|_| !cx.sigs.contains_key(&call.name))
+                {
+                    return in_own_frame(|| {
+                        let mut literals: Vec<String> = Vec::new();
+                        let mut holes: Vec<TExpr> = Vec::new();
+                        for (i, a) in call.args.iter().enumerate() {
+                            if i % 2 == 0 {
+                                let lit = match &a.expr {
+                                    Expr::Str(parts, _) => match parts.as_slice() {
+                                        [crate::AST::StrPart::Lit(s)] => s.clone(),
+                                        _ => String::new(),
+                                    },
+                                    _ => String::new(),
+                                };
+                                literals.push(lit);
+                            } else {
+                                holes.push(lower_expr(&a.expr, cx, env));
+                            }
+                        }
+                        let ty = Type::Named(kind.internal_type_name().to_string());
+                        return TExpr {
+                            ty,
+                            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
+                                kind,
+                                literals,
+                                holes,
+                            })),
+                        };
+                    });
+                }
+                // D-REGEX-LIT1=D: sema already validated this complete literal.
+                // Keep one Regex value through AOT/JIT instead of a fallible Result.
+                if call.name == Syntax::TYPE_REGEX
+                    && !cx.sigs.contains_key(&call.name)
+                    && call.args.len() == 1
+                {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
+                            kind: TExprKind::CoreCall {
+                                module: "core.regex".to_string(),
+                                method: "literal".to_string(),
+                                args: vec![lower_expr(&call.args[0].expr, cx, env)],
+                                source_span: call.name_span,
+                                widen_to_vec: vec![false],
+                            },
+                        };
+                    });
+                }
+                // `print` is ambient only when the user has not defined their own
+                // `print` function (matches emit_call; sema enforces the shadowing).
+                // D-VERDICT-1321-1: multiple arguments join with newlines into one
+                // Print, so every engine keeps its single-value Print semantics.
+                if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
+                    return in_own_frame(|| {
+                        // `join_print_args` also absorbs the sema-rejected zero-arg
+                        // form (empty line) so lowering never indexes out of bounds.
+                        let arg = if call.args.len() == 1 {
+                            lower_display_value(lower_expr(&call.args[0].expr, cx, env), cx)
+                        } else {
+                            join_print_args(&call.args, cx, env)
+                        };
+                        return TExpr {
+                            ty: unit_type(),
+                            kind: TExprKind::Print(Box::new(arg)),
+                        };
+                    });
+                }
+                // D-LIN1-DROP: `drop(x)` — discard the value (move-to-nowhere). Sema
+                // proved the discard is audited when the value is `#SingleUse`. Lowers
+                // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
+                // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
+                if call.name == Syntax::BUILTIN_CONSUME
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                {
+                    return in_own_frame(|| {
+                        let arg = lower_expr(&call.args[0].expr, cx, env);
+                        return TExpr {
+                            ty: unit_type(),
+                            kind: TExprKind::Drop(Box::new(arg)),
+                        };
+                    });
+                }
+                // D-TOOL4: `expect(x)` builds a snapshot harness holder. At TirBridge
+                // comptime the holder is the value itself — `consume(expect(x))` only
+                // needs the binding to exist; `.snapshot()` is a separate HostCall.
+                if call.name == Syntax::BUILTIN_EXPECT
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                    && call.args.len() == 1
+                {
+                    return in_own_frame(|| {
+                        let arg = lower_expr(&call.args[0].expr, cx, env);
+                        return TExpr {
+                            ty: arg.ty.clone(),
+                            kind: TExprKind::Clone(Box::new(arg)),
+                        };
+                    });
+                }
+                // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
+                // emit string at lowering, byte-for-byte the AST helper. `require`/`panic`
+                // are statement-position calls (a `()` result); the string is the `{ … }`
+                // block emit emits as an expr-statement. Disjoint from a user fn of the same
+                // name (`cx.sigs.contains_key` would be true then).
+                if !cx.sigs.contains_key(&call.name) && !env.locals.contains_key(&call.name) {
+                    if call.name == Syntax::BUILTIN_REQUIRE {
+                        return in_own_frame(|| {
+                            let (kind, loc) = lower_require_stop(call, cx, env);
+                            return TExpr {
+                                ty: unit_type(),
+                                kind: TExprKind::RequireStop {
+                                    kind,
+                                    loc,
+                                    always_stops: false,
+                                },
+                            };
+                        });
+                    }
+                    if call.name == Syntax::BUILTIN_REQUIRE_EQ {
+                        return in_own_frame(|| {
+                            let (kind, loc) = lower_require_eq_stop(call, cx, env);
+                            return TExpr {
+                                ty: unit_type(),
+                                kind: TExprKind::RequireStop {
+                                    kind,
+                                    loc,
+                                    always_stops: false,
+                                },
+                            };
+                        });
+                    }
+                    if call.name == Syntax::BUILTIN_PANIC {
+                        return in_own_frame(|| {
+                            let (kind, loc) = lower_panic_stop(&call.name_span, &call.args, cx, env);
+                            return TExpr {
+                                ty: unit_type(),
+                                kind: TExprKind::RequireStop {
+                                    kind,
+                                    loc,
+                                    always_stops: true,
+                                },
+                            };
+                        });
+                    }
+                }
+                // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
+                // lowering as `io.input(...)` (CoreCall would also work, but the bare-call
+                // surface has no module alias, so it is its own node). Resolves to
+                // `Result<String, IOError>` (matching sema), so it composes with the
+                // Phase-8 `??` fallback. The prompt arg (if any) is lowered in-subset.
+                if call.name == Syntax::BUILTIN_INPUT
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                {
+                    return in_own_frame(|| {
+                        let prompt = call
+                            .args
+                            .first()
+                            .map(|a| Box::new(lower_expr(&a.expr, cx, env)));
+                        return TExpr {
+                            ty: Type::Result {
+                                ok: Box::new(Type::String),
+                                err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                            },
+                            kind: TExprKind::AmbientInput { prompt },
+                        };
+                    });
+                }
+                // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
+                // `checked(e)` (D-NUMOPS1). The gate proved the name is one of the three (not
+                // shadowed) and the sole arg is an integer `Expr::Binary`. Reproduce
+                // `emit_call`'s arm (Expression.rs ~L1756): `(lhs).{name}_{op}(rhs)` with PLAIN
+                // operands (no trap helper). `checked_*` returns `Option<T>`; the others return
+                // `T` — set the result type accordingly so a `checked(...) ?? x` composes.
+                if matches!(
+                    call.name.as_str(),
+                    Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+                ) && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                {
+                    if let Some(Expr::Binary(op, l, r, _)) = call.args.first().map(|a| &a.expr) {
+                        return in_own_frame(|| {
+                            let op_suffix = match op {
+                                BinOp::Add => "add",
+                                BinOp::Sub => "sub",
+                                BinOp::Mul => "mul",
+                                BinOp::Div => "div",
+                                // Sema validated an arithmetic op; mirror the AST default.
+                                _ => "add",
+                            };
+                            let lhs = lower_expr(l, cx, env);
+                            let rhs = lower_expr(r, cx, env);
+                            let val_ty = lhs.ty.clone();
+                            let result_ty = if call.name == Syntax::BUILTIN_CHECKED {
+                                Type::Option(Box::new(val_ty))
+                            } else {
+                                val_ty
+                            };
+                            return TExpr {
+                                ty: result_ty,
+                                kind: TExprKind::OverflowOpt {
+                                    prefix: call.name.clone(),
+                                    op: op_suffix,
+                                    lhs: Box::new(lhs),
+                                    rhs: Box::new(rhs),
+                                },
+                            };
+                        });
+                    }
+                }
+                // c109 Phase 14: an FFI extern call (`emit_call`'s `extern_funcs` arm).
+                // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
+                // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
+                if !env.locals.contains_key(&call.name) {
+                    if let Some(wrapper) = cx.extern_funcs.get(&call.name).cloned() {
+                        return in_own_frame(|| {
+                            let sig = cx.sigs.get(&call.name).cloned();
+                            let eargs = call
+                                .args
+                                .iter()
+                                .enumerate()
+                                .map(|(i, a)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|ps| ps.get(i))
+                                        .map(|(c, t)| (*c, t.clone()));
+                                    lower_extern_call_arg(a, conv, env, cx)
+                                })
+                                .collect();
+                            // Return type comes from `cx.fn_types` (including extern rust /
+                            // CModule entries registered in Context).
+                            let lowered = TExpr {
+                                ty: call_return_type(cx, &call.name),
+                                kind: TExprKind::ExternCall {
+                                    wrapper,
+                                    args: eargs,
+                                },
+                            };
+                            let lowered = match source_arg_order(&call.args) {
+                                Some(order) => preserve_source_arg_order(
+                                    lowered,
+                                    &order,
+                                    call.args.len(),
+                                    call.name_span.start as u32,
+                                ),
+                                None => lowered,
+                            };
+                            return wrap_foreign_undo(
+                                lowered,
+                                cx.foreign_undos.get(&call.name).map(String::as_str),
+                                call.name_span.start as u32,
+                                cx,
+                                env,
+                            );
+                        });
+                    }
+                    // c109 Phase 14: unqualified inline-module import (`emit_call`'s
+                    // `unqualified_inline` arm) → `{root}__jet_{mangled}(args)`.
+                    let inline_mangled = cx
+                        .inline_unqualified
+                        .get(&env.fn_name)
+                        .and_then(|scope| scope.get(&call.name))
+                        .or_else(|| cx.unqualified_inline.get(&call.name))
+                        .cloned();
+                    if let Some(mangled_key) = inline_mangled
+                    {
+                        return in_own_frame(|| {
+                            let undo = cx
+                                .foreign_undos
+                                .get(&mangled_key)
+                                .map(String::as_str);
+                            let sig = cx.sigs.get(&mangled_key).cloned();
+                            let args: Vec<_> = call
+                                .args
+                                .iter()
+                                .enumerate()
+                                .map(|(i, a)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|ps| ps.get(i))
+                                        .map(|(c, t)| (*c, t.clone()));
+                                    lower_one_call_arg(a, conv, env, cx)
+                                })
+                                .collect();
+                            let lowered = TExpr {
+                                ty: call_return_type_with_args(
+                                    cx,
+                                    &mangled_key,
+                                    &call.type_args,
+                                    &args,
+                                ),
+                                kind: TExprKind::ModuleCall {
+                                    form: TModuleCallForm::InlineMangled {
+                                        mangled: mangled_key,
+                                    },
+                                    type_args: call.type_args.clone(),
+                                    args,
+                                },
+                            };
+                            let lowered = match source_arg_order(&call.args) {
+                                Some(order) => preserve_source_arg_order(
+                                    lowered,
+                                    &order,
+                                    call.args.len(),
+                                    call.name_span.start as u32,
+                                ),
+                                None => lowered,
+                            };
+                            return wrap_foreign_undo(
+                                lowered,
+                                undo,
+                                call.name_span.start as u32,
+                                cx,
+                                env,
+                            );
+                        });
+                    }
+                    // c109 Phase 14: unqualified file-module import (`emit_call`'s
+                    // `unqualified_file` arm) → `{root}{rust_mod}::{mangle(fn)}(args)`. The
+                    // AST looks up the sig under `(call.name, fn_name)`.
+                    let inline_file = cx
+                        .inline_unqualified_file
+                        .get(&env.fn_name)
+                        .and_then(|scope| scope.get(&call.name))
+                        .or_else(|| cx.unqualified_file.get(&call.name))
+                        .cloned();
+                    if let Some((rust_mod, fn_name)) = inline_file
+                    {
+                        return in_own_frame(|| {
+                            let undo = cx
+                                .foreign_undos
+                                .get(&format!("{rust_mod}::{fn_name}"))
+                                .map(String::as_str);
+                            let sig = cx
+                                .import_sigs
+                                .get(&(call.name.clone(), fn_name.clone()))
+                                .cloned();
+                            let args = call
+                                .args
+                                .iter()
+                                .enumerate()
+                                .map(|(i, a)| {
+                                    let conv = sig
+                                        .as_ref()
+                                        .and_then(|ps| ps.get(i))
+                                        .map(|(c, t)| (*c, t.clone()));
+                                    lower_one_call_arg(a, conv, env, cx)
+                                })
+                                .collect();
+                            let ret = cx
+                                .import_rets
+                                .get(&(call.name.clone(), fn_name.clone()))
+                                .cloned()
+                                .flatten()
+                                .unwrap_or_else(unit_type);
+                            let lowered = TExpr {
+                                ty: ret,
+                                kind: TExprKind::ModuleCall {
+                                    form: TModuleCallForm::Qualified {
+                                        rust_mod,
+                                        rust_fn: mangle(&fn_name).to_string(),
+                                    },
+                                    type_args: call.type_args.clone(),
+                                    args,
+                                },
+                            };
+                            let lowered = match source_arg_order(&call.args) {
+                                Some(order) => preserve_source_arg_order(
+                                    lowered,
+                                    &order,
+                                    call.args.len(),
+                                    call.name_span.start as u32,
+                                ),
+                                None => lowered,
+                            };
+                            return wrap_foreign_undo(
+                                lowered,
+                                undo,
+                                call.name_span.start as u32,
+                                cx,
+                                env,
+                            );
+                        });
+                    }
+                }
+                // D-ZIPPAD1: free zip-family calls carry their complete result type
+                // from sema. Lower the same variadic contract as the method form;
+                // no ordinary function lookup or codegen-side type inference is
+                // involved.
+                if matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
+                    && !cx.sigs.contains_key(&call.name)
+                    && call.resolved_ret.is_some()
+                {
+                    return in_own_frame(|| {
+                        let is_pad = call.name == "zip_pad";
+                        let mut inputs = Vec::new();
+                        let mut fields = Vec::new();
+                        let mut fills = Vec::new();
+                        for arg in &call.args {
+                            match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                                (true, Some("fill")) | (true, Some("fills")) => {
+                                    fills.push(lower_expr(&arg.expr, cx, env));
+                                }
+                                _ => {
+                                    let index = fields.len();
+                                    let name = arg.label.as_ref().map(|(name, _)| name.as_str());
+                                    let field = name.map_or_else(
+                                        || {
+                                            ["a", "b", "c", "d", "e", "f"]
+                                                .get(index)
+                                                .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
+                                        },
+                                        str::to_string,
+                                    );
+                                    fields.push(field);
+                                    inputs.push(lower_expr(&arg.expr, cx, env));
+                                }
+                            }
+                        }
+                        let ret = call.resolved_ret.as_ref().expect("zip result resolved by sema");
+                        if inputs.is_empty() {
+                            return crate::Codegen::TIR::lower_empty_zip_family(ret, &call.name);
+                        }
+                        let mut all = inputs.into_iter();
+                        let first = all.next().expect("non-empty zip inputs");
+                        return crate::Codegen::TIR::lower_zip_family(
+                            first,
+                            all.collect(),
+                            fills,
+                            fields,
+                            &call.name,
+                            Some(ret),
+                        );
+                    });
+                }
+                // D-DECIMAL1: `Decimal(…)` constructor.
+                if !env.locals.contains_key(&call.name)
+                    && call.name == crate::Syntax::TYPE_DECIMAL
+                    && !cx.type_names.contains(&call.name)
+                {
+                    return in_own_frame(|| {
+                        let targs: Vec<TExpr> = call
+                            .args
+                            .iter()
+                            .map(|a| lower_expr(&a.expr, cx, env))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(call.name.clone()),
+                            kind: TExprKind::PreciseBuiltin {
+                                type_name: call.name.clone(),
+                                func: "from_str".to_string(),
+                                args: targs,
+                            },
+                        };
+                    });
+                }
+                // D-TYPE2-IMAG1=A: unit-literal elaboration and explicit
+                // construction share the precise builtin constructor seam.
+                if !env.locals.contains_key(&call.name)
+                    && call.name == crate::Syntax::TYPE_COMPLEX
+                    && !cx.type_names.contains(&call.name)
+                {
+                    return in_own_frame(|| {
+                        let targs: Vec<TExpr> = call
+                            .args
+                            .iter()
+                            .map(|a| lower_expr(&a.expr, cx, env))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(call.name.clone()),
+                            kind: TExprKind::PreciseBuiltin {
+                                type_name: call.name.clone(),
+                                func: "from_parts".to_string(),
+                                args: targs,
+                            },
+                        };
+                    });
+                }
+                // D-SIMD2 / D-LINALG1: a built-in math-type constructor. Plainly lower the
+                // float components and emit `{root}jet_math_<T>_new(…)`.
+                if !env.locals.contains_key(&call.name)
+                    && crate::Sema::is_math_type(&call.name)
+                    && !cx.type_names.contains(&call.name)
+                {
+                    return in_own_frame(|| {
+                        let targs: Vec<TExpr> = call
+                            .args
+                            .iter()
+                            .map(|a| lower_expr(&a.expr, cx, env))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(call.name.clone()),
+                            kind: TExprKind::MathBuiltin {
+                                type_name: call.name.clone(),
+                                func: "new".to_string(),
+                                args: targs,
+                            },
+                        };
+                    });
+                }
+                if call.range_checked && !env.locals.contains_key(&call.name) {
+                    if let Some(arg) = call.args.first() {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Result {
+                                    ok: Box::new(Type::Named(call.name.clone())),
+                                    err: Box::new(Type::String),
+                                },
+                                kind: TExprKind::RangeCheckedCtor {
+                                    name: call.name.clone(),
+                                    arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                                },
+                            };
+                        });
+                    }
+                }
+                if !env.locals.contains_key(&call.name) {
+                    if let (Some((base, _)), Some(arg)) =
+                        (cx.distinct_types.get(&call.name), call.args.first())
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(call.name.clone()),
+                                kind: TExprKind::DistinctCtor {
+                                    name: call.name.clone(),
+                                    arg: Box::new(lower_expr(&arg.expr, cx, env)),
+                                    base: base.clone(),
+                                },
+                            };
+                        });
+                    }
+                }
+                // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a call to a trait-bounded
+                // variadic function — sema left the trailing args unpacked
+                // (`CheckerInfer/calls.rs::check_variadic_bound_tail`), so the arity
+                // is just "how many args past the fixed prefix". Route to the
+                // per-arity function `VariadicBound.rs` synthesizes; record the
+                // arity so the post-pass in `Codegen/mod.rs` knows to emit it.
+                if let Some((fixed, _bounds)) = cx.variadic_bound_fns.get(&call.name).cloned() {
+                    return in_own_frame(|| {
+                        let lowered = crate::Codegen::VariadicBound::lower_variadic_bound_call(
+                            call, fixed, cx, env,
+                        );
+                        return match source_arg_order(&call.args) {
+                            Some(order) => preserve_source_arg_order(
+                                lowered,
+                                &order,
+                                call.args.len(),
+                                call.name_span.start as u32,
+                            ),
+                            None => lowered,
+                        };
+                    });
+                }
+                // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
+                // decided here, totally — via the shared `lower_one_call_arg` (the single
+                // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
+                // param (now in subset) routes its arg through the Box-coercion form.
+                let sig = cx.sigs.get(&call.name).cloned();
+                let args: Vec<TCallArg> = call
                     .args
                     .iter()
                     .enumerate()
                     .map(|(i, a)| {
-                        let conv = params
+                        let conv = sig
+                            .as_ref()
                             .and_then(|ps| ps.get(i))
-                            .cloned()
-                            .map(|ty| {
-                                (
-                                    conventions
-                                        .and_then(|cs| cs.get(i))
-                                        .copied()
-                                        .unwrap_or(AccessConvention::Read),
-                                    ty,
-                                )
-                            });
+                            .map(|(c, t)| (*c, t.clone()));
                         lower_one_call_arg(a, conv, env, cx)
                     })
                     .collect();
-                let lowered = TExpr {
-                    ty: ret_ty,
-                    kind: TExprKind::FnValue {
-                        kind: TFnValueKind::Call {
-                            callee: Box::new(callee_t),
-                            args: targs,
-                        },
-                    },
-                };
-                return match source_arg_order(&call.args) {
-                    Some(order) => preserve_source_arg_order(
-                        lowered, &order, call.args.len(), call.name_span.start as u32,
-                    ),
-                    None => lowered,
-                };
-            }
-            if call.name == Syntax::RESOURCE_CLOSE
-                && call.args.len() == 1
-            {
-                let resource = match &call.args[0].expr {
-                    Expr::Ident(name, _) if env.is_resource(name) => TExpr {
-                        ty: env.ty_of(name).unwrap_or_else(unit_type),
-                        kind: TExprKind::ResourceTake(env.resource_take_place(name)),
-                    },
-                    expr => lower_expr(expr, cx, env),
-                };
-                return TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::Close(Box::new(resource)),
-                };
-            }
-            // D-BOUND-SINK1=A: sema has already checked the declared head and
-            // encoded every hole. The nominal carrier is erased here to the
-            // ordinary String expression on every execution tier.
-            if call.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP && call.args.len() == 1 {
-                let value = lower_expr(&call.args[0].expr, cx, env);
-                return TExpr {
-                    ty: Type::String,
-                    kind: value.kind,
-                };
-            }
-            // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call sema rewrote a typed
-            // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
-            // alternate literal-segment, hole, literal-segment, ..., always closing
-            // on a literal (`literals.len() == holes.len() + 1`) — even index is a
-            // compile-time-known literal segment, odd index is a hole value. A hole
-            // never re-enters the template text: `SQL` keeps it as a separate bound
-            // param, `HTML` HTML-escapes it before joining.
-            if let Some(kind) = Syntax::typed_head_kind(&call.name)
-                .filter(|kind| kind.is_interpolated_template())
-                .filter(|_| !cx.sigs.contains_key(&call.name))
-            {
-                let mut literals: Vec<String> = Vec::new();
-                let mut holes: Vec<TExpr> = Vec::new();
-                for (i, a) in call.args.iter().enumerate() {
-                    if i % 2 == 0 {
-                        let lit = match &a.expr {
-                            Expr::Str(parts, _) => match parts.as_slice() {
-                                [crate::AST::StrPart::Lit(s)] => s.clone(),
-                                _ => String::new(),
-                            },
-                            _ => String::new(),
-                        };
-                        literals.push(lit);
-                    } else {
-                        holes.push(lower_expr(&a.expr, cx, env));
-                    }
-                }
-                let ty = Type::Named(kind.internal_type_name().to_string());
-                return TExpr {
-                    ty,
-                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
-                        kind,
-                        literals,
-                        holes,
-                    })),
-                };
-            }
-            // D-REGEX-LIT1=D: sema already validated this complete literal.
-            // Keep one Regex value through AOT/JIT instead of a fallible Result.
-            if call.name == Syntax::TYPE_REGEX
-                && !cx.sigs.contains_key(&call.name)
-                && call.args.len() == 1
-            {
-                return TExpr {
-                    ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
-                    kind: TExprKind::CoreCall {
-                        module: "core.regex".to_string(),
-                        method: "literal".to_string(),
-                        args: vec![lower_expr(&call.args[0].expr, cx, env)],
-                        source_span: call.name_span,
-                        widen_to_vec: vec![false],
-                    },
-                };
-            }
-            // `print` is ambient only when the user has not defined their own
-            // `print` function (matches emit_call; sema enforces the shadowing).
-            // D-VERDICT-1321-1: multiple arguments join with newlines into one
-            // Print, so every engine keeps its single-value Print semantics.
-            if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
-                // `join_print_args` also absorbs the sema-rejected zero-arg
-                // form (empty line) so lowering never indexes out of bounds.
-                let arg = if call.args.len() == 1 {
-                    lower_display_value(lower_expr(&call.args[0].expr, cx, env), cx)
-                } else {
-                    join_print_args(&call.args, cx, env)
-                };
-                return TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::Print(Box::new(arg)),
-                };
-            }
-            // D-LIN1-DROP: `drop(x)` — discard the value (move-to-nowhere). Sema
-            // proved the discard is audited when the value is `#SingleUse`. Lowers
-            // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
-            // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
-            if call.name == Syntax::BUILTIN_CONSUME
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-            {
-                let arg = lower_expr(&call.args[0].expr, cx, env);
-                return TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::Drop(Box::new(arg)),
-                };
-            }
-            // D-TOOL4: `expect(x)` builds a snapshot harness holder. At TirBridge
-            // comptime the holder is the value itself — `consume(expect(x))` only
-            // needs the binding to exist; `.snapshot()` is a separate HostCall.
-            if call.name == Syntax::BUILTIN_EXPECT
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-                && call.args.len() == 1
-            {
-                let arg = lower_expr(&call.args[0].expr, cx, env);
-                return TExpr {
-                    ty: arg.ty.clone(),
-                    kind: TExprKind::Clone(Box::new(arg)),
-                };
-            }
-            // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
-            // emit string at lowering, byte-for-byte the AST helper. `require`/`panic`
-            // are statement-position calls (a `()` result); the string is the `{ … }`
-            // block emit emits as an expr-statement. Disjoint from a user fn of the same
-            // name (`cx.sigs.contains_key` would be true then).
-            if !cx.sigs.contains_key(&call.name) && !env.locals.contains_key(&call.name) {
-                if call.name == Syntax::BUILTIN_REQUIRE {
-                    let (kind, loc) = lower_require_stop(call, cx, env);
-                    return TExpr {
-                        ty: unit_type(),
-                        kind: TExprKind::RequireStop {
-                            kind,
-                            loc,
-                            always_stops: false,
-                        },
-                    };
-                }
-                if call.name == Syntax::BUILTIN_REQUIRE_EQ {
-                    let (kind, loc) = lower_require_eq_stop(call, cx, env);
-                    return TExpr {
-                        ty: unit_type(),
-                        kind: TExprKind::RequireStop {
-                            kind,
-                            loc,
-                            always_stops: false,
-                        },
-                    };
-                }
-                if call.name == Syntax::BUILTIN_PANIC {
-                    let (kind, loc) = lower_panic_stop(&call.name_span, &call.args, cx, env);
-                    return TExpr {
-                        ty: unit_type(),
-                        kind: TExprKind::RequireStop {
-                            kind,
-                            loc,
-                            always_stops: true,
-                        },
-                    };
-                }
-            }
-            // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
-            // lowering as `io.input(...)` (CoreCall would also work, but the bare-call
-            // surface has no module alias, so it is its own node). Resolves to
-            // `Result<String, IOError>` (matching sema), so it composes with the
-            // Phase-8 `??` fallback. The prompt arg (if any) is lowered in-subset.
-            if call.name == Syntax::BUILTIN_INPUT
-                && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-            {
-                let prompt = call
-                    .args
-                    .first()
-                    .map(|a| Box::new(lower_expr(&a.expr, cx, env)));
-                return TExpr {
-                    ty: Type::Result {
-                        ok: Box::new(Type::String),
-                        err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
-                    },
-                    kind: TExprKind::AmbientInput { prompt },
-                };
-            }
-            // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
-            // `checked(e)` (D-NUMOPS1). The gate proved the name is one of the three (not
-            // shadowed) and the sole arg is an integer `Expr::Binary`. Reproduce
-            // `emit_call`'s arm (Expression.rs ~L1756): `(lhs).{name}_{op}(rhs)` with PLAIN
-            // operands (no trap helper). `checked_*` returns `Option<T>`; the others return
-            // `T` — set the result type accordingly so a `checked(...) ?? x` composes.
-            if matches!(
-                call.name.as_str(),
-                Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
-            ) && !cx.sigs.contains_key(&call.name)
-                && !env.locals.contains_key(&call.name)
-            {
-                if let Some(Expr::Binary(op, l, r, _)) = call.args.first().map(|a| &a.expr) {
-                    let op_suffix = match op {
-                        BinOp::Add => "add",
-                        BinOp::Sub => "sub",
-                        BinOp::Mul => "mul",
-                        BinOp::Div => "div",
-                        // Sema validated an arithmetic op; mirror the AST default.
-                        _ => "add",
-                    };
-                    let lhs = lower_expr(l, cx, env);
-                    let rhs = lower_expr(r, cx, env);
-                    let val_ty = lhs.ty.clone();
-                    let result_ty = if call.name == Syntax::BUILTIN_CHECKED {
-                        Type::Option(Box::new(val_ty))
-                    } else {
-                        val_ty
-                    };
-                    return TExpr {
-                        ty: result_ty,
-                        kind: TExprKind::OverflowOpt {
-                            prefix: call.name.clone(),
-                            op: op_suffix,
-                            lhs: Box::new(lhs),
-                            rhs: Box::new(rhs),
-                        },
-                    };
-                }
-            }
-            // c109 Phase 14: an FFI extern call (`emit_call`'s `extern_funcs` arm).
-            // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
-            // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
-            if !env.locals.contains_key(&call.name) {
-                if let Some(wrapper) = cx.extern_funcs.get(&call.name).cloned() {
-                    let sig = cx.sigs.get(&call.name).cloned();
-                    let eargs = call
-                        .args
-                        .iter()
-                        .enumerate()
-                        .map(|(i, a)| {
-                            let conv = sig
-                                .as_ref()
-                                .and_then(|ps| ps.get(i))
-                                .map(|(c, t)| (*c, t.clone()));
-                            lower_extern_call_arg(a, conv, env, cx)
-                        })
-                        .collect();
-                    // Return type comes from `cx.fn_types` (including extern rust /
-                    // CModule entries registered in Context).
-                    let lowered = TExpr {
-                        ty: call_return_type(cx, &call.name),
-                        kind: TExprKind::ExternCall {
-                            wrapper,
-                            args: eargs,
-                        },
-                    };
-                    let lowered = match source_arg_order(&call.args) {
-                        Some(order) => preserve_source_arg_order(
-                            lowered,
-                            &order,
-                            call.args.len(),
-                            call.name_span.start as u32,
-                        ),
-                        None => lowered,
-                    };
-                    return wrap_foreign_undo(
-                        lowered,
-                        cx.foreign_undos.get(&call.name).map(String::as_str),
-                        call.name_span.start as u32,
-                        cx,
-                        env,
-                    );
-                }
-                // c109 Phase 14: unqualified inline-module import (`emit_call`'s
-                // `unqualified_inline` arm) → `{root}__jet_{mangled}(args)`.
-                let inline_mangled = cx
-                    .inline_unqualified
-                    .get(&env.fn_name)
-                    .and_then(|scope| scope.get(&call.name))
-                    .or_else(|| cx.unqualified_inline.get(&call.name))
-                    .cloned();
-                if let Some(mangled_key) = inline_mangled
-                {
-                    let undo = cx
-                        .foreign_undos
-                        .get(&mangled_key)
-                        .map(String::as_str);
-                    let sig = cx.sigs.get(&mangled_key).cloned();
-                    let args: Vec<_> = call
-                        .args
-                        .iter()
-                        .enumerate()
-                        .map(|(i, a)| {
-                            let conv = sig
-                                .as_ref()
-                                .and_then(|ps| ps.get(i))
-                                .map(|(c, t)| (*c, t.clone()));
-                            lower_one_call_arg(a, conv, env, cx)
-                        })
-                        .collect();
-                    let lowered = TExpr {
-                        ty: call_return_type_with_args(
-                            cx,
-                            &mangled_key,
-                            &call.type_args,
-                            &args,
-                        ),
-                        kind: TExprKind::ModuleCall {
-                            form: TModuleCallForm::InlineMangled {
-                                mangled: mangled_key,
-                            },
-                            type_args: call.type_args.clone(),
-                            args,
-                        },
-                    };
-                    let lowered = match source_arg_order(&call.args) {
-                        Some(order) => preserve_source_arg_order(
-                            lowered,
-                            &order,
-                            call.args.len(),
-                            call.name_span.start as u32,
-                        ),
-                        None => lowered,
-                    };
-                    return wrap_foreign_undo(
-                        lowered,
-                        undo,
-                        call.name_span.start as u32,
-                        cx,
-                        env,
-                    );
-                }
-                // c109 Phase 14: unqualified file-module import (`emit_call`'s
-                // `unqualified_file` arm) → `{root}{rust_mod}::{mangle(fn)}(args)`. The
-                // AST looks up the sig under `(call.name, fn_name)`.
-                let inline_file = cx
-                    .inline_unqualified_file
-                    .get(&env.fn_name)
-                    .and_then(|scope| scope.get(&call.name))
-                    .or_else(|| cx.unqualified_file.get(&call.name))
-                    .cloned();
-                if let Some((rust_mod, fn_name)) = inline_file
-                {
-                    let undo = cx
-                        .foreign_undos
-                        .get(&format!("{rust_mod}::{fn_name}"))
-                        .map(String::as_str);
-                    let sig = cx
-                        .import_sigs
-                        .get(&(call.name.clone(), fn_name.clone()))
-                        .cloned();
-                    let args = call
-                        .args
-                        .iter()
-                        .enumerate()
-                        .map(|(i, a)| {
-                            let conv = sig
-                                .as_ref()
-                                .and_then(|ps| ps.get(i))
-                                .map(|(c, t)| (*c, t.clone()));
-                            lower_one_call_arg(a, conv, env, cx)
-                        })
-                        .collect();
-                    let ret = cx
-                        .import_rets
-                        .get(&(call.name.clone(), fn_name.clone()))
-                        .cloned()
-                        .flatten()
-                        .unwrap_or_else(unit_type);
-                    let lowered = TExpr {
-                        ty: ret,
-                        kind: TExprKind::ModuleCall {
-                            form: TModuleCallForm::Qualified {
-                                rust_mod,
-                                rust_fn: mangle(&fn_name).to_string(),
-                            },
-                            type_args: call.type_args.clone(),
-                            args,
-                        },
-                    };
-                    let lowered = match source_arg_order(&call.args) {
-                        Some(order) => preserve_source_arg_order(
-                            lowered,
-                            &order,
-                            call.args.len(),
-                            call.name_span.start as u32,
-                        ),
-                        None => lowered,
-                    };
-                    return wrap_foreign_undo(
-                        lowered,
-                        undo,
-                        call.name_span.start as u32,
-                        cx,
-                        env,
-                    );
-                }
-            }
-            // D-ZIPPAD1: free zip-family calls carry their complete result type
-            // from sema. Lower the same variadic contract as the method form;
-            // no ordinary function lookup or codegen-side type inference is
-            // involved.
-            if matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
-                && !cx.sigs.contains_key(&call.name)
-                && call.resolved_ret.is_some()
-            {
-                let is_pad = call.name == "zip_pad";
-                let mut inputs = Vec::new();
-                let mut fields = Vec::new();
-                let mut fills = Vec::new();
-                for arg in &call.args {
-                    match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
-                        (true, Some("fill")) | (true, Some("fills")) => {
-                            fills.push(lower_expr(&arg.expr, cx, env));
-                        }
-                        _ => {
-                            let index = fields.len();
-                            let name = arg.label.as_ref().map(|(name, _)| name.as_str());
-                            let field = name.map_or_else(
-                                || {
-                                    ["a", "b", "c", "d", "e", "f"]
-                                        .get(index)
-                                        .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
-                                },
-                                str::to_string,
-                            );
-                            fields.push(field);
-                            inputs.push(lower_expr(&arg.expr, cx, env));
-                        }
-                    }
-                }
-                let ret = call.resolved_ret.as_ref().expect("zip result resolved by sema");
-                if inputs.is_empty() {
-                    return crate::Codegen::TIR::lower_empty_zip_family(ret, &call.name);
-                }
-                let mut all = inputs.into_iter();
-                let first = all.next().expect("non-empty zip inputs");
-                return crate::Codegen::TIR::lower_zip_family(
-                    first,
-                    all.collect(),
-                    fills,
-                    fields,
-                    &call.name,
-                    Some(ret),
-                );
-            }
-            // D-DECIMAL1: `Decimal(…)` constructor.
-            if !env.locals.contains_key(&call.name)
-                && call.name == crate::Syntax::TYPE_DECIMAL
-                && !cx.type_names.contains(&call.name)
-            {
-                let targs: Vec<TExpr> = call
-                    .args
-                    .iter()
-                    .map(|a| lower_expr(&a.expr, cx, env))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(call.name.clone()),
-                    kind: TExprKind::PreciseBuiltin {
-                        type_name: call.name.clone(),
-                        func: "from_str".to_string(),
-                        args: targs,
-                    },
-                };
-            }
-            // D-TYPE2-IMAG1=A: unit-literal elaboration and explicit
-            // construction share the precise builtin constructor seam.
-            if !env.locals.contains_key(&call.name)
-                && call.name == crate::Syntax::TYPE_COMPLEX
-                && !cx.type_names.contains(&call.name)
-            {
-                let targs: Vec<TExpr> = call
-                    .args
-                    .iter()
-                    .map(|a| lower_expr(&a.expr, cx, env))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(call.name.clone()),
-                    kind: TExprKind::PreciseBuiltin {
-                        type_name: call.name.clone(),
-                        func: "from_parts".to_string(),
-                        args: targs,
-                    },
-                };
-            }
-            // D-SIMD2 / D-LINALG1: a built-in math-type constructor. Plainly lower the
-            // float components and emit `{root}jet_math_<T>_new(…)`.
-            if !env.locals.contains_key(&call.name)
-                && crate::Sema::is_math_type(&call.name)
-                && !cx.type_names.contains(&call.name)
-            {
-                let targs: Vec<TExpr> = call
-                    .args
-                    .iter()
-                    .map(|a| lower_expr(&a.expr, cx, env))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(call.name.clone()),
-                    kind: TExprKind::MathBuiltin {
-                        type_name: call.name.clone(),
-                        func: "new".to_string(),
-                        args: targs,
-                    },
-                };
-            }
-            if call.range_checked && !env.locals.contains_key(&call.name) {
-                if let Some(arg) = call.args.first() {
-                    return TExpr {
-                        ty: Type::Result {
-                            ok: Box::new(Type::Named(call.name.clone())),
-                            err: Box::new(Type::String),
-                        },
-                        kind: TExprKind::RangeCheckedCtor {
-                            name: call.name.clone(),
-                            arg: Box::new(lower_expr(&arg.expr, cx, env)),
-                        },
-                    };
-                }
-            }
-            if !env.locals.contains_key(&call.name) {
-                if let (Some((base, _)), Some(arg)) =
-                    (cx.distinct_types.get(&call.name), call.args.first())
-                {
-                    return TExpr {
-                        ty: Type::Named(call.name.clone()),
-                        kind: TExprKind::DistinctCtor {
-                            name: call.name.clone(),
-                            arg: Box::new(lower_expr(&arg.expr, cx, env)),
-                            base: base.clone(),
-                        },
-                    };
-                }
-            }
-            // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a call to a trait-bounded
-            // variadic function — sema left the trailing args unpacked
-            // (`CheckerInfer/calls.rs::check_variadic_bound_tail`), so the arity
-            // is just "how many args past the fixed prefix". Route to the
-            // per-arity function `VariadicBound.rs` synthesizes; record the
-            // arity so the post-pass in `Codegen/mod.rs` knows to emit it.
-            if let Some((fixed, _bounds)) = cx.variadic_bound_fns.get(&call.name).cloned() {
-                let lowered = crate::Codegen::VariadicBound::lower_variadic_bound_call(
-                    call, fixed, cx, env,
-                );
-                return match source_arg_order(&call.args) {
-                    Some(order) => preserve_source_arg_order(
-                        lowered,
-                        &order,
-                        call.args.len(),
-                        call.name_span.start as u32,
-                    ),
-                    None => lowered,
-                };
-            }
-            // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
-            // decided here, totally — via the shared `lower_one_call_arg` (the single
-            // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
-            // param (now in subset) routes its arg through the Box-coercion form.
-            let sig = cx.sigs.get(&call.name).cloned();
-            let args: Vec<TCallArg> = call
-                .args
-                .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    let conv = sig
-                        .as_ref()
-                        .and_then(|ps| ps.get(i))
-                        .map(|(c, t)| (*c, t.clone()));
-                    lower_one_call_arg(a, conv, env, cx)
-                })
-                .collect();
-            cx.jit_generic_calls
-                .borrow_mut()
-                .entry(call.name.clone())
-                .or_default()
-                .push(
-                    {
-                        let mut shape: Vec<Type> = args
-                            .iter()
-                            .map(|arg| {
-                                if arg.widen_to_vec {
-                                    if let Type::FixedList { elem, .. } = &arg.value.ty {
-                                        return Type::List(elem.clone());
+                cx.jit_generic_calls
+                    .borrow_mut()
+                    .entry(call.name.clone())
+                    .or_default()
+                    .push(
+                        {
+                            let mut shape: Vec<Type> = args
+                                .iter()
+                                .map(|arg| {
+                                    if arg.widen_to_vec {
+                                        if let Type::FixedList { elem, .. } = &arg.value.ty {
+                                            return Type::List(elem.clone());
+                                        }
                                     }
-                                }
-                                arg.value.ty.clone()
-                            })
-                            .collect();
-                        shape.extend(call.type_args.iter().cloned());
-                        shape
-                    },
-                );
-            let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
-            let mut lowered = TExpr {
-                ty: ret,
-                kind: TExprKind::Call {
-                    name: cx.jit_local_call_prefix.as_ref().map_or_else(
-                        || call.name.clone(),
-                        |prefix| format!("{prefix}{}", mangle(&call.name)),
-                    ),
-                    type_args: call.type_args.clone(),
-                    args,
-                },
-            };
-            if let Some((pre, _)) = cx.contract_sigs.get(&call.name) {
-                let (bindings, contracts) =
-                    lower_call_pre_contracts(call, match &mut lowered.kind {
-                        TExprKind::Call { args, .. } => args,
-                        _ => unreachable!("plain call lowering produces a Call node"),
-                    }, pre, cx, env);
-                if !contracts.is_empty() {
-                    let mut stmts = bindings;
-                    stmts.extend(
-                        contracts
-                            .into_iter()
-                            .map(|contract| TStmt::Contract { contract }),
+                                    arg.value.ty.clone()
+                                })
+                                .collect();
+                            shape.extend(call.type_args.iter().cloned());
+                            shape
+                        },
                     );
-                    let call_ty = lowered.ty.clone();
-                    stmts.push(TStmt::ExprStmt(lowered));
-                    lowered = TExpr {
-                        ty: call_ty,
-                        kind: TExprKind::InlineBlock(stmts),
+                in_own_frame(|| {
+                    let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
+                    let mut lowered = TExpr {
+                        ty: ret,
+                        kind: TExprKind::Call {
+                            name: cx.jit_local_call_prefix.as_ref().map_or_else(
+                                || call.name.clone(),
+                                |prefix| format!("{prefix}{}", mangle(&call.name)),
+                            ),
+                            type_args: call.type_args.clone(),
+                            args,
+                        },
                     };
-                }
-            }
-            match source_arg_order(&call.args) {
-                Some(order) => preserve_source_arg_order(lowered, &order, call.args.len(), call.name_span.start as u32),
-                None => lowered,
-            }
+                    if let Some((pre, _)) = cx.contract_sigs.get(&call.name) {
+                        let (bindings, contracts) =
+                            lower_call_pre_contracts(call, match &mut lowered.kind {
+                                TExprKind::Call { args, .. } => args,
+                                _ => unreachable!("plain call lowering produces a Call node"),
+                            }, pre, cx, env);
+                        if !contracts.is_empty() {
+                            let mut stmts = bindings;
+                            stmts.extend(
+                                contracts
+                                    .into_iter()
+                                    .map(|contract| TStmt::Contract { contract }),
+                            );
+                            let call_ty = lowered.ty.clone();
+                            stmts.push(TStmt::ExprStmt(lowered));
+                            lowered = TExpr {
+                                ty: call_ty,
+                                kind: TExprKind::InlineBlock(stmts),
+                            };
+                        }
+                    }
+                    match source_arg_order(&call.args) {
+                        Some(order) => preserve_source_arg_order(lowered, &order, call.args.len(), call.name_span.start as u32),
+                        None => lowered,
+                    }
+                })
+            })
         }
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
         // exactly the synthetic `.clone()` or a user instance method on a covered
@@ -3525,816 +3641,878 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             ..
         } => {
-            // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
-            // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn __jet_<Trait>>`; the
-            // value's type is the trait object. Resolved here (totality) — only the plain
-            // user-struct branch below carries it (a coerced import_ns/prelude literal is
-            // not a construct any covered program produces; the gate keeps those uncoerced).
-            let trait_coerce = as_trait
-                .as_ref()
-                .map(|trait_name| (trait_name.clone(), type_name.clone()));
-            // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
-            // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
-            // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
-            // Resolve the head here (totality); a missing alias falls to `user_unknown`,
-            // exactly as the AST path (the gate already required the alias to resolve).
-            if let Some(alias) = import_ns {
-                if cx
-                    .core_import_module_for_function(&env.fn_name, alias)
-                    == Some("core.encoding")
-                    && matches!(
-                        type_name.as_str(),
-                        "EncodingLimits" | "EncodingCause" | "EncodingError"
-                    )
-                    && type_args.is_empty()
-                {
-                    let tfields = fields
-                        .iter()
-                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                        .collect();
-                    return TExpr {
-                        ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                            extra: None,
-                            as_trait: None,
-                        },
-                    };
-                }
-                if cx
-                    .core_import_module_for_function(&env.fn_name, alias)
-                    == Some("core.encoding.cbor")
-                    && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
-                    && type_args.is_empty()
-                {
-                    let tfields = fields
-                        .iter()
-                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                        .collect();
-                    return TExpr {
-                        ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                            extra: None,
-                            as_trait: None,
-                        },
-                    };
-                }
-                if cx
-                    .core_import_module_for_function(&env.fn_name, alias)
-                    == Some("core.encoding.xml")
-                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
-                    && type_args.is_empty()
-                {
-                    let tfields = fields
-                        .iter()
-                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                        .collect();
-                    return TExpr {
-                        ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                            extra: None,
-                            as_trait: None,
-                        },
-                    };
-                }
-                if cx
-                    .core_import_module_for_function(&env.fn_name, alias)
-                    == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
-                {
-                    let tfields = fields
-                        .iter()
-                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                        .collect();
-                    return TExpr {
-                        ty: if type_args.is_empty() {
-                            Type::Named(type_name.clone())
+            in_own_frame(|| {
+                // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
+                // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn __jet_<Trait>>`; the
+                // value's type is the trait object. Resolved here (totality) — only the plain
+                // user-struct branch below carries it (a coerced import_ns/prelude literal is
+                // not a construct any covered program produces; the gate keeps those uncoerced).
+                let trait_coerce = as_trait
+                    .as_ref()
+                    .map(|trait_name| (trait_name.clone(), type_name.clone()));
+                // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
+                // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
+                // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
+                // Resolve the head here (totality); a missing alias falls to `user_unknown`,
+                // exactly as the AST path (the gate already required the alias to resolve).
+                if let Some(alias) = import_ns {
+                    return in_own_frame(|| {
+                        if cx
+                            .core_import_module_for_function(&env.fn_name, alias)
+                            == Some("core.encoding")
+                            && matches!(
+                                type_name.as_str(),
+                                "EncodingLimits" | "EncodingCause" | "EncodingError"
+                            )
+                            && type_args.is_empty()
+                        {
+                            return in_own_frame(|| {
+                                let tfields = fields
+                                    .iter()
+                                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                                    .collect();
+                                return TExpr {
+                                    ty: Type::Named(type_name.clone()),
+                                    kind: TExprKind::StructLit {
+                                        fields: tfields,
+                                        extra: None,
+                                        as_trait: None,
+                                    },
+                                };
+                            });
+                        }
+                        if cx
+                            .core_import_module_for_function(&env.fn_name, alias)
+                            == Some("core.encoding.cbor")
+                            && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
+                            && type_args.is_empty()
+                        {
+                            return in_own_frame(|| {
+                                let tfields = fields
+                                    .iter()
+                                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                                    .collect();
+                                return TExpr {
+                                    ty: Type::Named(type_name.clone()),
+                                    kind: TExprKind::StructLit {
+                                        fields: tfields,
+                                        extra: None,
+                                        as_trait: None,
+                                    },
+                                };
+                            });
+                        }
+                        if cx
+                            .core_import_module_for_function(&env.fn_name, alias)
+                            == Some("core.encoding.xml")
+                            && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
+                            && type_args.is_empty()
+                        {
+                            return in_own_frame(|| {
+                                let tfields = fields
+                                    .iter()
+                                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                                    .collect();
+                                return TExpr {
+                                    ty: Type::Named(type_name.clone()),
+                                    kind: TExprKind::StructLit {
+                                        fields: tfields,
+                                        extra: None,
+                                        as_trait: None,
+                                    },
+                                };
+                            });
+                        }
+                        if cx
+                            .core_import_module_for_function(&env.fn_name, alias)
+                            == Some(crate::Syntax::CORE_EMAIL_MODULE)
+                            && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
+                        {
+                            return in_own_frame(|| {
+                                let tfields = fields
+                                    .iter()
+                                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                                    .collect();
+                                return TExpr {
+                                    ty: if type_args.is_empty() {
+                                        Type::Named(type_name.clone())
+                                    } else {
+                                        Type::Apply {
+                                            name: type_name.clone(),
+                                            args: type_args.clone(),
+                                        }
+                                    },
+                                    kind: TExprKind::StructLit {
+                                        fields: tfields,
+                                        extra: None,
+                                        as_trait: None,
+                                    },
+                                };
+                            });
+                        }
+                        let tfields = fields
+                            .iter()
+                            .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
+                            .collect();
+                        let qualified = in_own_frame(|| if cx.code_modules.contains(alias) {
+                            // Inline-module instance members are local generated nominals.
+                            // Their qualified source spelling is never a foreign identity.
+                            jet_foundation::Names::member_name(alias, type_name)
+                        } else if let Some(identity) = cx.foreign_type_identity(alias, type_name) {
+                            identity
+                        } else if super::is_eval_fragment() {
+                            // Fragment evaluation lowers an AST that carries no module,
+                            // import, or struct table (`TIR/eval/mod.rs::empty_cx`), so no
+                            // dotted head can be resolved through the two tables above.
+                            // D-CONF-GENSPELL1=A makes that routine rather than exotic: a
+                            // GENERIC-MODULE INSTANCE member (`three_ints.Buffer`) reaches
+                            // lowering ONLY this way. `expand_generic_module_aliases` folds
+                            // every module value argument and template `@` binding through
+                            // `Comptime::evaluate_closed_value`, and that bridge
+                            // (`TIR/eval/mod.rs::eval_expr_hook`) lowers every function of the
+                            // module AS IT STANDS AT THAT MOMENT — before expansion projects
+                            // the alias member onto its instance nominal
+                            // (`M5Three4IntsBuffer`), which is why no table can hold it yet.
+                            // Every position in that snapshot — the literal head and each
+                            // annotation naming the same type — spells it `alias.Type`, so
+                            // that spelling is its identity here; the canonical nominal
+                            // belongs to the expanded program, which resolves through the
+                            // branches above. Same fragment contract as the unqualified head
+                            // below and the `IndexKind::Unknown` recovery in `Expr::Index`.
+                            format!("{alias}.{type_name}")
                         } else {
-                            Type::Apply {
-                                name: type_name.clone(),
-                                args: type_args.clone(),
-                            }
-                        },
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                            extra: None,
-                            as_trait: None,
-                        },
-                    };
-                }
-                let tfields = fields
-                    .iter()
-                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
-                    .collect();
-                let qualified = if cx.code_modules.contains(alias) {
-                    // Inline-module instance members are local generated nominals.
-                    // Their qualified source spelling is never a foreign identity.
-                    jet_foundation::Names::member_name(alias, type_name)
-                } else if let Some(identity) = cx.foreign_type_identity(alias, type_name) {
-                    identity
-                } else if super::is_eval_fragment() {
-                    // Fragment evaluation lowers an AST that carries no module,
-                    // import, or struct table (`TIR/eval/mod.rs::empty_cx`), so no
-                    // dotted head can be resolved through the two tables above.
-                    // D-CONF-GENSPELL1=A makes that routine rather than exotic: a
-                    // GENERIC-MODULE INSTANCE member (`three_ints.Buffer`) reaches
-                    // lowering ONLY this way. `expand_generic_module_aliases` folds
-                    // every module value argument and template `@` binding through
-                    // `Comptime::evaluate_closed_value`, and that bridge
-                    // (`TIR/eval/mod.rs::eval_expr_hook`) lowers every function of the
-                    // module AS IT STANDS AT THAT MOMENT — before expansion projects
-                    // the alias member onto its instance nominal
-                    // (`M5Three4IntsBuffer`), which is why no table can hold it yet.
-                    // Every position in that snapshot — the literal head and each
-                    // annotation naming the same type — spells it `alias.Type`, so
-                    // that spelling is its identity here; the canonical nominal
-                    // belongs to the expanded program, which resolves through the
-                    // branches above. Same fragment contract as the unqualified head
-                    // below and the `IndexKind::Unknown` recovery in `Expr::Index`.
-                    format!("{alias}.{type_name}")
-                } else {
-                    // A bundle-backed context spells a dotted head one of exactly two
-                    // ways: an inline-module member or an import. Failing both tables
-                    // there is a genuine internal contradiction (I3).
-                    jet_foundation::ice!(
-                        None,
-                        "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
-                    )
-                };
-                return TExpr {
-                    ty: if type_args.is_empty() {
-                        Type::Named(qualified)
-                    } else {
-                        Type::Apply {
-                            name: qualified,
-                            args: type_args.clone(),
-                        }
-                    },
-                    kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse).
-            if net_handle_rust_type(type_name).is_some() {
-                // A prelude struct has no boxed (recursive) edges.
-                let mut tfields: Vec<(String, TExpr, bool)> = fields
-                    .iter()
-                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
-                    .collect();
-                let extra = if type_name == "HTTPRequest" {
-                    Some(crate::Codegen::TIR::TStructExtra::HTTPRequestParams)
-                } else {
-                    None
-                };
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        fields: tfields.drain(..).collect(),
-                        extra,
-                        as_trait: None,
-                    },
-                };
-            }
-            // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
-            // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
-            // extra field (unlike HTTPRequest's `params`).
-            if type_name == Syntax::TYPE_ERR {
-                let tfields = fields
-                    .iter()
-                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(Syntax::TYPE_ERR.to_string()),
-                    kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            if matches!(
-                type_name.as_str(),
-                "TextWidth" | "TerminalSize" | "TerminalPolicy"
-            ) {
-                let tfields: Vec<(String, TExpr, bool)> = fields
-                    .iter()
-                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            if type_name == "AsyncPolicy" {
-                let tfields = fields
-                    .iter()
-                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            // D-ENCSTREAM-SURFACE1=A: shared encoding value constructors.
-            if matches!(
-                type_name.as_str(),
-                "EncodingLimits" | "EncodingCause" | "EncodingError"
-            ) {
-                let tfields = fields
-                    .iter()
-                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — same shape,
-            // separate jet_std Rust head.
-            if type_name == "FieldError" {
-                let tfields = fields
-                    .iter()
-                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
-                let tfields = fields
-                    .iter()
-                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
-                    .collect();
-                return TExpr {
-                    ty: if type_args.is_empty() {
-                        Type::Named(type_name.clone())
-                    } else {
-                        Type::Apply {
-                            name: type_name.clone(),
-                            args: type_args.clone(),
-                        }
-                    },
-                    kind: TExprKind::StructLit {
-                        fields: tfields,
-                        extra: None,
-                        as_trait: None,
-                    },
-                };
-            }
-            // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
-            // The Rust head is the turbofish `__jet_<Name>::<args>` (`user_type_apply_rust`),
-            // resolved at lowering; fields mangle. A non-generic literal renders `__jet_<Name>`.
-            // c109: an UNqualified FOREIGN struct (`Note { … }`, no `import_ns`) prefixes its
-            // module head (`{root}__jet_<mod>::__jet_<Note>`), exactly as `user_type_apply_rust`
-            // — or rustc can't find the type (E0422). A local struct keeps the plain head.
-            // Struct head spelling comes from `TExpr.ty` at emit (`cx.rust_type`).
-            // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
-            // wrap provided scalars in `Some(…)`.
-            if let Some(base_name) = type_name.strip_suffix(".Patch") {
-                // TIR's entry-module shape table contains source structs, not
-                // sema's synthetic patch item. Reconstruct that one derived
-                // shape from the base fields, preserving the computed-field
-                // exclusion owned by the patchable sema pass.
-                let all = cx.struct_fields.get(base_name).map(|base_fields| {
-                    base_fields
-                        .iter()
-                        .filter(|(name, _)| {
-                            !cx.computed_fields
-                                .get(base_name)
-                                .is_some_and(|computed| computed.contains(name))
-                        })
-                        .map(|(name, field_ty)| {
-                            (name.clone(), Type::Option(Box::new(field_ty.clone())))
-                        })
-                        .collect::<Vec<_>>()
-                });
-                if let Some(all) = all {
-                    let provided: std::collections::HashMap<_, _> =
-                        fields.iter().map(|(n, _, fe)| (n.as_str(), fe)).collect();
-                    let tfields = all
-                        .iter()
-                        .map(|(fname, fty)| {
-                            let te = if let Some(fe) = provided.get(fname.as_str()) {
-                                let inner = lower_expr(fe, cx, env);
-                                TExpr {
-                                    ty: fty.clone(),
-                                    kind: TExprKind::Present(Box::new(inner)),
-                                }
+                            // A bundle-backed context spells a dotted head one of exactly two
+                            // ways: an inline-module member or an import. Failing both tables
+                            // there is a genuine internal contradiction (I3).
+                            jet_foundation::ice!(
+                                None,
+                                "foreign struct literal `{alias}.{type_name}` has no canonical nominal identity (I3)"
+                            )
+                        });
+                        return TExpr {
+                            ty: if type_args.is_empty() {
+                                Type::Named(qualified)
                             } else {
-                                TExpr {
-                                    ty: fty.clone(),
-                                    kind: TExprKind::Absent,
+                                Type::Apply {
+                                    name: qualified,
+                                    args: type_args.clone(),
                                 }
+                            },
+                            kind: TExprKind::StructLit {
+                                fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse).
+                if net_handle_rust_type(type_name).is_some() {
+                    return in_own_frame(|| {
+                        // A prelude struct has no boxed (recursive) edges.
+                        let mut tfields: Vec<(String, TExpr, bool)> = fields
+                            .iter()
+                            .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
+                            .collect();
+                        let extra = if type_name == "HTTPRequest" {
+                            Some(crate::Codegen::TIR::TStructExtra::HTTPRequestParams)
+                        } else {
+                            None
+                        };
+                        return TExpr {
+                            ty: Type::Named(type_name.clone()),
+                            kind: TExprKind::StructLit {
+                                fields: tfields.drain(..).collect(),
+                                extra,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
+                // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
+                // extra field (unlike HTTPRequest's `params`).
+                if type_name == Syntax::TYPE_ERR {
+                    return in_own_frame(|| {
+                        let tfields = fields
+                            .iter()
+                            .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(Syntax::TYPE_ERR.to_string()),
+                            kind: TExprKind::StructLit {
+                                fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                if matches!(
+                    type_name.as_str(),
+                    "TextWidth" | "TerminalSize" | "TerminalPolicy"
+                ) {
+                    return in_own_frame(|| {
+                        let tfields: Vec<(String, TExpr, bool)> = fields
+                            .iter()
+                            .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(type_name.clone()),
+                                kind: TExprKind::StructLit {
+                                    fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                if type_name == "AsyncPolicy" {
+                    return in_own_frame(|| {
+                        let tfields = fields
+                            .iter()
+                            .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(type_name.clone()),
+                                kind: TExprKind::StructLit {
+                                fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                // D-ENCSTREAM-SURFACE1=A: shared encoding value constructors.
+                if matches!(
+                    type_name.as_str(),
+                    "EncodingLimits" | "EncodingCause" | "EncodingError"
+                ) {
+                    return in_own_frame(|| {
+                        let tfields = fields
+                            .iter()
+                            .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(type_name.clone()),
+                                kind: TExprKind::StructLit {
+                                fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — same shape,
+                // separate jet_std Rust head.
+                if type_name == "FieldError" {
+                    return in_own_frame(|| {
+                        let tfields = fields
+                            .iter()
+                            .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                            .collect();
+                        return TExpr {
+                            ty: Type::Named(type_name.clone()),
+                                kind: TExprKind::StructLit {
+                                fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
+                    return in_own_frame(|| {
+                        let tfields = fields
+                            .iter()
+                            .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                            .collect();
+                        return TExpr {
+                            ty: if type_args.is_empty() {
+                                Type::Named(type_name.clone())
+                            } else {
+                                Type::Apply {
+                                    name: type_name.clone(),
+                                    args: type_args.clone(),
+                                }
+                            },
+                            kind: TExprKind::StructLit {
+                                fields: tfields,
+                                extra: None,
+                                as_trait: None,
+                            },
+                        };
+                    });
+                }
+                // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
+                // The Rust head is the turbofish `__jet_<Name>::<args>` (`user_type_apply_rust`),
+                // resolved at lowering; fields mangle. A non-generic literal renders `__jet_<Name>`.
+                // c109: an UNqualified FOREIGN struct (`Note { … }`, no `import_ns`) prefixes its
+                // module head (`{root}__jet_<mod>::__jet_<Note>`), exactly as `user_type_apply_rust`
+                // — or rustc can't find the type (E0422). A local struct keeps the plain head.
+                // Struct head spelling comes from `TExpr.ty` at emit (`cx.rust_type`).
+                // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
+                // wrap provided scalars in `Some(…)`.
+                if let Some(base_name) = type_name.strip_suffix(".Patch") {
+                    // TIR's entry-module shape table contains source structs, not
+                    // sema's synthetic patch item. Reconstruct that one derived
+                    // shape from the base fields, preserving the computed-field
+                    // exclusion owned by the patchable sema pass.
+                    let all = cx.struct_fields.get(base_name).map(|base_fields| {
+                        base_fields
+                            .iter()
+                            .filter(|(name, _)| {
+                                !cx.computed_fields
+                                    .get(base_name)
+                                    .is_some_and(|computed| computed.contains(name))
+                            })
+                            .map(|(name, field_ty)| {
+                                (name.clone(), Type::Option(Box::new(field_ty.clone())))
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                    if let Some(all) = all {
+                        return in_own_frame(|| {
+                            let provided: std::collections::HashMap<_, _> =
+                                fields.iter().map(|(n, _, fe)| (n.as_str(), fe)).collect();
+                            let tfields = all
+                                .iter()
+                                .map(|(fname, fty)| {
+                                    let te = if let Some(fe) = provided.get(fname.as_str()) {
+                                        let inner = lower_expr(fe, cx, env);
+                                        TExpr {
+                                            ty: fty.clone(),
+                                            kind: TExprKind::Present(Box::new(inner)),
+                                        }
+                                    } else {
+                                        TExpr {
+                                            ty: fty.clone(),
+                                            kind: TExprKind::Absent,
+                                        }
+                                    };
+                                    (fname.clone(), te, false)
+                                })
+                                .collect();
+                            return TExpr {
+                                ty: Type::Named(type_name.clone()),
+                                kind: TExprKind::StructLit {
+                                    fields: tfields,
+                                    extra: None,
+                                    as_trait: None,
+                                },
                             };
-                            (fname.clone(), te, false)
+                        });
+                    }
+                }
+                in_own_frame(|| {
+                    // I3: sema already proved this literal names a real struct. A local
+                    // name passes through unchanged; only a foreign import needs its
+                    // canonical identity. The `jet run` TIR path lowers before the AOT
+                    // context registers local structs, so a missing map entry here is
+                    // ordinary, not an error.
+                    let resolved_name = if cx.struct_fields.contains_key(type_name) {
+                        type_name.clone()
+                    } else if let Some(foreign) = cx.foreign_type_identity("", type_name) {
+                        foreign
+                    } else {
+                        type_name.clone()
+                    };
+                    let resolved_ty = if type_args.is_empty() {
+                        Type::Named(resolved_name.clone())
+                    } else {
+                        Type::Apply {
+                            name: resolved_name.clone(),
+                            args: type_args.clone(),
+                        }
+                    };
+                    // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
+                    // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
+                    // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
+                    let mut tfields = fields
+                        .iter()
+                        .map(|(n, _, fe)| {
+                            let boxed = cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
+                            let mut value = lower_owned_expr(fe, cx, env);
+                            // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
+                            if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
+                                // A typed fixed-list literal is lowered without an
+                                // expected type at this point. Reapply the field's
+                                // concrete shape before emission, or a `[T#N]` field
+                                // receives a `Vec<T>` and rustc reports an internal
+                                // type error (I2).
+                                value = preserve_typed_list_shape(value, &fty, cx);
+                                value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
+                            }
+                            (n.clone(), value, boxed)
                         })
-                        .collect();
-                    return TExpr {
-                        ty: Type::Named(type_name.clone()),
+                        .collect::<Vec<_>>();
+                    if cx.published_schemas.contains(&resolved_name) {
+                        let holder_ty = Type::Named(Syntax::TYPE_DATA.to_string());
+                        let holder = if env.fn_name == "decode" {
+                            TExpr {
+                                ty: holder_ty,
+                                kind: TExprKind::Local(TLocal::user("tree")),
+                            }
+                        } else {
+                            TExpr {
+                                ty: holder_ty,
+                                kind: TExprKind::CoreCall {
+                                    module: "core.encoding".to_string(),
+                                    method: "__published_schema_empty".to_string(),
+                                    args: Vec::new(),
+                                    source_span: *span,
+                                    widen_to_vec: Vec::new(),
+                                },
+                            }
+                        };
+                        tfields.push((
+                            Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(),
+                            holder,
+                            false,
+                        ));
+                    }
+                    // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
+                    // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
+                    let ty = match as_trait {
+                        Some(t) => Type::TraitObject(vec![t.clone()]),
+                        None => resolved_ty,
+                    };
+                    TExpr {
+                        ty,
                         kind: TExprKind::StructLit {
                             fields: tfields,
                             extra: None,
-                            as_trait: None,
+                            as_trait: trait_coerce,
                         },
-                    };
-                }
-            }
-            // I3: sema already proved this literal names a real struct. A local
-            // name passes through unchanged; only a foreign import needs its
-            // canonical identity. The `jet run` TIR path lowers before the AOT
-            // context registers local structs, so a missing map entry here is
-            // ordinary, not an error.
-            let resolved_name = if cx.struct_fields.contains_key(type_name) {
-                type_name.clone()
-            } else if let Some(foreign) = cx.foreign_type_identity("", type_name) {
-                foreign
-            } else {
-                type_name.clone()
-            };
-            let resolved_ty = if type_args.is_empty() {
-                Type::Named(resolved_name.clone())
-            } else {
-                Type::Apply {
-                    name: resolved_name.clone(),
-                    args: type_args.clone(),
-                }
-            };
-            // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
-            // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
-            // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
-            let mut tfields = fields
-                .iter()
-                .map(|(n, _, fe)| {
-                    let boxed = cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
-                    let mut value = lower_owned_expr(fe, cx, env);
-                    // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
-                    if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
-                        // A typed fixed-list literal is lowered without an
-                        // expected type at this point. Reapply the field's
-                        // concrete shape before emission, or a `[T#N]` field
-                        // receives a `Vec<T>` and rustc reports an internal
-                        // type error (I2).
-                        value = preserve_typed_list_shape(value, &fty, cx);
-                        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
                     }
-                    (n.clone(), value, boxed)
                 })
-                .collect::<Vec<_>>();
-            if cx.published_schemas.contains(&resolved_name) {
-                let holder_ty = Type::Named(Syntax::TYPE_DATA.to_string());
-                let holder = if env.fn_name == "decode" {
-                    TExpr {
-                        ty: holder_ty,
-                        kind: TExprKind::Local(TLocal::user("tree")),
-                    }
-                } else {
-                    TExpr {
-                        ty: holder_ty,
-                        kind: TExprKind::CoreCall {
-                            module: "core.encoding".to_string(),
-                            method: "__published_schema_empty".to_string(),
-                            args: Vec::new(),
-                            source_span: *span,
-                            widen_to_vec: Vec::new(),
-                        },
-                    }
-                };
-                tfields.push((
-                    Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(),
-                    holder,
-                    false,
-                ));
-            }
-            // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
-            // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
-            let ty = match as_trait {
-                Some(t) => Type::TraitObject(vec![t.clone()]),
-                None => resolved_ty,
-            };
-            TExpr {
-                ty,
-                kind: TExprKind::StructLit {
-                    fields: tfields,
-                    extra: None,
-                    as_trait: trait_coerce,
-                },
-            }
+            })
         }
         // c109 Phase 3: a struct field read in borrow position. Resolve the field
         // type ONCE here from the receiver's resolved struct type (totality). A
         // covered function never reaches here with a non-struct receiver (sema
         // guarantees field reads target struct values).
         Expr::Field(receiver, member, _) => {
-            // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
-            // comptime `TypeInfo` value, but fragment lowering has no ordinary
-            // local type fact for that binding. Keep `@layout` on the field
-            // path so `T.@layout` is not mistaken for an enum literal.
-            let compiler_fact_receiver = match receiver.as_ref() {
-                // A qualified type path lowers as a field chain. The final
-                // segment is still the type name (`module.Packet`), while a
-                // value path such as `info.layout` remains lowercase.
-                Expr::Ident(name, _) => {
-                    name.chars().next().is_some_and(char::is_uppercase)
-                        || matches!(
-                            env.ty_of(name),
-                            Some(Type::Named(type_name))
-                                if matches!(
-                                    type_name.as_str(),
-                                    "FieldInfo" | "MethodInfo" | "TypeParamInfo"
-                                )
-                        )
-                }
-                Expr::Field(_, name, _) => name.chars().next().is_some_and(char::is_uppercase),
-                _ => false,
-            };
-            if compiler_fact_receiver
-                && (Syntax::compiler_fact_member(member).is_some()
-                    || jet_foundation::Registry::fact_read(member).is_some())
-            {
-                let recv = lower_expr(receiver, cx, env);
-                return TExpr {
-                    ty: compiler_fact_type(member),
-                    kind: TExprKind::Field {
-                        recv: Box::new(recv),
-                        field: member.clone(),
-                        boxed: false,
-                    },
+            in_own_frame(|| {
+                // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
+                // comptime `TypeInfo` value, but fragment lowering has no ordinary
+                // local type fact for that binding. Keep `@layout` on the field
+                // path so `T.@layout` is not mistaken for an enum literal.
+                let compiler_fact_receiver = match receiver.as_ref() {
+                    // A qualified type path lowers as a field chain. The final
+                    // segment is still the type name (`module.Packet`), while a
+                    // value path such as `info.layout` remains lowercase.
+                    Expr::Ident(name, _) => {
+                        name.chars().next().is_some_and(char::is_uppercase)
+                            || matches!(
+                                env.ty_of(name),
+                                Some(Type::Named(type_name))
+                                    if matches!(
+                                        type_name.as_str(),
+                                        "FieldInfo" | "MethodInfo" | "TypeParamInfo"
+                                    )
+                            )
+                    }
+                    Expr::Field(_, name, _) => name.chars().next().is_some_and(char::is_uppercase),
+                    _ => false,
                 };
-            }
-            if let Some((enum_type, variant)) = grouped_enum_unit_variant(
-                cx,
-                receiver,
-                member,
-                |name| env.ty_of(name).is_some(),
-            ) {
-                return TExpr {
-                    ty: Type::Named(enum_type.clone()),
-                    kind: TExprKind::EnumLit {
-                        enum_type,
-                        variant,
-                        payload: TEnumPayload::Unit,
-                    },
-                };
-            }
-            // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
-            // a `Field` whose receiver is the enum-name ident (sema re-types but does
-            // not rewrite the node). The gate proved this is a covered enum + unit
-            // variant; emit `__jet_<Enum>::__jet_<variant>` (the AST path's form).
-            if let Expr::Ident(enum_name, _) = receiver.as_ref() {
-                let resolved_enum = cx
-                    .core_qualified_rust_type_name(enum_name)
-                    .unwrap_or(enum_name.as_str());
-                if env.ty_of(enum_name).is_none()
-                    && matches!(enum_name.as_str(), "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome")
+                if compiler_fact_receiver
+                    && (Syntax::compiler_fact_member(member).is_some()
+                        || jet_foundation::Registry::fact_read(member).is_some())
                 {
-                    return TExpr {
-                        ty: Type::Named(enum_name.clone()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: enum_name.clone(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                if env.ty_of(enum_name).is_none()
-                    && enum_name == "DataEvent"
-                    && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
-                {
-                    return TExpr {
-                        ty: Type::Named("DataEvent".to_string()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: "DataEvent".to_string(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                // D-LISTREMOVE1/F: `RemoveBy.Val` / `RemoveBy.Slot` is a
-                // built-in enum with a registered type fact, so it does not
-                // pass through the user-enum field path above.
-                if enum_name == crate::Syntax::TYPE_REMOVE_BY
-                    && matches!(member.as_str(), "Val" | "Slot")
-                {
-                    return TExpr {
-                        ty: Type::Named(crate::Syntax::TYPE_REMOVE_BY.to_string()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: crate::Syntax::TYPE_REMOVE_BY.to_string(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                if env.ty_of(enum_name).is_none()
-                    && ((enum_name == "EncodingFormat"
-                        && matches!(member.as_str(), "JSON" | "JSONL" | "CSV" | "XML" | "CBOR"))
-                        || (enum_name == "EncodingErrorKind"
-                            && matches!(
-                                member.as_str(),
-                                "Syntax" | "Truncated" | "Unsupported" | "Limit" | "IO" | "State"
-                            )))
-                {
-                    return TExpr {
-                        ty: Type::Named(enum_name.clone()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: enum_name.clone(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                if env.ty_of(enum_name).is_none()
-                    && matches!(resolved_enum, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust")
-                    && ((resolved_enum == "SMTPSecurity" && matches!(member.as_str(), "StartTls" | "TLS"))
-                        || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
-                        || (resolved_enum == "SMTPAuth" && member == "None")
-                        || (resolved_enum == "TLSTrust" && member == "System"))
-                {
-                    return TExpr {
-                        ty: Type::Named(resolved_enum.to_string()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: resolved_enum.to_string(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                // Core net unit enums reach codegen as Field (`NetReadyInterest.Write`).
-                if env.ty_of(enum_name).is_none()
-                    && ((resolved_enum == "NetReadyInterest"
-                        && matches!(member.as_str(), "Read" | "Write" | "ReadWrite"))
-                        || (resolved_enum == "NetShutdown"
-                            && matches!(member.as_str(), "Read" | "Write" | "Both")))
-                {
-                    return TExpr {
-                        ty: Type::Named(resolved_enum.to_string()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: resolved_enum.to_string(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                if env.ty_of(enum_name).is_none()
-                    && (cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
-                        // Fragment eval (#722): REPL/comptime often lacks `variant_owner`
-                        // on empty_cx; an unbound PascalCase type.Variant is a unit enum lit.
-                        // Skip numeric bounds (`F32.MAX`) — those are HostCall::NumericBounds.
-                        || (super::is_eval_fragment()
-                            && enum_name
-                                .chars()
-                                .next()
-                                .is_some_and(|c| c.is_ascii_uppercase())
-                            && crate::AST::numeric_type_from_name(enum_name).is_none()
-                            && !is_numeric_bounds_const(member)))
-                {
-                    // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in
-                    // search.jet) qualifies with the module path, exactly as `emit_expr`'s
-                    // `Field` arm (Expression.rs ~L232): `{root}{mod}::__jet_<Enum>::<V>`.
-                    // Keyed on the ENUM-name (`enum_name`, the receiver) in `cx.foreign_types`,
-                    // NOT the variant — matching the AST byte-for-byte.
-                    return TExpr {
-                        ty: Type::Named(enum_name.clone()),
-                        kind: TExprKind::EnumLit {
-                            enum_type: enum_name.clone(),
-                            variant: member.clone(),
-                            payload: TEnumPayload::Unit,
-                        },
-                    };
-                }
-                if env.ty_of(enum_name).is_none() {
-                    if let Some(owner) = cx.variant_owner.get(member).filter(|owner| {
-                        owner.rsplit("::").next() == Some(enum_name)
-                    }) {
+                    return in_own_frame(|| {
+                        let recv = lower_expr(receiver, cx, env);
                         return TExpr {
-                            ty: Type::Named(owner.clone()),
+                            ty: compiler_fact_type(member),
+                            kind: TExprKind::Field {
+                                recv: Box::new(recv),
+                                field: member.clone(),
+                                boxed: false,
+                            },
+                        };
+                    });
+                }
+                if let Some((enum_type, variant)) = grouped_enum_unit_variant(
+                    cx,
+                    receiver,
+                    member,
+                    |name| env.ty_of(name).is_some(),
+                ) {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: Type::Named(enum_type.clone()),
                             kind: TExprKind::EnumLit {
-                                enum_type: owner.clone(),
-                                variant: member.clone(),
+                                enum_type,
+                                variant,
                                 payload: TEnumPayload::Unit,
                             },
                         };
-                    }
+                    });
                 }
-                // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
-                // construction reaching codegen as a `Field`, the gate proved it).
-                if env.ty_of(enum_name).is_none()
-                    && is_json_type_name(enum_name)
-                    && member == "Null"
-                {
-                    return TExpr {
-                        ty: Type::Named(Syntax::TYPE_DATA.to_string()),
-                        kind: TExprKind::JSONLit {
-                            variant: "Null".to_string(),
-                            arg: None,
-                        },
-                    };
-                }
-                // D-DBDRIVER1: `DBValue.Null` — same no-arg-`Field` shape as `Data.Null`.
-                if env.ty_of(enum_name).is_none()
-                    && is_db_value_type_name(enum_name)
-                    && member == "Null"
-                {
-                    return TExpr {
-                        ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-                        kind: TExprKind::DBValueLit {
-                            variant: "Null".to_string(),
-                            arg: None,
-                        },
-                    };
-                }
-                // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
-                // `Float.INFINITY`/…). The gate proved the receiver is a numeric type
-                // name and `member` a bounds-const name. Reproduce the AST `emit_expr`
-                // Field arm (Expression.rs ~L224): `{rust_type(nt)}::{member}`. The
-                // rendered Rust string is total here; the result type is the numeric
-                // type itself (`U8` for `U8.MAX`, `Float` for `Float.INFINITY`).
-                if env.ty_of(enum_name).is_none() {
-                    if let Some(nt) = crate::AST::numeric_type_from_name(enum_name) {
-                        if is_numeric_bounds_const(member) {
+                // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
+                // a `Field` whose receiver is the enum-name ident (sema re-types but does
+                // not rewrite the node). The gate proved this is a covered enum + unit
+                // variant; emit `__jet_<Enum>::__jet_<variant>` (the AST path's form).
+                if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                    let resolved_enum = cx
+                        .core_qualified_rust_type_name(enum_name)
+                        .unwrap_or(enum_name.as_str());
+                    if env.ty_of(enum_name).is_none()
+                        && matches!(enum_name.as_str(), "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome")
+                    {
+                        return in_own_frame(|| {
                             return TExpr {
-                                ty: nt.clone(),
-                                kind: TExprKind::HostCall(Box::new(
-                                    crate::Codegen::TIR::THostCall::NumericBounds {
-                                        ty: nt.clone(),
-                                        member: member.to_string(),
-                                    },
-                                )),
-                            };
-                        }
-                    }
-                }
-            }
-            // D-SOA1: a fused `xs[i].field` where `xs` is a columnar list reads the
-            // field's column directly (`jet_index_vec(&(base).__jet_<field>, i, …)`),
-            // the cache-friendly path — no whole-`S` gather. The result is the same
-            // owned, bounds-checked field value the AoS form would produce.
-            if let Expr::Index {
-                base,
-                index,
-                span,
-                kind,
-            } = receiver.as_ref()
-            {
-                if matches!(kind, IndexKind::List) {
-                    let base_t = lower_expr(base, cx, env);
-                    if let Type::List(elem) = &base_t.ty {
-                        if cx.columnar_list_type(elem).is_some() {
-                            let field_ty = struct_field_type(cx, elem, member).unwrap_or(Type::Int);
-                            let index_t = lower_expr(index, cx, env);
-                            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-                            return TExpr {
-                                ty: field_ty,
-                                kind: TExprKind::ColumnarColumnRead {
-                                    base: Box::new(base_t),
-                                    index: Box::new(index_t),
-                                    column_rust: mangle(member).to_string(),
-                                    line,
+                                ty: Type::Named(enum_name.clone()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: enum_name.clone(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
                                 },
                             };
+                        });
+                    }
+                    if env.ty_of(enum_name).is_none()
+                        && enum_name == "DataEvent"
+                        && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named("DataEvent".to_string()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: "DataEvent".to_string(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
+                                },
+                            };
+                        });
+                    }
+                    // D-LISTREMOVE1/F: `RemoveBy.Val` / `RemoveBy.Slot` is a
+                    // built-in enum with a registered type fact, so it does not
+                    // pass through the user-enum field path above.
+                    if enum_name == crate::Syntax::TYPE_REMOVE_BY
+                        && matches!(member.as_str(), "Val" | "Slot")
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(crate::Syntax::TYPE_REMOVE_BY.to_string()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: crate::Syntax::TYPE_REMOVE_BY.to_string(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
+                                },
+                            };
+                        });
+                    }
+                    if env.ty_of(enum_name).is_none()
+                        && ((enum_name == "EncodingFormat"
+                            && matches!(member.as_str(), "JSON" | "JSONL" | "CSV" | "XML" | "CBOR"))
+                            || (enum_name == "EncodingErrorKind"
+                                && matches!(
+                                    member.as_str(),
+                                    "Syntax" | "Truncated" | "Unsupported" | "Limit" | "IO" | "State"
+                                )))
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(enum_name.clone()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: enum_name.clone(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
+                                },
+                            };
+                        });
+                    }
+                    if env.ty_of(enum_name).is_none()
+                        && matches!(resolved_enum, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust")
+                        && ((resolved_enum == "SMTPSecurity" && matches!(member.as_str(), "StartTls" | "TLS"))
+                            || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
+                            || (resolved_enum == "SMTPAuth" && member == "None")
+                            || (resolved_enum == "TLSTrust" && member == "System"))
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(resolved_enum.to_string()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: resolved_enum.to_string(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
+                                },
+                            };
+                        });
+                    }
+                    // Core net unit enums reach codegen as Field (`NetReadyInterest.Write`).
+                    if env.ty_of(enum_name).is_none()
+                        && ((resolved_enum == "NetReadyInterest"
+                            && matches!(member.as_str(), "Read" | "Write" | "ReadWrite"))
+                            || (resolved_enum == "NetShutdown"
+                                && matches!(member.as_str(), "Read" | "Write" | "Both")))
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(resolved_enum.to_string()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: resolved_enum.to_string(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
+                                },
+                            };
+                        });
+                    }
+                    if env.ty_of(enum_name).is_none()
+                        && (cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
+                            // Fragment eval (#722): REPL/comptime often lacks `variant_owner`
+                            // on empty_cx; an unbound PascalCase type.Variant is a unit enum lit.
+                            // Skip numeric bounds (`F32.MAX`) — those are HostCall::NumericBounds.
+                            || (super::is_eval_fragment()
+                                && enum_name
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_ascii_uppercase())
+                                && crate::AST::numeric_type_from_name(enum_name).is_none()
+                                && !is_numeric_bounds_const(member)))
+                    {
+                        return in_own_frame(|| {
+                            // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in
+                            // search.jet) qualifies with the module path, exactly as `emit_expr`'s
+                            // `Field` arm (Expression.rs ~L232): `{root}{mod}::__jet_<Enum>::<V>`.
+                            // Keyed on the ENUM-name (`enum_name`, the receiver) in `cx.foreign_types`,
+                            // NOT the variant — matching the AST byte-for-byte.
+                            return TExpr {
+                                ty: Type::Named(enum_name.clone()),
+                                kind: TExprKind::EnumLit {
+                                    enum_type: enum_name.clone(),
+                                    variant: member.clone(),
+                                    payload: TEnumPayload::Unit,
+                                },
+                            };
+                        });
+                    }
+                    if env.ty_of(enum_name).is_none() {
+                        if let Some(owner) = cx.variant_owner.get(member).filter(|owner| {
+                            owner.rsplit("::").next() == Some(enum_name)
+                        }) {
+                            return in_own_frame(|| {
+                                return TExpr {
+                                    ty: Type::Named(owner.clone()),
+                                    kind: TExprKind::EnumLit {
+                                        enum_type: owner.clone(),
+                                        variant: member.clone(),
+                                        payload: TEnumPayload::Unit,
+                                    },
+                                };
+                            });
+                        }
+                    }
+                    // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
+                    // construction reaching codegen as a `Field`, the gate proved it).
+                    if env.ty_of(enum_name).is_none()
+                        && is_json_type_name(enum_name)
+                        && member == "Null"
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(Syntax::TYPE_DATA.to_string()),
+                                kind: TExprKind::JSONLit {
+                                    variant: "Null".to_string(),
+                                    arg: None,
+                                },
+                            };
+                        });
+                    }
+                    // D-DBDRIVER1: `DBValue.Null` — same no-arg-`Field` shape as `Data.Null`.
+                    if env.ty_of(enum_name).is_none()
+                        && is_db_value_type_name(enum_name)
+                        && member == "Null"
+                    {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
+                                kind: TExprKind::DBValueLit {
+                                    variant: "Null".to_string(),
+                                    arg: None,
+                                },
+                            };
+                        });
+                    }
+                    // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
+                    // `Float.INFINITY`/…). The gate proved the receiver is a numeric type
+                    // name and `member` a bounds-const name. Reproduce the AST `emit_expr`
+                    // Field arm (Expression.rs ~L224): `{rust_type(nt)}::{member}`. The
+                    // rendered Rust string is total here; the result type is the numeric
+                    // type itself (`U8` for `U8.MAX`, `Float` for `Float.INFINITY`).
+                    if env.ty_of(enum_name).is_none() {
+                        if let Some(nt) = crate::AST::numeric_type_from_name(enum_name) {
+                            if is_numeric_bounds_const(member) {
+                                return in_own_frame(|| {
+                                    return TExpr {
+                                        ty: nt.clone(),
+                                        kind: TExprKind::HostCall(Box::new(
+                                            crate::Codegen::TIR::THostCall::NumericBounds {
+                                                ty: nt.clone(),
+                                                member: member.to_string(),
+                                            },
+                                        )),
+                                    };
+                                });
+                            }
                         }
                     }
                 }
-            }
-            let recv = lower_expr(receiver, cx, env);
-            if member == "value" {
-                if let Type::Apply { name, args } = recv.ty.clone() {
-                    if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
-                        return TExpr {
-                            ty: args[0].clone(),
-                            kind: TExprKind::SharedGuardValue {
-                                guard: Box::new(recv),
-                                editable: false,
-                            },
-                        };
-                    }
-                }
-                if let Type::Tagged { marker, inner } = recv.ty.clone() {
-                    if matches!(
-                        marker,
-                        crate::AST::TagMarker::Internal(
-                            crate::AST::InternalTag::SharedGuardRead
-                                | crate::AST::InternalTag::SharedGuardEdit
-                        )
-                    ) {
-                        if let Type::Apply { name, args } = inner.as_ref() {
-                            if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                // D-SOA1: a fused `xs[i].field` where `xs` is a columnar list reads the
+                // field's column directly (`jet_index_vec(&(base).__jet_<field>, i, …)`),
+                // the cache-friendly path — no whole-`S` gather. The result is the same
+                // owned, bounds-checked field value the AoS form would produce.
+                if let Expr::Index {
+                    base,
+                    index,
+                    span,
+                    kind,
+                } = receiver.as_ref()
+                {
+                    if matches!(kind, IndexKind::List) {
+                        let base_t = lower_expr(base, cx, env);
+                        if let Type::List(elem) = &base_t.ty {
+                            if cx.columnar_list_type(elem).is_some() {
+                                let field_ty = struct_field_type(cx, elem, member).unwrap_or(Type::Int);
+                                let index_t = lower_expr(index, cx, env);
+                                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
                                 return TExpr {
-                                    ty: args[0].clone(),
-                                    kind: TExprKind::SharedGuardValue {
-                                        guard: Box::new(recv),
-                                        editable: matches!(
-                                            marker,
-                                            crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)
-                                        ),
+                                    ty: field_ty,
+                                    kind: TExprKind::ColumnarColumnRead {
+                                        base: Box::new(base_t),
+                                        index: Box::new(index_t),
+                                        column_rust: mangle(member).to_string(),
+                                        line,
                                     },
                                 };
                             }
                         }
                     }
                 }
-            }
-            // D-FIELDPOL1: a computed field is not a Rust struct member — sema
-            // (`CheckerFieldPolicy`) already synthesized it as a getter method
-            // on `s.methods`; route the read to a call of that method instead
-            // of a member access. `boxed` never applies (a getter call, not a
-            // stored recursive edge). `self`'s own env type is deliberately
-            // `None` (`recv.ty` falls back to `Type::Int`, see `LowerEnv::bind`),
-            // so a bare `self.field` (every computed field's rewritten body
-            // reads its siblings this way) resolves the owner via
-            // `env.self_owner` instead of `recv.ty`.
-            let field_owner: Option<&str> = if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == Syntax::KW_SELF)
-            {
-                env.self_owner.as_deref()
-            } else if let Type::Named(type_name) = &recv.ty {
-                Some(type_name.as_str())
-            } else {
-                None
-            };
-            if let Some(type_name) = field_owner {
-                if cx
-                    .computed_fields
-                    .get(type_name)
-                    .is_some_and(|c| c.contains(member))
-                {
-                    let field_ty =
-                        struct_field_type(cx, &Type::Named(type_name.to_string()), member)
-                            .unwrap_or(Type::Int);
-                    return TExpr {
-                        ty: field_ty,
-                        kind: TExprKind::MethodCall {
-                            recv: Box::new(recv),
-                            method: crate::Codegen::TIR::TMethodRef::inherent(member),
-                            type_args: Vec::new(),
-                            args: vec![],
-                            source_first_string_literal: None,
-                            operator_line: None,
-                        },
-                    };
+                let recv = lower_expr(receiver, cx, env);
+                if member == "value" {
+                    if let Type::Apply { name, args } = recv.ty.clone() {
+                        if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                            return in_own_frame(|| {
+                                return TExpr {
+                                    ty: args[0].clone(),
+                                    kind: TExprKind::SharedGuardValue {
+                                        guard: Box::new(recv),
+                                        editable: false,
+                                    },
+                                };
+                            });
+                        }
+                    }
+                    if let Type::Tagged { marker, inner } = recv.ty.clone() {
+                        if matches!(
+                            marker,
+                            crate::AST::TagMarker::Internal(
+                                crate::AST::InternalTag::SharedGuardRead
+                                    | crate::AST::InternalTag::SharedGuardEdit
+                            )
+                        ) {
+                            if let Type::Apply { name, args } = inner.as_ref() {
+                                if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                                    return in_own_frame(|| {
+                                        return TExpr {
+                                            ty: args[0].clone(),
+                                            kind: TExprKind::SharedGuardValue {
+                                                guard: Box::new(recv),
+                                                editable: matches!(
+                                                    marker,
+                                                    crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)
+                                                ),
+                                            },
+                                        };
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-            if let Type::Named(type_name) = &recv.ty {
-                if crate::Sema::is_swizzleable_math_type(type_name)
-                    && !cx.struct_fields.contains_key(type_name)
+                // D-FIELDPOL1: a computed field is not a Rust struct member — sema
+                // (`CheckerFieldPolicy`) already synthesized it as a getter method
+                // on `s.methods`; route the read to a call of that method instead
+                // of a member access. `boxed` never applies (a getter call, not a
+                // stored recursive edge). `self`'s own env type is deliberately
+                // `None` (`recv.ty` falls back to `Type::Int`, see `LowerEnv::bind`),
+                // so a bare `self.field` (every computed field's rewritten body
+                // reads its siblings this way) resolves the owner via
+                // `env.self_owner` instead of `recv.ty`.
+                let field_owner: Option<&str> = if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == Syntax::KW_SELF)
                 {
-                    if let crate::Sema::SwizzleParse::Ok(lanes) =
-                        crate::Sema::parse_swizzle_member(member, type_name)
+                    env.self_owner.as_deref()
+                } else if let Type::Named(type_name) = &recv.ty {
+                    Some(type_name.as_str())
+                } else {
+                    None
+                };
+                if let Some(type_name) = field_owner {
+                    if cx
+                        .computed_fields
+                        .get(type_name)
+                        .is_some_and(|c| c.contains(member))
                     {
-                        let lanes_u8: Vec<u8> = lanes.iter().map(|&i| i as u8).collect();
+                        let field_ty =
+                            struct_field_type(cx, &Type::Named(type_name.to_string()), member)
+                                .unwrap_or(Type::Int);
                         return TExpr {
-                            ty: crate::Sema::swizzle_read_type(type_name, lanes.len()),
-                            kind: TExprKind::MathSwizzleRead {
-                                type_name: type_name.clone(),
+                            ty: field_ty,
+                            kind: TExprKind::MethodCall {
                                 recv: Box::new(recv),
-                                lanes: lanes_u8,
+                                method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                                type_args: Vec::new(),
+                                args: vec![],
+                                source_first_string_literal: None,
+                                operator_line: None,
                             },
                         };
                     }
                 }
-            }
-            let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
-            // A field of a CORE struct (`ProcessResult.code`, `JSONError.message`, …) is
-            // emitted by its PLAIN Rust name, never `__jet_<name>` (the core structs in
-            // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
-            // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
-            // type so the field read is byte-exact for both core and user structs.
-            let field = member.to_string();
-            // A self-referential (recursive) edge has Rust type `Box<…>`; the read derefs
-            // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
-            // resolved struct name — mirrors the AST `boxed_field_read`).
-            let boxed = match &recv.ty {
-                Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), member.to_string())),
-                _ => false,
-            };
-            TExpr {
-                ty: field_ty,
-                kind: TExprKind::Field {
-                    recv: Box::new(recv),
-                    field,
-                    boxed,
-                },
-            }
+                if let Type::Named(type_name) = &recv.ty {
+                    if crate::Sema::is_swizzleable_math_type(type_name)
+                        && !cx.struct_fields.contains_key(type_name)
+                    {
+                        if let crate::Sema::SwizzleParse::Ok(lanes) =
+                            crate::Sema::parse_swizzle_member(member, type_name)
+                        {
+                            let lanes_u8: Vec<u8> = lanes.iter().map(|&i| i as u8).collect();
+                            return TExpr {
+                                ty: crate::Sema::swizzle_read_type(type_name, lanes.len()),
+                                kind: TExprKind::MathSwizzleRead {
+                                    type_name: type_name.clone(),
+                                    recv: Box::new(recv),
+                                    lanes: lanes_u8,
+                                },
+                            };
+                        }
+                    }
+                }
+                let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
+                // A field of a CORE struct (`ProcessResult.code`, `JSONError.message`, …) is
+                // emitted by its PLAIN Rust name, never `__jet_<name>` (the core structs in
+                // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
+                // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
+                // type so the field read is byte-exact for both core and user structs.
+                let field = member.to_string();
+                // A self-referential (recursive) edge has Rust type `Box<…>`; the read derefs
+                // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
+                // resolved struct name — mirrors the AST `boxed_field_read`).
+                let boxed = match &recv.ty {
+                    Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), member.to_string())),
+                    _ => false,
+                };
+                TExpr {
+                    ty: field_ty,
+                    kind: TExprKind::Field {
+                        recv: Box::new(recv),
+                        field,
+                        boxed,
+                    },
+                }
+            })
         }
         // c109 Phase 4/16: an enum literal. Each payload arg carries its resolved
         // `clone`/`boxed` decisions (`emit_boxed_enum_arg`): a non-scalar payload from
@@ -4348,63 +4526,65 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             args,
             ..
         } => {
-            let resolved_type = cx
-                .core_qualified_rust_type_name(type_name)
-                .unwrap_or(type_name.as_str());
-            let payload = if args.is_empty() {
-                TEnumPayload::Unit
-            } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
-                let pos = args
-                    .iter()
-                    .map(|a| match a {
-                        EnumLitArg::Positional(e) => {
-                            lower_enum_arg(resolved_type, variant, variant, e, cx, env)
-                        }
-                        _ => unreachable!("all positional in this branch"),
-                    })
-                    .collect();
-                TEnumPayload::Positional(pos)
-            } else {
-                // Named-payload variant: each field carries its mangled Rust name.
-                let named = args
-                    .iter()
-                    .map(|a| match a {
-                        EnumLitArg::Named { label, expr } => {
-                            let edge = format!("{}.{}", variant, label);
-                            (
-                                if matches!(
-                                    resolved_type,
-                                    "EmailError"
-                                        | "SMTPAuth"
-                                        | "TLSTrust"
-                                        | "AuthError"
-                                        | "HTTPRedirectPolicy"
-                                ) {
-                                    label.clone()
-                                } else {
-                                    mangle(label)
-                                },
-                                lower_enum_arg(resolved_type, variant, &edge, expr, cx, env),
-                            )
-                        }
-                        // A positional arg mixed with named is a sema error that
-                        // never reaches a covered function; default to a field.
-                        EnumLitArg::Positional(e) => (
-                            String::new(),
-                            lower_enum_arg(resolved_type, variant, variant, e, cx, env),
-                        ),
-                    })
-                    .collect();
-                TEnumPayload::Named(named)
-            };
-            TExpr {
-                ty: Type::Named(resolved_type.to_string()),
-                kind: TExprKind::EnumLit {
-                    enum_type: resolved_type.to_string(),
-                    variant: variant.clone(),
-                    payload,
-                },
-            }
+            in_own_frame(|| {
+                let resolved_type = cx
+                    .core_qualified_rust_type_name(type_name)
+                    .unwrap_or(type_name.as_str());
+                let payload = in_own_frame(|| if args.is_empty() {
+                    TEnumPayload::Unit
+                } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
+                    let pos = args
+                        .iter()
+                        .map(|a| match a {
+                            EnumLitArg::Positional(e) => {
+                                lower_enum_arg(resolved_type, variant, variant, e, cx, env)
+                            }
+                            _ => unreachable!("all positional in this branch"),
+                        })
+                        .collect();
+                    TEnumPayload::Positional(pos)
+                } else {
+                    // Named-payload variant: each field carries its mangled Rust name.
+                    let named = args
+                        .iter()
+                        .map(|a| match a {
+                            EnumLitArg::Named { label, expr } => {
+                                let edge = format!("{}.{}", variant, label);
+                                (
+                                    if matches!(
+                                        resolved_type,
+                                        "EmailError"
+                                            | "SMTPAuth"
+                                            | "TLSTrust"
+                                            | "AuthError"
+                                            | "HTTPRedirectPolicy"
+                                    ) {
+                                        label.clone()
+                                    } else {
+                                        mangle(label)
+                                    },
+                                    lower_enum_arg(resolved_type, variant, &edge, expr, cx, env),
+                                )
+                            }
+                            // A positional arg mixed with named is a sema error that
+                            // never reaches a covered function; default to a field.
+                            EnumLitArg::Positional(e) => (
+                                String::new(),
+                                lower_enum_arg(resolved_type, variant, variant, e, cx, env),
+                            ),
+                        })
+                        .collect();
+                    TEnumPayload::Named(named)
+                });
+                TExpr {
+                    ty: Type::Named(resolved_type.to_string()),
+                    kind: TExprKind::EnumLit {
+                        enum_type: resolved_type.to_string(),
+                        variant: variant.clone(),
+                        payload,
+                    },
+                }
+            })
         }
         // c109 Phase 5: a list literal. Lowers each element as-is (mirrors the AST
         // `vec![…]` form — no clone/coercion at the literal site). The result type
@@ -4418,108 +4598,114 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // from the type; each canonical field's value is taken from the literal (by
         // name) and lowered. Fields are emitted as `__jet_<f>: <v>` in canonical order.
         Expr::TupleLit(lit_fields, _, ty) => {
-            let canonical = match ty {
-                Some(Type::Tuple(fs)) => tuple_fields_plain(fs),
-                _ => Vec::new(),
-            };
-            let struct_name = tuple_struct_name(&canonical);
-            // Map field-name → its literal value expr (the literal may list fields in
-            // any order; the type fixes the canonical order — exactly the AST path).
-            let mut value_of: std::collections::HashMap<&str, &Expr> =
-                std::collections::HashMap::new();
-            for (n, e) in lit_fields {
-                value_of.insert(n.as_str(), e);
-            }
-            let fields: Vec<(String, TExpr)> = canonical
-                .iter()
-                .map(|(n, fty)| {
-                    let v = match value_of.get(n.as_str()) {
-                        Some(e) => lower_expr(e, cx, env),
-                        // A missing field never occurs in a sema-checked tuple literal;
-                        // mirror the AST's `0i64` default defensively (an Int literal).
-                        None => TExpr {
-                            ty: fty.clone(),
-                            kind: TExprKind::IntLit(0, None),
-                        },
-                    };
-                    (mangle(n).to_string(), v)
-                })
-                .collect();
-            TExpr {
-                ty: ty.clone().unwrap_or_else(|| Type::Tuple(Vec::new())),
-                kind: TExprKind::TupleLit {
-                    struct_name,
-                    fields,
-                },
-            }
+            in_own_frame(|| {
+                let canonical = match ty {
+                    Some(Type::Tuple(fs)) => tuple_fields_plain(fs),
+                    _ => Vec::new(),
+                };
+                let struct_name = tuple_struct_name(&canonical);
+                // Map field-name → its literal value expr (the literal may list fields in
+                // any order; the type fixes the canonical order — exactly the AST path).
+                let mut value_of: std::collections::HashMap<&str, &Expr> =
+                    std::collections::HashMap::new();
+                for (n, e) in lit_fields {
+                    value_of.insert(n.as_str(), e);
+                }
+                let fields: Vec<(String, TExpr)> = canonical
+                    .iter()
+                    .map(|(n, fty)| {
+                        let v = match value_of.get(n.as_str()) {
+                            Some(e) => lower_expr(e, cx, env),
+                            // A missing field never occurs in a sema-checked tuple literal;
+                            // mirror the AST's `0i64` default defensively (an Int literal).
+                            None => TExpr {
+                                ty: fty.clone(),
+                                kind: TExprKind::IntLit(0, None),
+                            },
+                        };
+                        (mangle(n).to_string(), v)
+                    })
+                    .collect();
+                TExpr {
+                    ty: ty.clone().unwrap_or_else(|| Type::Tuple(Vec::new())),
+                    kind: TExprKind::TupleLit {
+                        struct_name,
+                        fields,
+                    },
+                }
+            })
         }
         // #779: map literals desugar to empty `MapLit` + `IndexAssign` inserts inside
         // an `IfExpr(true)` block. Engines keep only the empty-map constructor arm.
         Expr::MapLit(entries, _) => {
-            let tentries: Vec<(TExpr, TExpr)> = entries
-                .iter()
-                .map(|(k, v)| (lower_expr(k, cx, env), lower_expr(v, cx, env)))
-                .collect();
-            let (kt, vt) = tentries
-                .first()
-                .map(|(k, v)| (k.ty.clone(), v.ty.clone()))
-                .unwrap_or((Type::String, Type::Int));
-            let map_ty = Type::Map {
-                key: Box::new(kt),
-                key_span: None,
-                value: Box::new(vt),
-            };
-            if tentries.is_empty() {
-                return TExpr {
-                    ty: map_ty,
-                    kind: TExprKind::MapLit(Vec::new()),
+            in_own_frame(|| {
+                let tentries: Vec<(TExpr, TExpr)> = entries
+                    .iter()
+                    .map(|(k, v)| (lower_expr(k, cx, env), lower_expr(v, cx, env)))
+                    .collect();
+                let (kt, vt) = tentries
+                    .first()
+                    .map(|(k, v)| (k.ty.clone(), v.ty.clone()))
+                    .unwrap_or((Type::String, Type::Int));
+                let map_ty = Type::Map {
+                    key: Box::new(kt),
+                    key_span: None,
+                    value: Box::new(vt),
                 };
-            }
-            let map_name = mangle_generated("m");
-            let empty = TExpr {
-                ty: map_ty.clone(),
-                kind: TExprKind::MapLit(Vec::new()),
-            };
-            let mut then_body = vec![crate::Codegen::TIR::TStmt::Let {
-                name: map_name.clone(),
-                kw: "let mut",
-                let_ty: crate::Codegen::TIR::TLetTy::Inferred,
-                init: empty,
-                gc_promotion: None,
-                gc_transferred: false,
-            }];
-            for (k, v) in tentries {
-                then_body.push(crate::Codegen::TIR::TStmt::IndexAssign {
-                    uninit: false,
-                    base: TExpr {
-                        ty: map_ty.clone(),
-                        kind: TExprKind::Local(TLocal::user(map_name.clone())),
-                    },
-                    index: k,
-                    is_map: true,
-                    value: v,
-                });
-            }
-            let result = TExpr {
-                ty: map_ty.clone(),
-                kind: TExprKind::Local(TLocal::user(map_name)),
-            };
-            TExpr {
-                ty: map_ty.clone(),
-                kind: TExprKind::IfExpr {
-                    cond: Box::new(crate::Codegen::TIR::TIfCond::Plain(TExpr {
-                        ty: Type::Bool,
-                        kind: TExprKind::BoolLit(true),
-                    })),
-                    then_body,
-                    then_value: Box::new(result),
-                    else_body: Vec::new(),
-                    else_value: Box::new(TExpr {
+                if tentries.is_empty() {
+                    return TExpr {
                         ty: map_ty,
                         kind: TExprKind::MapLit(Vec::new()),
-                    }),
-                },
-            }
+                    };
+                }
+                in_own_frame(|| {
+                    let map_name = mangle_generated("m");
+                    let empty = TExpr {
+                        ty: map_ty.clone(),
+                        kind: TExprKind::MapLit(Vec::new()),
+                    };
+                    let mut then_body = vec![crate::Codegen::TIR::TStmt::Let {
+                        name: map_name.clone(),
+                        kw: "let mut",
+                        let_ty: crate::Codegen::TIR::TLetTy::Inferred,
+                        init: empty,
+                        gc_promotion: None,
+                        gc_transferred: false,
+                    }];
+                    for (k, v) in tentries {
+                        then_body.push(crate::Codegen::TIR::TStmt::IndexAssign {
+                            uninit: false,
+                            base: TExpr {
+                                ty: map_ty.clone(),
+                                kind: TExprKind::Local(TLocal::user(map_name.clone())),
+                            },
+                            index: k,
+                            is_map: true,
+                            value: v,
+                        });
+                    }
+                    let result = TExpr {
+                        ty: map_ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(map_name)),
+                    };
+                    TExpr {
+                        ty: map_ty.clone(),
+                        kind: TExprKind::IfExpr {
+                            cond: Box::new(crate::Codegen::TIR::TIfCond::Plain(TExpr {
+                                ty: Type::Bool,
+                                kind: TExprKind::BoolLit(true),
+                            })),
+                            then_body,
+                            then_value: Box::new(result),
+                            else_body: Vec::new(),
+                            else_value: Box::new(TExpr {
+                                ty: map_ty,
+                                kind: TExprKind::MapLit(Vec::new()),
+                            }),
+                        },
+                    }
+                })
+            })
         }
         // c109 Phase 5: indexing `coll[i]`. The `IndexKind` (List/Map) is the total
         // sema fact (`is_map`); the helper line is resolved at lowering. The result
@@ -4531,170 +4717,182 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             kind,
         } => {
-            // D-LAYOUT-FACTS1=B: the parser stores `[.field]` as an internal
-            // selector identifier. Project it through the same `Field` TIR
-            // node used by every other comptime struct read; the evaluator
-            // resolves the selected `LayoutField` from `LayoutInfo.fields`.
-            if let Expr::Ident(name, _) = index.as_ref() {
-                if let Some(field_name) = Syntax::layout_selector_name(name) {
-                    let base_t = lower_expr(base, cx, env);
-                    return TExpr {
-                        ty: Type::Named(Syntax::TYPE_LAYOUT_FIELD.to_string()),
-                        kind: TExprKind::Field {
-                            recv: Box::new(base_t),
-                            field: format!(
-                                "{}{}",
-                                Syntax::LAYOUT_FIELD_PROJECTION_PREFIX,
-                                field_name
-                            ),
-                            boxed: false,
-                        },
-                    };
-                }
-            }
-            let base_t = lower_expr(base, cx, env);
-            // Fragment evaluation intentionally lowers a small AST without the
-            // ordinary sema fact table. In that path reflection values can still
-            // carry an unresolved index kind; use the already lowered collection
-            // type to recover the same list/map operation. Ordinary functions
-            // retain the sema-to-TIR handoff assertion.
-            let fallback_kind = if matches!(base_t.ty.without_user_tags(), Type::Map { .. }) {
-                IndexKind::Map
-            } else {
-                IndexKind::List
-            };
-            let kind = if matches!(kind, IndexKind::Unknown) {
-                debug_assert!(super::is_eval_fragment(), "sema-to-TIR handoff violated");
-                &fallback_kind
-            } else {
-                kind
-            };
-            let index_t = lower_expr(index, cx, env);
-            let base_ty = base_t.ty.without_user_tags();
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-            if matches!(kind, IndexKind::Range) {
-                let zero = || TExpr {
-                    ty: Type::Int,
-                    kind: TExprKind::IntLit(0, None),
-                };
-                return TExpr {
-                    ty: base_t.ty.clone(),
-                    kind: TExprKind::Slice {
-                        base: Box::new(base_t),
-                        start: Box::new(zero()),
-                        end: Box::new(zero()),
-                        range: Some(Box::new(index_t)),
-                        line,
-                    },
-                };
-            }
-            // D-SIMD2: `v[i]` lane access on a SIMD lane type → a bounds-checked lane
-            // read. The result is the lane scalar; sema resolved `IndexKind::Lane`.
-            if let IndexKind::Lane(lane_ty) = kind {
-                return TExpr {
-                    ty: crate::Sema::math_scalar_ty(lane_ty),
-                    kind: TExprKind::MathLaneIndex {
-                        lane_ty: lane_ty.clone(),
-                        base: Box::new(base_t),
-                        index: Box::new(index_t),
-                        line: line as u32,
-                    },
-                };
-            }
-            if let IndexKind::User(type_name) = kind {
-                let value_ty = cx
-                    .index_hooks
-                    .get(type_name)
-                    .map(|h| h.value_type.clone())
-                    .unwrap_or(Type::Int);
-                return TExpr {
-                    ty: value_ty,
-                    kind: TExprKind::IndexHook {
-                        type_name: type_name.clone(),
-                        base: Box::new(base_t),
-                        index: Box::new(index_t),
-                        line,
-                    },
-                };
-            }
-            // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` read — a generation-checked
-            // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
-            // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
-            // new `TExprKind` needed for a single free-function call, same as the
-            // `SQL.raw` escape in `lower_method_call` below.
-            if matches!(kind, IndexKind::Pool) {
-                let elem_ty = match base_ty {
-                    Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
-                        args[0].clone()
+            in_own_frame(|| {
+                // D-LAYOUT-FACTS1=B: the parser stores `[.field]` as an internal
+                // selector identifier. Project it through the same `Field` TIR
+                // node used by every other comptime struct read; the evaluator
+                // resolves the selected `LayoutField` from `LayoutInfo.fields`.
+                if let Expr::Ident(name, _) = index.as_ref() {
+                    if let Some(field_name) = Syntax::layout_selector_name(name) {
+                        return in_own_frame(|| {
+                            let base_t = lower_expr(base, cx, env);
+                            return TExpr {
+                                ty: Type::Named(Syntax::TYPE_LAYOUT_FIELD.to_string()),
+                                kind: TExprKind::Field {
+                                    recv: Box::new(base_t),
+                                    field: format!(
+                                        "{}{}",
+                                        Syntax::LAYOUT_FIELD_PROJECTION_PREFIX,
+                                        field_name
+                                    ),
+                                    boxed: false,
+                                },
+                            };
+                        });
                     }
-                    _ => Type::Int,
-                };
-                return TExpr {
-                    ty: elem_ty,
-                    kind: TExprKind::PoolSlot {
-                        pool: Box::new(base_t),
-                        id: Box::new(index_t),
-                        mutable: false,
-                        field: None,
-                        line,
-                    },
-                };
-            }
-            if matches!(kind, IndexKind::FixedListProof) {
-                let elem_ty = match base_ty {
-                    Type::FixedList { elem, .. } => (**elem).clone(),
-                    _ => Type::Int,
-                };
-                return TExpr {
-                    ty: elem_ty,
-                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FixedListIndex {
-                        base: Box::new(base_t),
-                        index: Box::new(index_t),
-                        line: line as u32,
-                    })),
-                };
-            }
-            let result_ty = match base_ty {
-                Type::List(elem) => (**elem).clone(),
-                Type::Map { value, .. } => (**value).clone(),
-                Type::FixedList { elem, .. } => (**elem).clone(),
-                // D-DYNARRAY1: `window[i]` on a `View<T>`.
-                Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-                        && args.len() == 1 =>
-                {
-                    args[0].clone()
                 }
-                _ => Type::Int,
-            };
-            // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
-            // columns. (A fused `xs[i].field` is handled in the `Field` arm before
-            // this point — that path reads a single column directly.)
-            if let Type::List(elem) = base_ty {
-                if cx.columnar_list_type(elem).is_some() {
+                let base_t = lower_expr(base, cx, env);
+                // Fragment evaluation intentionally lowers a small AST without the
+                // ordinary sema fact table. In that path reflection values can still
+                // carry an unresolved index kind; use the already lowered collection
+                // type to recover the same list/map operation. Ordinary functions
+                // retain the sema-to-TIR handoff assertion.
+                let fallback_kind = if matches!(base_t.ty.without_user_tags(), Type::Map { .. }) {
+                    IndexKind::Map
+                } else {
+                    IndexKind::List
+                };
+                let kind = if matches!(kind, IndexKind::Unknown) {
+                    debug_assert!(super::is_eval_fragment(), "sema-to-TIR handoff violated");
+                    &fallback_kind
+                } else {
+                    kind
+                };
+                let index_t = lower_expr(index, cx, env);
+                let base_ty = base_t.ty.without_user_tags();
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                if matches!(kind, IndexKind::Range) {
+                    return in_own_frame(|| {
+                        let zero = || TExpr {
+                            ty: Type::Int,
+                            kind: TExprKind::IntLit(0, None),
+                        };
+                        return TExpr {
+                            ty: base_t.ty.clone(),
+                            kind: TExprKind::Slice {
+                                base: Box::new(base_t),
+                                start: Box::new(zero()),
+                                end: Box::new(zero()),
+                                range: Some(Box::new(index_t)),
+                                line,
+                            },
+                        };
+                    });
+                }
+                // D-SIMD2: `v[i]` lane access on a SIMD lane type → a bounds-checked lane
+                // read. The result is the lane scalar; sema resolved `IndexKind::Lane`.
+                if let IndexKind::Lane(lane_ty) = kind {
+                    return in_own_frame(|| {
+                        return TExpr {
+                            ty: crate::Sema::math_scalar_ty(lane_ty),
+                            kind: TExprKind::MathLaneIndex {
+                                lane_ty: lane_ty.clone(),
+                                base: Box::new(base_t),
+                                index: Box::new(index_t),
+                                line: line as u32,
+                            },
+                        };
+                    });
+                }
+                if let IndexKind::User(type_name) = kind {
+                    return in_own_frame(|| {
+                        let value_ty = cx
+                            .index_hooks
+                            .get(type_name)
+                            .map(|h| h.value_type.clone())
+                            .unwrap_or(Type::Int);
+                        return TExpr {
+                            ty: value_ty,
+                            kind: TExprKind::IndexHook {
+                                type_name: type_name.clone(),
+                                base: Box::new(base_t),
+                                index: Box::new(index_t),
+                                line,
+                            },
+                        };
+                    });
+                }
+                // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` read — a generation-checked
+                // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
+                // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
+                // new `TExprKind` needed for a single free-function call, same as the
+                // `SQL.raw` escape in `lower_method_call` below.
+                if matches!(kind, IndexKind::Pool) {
+                    let elem_ty = match base_ty {
+                        Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
+                            args[0].clone()
+                        }
+                        _ => Type::Int,
+                    };
                     return TExpr {
-                        ty: result_ty,
-                        kind: TExprKind::ColumnarGather {
-                            base: Box::new(base_t),
-                            index: Box::new(index_t),
+                        ty: elem_ty,
+                        kind: TExprKind::PoolSlot {
+                            pool: Box::new(base_t),
+                            id: Box::new(index_t),
+                            mutable: false,
+                            field: None,
                             line,
                         },
                     };
                 }
-            }
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::Index {
-                    base: Box::new(base_t),
-                    index: Box::new(index_t),
-                    is_map: matches!(kind, IndexKind::Map),
-                    uninit_fixed: matches!(
-                        base.as_ref(),
-                        Expr::Ident(name, _) if env.is_uninit_fixed(name)
-                    ),
-                    line,
-                },
-            }
+                if matches!(kind, IndexKind::FixedListProof) {
+                    let elem_ty = match base_ty {
+                        Type::FixedList { elem, .. } => (**elem).clone(),
+                        _ => Type::Int,
+                    };
+                    return TExpr {
+                        ty: elem_ty,
+                        kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FixedListIndex {
+                            base: Box::new(base_t),
+                            index: Box::new(index_t),
+                            line: line as u32,
+                        })),
+                    };
+                }
+                let result_ty = match base_ty {
+                    Type::List(elem) => (**elem).clone(),
+                    Type::Map { value, .. } => (**value).clone(),
+                    Type::FixedList { elem, .. } => (**elem).clone(),
+                    // D-DYNARRAY1: `window[i]` on a `View<T>`.
+                    Type::Apply { name, args }
+                        if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                            && args.len() == 1 =>
+                    {
+                        args[0].clone()
+                    }
+                    _ => Type::Int,
+                };
+                // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
+                // columns. (A fused `xs[i].field` is handled in the `Field` arm before
+                // this point — that path reads a single column directly.)
+                if let Type::List(elem) = base_ty {
+                    if cx.columnar_list_type(elem).is_some() {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: result_ty,
+                                kind: TExprKind::ColumnarGather {
+                                    base: Box::new(base_t),
+                                    index: Box::new(index_t),
+                                    line,
+                                },
+                            };
+                        });
+                    }
+                }
+                TExpr {
+                    ty: result_ty,
+                    kind: TExprKind::Index {
+                        base: Box::new(base_t),
+                        index: Box::new(index_t),
+                        is_map: matches!(kind, IndexKind::Map),
+                        uninit_fixed: matches!(
+                            base.as_ref(),
+                            Expr::Ident(name, _) if env.is_uninit_fixed(name)
+                        ),
+                        line,
+                    },
+                }
+            })
         }
         // Owned slicing lowers here. Place contexts are handled above and use
         // ViewNew/ViewMutNew, preserving the owner's storage.
@@ -4705,22 +4903,24 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             range,
             span,
         } => {
-            let base_t = lower_expr(base, cx, env);
-            let start_t = lower_expr(start, cx, env);
-            let end_t = lower_expr(end, cx, env);
-            let range_t = range.as_ref().map(|range| Box::new(lower_expr(range, cx, env)));
-            let result_ty = base_t.ty.clone();
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::Slice {
-                    base: Box::new(base_t),
-                    start: Box::new(start_t),
-                    end: Box::new(end_t),
-                    range: range_t,
-                    line,
-                },
-            }
+            in_own_frame(|| {
+                let base_t = lower_expr(base, cx, env);
+                let start_t = lower_expr(start, cx, env);
+                let end_t = lower_expr(end, cx, env);
+                let range_t = range.as_ref().map(|range| Box::new(lower_expr(range, cx, env)));
+                let result_ty = base_t.ty.clone();
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                TExpr {
+                    ty: result_ty,
+                    kind: TExprKind::Slice {
+                        base: Box::new(base_t),
+                        start: Box::new(start_t),
+                        end: Box::new(end_t),
+                        range: range_t,
+                        line,
+                    },
+                }
+            })
         }
         // D-TAINT1: `#Tainted expr` — the value-fact tag is **erased in codegen**
         // (I3). Lower the inner expression unchanged; taint exists only as a
@@ -4731,11 +4931,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // so resource locals must transfer through `ResourceTake`, not dereference
         // the cleanup guard. Mirrors `Expr::Present`.
         Expr::Present(inner, _) => {
-            let t = lower_owned_expr(inner, cx, env);
-            TExpr {
-                ty: Type::Option(Box::new(t.ty.clone())),
-                kind: TExprKind::Present(Box::new(t)),
-            }
+            in_own_frame(|| {
+                let t = lower_owned_expr(inner, cx, env);
+                TExpr {
+                    ty: Type::Option(Box::new(t.ty.clone())),
+                    kind: TExprKind::Present(Box::new(t)),
+                }
+            })
         }
         // c109 Phase 8: bare `null` → `None`. The element type is unresolved here
         // (`Int` placeholder) — like an empty `vec![]`, Rust infers it from the
@@ -4752,96 +4954,106 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             expected_type,
         } => {
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-            TExpr {
-                ty: Type::Named("Unit".to_string()),
-                kind: TExprKind::Todo {
-                    line,
-                    expected_type: expected_type
-                        .clone()
-                        .unwrap_or_else(|| "(unknown)".to_string()),
-                },
-            }
+            in_own_frame(|| {
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                TExpr {
+                    ty: Type::Named("Unit".to_string()),
+                    kind: TExprKind::Todo {
+                        line,
+                        expected_type: expected_type
+                            .clone()
+                            .unwrap_or_else(|| "(unknown)".to_string()),
+                    },
+                }
+            })
         }
         // Card #1440: the dead end of an else-less exhaustive dispatch. Sema
         // proved coverage (E0307); like Todo, the result `ty` is never
         // load-bearing — the node diverges on every tier.
         Expr::NoElse(span) => {
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-            TExpr {
-                ty: Type::Named("Unit".to_string()),
-                kind: TExprKind::Unreachable { line },
-            }
+            in_own_frame(|| {
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                TExpr {
+                    ty: Type::Named("Unit".to_string()),
+                    kind: TExprKind::Unreachable { line },
+                }
+            })
         }
         // c109 Phase 8: `Ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is
         // the inner's; the err type is unresolved here (Rust infers it from the
         // function return context, exactly as the AST path's bare `Ok(x)` does).
         Expr::Ok(inner, _) => {
-            let mut t = lower_owned_expr(inner, cx, env);
-            if let Some(Type::Result { ok, .. }) = &env.ret_ty {
-                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
-            }
-            TExpr {
-                ty: Type::Result {
-                    ok: Box::new(t.ty.clone()),
-                    err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
-                },
-                kind: TExprKind::Ok(Box::new(t)),
-            }
+            in_own_frame(|| {
+                let mut t = lower_owned_expr(inner, cx, env);
+                if let Some(Type::Result { ok, .. }) = &env.ret_ty {
+                    t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
+                }
+                TExpr {
+                    ty: Type::Result {
+                        ok: Box::new(t.ty.clone()),
+                        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                    },
+                    kind: TExprKind::Ok(Box::new(t)),
+                }
+            })
         }
         // c109 Phase 8: `Err(e)` → `Err(e)`. The err type is the inner's; the ok type
         // is unresolved here (inferred from the function return context).
         Expr::Err(inner, _) => {
-            let mut t = lower_owned_expr(inner, cx, env);
-            if let Some(Type::Result { err, .. }) = &env.ret_ty {
-                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
-            }
-            TExpr {
-                ty: Type::Result {
-                    ok: Box::new(Type::Int),
-                    err: Box::new(t.ty.clone()),
-                },
-                kind: TExprKind::Err(Box::new(t)),
-            }
+            in_own_frame(|| {
+                let mut t = lower_owned_expr(inner, cx, env);
+                if let Some(Type::Result { err, .. }) = &env.ret_ty {
+                    t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
+                }
+                TExpr {
+                    ty: Type::Result {
+                        ok: Box::new(Type::Int),
+                        err: Box::new(t.ty.clone()),
+                    },
+                    kind: TExprKind::Err(Box::new(t)),
+                }
+            })
         }
         // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is the
         // total sema fact — reproduce it exactly (none/Typed). The result
         // type is the inner `Result`'s ok type (the `?` unwraps it). The trace-frame
         // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
         Expr::Try(inner, span, convert, note) => {
-            let inner_t = lower_expr(inner, cx, env);
-            let note_t = note
-                .as_ref()
-                .map(|note| Box::new(lower_expr(note, cx, env)));
-            // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
-            // resolved to a Result, take its ok type; else fall back to the inner type
-            // (never load-bearing in the covered subset — a `?` result feeds a binding
-            // carrying sema's `b.ty`, or an `Ok(...)` wrap whose own type is total).
-            let result_ty = match &inner_t.ty {
-                Type::Result { ok, .. } => (**ok).clone(),
-                other => other.clone(),
-            };
-            let tconvert = match convert {
-                TryConvert::None => TTryConvert::None,
-                TryConvert::DefaultErr => TTryConvert::DefaultErr,
-                TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
-                TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {
-                    enum_name: enum_name.clone(),
-                    tag: tag.clone(),
-                },
-            };
-            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-            TExpr {
-                ty: result_ty,
-                kind: TExprKind::Try {
-                    inner: Box::new(inner_t),
-                    note: note_t,
-                    convert: tconvert,
-                    file: escape_rust_str(&cx.file),
-                    line,
-                    fn_name: escape_rust_str(&env.fn_name),
-                },
-            }
+            in_own_frame(|| {
+                let inner_t = lower_expr(inner, cx, env);
+                let note_t = note
+                    .as_ref()
+                    .map(|note| Box::new(lower_expr(note, cx, env)));
+                // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
+                // resolved to a Result, take its ok type; else fall back to the inner type
+                // (never load-bearing in the covered subset — a `?` result feeds a binding
+                // carrying sema's `b.ty`, or an `Ok(...)` wrap whose own type is total).
+                let result_ty = match &inner_t.ty {
+                    Type::Result { ok, .. } => (**ok).clone(),
+                    other => other.clone(),
+                };
+                let tconvert = match convert {
+                    TryConvert::None => TTryConvert::None,
+                    TryConvert::DefaultErr => TTryConvert::DefaultErr,
+                    TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
+                    TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {
+                        enum_name: enum_name.clone(),
+                        tag: tag.clone(),
+                    },
+                };
+                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                TExpr {
+                    ty: result_ty,
+                    kind: TExprKind::Try {
+                        inner: Box::new(inner_t),
+                        note: note_t,
+                        convert: tconvert,
+                        file: escape_rust_str(&cx.file),
+                        line,
+                        fn_name: escape_rust_str(&env.fn_name),
+                    },
+                }
+            })
         }
         // c109 Phase 8: the `??` fallback operator. D-FAIL-CARRIER1=A: one carrier,
         // so the value type alone gives the payload type. Mirrors `emit_or_fallback`.
@@ -4858,15 +5070,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             flatten,
             ..
         } => {
-            let base_t = lower_expr(base, cx, env);
-            TExpr {
-                ty: base_t.ty.clone(),
-                kind: TExprKind::OptField {
-                    base: Box::new(base_t),
-                    member: member.to_string(),
-                    flatten: *flatten,
-                },
-            }
+            in_own_frame(|| {
+                let base_t = lower_expr(base, cx, env);
+                TExpr {
+                    ty: base_t.ty.clone(),
+                    kind: TExprKind::OptField {
+                        base: Box::new(base_t),
+                        member: member.to_string(),
+                        flatten: *flatten,
+                    },
+                }
+            })
         }
         // c109 Phase 11: a lambda/closure literal. The gate proved the body is
         // in-subset; lower it via `lower_lambda` (capture/escape facts total from
@@ -4874,34 +5088,38 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // load-bearing in emit (a closure is consumed in arg position), so carry a
         // placeholder `Fn` type; the binding/arg context supplies the real Rust type.
         Expr::Lambda(lam) => {
-            let tl = lower_lambda(lam, cx, env);
-            let params = tl.param_types.clone();
-            let ret = tl.ret.clone().map(Box::new);
-            TExpr {
-                ty: Type::Fn {
-                    params,
-                    ret,
-                    effect_bound: None,
-                    param_contract: None,
-                call_metadata: None,
-                    return_view_provenance: lam.meta.return_view_provenance.clone(),
-                },
-                kind: TExprKind::Lambda(Box::new(tl)),
-            }
+            in_own_frame(|| {
+                let tl = lower_lambda(lam, cx, env);
+                let params = tl.param_types.clone();
+                let ret = tl.ret.clone().map(Box::new);
+                TExpr {
+                    ty: Type::Fn {
+                        params,
+                        ret,
+                        effect_bound: None,
+                        param_contract: None,
+                    call_metadata: None,
+                        return_view_provenance: lam.meta.return_view_provenance.clone(),
+                    },
+                    kind: TExprKind::Lambda(Box::new(tl)),
+                }
+            })
         }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (S58). The result type is
         // `Ptr<elem>` (`ptr_type`), total from the node's `elem`. The element's Rust type
         // is resolved here (`cx.rust_type`) so emit makes no decision (I3). The cast is
         // safe Rust (no `unsafe`).
         Expr::PtrFromAddr { elem, addr, .. } => {
-            let taddr = lower_expr(addr, cx, env);
-            TExpr {
-                ty: crate::Sema::ptr_type(elem.clone()),
-                kind: TExprKind::PtrFromAddr {
-                    elem: elem.clone(),
-                    addr: Box::new(taddr),
-                },
-            }
+            in_own_frame(|| {
+                let taddr = lower_expr(addr, cx, env);
+                TExpr {
+                    ty: crate::Sema::ptr_type(elem.clone()),
+                    kind: TExprKind::PtrFromAddr {
+                        elem: elem.clone(),
+                        addr: Box::new(taddr),
+                    },
+                }
+            })
         }
         // D-UNITLIT1 / D-TYPE2-IMAG1=A: Comptime/TirBridge lower the raw AST,
         // so sema's unit-literal rewrite has not run yet. Reproduce it and
@@ -4920,142 +5138,148 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // Comptime/TirBridge can evaluate function bodies before sema elaborates
         // `Type.{ … }` (eval_comptime_items runs early). Mirror elaborate_typed_lit.
         Expr::TypedLit { head, body, span } => {
-            let Some(head) = head.clone() else {
-                return TExpr {
-                    ty: Type::Int,
-                    kind: TExprKind::Todo {
-                        line: 0,
-                        expected_type: "inferred typed literal without head".into(),
-                    },
-                };
-            };
-            if let Type::Named(type_name) = &head {
-                if let Some(lowered) = lower_boundary_typed_lit(type_name, body, cx, env) {
-                    return lowered;
-                }
-            }
-            if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
-                if let TypedLitBody::Value(pattern) = body {
-                    return TExpr {
-                        ty: head,
-                        kind: TExprKind::CoreCall {
-                            module: "core.regex".to_string(),
-                            method: "literal".to_string(),
-                            args: vec![lower_expr(pattern, cx, env)],
-                            source_span: *span,
-                            widen_to_vec: vec![false],
-                        },
-                    };
-                }
-            }
-            let rewritten = match (head.clone(), body.clone()) {
-                (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
-                    Expr::ListLit(Vec::new(), *span)
-                }
-                (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
-                    Expr::ListLit(elems, *span)
-                }
-                (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
-                    Expr::ListLit(vec![*inner], *span)
-                }
-                (Type::Map { .. }, TypedLitBody::Empty) => Expr::MapLit(Vec::new(), *span),
-                (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
-                    Expr::MapLit(entries, *span)
-                }
-                (Type::Named(name), TypedLitBody::Fields(fields)) => Expr::StructLit {
-                    type_name: name,
-                    type_args: Vec::new(),
-                    import_ns: None,
-                    as_trait: None,
-                    fields,
-                    inferred: false,
-                    span: *span,
-                },
-                (Type::Apply { name, args }, TypedLitBody::Fields(fields)) => Expr::StructLit {
-                    type_name: name,
-                    type_args: args,
-                    import_ns: None,
-                    as_trait: None,
-                    fields,
-                    inferred: false,
-                    span: *span,
-                },
-                (Type::Named(name), TypedLitBody::Empty) => Expr::StructLit {
-                    type_name: name,
-                    type_args: Vec::new(),
-                    import_ns: None,
-                    as_trait: None,
-                    fields: Vec::new(),
-                    inferred: false,
-                    span: *span,
-                },
-                (Type::Apply { name, args }, TypedLitBody::Empty) => Expr::StructLit {
-                    type_name: name,
-                    type_args: args,
-                    import_ns: None,
-                    as_trait: None,
-                    fields: Vec::new(),
-                    inferred: false,
-                    span: *span,
-                },
-                (_, TypedLitBody::Value(inner)) => {
-                    // Scalar `U8.{ 13 }` / `F32.{ -0.0 }` — lower the value, then
-                    // retag with head width (including nested float operands so
-                    // unary/binary keep F32/F64 lanes matched).
-                    let mut t = lower_expr(&inner, cx, env);
-                    retag_numeric_width(&mut t, &head);
-                    return t;
-                }
-                (_, TypedLitBody::Elements(elems)) if elems.len() == 1 => {
-                    let mut t = lower_expr(&elems[0], cx, env);
-                    retag_numeric_width(&mut t, &head);
-                    return t;
-                }
-                _ => {
+            in_own_frame(|| {
+                let Some(head) = head.clone() else {
                     return TExpr {
                         ty: Type::Int,
                         kind: TExprKind::Todo {
                             line: 0,
-                            expected_type: format!(
-                                "typed literal body vs head `{}`",
-                                head.name()
-                            ),
+                            expected_type: "inferred typed literal without head".into(),
                         },
                     };
+                };
+                if let Type::Named(type_name) = &head {
+                    if let Some(lowered) = lower_boundary_typed_lit(type_name, body, cx, env) {
+                        return lowered;
+                    }
                 }
-            };
-            let mut t = lower_expr(&rewritten, cx, env);
-            // Prefer the typed head when the rewritten form under-specifies (empty list/map).
-            if matches!(
-                head,
-                Type::List(_)
-                    | Type::FixedList { .. }
-                    | Type::Map { .. }
-                    | Type::Named(_)
-                    | Type::Apply { .. }
-                    | Type::Int
-                    | Type::IntN { .. }
-                    | Type::InlineRange { .. }
-                    | Type::Float
-                    | Type::Float32
-            ) {
-                t.ty = head.clone();
-            }
-            // D-SG9: retag list-element IntLits from a `[U8]`/`[I32]`/… head so
-            // emit uses the right Rust suffix even if sema left width unset.
-            if let Type::List(elem) | Type::FixedList { elem, .. } = &head {
-                if let Type::IntN { signed, bits } = elem.as_ref() {
-                    if let TExprKind::ListLit(elems) = &mut t.kind {
-                        for el in elems.iter_mut() {
-                            if let TExprKind::IntLit(_, width) = &mut el.kind {
-                                *width = Some((*signed, *bits));
-                                el.ty = elem.as_ref().clone();
+                if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
+                    if let TypedLitBody::Value(pattern) = body {
+                        return in_own_frame(|| {
+                            return TExpr {
+                                ty: head,
+                                kind: TExprKind::CoreCall {
+                                    module: "core.regex".to_string(),
+                                    method: "literal".to_string(),
+                                    args: vec![lower_expr(pattern, cx, env)],
+                                    source_span: *span,
+                                    widen_to_vec: vec![false],
+                                },
+                            };
+                        });
+                    }
+                }
+                let rewritten = match (head.clone(), body.clone()) {
+                    (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
+                        Expr::ListLit(Vec::new(), *span)
+                    }
+                    (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
+                        Expr::ListLit(elems, *span)
+                    }
+                    (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
+                        Expr::ListLit(vec![*inner], *span)
+                    }
+                    (Type::Map { .. }, TypedLitBody::Empty) => Expr::MapLit(Vec::new(), *span),
+                    (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
+                        Expr::MapLit(entries, *span)
+                    }
+                    (Type::Named(name), TypedLitBody::Fields(fields)) => Expr::StructLit {
+                        type_name: name,
+                        type_args: Vec::new(),
+                        import_ns: None,
+                        as_trait: None,
+                        fields,
+                        inferred: false,
+                        span: *span,
+                    },
+                    (Type::Apply { name, args }, TypedLitBody::Fields(fields)) => Expr::StructLit {
+                        type_name: name,
+                        type_args: args,
+                        import_ns: None,
+                        as_trait: None,
+                        fields,
+                        inferred: false,
+                        span: *span,
+                    },
+                    (Type::Named(name), TypedLitBody::Empty) => Expr::StructLit {
+                        type_name: name,
+                        type_args: Vec::new(),
+                        import_ns: None,
+                        as_trait: None,
+                        fields: Vec::new(),
+                        inferred: false,
+                        span: *span,
+                    },
+                    (Type::Apply { name, args }, TypedLitBody::Empty) => Expr::StructLit {
+                        type_name: name,
+                        type_args: args,
+                        import_ns: None,
+                        as_trait: None,
+                        fields: Vec::new(),
+                        inferred: false,
+                        span: *span,
+                    },
+                    (_, TypedLitBody::Value(inner)) => {
+                        // Scalar `U8.{ 13 }` / `F32.{ -0.0 }` — lower the value, then
+                        // retag with head width (including nested float operands so
+                        // unary/binary keep F32/F64 lanes matched).
+                        let mut t = lower_expr(&inner, cx, env);
+                        retag_numeric_width(&mut t, &head);
+                        return t;
+                    }
+                    (_, TypedLitBody::Elements(elems)) if elems.len() == 1 => {
+                        let mut t = lower_expr(&elems[0], cx, env);
+                        retag_numeric_width(&mut t, &head);
+                        return t;
+                    }
+                    _ => {
+                        return TExpr {
+                            ty: Type::Int,
+                            kind: TExprKind::Todo {
+                                line: 0,
+                                expected_type: format!(
+                                    "typed literal body vs head `{}`",
+                                    head.name()
+                                ),
+                            },
+                        };
+                    }
+                };
+                in_own_frame(|| {
+                    let mut t = lower_expr(&rewritten, cx, env);
+                    // Prefer the typed head when the rewritten form under-specifies (empty list/map).
+                    if matches!(
+                        head,
+                        Type::List(_)
+                            | Type::FixedList { .. }
+                            | Type::Map { .. }
+                            | Type::Named(_)
+                            | Type::Apply { .. }
+                            | Type::Int
+                            | Type::IntN { .. }
+                            | Type::InlineRange { .. }
+                            | Type::Float
+                            | Type::Float32
+                    ) {
+                        t.ty = head.clone();
+                    }
+                    // D-SG9: retag list-element IntLits from a `[U8]`/`[I32]`/… head so
+                    // emit uses the right Rust suffix even if sema left width unset.
+                    if let Type::List(elem) | Type::FixedList { elem, .. } = &head {
+                        if let Type::IntN { signed, bits } = elem.as_ref() {
+                            if let TExprKind::ListLit(elems) = &mut t.kind {
+                                for el in elems.iter_mut() {
+                                    if let TExprKind::IntLit(_, width) = &mut el.kind {
+                                        *width = Some((*signed, *bits));
+                                        el.ty = elem.as_ref().clone();
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
-            t
+                    t
+                })
+            })
         },
         Expr::PatternTest {
             subject, pattern, ..
