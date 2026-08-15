@@ -983,6 +983,92 @@ fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
 }
 
 #[test]
+fn fmt_simplify_leaves_a_recovered_parse_alone() {
+    // I2 / card #1514: `jet fmt --simplify` over a tree holding a
+    // syntactically broken file is an ordinary formatter outcome, never a
+    // compiler-bug report. A recovered AST is not a meaningful before/after
+    // baseline for the identity check, so the mode degrades to plain fmt.
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let broken = include_str!("ui/control_body_needs_braces.jet");
+    let source = format!("fn answer() => Int {{\n    return 42\n}}\n\n{broken}");
+
+    let plain = jet::format_source(&source).expect("a recovered parse still formats");
+    let simplified = jet::format_source_with_options(&source, options)
+        .expect("a recovered parse must not reach the identity assertion");
+    assert_eq!(
+        simplified, plain,
+        "simplify must be a no-op on a parse-invalid source:\n{simplified}"
+    );
+    assert!(
+        !simplified.contains(":: 42"),
+        "simplify rewrote a source whose parse only recovered:\n{simplified}"
+    );
+}
+
+#[test]
+fn fmt_simplify_keeps_a_routed_value_loop_binding() {
+    // Card #1514: `loop value, values { … } ?? route` desugars to a carrier
+    // whose generated break label spells the loop header's byte offset
+    // (`__jet_value_loop_<offset>`). An R1 rewrite earlier in the file moves
+    // that header, so the identity check must be blind to the offset — and the
+    // binding itself must come out byte-identical, since R1 only ever collapses
+    // a braced single-`return` function body.
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let source = "fn answer() => Int {\n    return 42\n}\n\nfn search() => Int {\n    values :: [Int].{1, 2, 3, 4}\n    first :: loop value, values {\n        if value > 2 { break value }\n    } ?? -1\n    return first\n}\n";
+
+    let plain = jet::format_source(source).expect("a routed value loop should format");
+    let simplified = jet::format_source_with_options(&plain, options)
+        .expect("a routed value loop must not reach the identity assertion");
+    assert!(
+        simplified.contains("fn answer() => Int :: 42"),
+        "R1 did not fire ahead of the value loop, so nothing moved:\n{simplified}"
+    );
+
+    let tail = |text: &str| {
+        let start = text.find("fn search").expect("the search fn survives fmt");
+        text[start..].to_string()
+    };
+    assert_eq!(
+        tail(&simplified),
+        tail(&plain),
+        "simplify changed the routed value-loop binding:\n{simplified}"
+    );
+    assert_eq!(
+        simplified,
+        jet::format_source_with_options(&simplified, options)
+            .expect("second simplify pass should work"),
+        "simplify output must be stable"
+    );
+}
+
+#[test]
+fn fmt_simplify_keeps_a_struct_literal_return_braced() {
+    // D-DOTCTOR1 against D-FMT-SIMPLIFY1=A: the parser reads a `::` one-line
+    // function body with `expr_no_struct_lit`, so a bare `Rect.{ … }` cannot be
+    // read back there. R1 must leave that body braced rather than write source
+    // that no longer parses.
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let source = "struct Rect {\n    width: Int,\n    height: Int\n}\n\nfn make(width: Int, height: Int) => Rect {\n    return Rect.{width: width, height: height}\n}\n\nfn run() {}\n";
+
+    let once = jet::format_source_with_options(source, options)
+        .expect("a struct-literal return must stay parseable under simplify");
+    assert!(
+        once.contains("return Rect."),
+        "the struct-literal return was rewritten away:\n{once}"
+    );
+    assert!(
+        !once.contains(":: Rect."),
+        "R1 collapsed a body the `::` form cannot hold:\n{once}"
+    );
+    assert_eq!(
+        once,
+        jet::format_source_with_options(&once, options)
+            .expect("second simplify pass should work"),
+        "simplify output must be stable"
+    );
+}
+
+#[test]
 fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
     let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");

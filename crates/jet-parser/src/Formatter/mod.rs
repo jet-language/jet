@@ -34,7 +34,7 @@ pub struct FormatOptions {
 /// `block_spans` records source layout only, so it is excluded when a
 /// simplify rewrite changes a braced body to a one-line body.
 pub fn canonical_program(prog: &Program) -> Vec<u8> {
-    crate::CanonicalAST::canonical_fragment(&(
+    let canonical = crate::CanonicalAST::canonical_fragment(&(
         &prog.imports,
         &prog.items,
         &prog.script_body,
@@ -50,7 +50,59 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
             &prog.applied_rules,
             &prog.rule_facts,
         ),
-    ))
+    ));
+    canonicalize_generated_loop_labels(&canonical)
+}
+
+/// D-FMT-SIMPLIFY1=A: the identity check above is span-free, but two generated
+/// loop labels are not. A value loop and a collecting loop each get the label
+/// `<prefix>value_loop_<offset>` / `<prefix>collect_loop_<offset>`, where
+/// `<offset>` is the source byte offset of the loop header
+/// (`Parser/Statements/control.rs`). That offset rides in an *identifier*, which
+/// `CanonicalAST`'s span stripping cannot see, so moving a loop one byte would
+/// otherwise read as a changed program. Renumber the labels by first
+/// appearance: position stops mattering, while two distinct labels stay
+/// distinct.
+fn canonicalize_generated_loop_labels(canonical: &[u8]) -> Vec<u8> {
+    const OFFSET_STEMS: [&str; 2] = ["value_loop_", "collect_loop_"];
+    let prefix = Syntax::GENERATED_NAME_PREFIX.as_bytes();
+    let mut out = Vec::with_capacity(canonical.len());
+    let mut seen: Vec<&[u8]> = Vec::new();
+    let mut copy_from = 0usize;
+    let mut i = 0usize;
+    while i < canonical.len() {
+        let stem = canonical[i..].strip_prefix(prefix).and_then(|rest| {
+            OFFSET_STEMS
+                .iter()
+                .find(|stem| rest.starts_with(stem.as_bytes()))
+                .copied()
+        });
+        let Some(stem) = stem else {
+            i += 1;
+            continue;
+        };
+        let mut end = i + prefix.len() + stem.len();
+        while canonical.get(end).is_some_and(u8::is_ascii_digit) {
+            end += 1;
+        }
+        let label = &canonical[i..end];
+        let known = seen.iter().position(|entry| *entry == label);
+        let ordinal = match known {
+            Some(index) => index,
+            None => {
+                seen.push(label);
+                seen.len() - 1
+            }
+        };
+        out.extend_from_slice(&canonical[copy_from..i]);
+        out.extend_from_slice(prefix);
+        out.extend_from_slice(stem.as_bytes());
+        out.extend_from_slice(ordinal.to_string().as_bytes());
+        i = end;
+        copy_from = end;
+    }
+    out.extend_from_slice(&canonical[copy_from..]);
+    out
 }
 
 /// D-FMT1: may this statement render inline inside a one-line brace body? Only
@@ -1577,7 +1629,7 @@ pub fn format_source(src: &str) -> Result<String, Vec<crate::Diagnostics::Diagno
 /// propagate; sema is not required.
 pub fn format_source_with_options(
     src: &str,
-    options: FormatOptions,
+    mut options: FormatOptions,
 ) -> Result<String, Vec<crate::Diagnostics::Diagnostic>> {
     let print_edits = retired_print_family_edits(src);
     let print_migrated = apply_source_edits(src, &print_edits).unwrap_or_else(|| src.to_string());
@@ -1586,7 +1638,25 @@ pub fn format_source_with_options(
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let prog = crate::Parser::parse_for_fmt(&toks)?;
+    // D-FMT-SIMPLIFY1=A / I2: only a clean parse may be simplified. Formatting
+    // itself is defined on a recovered parse too — `parse_for_fmt` succeeds
+    // through teaching diagnostics and retired spellings — but a recovered AST
+    // is not a meaningful before/after baseline, and asserting on one would
+    // turn a syntactically broken user file into a compiler-bug report.
+    // `parse_for_check` is the entry that reports the diagnostics
+    // `parse_for_fmt` drops; a source it rejects outright is recovered too.
+    let prog = match crate::Parser::parse_for_check(&toks) {
+        Ok((prog, parse_diags)) => {
+            options.simplify &= !parse_diags
+                .iter()
+                .any(|diag| diag.severity == crate::Diagnostics::Severity::Error);
+            prog
+        }
+        Err(_) => {
+            options.simplify = false;
+            crate::Parser::parse_for_fmt(&toks)?
+        }
+    };
     let comment_toks: Vec<_> = toks
         .iter()
         .filter(|token| {
@@ -1599,18 +1669,42 @@ pub fn format_source_with_options(
         .collect();
     let formatted = format_program_with_tokens(&prog, &migrated, &comment_toks, &toks, options);
     if options.simplify {
-        let (formatted_toks, formatted_lex_diags) = crate::Lexer::lex(&formatted);
-        if !formatted_lex_diags.is_empty() {
-            return Err(formatted_lex_diags);
-        }
-        let formatted_prog = crate::Parser::parse_for_fmt(&formatted_toks)?;
-        assert_eq!(
-            canonical_program(&prog),
-            canonical_program(&formatted_prog),
-            "fmt --simplify changed the parsed AST"
+        // D-FMT-SIMPLIFY1=A: the identity check compares the simplify output
+        // against the *plain* formatter output, never against the author's
+        // source. Plain fmt already performs ratified canonicalizations that
+        // are visible in the parsed AST — a braced single-statement control
+        // body becomes `->` (so `arrow_body` flips), a struct shorthand grows
+        // its labels, a dotted import gains its default alias, a retired
+        // spelling is migrated. `tests/support/fmt_lossless.rs` owns those with
+        // its explicit allowance list. What this assertion owns is narrower and
+        // exact: a simplify rewrite must not change the program plain fmt
+        // would have produced.
+        let plain = format_program_with_tokens(
+            &prog,
+            &migrated,
+            &comment_toks,
+            &toks,
+            FormatOptions::default(),
         );
+        if plain != formatted {
+            assert_eq!(
+                canonical_formatted(&plain)?,
+                canonical_formatted(&formatted)?,
+                "fmt --simplify changed the parsed AST"
+            );
+        }
     }
     Ok(formatted)
+}
+
+/// Canonical program content of formatter output, for the simplify identity
+/// check. Formatter output is Jet source, so it lexes and parses again.
+fn canonical_formatted(formatted: &str) -> Result<Vec<u8>, Vec<crate::Diagnostics::Diagnostic>> {
+    let (toks, lex_diags) = crate::Lexer::lex(formatted);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
+    }
+    Ok(canonical_program(&crate::Parser::parse_for_fmt(&toks)?))
 }
 
 /// Simple unified diff for `jet fmt --check`.

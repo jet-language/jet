@@ -10,6 +10,35 @@ enum EnumFmtEntry<'b> {
     Group(&'b EnumGroup),
 }
 
+/// D-FMT-SIMPLIFY1=A: may this rendered expression be a `::` one-line function
+/// body? The parser reads that body with `expr_no_struct_lit`, which refuses a
+/// `{` opening in the bare expression spine — a `Type.{ … }` construction or a
+/// block lambda (`Parser/Items/functions_params.rs`,
+/// `Parser/Expressions/primary.rs`). Braces inside `(`/`[` reopen the ordinary
+/// expression grammar, and braces inside text are the lexer's business.
+fn reads_back_as_one_line_body(rendered: &str) -> bool {
+    let mut depth = 0usize;
+    let mut chars = rendered.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' | '\'' => {
+                while let Some(inner) = chars.next() {
+                    if inner == '\\' {
+                        chars.next();
+                    } else if inner == ch {
+                        break;
+                    }
+                }
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            '{' if depth == 0 => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
 fn has_ambiguous_decode_union(items: &[Item], ty: &Type) -> bool {
     if let Type::Union(members) = ty {
         let mut seen = Vec::new();
@@ -763,10 +792,18 @@ impl<'a> Fmt<'a> {
         // comments and wide output in the explicit block form.
         if self.simplify {
             if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
-                let is_authored_return = self
-                    .src
-                    .get(span.start..span.start.saturating_add("return".len()))
-                    == Some("return");
+                // A word test, not a prefix test: the marker forms above have
+                // already returned, so the only construct D-FMT-SIMPLIFY1=A
+                // ratified here is a body whose single statement the author
+                // wrote as the `return` keyword.
+                let after_keyword = span.start.saturating_add("return".len());
+                let is_authored_return = self.src.get(span.start..after_keyword)
+                    == Some("return")
+                    && self
+                        .src
+                        .get(after_keyword..)
+                        .and_then(|rest| rest.chars().next())
+                        .map_or(true, |ch| !ch.is_alphanumeric() && ch != '_');
                 let comment_free = self
                     .single_stmt_braces(&f.body[0])
                     .is_some_and(|(open, close)| !self.span_has_comment(open, close));
@@ -778,7 +815,10 @@ impl<'a> Fmt<'a> {
                     let saved_comment_i = self.comment_i;
                     self.write(" :: ");
                     self.fmt_expr(expr, Prec::OrFallback);
-                    if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
+                    if self.col <= MAX_WIDTH
+                        && !self.out[saved_out..].contains('\n')
+                        && reads_back_as_one_line_body(&self.out[saved_out..])
+                    {
                         return;
                     }
                     self.out.truncate(saved_out);

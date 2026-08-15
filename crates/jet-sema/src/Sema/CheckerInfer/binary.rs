@@ -111,11 +111,35 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: a bare numeral adopts a *fixed-width*
-    /// peer that contains its value. With no sized peer (or an `Int` peer), it
-    /// stays `Int` — peerless `1000000 * 1000000` and `0 - 17` must not invent a
-    /// U32/U8 and trap. Destination width still arrives through `expected_type`
-    /// on `Expr::Int` (e.g. `take_u8(1 + 2)`).
+    /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: the width a bare numeral takes
+    /// next to a sized peer. The peer chooses the signedness family; the
+    /// numeral chooses the *narrowest* width of that family that holds it. A
+    /// numeral with no sized peer, or one that outgrows every fixed width,
+    /// stays `Int` — peerless `1000000 * 1000000` and `0 - 17` must not invent
+    /// a U32/U8 and trap, and `byte + -1` must not invent a signed peer.
+    fn minimal_literal_width(value: &crate::Numeric::CtBigInt, peer: Option<&Type>) -> Type {
+        let Some(Type::IntN { signed, .. }) = peer else {
+            return Type::Int;
+        };
+        [8u8, 16, 32, 64]
+            .into_iter()
+            .find_map(|bits| {
+                let (lower, upper) = crate::AST::int_range(*signed, bits);
+                super::exact_integer_fits(value, lower, upper).then_some(Type::IntN {
+                    signed: *signed,
+                    bits,
+                })
+            })
+            .unwrap_or(Type::Int)
+    }
+
+    /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: a bare numeral takes its own
+    /// minimal width *before* the operator join, then the ordinary value-set
+    /// law decides the join. The peer's width is never pushed onto the numeral,
+    /// so `byte + 256` joins `U8` with `U16` instead of rejecting `256` against
+    /// `U8`. Destination width still arrives through `expected_type` on
+    /// `Expr::Int` (e.g. `take_u8(1 + 2)`), and a numeral that already carries a
+    /// width is left alone.
     fn minimal_integer_literal_type(expr: &mut Expr, peer: Option<&Type>) -> Option<Type> {
         match expr {
             Expr::Paren(inner, _) => Self::minimal_integer_literal_type(inner, peer),
@@ -127,28 +151,12 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
-                match peer {
-                    Some(Type::IntN { signed, bits }) => {
-                        let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                        if super::exact_integer_fits(&negated, lower, upper) {
-                            *width = Some((*signed, *bits));
-                            Some(Type::IntN {
-                                signed: *signed,
-                                bits: *bits,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    Some(Type::Int) | None => {
-                        *width = None;
-                        Some(Type::Int)
-                    }
-                    Some(_) => {
-                        *width = None;
-                        Some(Type::Int)
-                    }
-                }
+                let minimal = Self::minimal_literal_width(&negated, peer);
+                *width = match &minimal {
+                    Type::IntN { signed, bits } => Some((*signed, *bits)),
+                    _ => None,
+                };
+                Some(minimal)
             }
             Expr::Int(value, _, width, raw)
                 if width.is_none()
@@ -156,29 +164,13 @@ impl<'a> Checker<'a> {
                         &crate::Numeric::CtBigInt::from_int(0),
                     ) != std::cmp::Ordering::Less =>
             {
-                let value = super::exact_integer_literal(*value, raw.as_deref());
-                match peer {
-                    Some(Type::IntN { signed, bits }) => {
-                        let (lower, upper) = crate::AST::int_range(*signed, *bits);
-                        if super::exact_integer_fits(&value, lower, upper) {
-                            *width = Some((*signed, *bits));
-                            Some(Type::IntN {
-                                signed: *signed,
-                                bits: *bits,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    Some(Type::Int) | None => {
-                        *width = None;
-                        Some(Type::Int)
-                    }
-                    Some(_) => {
-                        *width = None;
-                        Some(Type::Int)
-                    }
-                }
+                let exact = super::exact_integer_literal(*value, raw.as_deref());
+                let minimal = Self::minimal_literal_width(&exact, peer);
+                *width = match &minimal {
+                    Type::IntN { signed, bits } => Some((*signed, *bits)),
+                    _ => None,
+                };
+                Some(minimal)
             }
             _ => None,
         }
@@ -768,10 +760,12 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // D-INTLIT-WIDTH1=F / D-NUMLIT-PEER1=A: an unowned whole literal adopts a
-        // fixed-width peer that contains its singleton value; without a sized
-        // peer it stays `Int`. The ordinary value-set law then decides whether
-        // one operand widens to the other.
+        // D-INTLIT-WIDTH1=F / D-NUMLIT-PEER1=A: an unowned whole literal takes
+        // its own minimal width in a sized peer's signedness family; without a
+        // sized peer it stays `Int`. The ordinary value-set law then decides
+        // whether one operand widens to the other — the peer's width is never
+        // pushed onto the numeral, so a numeral the peer cannot hold widens the
+        // join instead of being rejected against the peer.
         let lhs_is_literal = Self::is_bare_integer_literal(lhs);
         let rhs_is_literal = Self::is_bare_integer_literal(rhs);
         if let Some(minimal) =

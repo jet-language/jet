@@ -6206,6 +6206,18 @@ fn lower_method_call_impl(
                     rhs.borrow = true;
                 }
             }
+            // D-NUMOPS1/D-FAIL-ARITH1: an arithmetic operator that reached its
+            // bound generically (`fn f<T: Add>(l: T, r: T) => T { return l + r }`)
+            // traps in the same Prelude kernel as the direct operator, so it must
+            // report the same Jet location. Record the operator's source line
+            // here; emit then spells the trait's `_at` entry point, whose
+            // fixed-width impls thread `(file, line)` into `jet_add`/`jet_div`.
+            // Without it the call lands on the impl's location-free plain method,
+            // whose only spellable placeholder is `<built-in Add>:0`.
+            // `equal`/`compare` never trap, so they carry no line.
+            let operator_line = (builtin_operator
+                && matches!(method, "add" | "sub" | "mul" | "div"))
+            .then(|| crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32);
             // A specialized generic/variadic parameter can retain the trait as
             // `recv_type` while its lowered TIR type is the exact concrete
             // implementation. Keep that concrete ABI and dispatch directly;
@@ -6227,7 +6239,7 @@ fn lower_method_call_impl(
                         type_args: type_args.to_vec(),
                         args: targs,
                         source_first_string_literal: first_string_literal_arg(args),
-                        operator_line: None,
+                        operator_line,
                     },
                 };
             }
@@ -6240,7 +6252,7 @@ fn lower_method_call_impl(
                     type_args: type_args.to_vec(),
                     args: targs,
                     source_first_string_literal: first_string_literal_arg(args),
-                    operator_line: None,
+                    operator_line,
                 },
             };
         }
