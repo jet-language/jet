@@ -59,11 +59,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
     fresh_runtime_with_program_allocator(None)
 }
 
-pub(crate) fn fresh_runtime_for_program(program: &JitProgram) -> JitRuntime {
-    fresh_runtime_with_program_allocator(program.program_allocator_cap_bytes)
-}
-
-fn fresh_runtime_with_program_allocator(cap_bytes: Option<u64>) -> JitRuntime {
+pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRuntime {
     JitRuntime {
         source_file: String::new(),
         source_text: String::new(),
@@ -504,10 +500,15 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
     })
 }
 
-pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, String> {
+pub(crate) fn resident_run_fresh(
+    program: &JitProgram,
+    cap_bytes: Option<u64>,
+) -> Result<RunOutcome, String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
-    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime_for_program(program)));
+    RESIDENT_RUNTIME.with(|slot| {
+        *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
+    });
     super::tier_cache::begin_capture();
     let compiled = ensure_resident_module(program);
     if compiled.is_err() {
@@ -524,13 +525,19 @@ pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, Str
 }
 
 /// Mixed-tier run: Cranelift for covered funcs, interpreter stubs for named gaps.
-pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Result<RunOutcome, String> {
+pub(crate) fn resident_run_mixed(
+    program: &JitProgram,
+    plan: &TierPlan,
+    cap_bytes: Option<u64>,
+) -> Result<RunOutcome, String> {
     use cranelift_module::Module;
 
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
     clear_deopt_state();
-    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime_for_program(program)));
+    RESIDENT_RUNTIME.with(|slot| {
+        *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
+    });
 
     let mut deopt_index = HashMap::new();
     let mut deopt_names = Vec::new();
@@ -550,7 +557,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
     let (mut module, host) = new_jit_module()?;
     let mut runtime = RESIDENT_RUNTIME
         .with(|slot| slot.borrow_mut().take())
-        .unwrap_or_else(fresh_runtime);
+        .unwrap_or_else(|| fresh_runtime_with_allocator_cap(cap_bytes));
     let main_id = compile_program_tiered(
         &mut module,
         &host,
@@ -593,13 +600,22 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
     resident_invoke()
 }
 
-pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
+pub(crate) fn resident_hot_swap(
+    program: &JitProgram,
+    cap_bytes: Option<u64>,
+) -> Result<RunOutcome, String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     // Rebuild the module (Cranelift rejects redefining `__jet_jit_main`) but keep
     // the live runtime heap — the M2 contract.
     crate::CoreHost::reset_jit_interrupts();
-    let mut runtime =
-        RESIDENT_RUNTIME.with(|slot| slot.borrow_mut().take().unwrap_or_else(fresh_runtime));
+    let mut runtime = RESIDENT_RUNTIME
+        .with(|slot| slot.borrow_mut().take())
+        .unwrap_or_else(|| fresh_runtime_with_allocator_cap(cap_bytes));
+    runtime.program_allocator.release_hosted_reservations();
+    runtime.program_allocator = cap_bytes.map_or_else(
+        jet_codegen::program_allocator::JetProgramAllocator::system,
+        jet_codegen::program_allocator::JetProgramAllocator::counting,
+    );
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     let (mut module, host) = new_jit_module()?;
     let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;

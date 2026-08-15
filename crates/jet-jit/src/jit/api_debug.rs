@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use super::gap::{entry_run_name, JitGap};
 use super::resident::{
-    ensure_resident_module, fresh_runtime_for_program, resident_hot_swap, resident_run_fresh,
-    resident_run_mixed, resident_teardown,
+    ensure_resident_module, fresh_runtime_with_allocator_cap, resident_hot_swap,
+    resident_run_fresh, resident_run_mixed, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
 use super::tiers::{plan_tiers, record_trace};
@@ -59,6 +59,7 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
     }
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
+    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -70,7 +71,9 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
     }
     note_jit_execution();
     if plan.deopt.is_empty() {
-        match catch_jit_panic("resident run", || resident_run_fresh(&program)) {
+        match catch_jit_panic("resident run", || {
+            resident_run_fresh(&program, cap_bytes)
+        }) {
             Ok(outcome) => {
                 record_trace(plan.rows);
                 Ok(outcome)
@@ -88,7 +91,7 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
     } else {
         // Mixed: native entry + interpreter stubs for named gaps.
         match catch_jit_panic("mixed tier run", || {
-            resident_run_mixed(&program, &plan)
+            resident_run_mixed(&program, &plan, cap_bytes)
         }) {
             Ok(outcome) => {
                 super::trace::note_deopt_invoked_for_test();
@@ -116,6 +119,7 @@ pub(crate) fn try_resident_hot_swap(
     }
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
+    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
     if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
         let mut plan = plan_tiers(bundle, None);
         if let Some(gap) = plan.gap.as_mut() {
@@ -137,7 +141,7 @@ pub(crate) fn try_resident_hot_swap(
         return Err(plan);
     }
     note_jit_execution();
-    match resident_hot_swap(&program) {
+    match resident_hot_swap(&program, cap_bytes) {
         Ok(outcome) => {
             record_trace(plan.rows);
             Ok(outcome)
@@ -157,6 +161,7 @@ pub(crate) fn try_resident_restart(
     jet_foundation::Persist::shared_clear();
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
+    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
     if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
         let mut plan = plan_tiers(bundle, None);
         if let Some(gap) = plan.gap.as_mut() {
@@ -175,7 +180,7 @@ pub(crate) fn try_resident_restart(
     }
     note_jit_execution();
     if plan.deopt.is_empty() {
-        match resident_run_fresh(&program) {
+        match resident_run_fresh(&program, cap_bytes) {
             Ok(outcome) => {
                 record_trace(plan.rows);
                 Ok(outcome)
@@ -183,7 +188,7 @@ pub(crate) fn try_resident_restart(
             Err(_) => Err(plan),
         }
     } else {
-        match resident_run_mixed(&program, &plan) {
+        match resident_run_mixed(&program, &plan, cap_bytes) {
             Ok(outcome) => {
                 super::trace::note_deopt_invoked_for_test();
                 record_trace(plan.rows);
@@ -220,6 +225,7 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
         return Err("cranelift-jit host path unsupported on this architecture".to_string());
     }
     crate::Ffi::bind_bundle_ffi(bundle)?;
+    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
     let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
         format!(
             "lower_jit_program returned None ({})",
@@ -235,7 +241,7 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
         crate::CLI::prepare_cli_from_bundle(bundle);
         crate::Ffi::bind_bundle_ffi(bundle)?;
         RESIDENT_RUNTIME.with(|slot| {
-            *slot.borrow_mut() = Some(fresh_runtime_for_program(&program))
+            *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
         });
         ensure_resident_module(&program)
     })

@@ -17,17 +17,26 @@
 
 /// D-ALLOC-PROGRAM1=A / I9: engines only marshal the checked typed fact into
 /// the allocator kernel compiled from Prelude/ProgramAllocator.rs.
-fn with_program_allocator<R>(
+fn program_allocator_cap_bytes(
     bundle: &jet_foundation::AST::ProgramBundle,
-    run: impl FnOnce() -> R,
-) -> R {
-    let cap_bytes = match &bundle.program_allocator {
+) -> Option<u64> {
+    match &bundle.program_allocator {
         jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } => {
             Some(cap.map_or(0, |size| size.bytes))
         }
         _ => None,
-    };
-    jet_codegen::program_allocator::jet_with_host_program_allocator(cap_bytes, run).0
+    }
+}
+
+fn with_program_allocator<R>(
+    bundle: &jet_foundation::AST::ProgramBundle,
+    run: impl FnOnce() -> R,
+) -> R {
+    jet_codegen::program_allocator::jet_with_host_program_allocator(
+        program_allocator_cap_bytes(bundle),
+        run,
+    )
+    .0
 }
 pub mod Job {
     include!("../../jet-codegen/src/Prelude/Job.rs");
