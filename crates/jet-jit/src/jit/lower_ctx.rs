@@ -24708,6 +24708,44 @@ impl LowerCtx<'_, '_> {
                 let one = self.b.ins().iconst(types::I8, 1);
                 self.b.ins().isub(one, eq)
             }
+            // Auto-derived `Comparable` on a struct with a list field is
+            // `self.f < rhs.f` then `self.f > rhs.f`
+            // (`Sema/Registration/Derives.rs::struct_derive_items`), so a
+            // generic module's `[T#capacity]` slot reaches the resident tier as
+            // an ordering over a heap list handle. AOT runs Rust's slice
+            // `PartialOrd` on `[T; n]`; the host reports that same law as an
+            // ordering tag (0 less, 1 equal, 2 greater, 3 incomparable) and the
+            // requested operator is rebuilt from the tag here.
+            (
+                Type::List(_) | Type::FixedList { .. },
+                BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge,
+            ) => {
+                // The element decides which handle shape the host reads, so
+                // erase `#Numeric` / tagged wrappers first: a `[Meter#3]` slot
+                // stores f64 elements even though the element type is Named.
+                let elem = match &lhs_ty {
+                    Type::List(elem) => Some(elem.as_ref()),
+                    Type::FixedList { elem, .. } => Some(elem.as_ref()),
+                    _ => None,
+                }
+                .map(|elem| self.erase_distinct_ty(elem));
+                let host = match &elem {
+                    Some(Type::String) => self.host.coll.list_order_str,
+                    Some(Type::Float | Type::Float32) => self.host.coll.list_order_f64,
+                    _ => self.host.coll.list_order,
+                };
+                let ordering = self.call_host(host, &[l, r]);
+                let strict_tag: i64 = if matches!(op, BinOp::Lt | BinOp::Le) { 0 } else { 2 };
+                let strict_tag = self.b.ins().iconst(types::I8, strict_tag);
+                let strict = self.bool_from_icmp(IntCC::Equal, ordering, strict_tag);
+                if matches!(op, BinOp::Lt | BinOp::Gt) {
+                    strict
+                } else {
+                    let equal_tag = self.b.ins().iconst(types::I8, 1);
+                    let equal = self.bool_from_icmp(IntCC::Equal, ordering, equal_tag);
+                    self.b.ins().bor(strict, equal)
+                }
+            }
             _ => return Err("jit binary op unsupported".to_string()),
         })
     }

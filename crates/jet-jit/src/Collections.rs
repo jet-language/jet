@@ -1160,6 +1160,38 @@ extern "C" fn jet_jit_list_eq_f64(a: i64, b: i64) -> i8 {
     collection_semantics::list_equal(&clone_list_floats(a), &clone_list_floats(b)) as i8
 }
 
+/// Lexicographic list ordering for `[T]` / `[T#n]` under `<`, `<=`, `>`, `>=`.
+///
+/// AOT emits the bare Rust operator on whatever the operand lowers to —
+/// `[i64; 3]` for `[Int#3]`, `Vec<i64>` for `[Int]` (the plain `rust_spell`
+/// arm of `Codegen/TIR/emit/expressions.rs`) — so the ordering law for these
+/// types is Rust's own slice `PartialOrd`; the Prelude has `jet_list_equal`
+/// but no ordering kernel to call. Ask that one law once and report it as a
+/// tag, so this host never decides which of the four operators was written and
+/// float partiality survives the crossing: `0` less, `1` equal, `2` greater
+/// (the same numbering `ordering_from_flags` uses), `3` incomparable — a NaN
+/// element, where all four operators are false in both tiers.
+fn list_order<T: PartialOrd>(left: &[T], right: &[T]) -> i8 {
+    match left.partial_cmp(right) {
+        Some(std::cmp::Ordering::Less) => 0,
+        Some(std::cmp::Ordering::Equal) => 1,
+        Some(std::cmp::Ordering::Greater) => 2,
+        None => 3,
+    }
+}
+
+extern "C" fn jet_jit_list_order(a: i64, b: i64) -> i8 {
+    list_order(&clone_list_ints(a), &clone_list_ints(b))
+}
+
+extern "C" fn jet_jit_list_order_str(a: i64, b: i64) -> i8 {
+    list_order(&clone_list_strings(a), &clone_list_strings(b))
+}
+
+extern "C" fn jet_jit_list_order_f64(a: i64, b: i64) -> i8 {
+    list_order(&clone_list_floats(a), &clone_list_floats(b))
+}
+
 /// Mirror AOT `jet_iter_indexes(n)` — materialize `Iter<Int>` as a list handle.
 extern "C" fn jet_jit_list_indexes(n: i64) -> i64 {
     let n = n.max(0);
@@ -4750,6 +4782,9 @@ host_fns! {
     list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
     list_eq_str: "jet_jit_list_eq_str" => jet_jit_list_eq_str: sig_list_eq;
     list_eq_f64: "jet_jit_list_eq_f64" => jet_jit_list_eq_f64: sig_list_eq;
+    list_order: "jet_jit_list_order" => jet_jit_list_order: sig_list_eq;
+    list_order_str: "jet_jit_list_order_str" => jet_jit_list_order_str: sig_list_eq;
+    list_order_f64: "jet_jit_list_order_f64" => jet_jit_list_order_f64: sig_list_eq;
     list_indexes: "jet_jit_list_indexes" => jet_jit_list_indexes: sig_len;
     list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
