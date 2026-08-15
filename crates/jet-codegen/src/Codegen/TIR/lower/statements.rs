@@ -1817,8 +1817,11 @@ fn refutable_binding_name<'a>(pattern: &'a Pattern, init: &TExpr) -> Option<&'a 
     }
 }
 
-fn is_direct_refutable_pattern(pattern: &Pattern) -> bool {
-    matches!(pattern, Pattern::Variant { .. })
+fn is_direct_refutable_pattern(pattern: &Pattern, cx: &Cx) -> bool {
+    matches!(
+        pattern,
+        Pattern::Variant { variant, .. } if cx.variant_owner.contains_key(variant)
+    )
 }
 
 fn lower_refutable_fallback(
@@ -1865,7 +1868,6 @@ fn lower_refutable_fallback(
         }
     }
 }
-
 #[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
@@ -2120,7 +2122,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             if matches!(
                 &b.pattern,
                 Some(BindPattern::Refutable { pattern, .. })
-                    if is_direct_refutable_pattern(pattern)
+                    if is_direct_refutable_pattern(pattern, cx)
             ) => {
             let Some(BindPattern::Refutable {
                 pattern,

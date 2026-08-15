@@ -96,14 +96,16 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 // shared `RefutableBind` node so every tier keeps captures in
                 // the surrounding scope after the miss route diverges.
                 Some(BindPattern::Refutable {
-                    pattern:
-                        Pattern::Ok { .. }
-                        | Pattern::Present { .. }
-                        | Pattern::Variant { .. },
+                    pattern,
                     fallback,
                     names,
                     ..
-                }) => {
+                }) if matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
+                    || matches!(
+                        pattern,
+                        Pattern::Variant { variant, .. }
+                            if cx.variant_owner.contains_key(variant)
+                    ) => {
                     let ok = !b.is_comptime
                         && !b.uninit
                         && expr_in_subset(&b.init, cx, locals)
