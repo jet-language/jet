@@ -559,7 +559,19 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 self.fold_comptime_struct_field(base);
+                // The comptime projection probes `base` speculatively and
+                // discards the result whenever the fold does not apply (the
+                // `ComptimeName` check just below). `borrow_ctx` is a one-shot
+                // fact about the expression `infer_checked` is about to claim
+                // — it is taken there, before the ordinary dispatch — so a
+                // probe must restore it. Consuming it re-classified a borrow
+                // position as an owning read: a mutating method's receiver
+                // rooted in an index (`pool[id].children.push(child)`) then
+                // took a silent `Expr::Copy`, and every tier pushed into the
+                // copy instead of the stored collection (D-MEM1 S6).
+                let saved_borrow_ctx = self.borrow_ctx;
                 let base_ty = self.infer(base);
+                self.borrow_ctx = saved_borrow_ctx;
                 let Expr::ComptimeName { name, value, .. } = base.as_mut() else {
                     return None;
                 };
