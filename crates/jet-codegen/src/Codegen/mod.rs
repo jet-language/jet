@@ -3780,6 +3780,19 @@ fn uses_gtk_backend(bundle: &ProgramBundle) -> bool {
         && bundle.used_core.iter().any(|u| u == "core.ui::gtk_backend")
 }
 
+/// `Prelude/CoreLib/Top/EncodingCodecs.rs` reads the package edition as
+/// `__JET_PACKAGE_EDITION`, and the CoreLib kernel is emitted whenever a program
+/// mentions any default `Int`. Every harness therefore needs the constant, so one
+/// helper emits it: three hand-written copies had already drifted, leaving the
+/// fuzz harness with the three uses and no definition (rustc E0425 on generated
+/// code, an I2 violation). Unconditional on purpose — the harness carries
+/// `#![allow(warnings)]`, so an unused const costs nothing, and a definition that
+/// is never gated cannot drift from the use guard again.
+fn push_package_edition(out: &mut String, bundle: &ProgramBundle) {
+    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
+    out.push_str(&format!("const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"));
+}
+
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
     emit_bundle_dbg(bundle, link, false, Syntax::OSTarget::host())
 }
@@ -3818,8 +3831,7 @@ pub fn emit_bundle_dbg(
         out.push_str(&format!("// jet:generic-instance module={} fingerprint={} full-key={}\n", provenance.canonical_module, provenance.fingerprint, provenance.full_key_hex));
     }
     out.push_str("#![allow(warnings)]\n\n");
-    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
-    out.push_str(&format!("const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"));
+    push_package_edition(&mut out, bundle);
     emit_command_metadata(bundle, active_os, &mut out);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
@@ -4094,10 +4106,7 @@ fn emit_bundle_tests_cov_inner(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
-    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
-    out.push_str(&format!(
-        "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
-    ));
+    push_package_edition(&mut out, bundle);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
@@ -4390,6 +4399,7 @@ pub fn emit_bundle_fuzz(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    push_package_edition(&mut out, bundle);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
@@ -4723,10 +4733,7 @@ fn emit_bundle_benches_inner(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
-    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
-    out.push_str(&format!(
-        "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
-    ));
+    push_package_edition(&mut out, bundle);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }

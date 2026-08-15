@@ -46,9 +46,12 @@ fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
 }
 
 
-/// Preserve a child process failure when the OS reports termination by signal
-/// instead of an ordinary numeric exit status.
-fn child_exit_code(status: std::process::ExitStatus) -> i32 {
+/// The one home for turning a finished child process into this process's exit
+/// status. A harness child that stopped at runtime (`require`, `panic`) already
+/// chose its status through `jet_runtime_boundary` — the CLI relays it instead
+/// of inventing a second, weaker one. A termination by signal has no numeric
+/// status, so it falls back to the driver-reported user error.
+pub(crate) fn child_exit_code(status: std::process::ExitStatus) -> i32 {
     status.code().unwrap_or(ExitCodes::USER_ERROR)
 }
 
@@ -3138,7 +3141,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
         }
     };
     let _ = fs::remove_file(&bin);
-    exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
+    exit(child_exit_code(status));
 }
 
 /// D-BUILDNORM1=A (Tower #85): SHA-256 of the enclosing Package root's bytes, or

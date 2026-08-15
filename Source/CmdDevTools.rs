@@ -3222,7 +3222,11 @@ fn collect_bench_evidence_with_filter(
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
     }
     if !out.status.success() {
-        exit(ExitCodes::USER_ERROR);
+        // A failed `#Bench` body stops the harness through the shared runtime
+        // boundary, which already picked the program-stop status (70 for
+        // E3001). Relay it: replacing it with the driver's own USER_ERROR would
+        // report a program stop as a jet-side problem.
+        exit(crate::CmdCompile::child_exit_code(out.status));
     }
     let stdout = String::from_utf8(out.stdout).unwrap_or_else(|_| {
         eprintln!("bench: harness emitted non-UTF-8 evidence");

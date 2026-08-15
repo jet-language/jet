@@ -699,6 +699,23 @@ fn append_effective(
     }
 }
 
+/// Enumerate the functions a scoped memory fact is declared *about*.
+///
+/// A `#Policy(no_alloc)` / `zero_rc` / `arena_bounded(N)` declaration is a
+/// promise about the code the module wrote. Compiler-synthesized members are
+/// not that code: the auto-derived `encode`/`decode` codecs
+/// (`ImplDef::is_generated_serde`) and the structural `equal`/`compare`
+/// blocks (`TraitImplBlock::compiler_generated`) are attached by the package
+/// auto-derive default, and an auto-derived `encode` returns a `DataTree`
+/// object built from a map literal — it allocates by construction. Rooting
+/// one would make a module-scope `no_alloc` incompatible with declaring any
+/// struct at all.
+///
+/// The skip is on root enumeration only. Their memory events stay recorded
+/// and their call edges stay traversable, so an authored root that really
+/// calls `e.encode()` still reaches the allocation through the graph and
+/// still reports E0921 with the full call path. A codec nobody calls
+/// allocates nothing, so there is no fact left to prove about it.
 fn collect_function_keys(items: &[Item], alias: &str, out: &mut Vec<(Span, String)>) {
     fn one(
         function: &crate::AST::Func,
@@ -711,18 +728,19 @@ fn collect_function_keys(items: &[Item], alias: &str, out: &mut Vec<(Span, Strin
     for item in items {
         match item {
             Item::Func(function) => one(function, None, alias, out),
+            Item::Impl(implementation) if implementation.is_generated_serde => {}
             Item::Impl(implementation) => {
                 for method in &implementation.methods { one(method, Some(&implementation.type_name), alias, out); }
             }
             Item::Struct(definition) => {
                 for method in &definition.methods { one(method, Some(&definition.name), alias, out); }
-                for block in &definition.trait_impls {
+                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
                     for method in &block.methods { one(method, Some(&definition.name), alias, out); }
                 }
             }
             Item::Enum(definition) => {
                 for method in &definition.methods { one(method, Some(&definition.name), alias, out); }
-                for block in &definition.trait_impls {
+                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
                     for method in &block.methods { one(method, Some(&definition.name), alias, out); }
                 }
             }

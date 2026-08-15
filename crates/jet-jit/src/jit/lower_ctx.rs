@@ -10437,6 +10437,66 @@ impl LowerCtx<'_, '_> {
         Some(format!("{}::{}", base, method.name))
     }
 
+    /// D-CAPBUNDLE1 / D-QUAL3: `+ - * /` that resolved to a synthetic operator
+    /// trait rather than to a Jet method body — a `#Numeric` distinct type's
+    /// operator (`Usd :: distinct Int`, a `#UnitFamily` member), or the same
+    /// operator reached through a generic `T: Add` bound.
+    ///
+    /// AOT emits a compiler-owned `impl __jet_Add for Usd`, so there is no
+    /// `Usd::add` function for `func_ids` to hold and the key lookup can only
+    /// fail. Run the arithmetic that impl runs, on the erased scalar ABI the
+    /// resident tier already stores the value in — the same host calls
+    /// `lower_binary` uses for the base type.
+    fn lower_builtin_operator(
+        &mut self,
+        recv: &TExpr,
+        method: &str,
+        args: &[TCallArg],
+        line: u32,
+    ) -> Result<Value, String> {
+        let op = match method {
+            "add" => BinOp::Add,
+            "sub" => BinOp::Sub,
+            "mul" => BinOp::Mul,
+            "div" => BinOp::Div,
+            other => return Err(format!("jit operator method `{other}` unsupported")),
+        };
+        let [arg] = args else {
+            return Err(format!("jit operator `{method}` needs one argument"));
+        };
+        let base = self.erase_distinct_ty(&recv.ty);
+        let left = self.lower_expr(recv)?;
+        let right = self.lower_call_arg(arg)?;
+        match base {
+            Type::Int => {
+                let host_id = match op {
+                    BinOp::Add => self.host.num.int_add,
+                    BinOp::Sub => self.host.num.int_sub,
+                    BinOp::Mul => self.host.num.int_mul,
+                    _ => self.host.num.int_div,
+                };
+                Ok(self.call_host(host_id, &[left, right]))
+            }
+            Type::Float | Type::Float32 => Ok(match op {
+                BinOp::Add => self.b.ins().fadd(left, right),
+                BinOp::Sub => self.b.ins().fsub(left, right),
+                BinOp::Mul => self.b.ins().fmul(left, right),
+                _ => self.b.ins().fdiv(left, right),
+            }),
+            Type::IntN { signed, bits } => self.lower_intn_values(
+                op,
+                INTN_MODE_TRAP,
+                left,
+                right,
+                signed,
+                bits,
+                true,
+                line,
+            ),
+            other => Err(format!("jit operator base type unsupported: {other:?}")),
+        }
+    }
+
     fn require_raw_bag_key(&self, recv_ty: &Type) -> Result<(), String> {
         match recv_ty {
             Type::Apply { name, args }
@@ -16752,6 +16812,7 @@ impl LowerCtx<'_, '_> {
                 method,
                 type_args,
                 args,
+                operator_line,
                 ..
             } => {
                 if method.name == "compare"
@@ -16817,6 +16878,30 @@ impl LowerCtx<'_, '_> {
                             return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
                         }
                         return Err(format!("jit or_err payload type unsupported: {inner:?}"));
+                    }
+                }
+                // D-CAPBUNDLE1 / D-QUAL3 / D-NUMOPS1: an arithmetic operator
+                // that dispatched through a synthetic operator trait — a
+                // `#Numeric` distinct type's `+`, or the same operator reached
+                // through a generic `T: Add` bound (TIR stamps `operator_line`
+                // on the latter). Those impls are compiler-owned, so no
+                // `Type::add` function is ever registered; resolve them against
+                // the erased base instead of declining the whole function.
+                if matches!(method.name.as_str(), "add" | "sub" | "mul" | "div")
+                    && args.len() == 1
+                {
+                    let base = self.erase_distinct_ty(&recv.ty);
+                    let wrapper = base != recv.ty;
+                    let has_body = self
+                        .method_key(&recv.ty, method, type_args)
+                        .is_some_and(|key| self.func_ids.contains_key(&key));
+                    if !has_body {
+                        if let Some(line) = *operator_line {
+                            return self.lower_builtin_operator(recv, &method.name, args, line);
+                        }
+                        if wrapper {
+                            return self.lower_builtin_operator(recv, &method.name, args, 0);
+                        }
                     }
                 }
                 let key = self.method_key(&recv.ty, method, type_args)
@@ -19639,12 +19724,15 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::SetSort => {
                 let list = self.call_host(self.host.coll.set_to_list, &[recv_val]);
-                let host = if matches!(&recv_ty, Type::Apply { args, .. } if args.as_slice() == [Type::String]) {
+                let host_id = if matches!(&recv_ty, Type::Apply { args, .. } if args.as_slice() == [Type::String]) {
                     self.host.coll.list_sort_str
                 } else {
                     self.host.coll.list_sort
                 };
-                self.call_host(host, &[list]);
+                // `jet_jit_list_sort` sorts in place and returns nothing, so it
+                // must not go through `call_host` (which reads result 0).
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                self.b.ins().call(host_ref, &[list]);
                 Ok(list)
             }
             TBuiltinOp::SetShuffle => {
