@@ -1495,7 +1495,7 @@ fn main() {
 
     // Commands with no required positional target.
     match cmd {
-        "fix" if args.get(1).map(String::as_str) == Some("memory") => {
+        "fix" if args.get(1).map(|arg| arg.as_str()) == Some("memory") => {
             CmdMemory::fix(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
             return;
         }

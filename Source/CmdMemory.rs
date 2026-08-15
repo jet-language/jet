@@ -138,7 +138,7 @@ pub(crate) fn fix(args: &[String], mode: OutputMode) {
                     row.span_start,
                     row.span_end,
                     json_escape(&row.repairs[0]),
-                    changed && !dry_run,
+                    *changed && !dry_run,
                 )
             })
             .collect::<Vec<_>>()
