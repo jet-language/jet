@@ -739,6 +739,12 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                     measured.as_f64(),
                     uncertainty.as_f64(),
                 )))
+            } else if matches!(value, CtValue::Struct { .. } | CtValue::Enum { .. })
+                && core_display.is_none()
+            {
+                // A non-Core nominal needs the evaluator's declaration metadata
+                // for source names, union erasure, and typed nested Debug.
+                None
             } else {
                 canonical_structural_display(value)
             }
