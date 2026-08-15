@@ -450,6 +450,41 @@ impl<'a> Checker<'a> {
         Some(Some(ty))
     }
 
+    fn fold_comptime_struct_field(&mut self, expr: &mut Expr) -> Option<Type> {
+        let Expr::Field(inner, member, span) = expr else {
+            return None;
+        };
+        if Syntax::fact_read_kind(member).is_some() {
+            return None;
+        }
+        let member = member.clone();
+        let span = *span;
+        let Expr::ComptimeName { name, value, .. } = inner.as_mut() else {
+            return None;
+        };
+        if value.is_none() {
+            *value = self.current_ct_globals().get(name).cloned();
+        }
+        let (projected, declared_ty) = match value.as_ref()? {
+            crate::Comptime::CtValue::Struct { type_name, fields } => {
+                let projected = fields
+                    .iter()
+                    .find(|(field, _)| field == &member)
+                    .map(|(_, value)| value)
+                    .cloned()?;
+                (projected, core_struct_field(type_name, &member))
+            }
+            _ => return None,
+        };
+        let ty = declared_ty.unwrap_or_else(|| projected.jet_type());
+        *expr = Expr::ComptimeName {
+            name: format!("\0jet.fact.{}", span.start),
+            span,
+            value: Some(projected),
+        };
+        Some(ty)
+    }
+
     pub(crate) fn default_err_value(
         &mut self,
         mut call: Call,
@@ -2778,6 +2813,9 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(result) = self.fold_fact_read(e) {
                     return result;
+                }
+                if let Some(ty) = self.fold_comptime_struct_field(e) {
+                    return Some(ty);
                 }
                 let Expr::Field(inner, member, _) = e else {
                     unreachable!("matched Field above")
