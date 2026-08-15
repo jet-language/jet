@@ -709,8 +709,8 @@ pub fn evaluate(
 }
 
 /// D-CONF-MODULE1=A: the one closed-value evaluator for settings and generic
-/// module value arguments. Build facts are folded into ordinary literals
-/// before the existing fuel-limited Tier-0 evaluator runs, so arithmetic,
+/// module value arguments. Registered facts are folded into value-carrying AST
+/// nodes before the existing fuel-limited evaluator runs, so arithmetic,
 /// bindings, calls, purity, and fuel keep one semantic path.
 pub fn evaluate_closed_value(
     init: &crate::AST::Expr,
@@ -735,14 +735,16 @@ pub fn evaluate_closed_value(
         &HashMap::new(),
         &[],
         None,
+        &[],
         build_facts,
     )
     .map(|(value, _)| value)
 }
 
 /// D-CONF-MODULE1=A: the settings evaluator is also the definition-side
-/// comptime evaluator. Its optional collection arguments preserve the normal
-/// build-time I/O evidence path while the fact leaves are folded first.
+/// comptime evaluator. Source items let the shared fact reader resolve
+/// declaration facts before registration; optional collection arguments
+/// preserve the normal build-time I/O evidence path.
 pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, &'a Func>,
@@ -758,9 +760,10 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
     distinct_bases: &HashMap<String, crate::AST::Type>,
     unit_families: &[crate::AST::UnitFamilyDef],
     mutated: Option<&mut HashMap<String, CtValue>>,
+    fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
-    let closed = fold_build_facts(init, build_facts);
+    let closed = fold_build_facts(init, fact_items, build_facts);
     evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
         funcs,
@@ -781,37 +784,46 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
 
 fn fold_build_facts(
     init: &crate::AST::Expr,
+    fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> crate::AST::Expr {
     let mut closed = init.clone();
     closed.for_each_expr_mut(|expr| {
-        let Some(value) = fact_read_value(expr, &[], build_facts) else {
+        let Some(value) = fact_read_value(expr, fact_items, build_facts) else {
             return;
         };
         let span = expr.span();
-        if let Some(literal) = build_fact_expr(value, span) {
-            *expr = literal;
-        }
+        *expr = match build_fact_expr(&value, span) {
+            Some(literal) => literal,
+            None => crate::AST::Expr::ComptimeName {
+                name: "@fact".to_string(),
+                span,
+                value: Some(value),
+            },
+        };
     });
     closed
 }
 
-fn build_fact_expr(value: CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
+fn build_fact_expr(
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Option<crate::AST::Expr> {
     Some(match value {
-        CtValue::Bool(value) => crate::AST::Expr::Bool(value, span),
-        CtValue::Int(value) => crate::AST::Expr::Int(value, span, None, None),
+        CtValue::Bool(value) => crate::AST::Expr::Bool(*value, span),
+        CtValue::Int(value) => crate::AST::Expr::Int(*value, span, None, None),
         CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false),
-        CtValue::Char(value) => crate::AST::Expr::Char(value, span),
+        CtValue::Char(value) => crate::AST::Expr::Char(*value, span),
         CtValue::Str(value) => {
-            crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value)], span)
+            crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.clone())], span)
         }
         CtValue::Enum {
             type_name,
             variant,
             args,
         } if args.is_empty() => crate::AST::Expr::EnumLit {
-            type_name,
-            variant,
+            type_name: type_name.clone(),
+            variant: variant.clone(),
             args: Vec::new(),
             leading_dot: false,
             span,
@@ -2180,7 +2192,7 @@ fn comptime_literal_expr(
             value: Some(value),
         });
     }
-    build_fact_expr(value, span)
+    build_fact_expr(&value, span)
 }
 
 fn expand_template_type(

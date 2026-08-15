@@ -297,22 +297,6 @@ pub(crate) fn eval_comptime_items(
             if !crate::Comptime::check_build_time_io(&value, base_dir, diags) {
                 continue;
             }
-            // D-FACT-READ1=A: direct registered-plane reads have a typed value
-            // before the general evaluator runs. This is the same reader used
-            // after registration; the early pass only supplies source
-            // declarations because sema has not built the module registry yet.
-            if let Some(value) =
-                crate::Comptime::fact_read_value(&value, &eval_items, build_facts)
-            {
-                let ty = value.jet_type();
-                consts.insert(name.clone(), ty.clone());
-                globals.insert(name.clone(), value.clone());
-                if let Item::Const(c) = &mut items[index] {
-                    c.ty = Some(ty);
-                    c.ct = Some(value);
-                }
-                continue;
-            }
             // D-META-EFFECT1: evaluate_with_imports resolves Core calls
             // through the shared effect facts.
             let mut eval_value = value.clone();
@@ -345,6 +329,7 @@ pub(crate) fn eval_comptime_items(
                 &distinct_bases,
                 &unit_families,
                 None,
+                &eval_items,
                 build_facts,
             ) {
                 Ok((v, inputs)) => {

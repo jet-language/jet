@@ -26,7 +26,9 @@ module cache<K>(capacity: Int) {
     pub struct Buffer { items: [K#capacity] }
     pub fn slots() => Int :: capacity
 }
+@profile_slots :: @build.settings.cache_slots
 module tuned :: cache<Int>(@build.settings.cache_slots)
+module chained :: cache<Int>(@profile_slots)
 fn run() { print(tuned.slots()) }
 "#;
     let entry = root.join("main.jet");
@@ -64,6 +66,13 @@ fn run() { print(tuned.slots()) }
         assert_eq!(identity.argument_values[1], format!("value:{}", if profile == "compact" { 2 } else { 5 }));
         assert!(identity.argument_provenance[1].iter().any(|source| source.contains("settings.cache_slots")));
         assert!(identity.argument_provenance[1].iter().any(|source| source.contains(&format!("build.{profile}"))));
+        assert!(
+            identity
+                .applications
+                .iter()
+                .any(|application| application.name == "chained"),
+            "a setting folded through the definition evaluator must reuse the direct fact specialization"
+        );
         fingerprints.push(identity.fingerprint.clone());
     }
     assert_ne!(fingerprints[0], fingerprints[1], "profile values must not collide");
@@ -214,6 +223,36 @@ fn run() {
     jet::compile(source).unwrap_or_else(|diags| {
         panic!("canonical generic-module spelling failed: {diags:#?}")
     });
+}
+
+#[test]
+fn generic_module_diagnostics_hide_instance_mangling() {
+    let diagnostics = jet::compile(
+        r#"
+module box<T> {
+    pub struct Entry { value: T }
+}
+module boxed :: box<Int>
+fn wrong(value: boxed.Entry) => String { return value }
+fn run() {}
+"#,
+    )
+    .expect_err("the return type mismatch must be diagnosed");
+    let text = diagnostics
+        .iter()
+        .flat_map(|diagnostic| {
+            [
+                diagnostic.what.as_str(),
+                diagnostic.why.as_str(),
+                diagnostic.fix.as_str(),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !text.contains("M5BoxedEntry"),
+        "compiler-owned generic-module names leaked into a diagnostic: {text}"
+    );
 }
 
 #[test]
