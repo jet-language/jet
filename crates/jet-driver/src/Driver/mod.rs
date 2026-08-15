@@ -2936,7 +2936,15 @@ fn compile_bundle_path_build_inner(
             generated_lock_provenance = Some(locked_provenance);
         }
         let mut planned_bundle = if options.execute {
-            load_planned_runtime_bundle(file, &evaluated.plan, &generated, &bundle.project_root)?
+            let project_root = bundle.project_root.clone();
+            let fallback_bundle = runtime_bundle_for_package.take().unwrap_or(bundle);
+            load_planned_runtime_bundle(
+                file,
+                &evaluated.plan,
+                &generated,
+                &project_root,
+                fallback_bundle,
+            )?
         } else {
             bundle
         };
@@ -3148,19 +3156,11 @@ fn load_planned_runtime_bundle(
     plan: &crate::Comptime::Build::BuildPlan,
     generated: &[GeneratedSourceProvenance],
     project_root: &std::path::Path,
+    fallback_bundle: crate::AST::ProgramBundle,
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
     let sources = plan
         .selected_sources()
         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-    let Some(entry_source) = sources.first() else {
-        return Err(vec![Diagnostic::error(
-            "E3502",
-            "the selected build target has no Jet sources".to_string(),
-            "BuildPlan selects the exact program passed back through lexer, parser, sema, and codegen".to_string(),
-            "add the runtime entry file to the selected target's sources".to_string(),
-            None,
-        )]);
-    };
     let resolve = |path: &str| {
         let path = std::path::Path::new(path);
         if path.is_absolute() {
@@ -3169,12 +3169,20 @@ fn load_planned_runtime_bundle(
             project_root.join(path)
         }
     };
-    let entry_path = resolve(entry_source.as_str());
-    let mut bundle = crate::Loader::load_entry_with_overlay(
-        entry_path.to_str().unwrap_or(build_file),
-        None,
-        false,
-    )?;
+    // An empty/default BuildPlan augments the package's batteries program; it
+    // does not select a synthetic target with no sources. The caller retains
+    // the checked runtime bundle before switching to a separately discovered
+    // package build entry, or keeps it when build and run share a file.
+    let mut bundle = if let Some(entry_source) = sources.first() {
+        let entry_path = resolve(entry_source.as_str());
+        crate::Loader::load_entry_with_overlay(
+            entry_path.to_str().unwrap_or(build_file),
+            None,
+            false,
+        )?
+    } else {
+        fallback_bundle
+    };
 
     // Additional selected roots and generated modules merge before the one
     // complete sema pass, so runtime code can call generated declarations.
