@@ -2507,6 +2507,9 @@ fn compile_bundle_path_build_inner(
             .collect(),
         build_span.is_some(),
     )?;
+    // The cache capability is constructed only after parser, sema, policy,
+    // extension, and diagnostic classification have all succeeded.
+    let front_end_completion = crate::Comptime::Build::FrontEndCompletion::all_complete();
 
     let mut build_run = None;
     let mut filesystem_transaction = None;
@@ -2872,7 +2875,7 @@ fn compile_bundle_path_build_inner(
                 &evaluated.plan,
                 &bundle.project_root,
                 &execution_grants,
-                crate::Comptime::Build::FrontEndCompletion::all_complete(),
+                front_end_completion,
                 options.remote.as_ref(),
                 Some(&compiler_runner),
             )

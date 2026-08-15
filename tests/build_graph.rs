@@ -2858,79 +2858,83 @@ fn front_end_completion_gates_cache_lookup() {
 #[test]
 fn per_package_dependency_artifacts_restore_and_invalidate() {
     let root = std::env::temp_dir().join(format!(
-        "jet_build_package_actions_{}_{}",
-        std::process::id(),
-        "restore"
+        "jet_build_package_actions_{}_restore",
+        std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
 
-    let make_plan = |identity: &str, target: &str, profile: &str, alpha_source: &[u8]| {
-        let mut context = BuildContext::new();
-        let app = context
-            .add_executable("app", TargetSpec::new().with_source("main.jet"))
+    let make_plan =
+        |identity: &str, target: &str, profile: &str, alpha_source: &[u8], beta_source: &[u8]| {
+            let mut context = BuildContext::new();
+            let app = context
+                .add_executable("app", TargetSpec::new().with_source("main.jet"))
+                .unwrap();
+            let mut plan = context.plan_with_default(app).unwrap();
+            plan.add_compiler_package_actions(
+                &[
+                    CompilerPackageSpec::new(
+                        "alpha",
+                        ContentDigest::from_bytes(alpha_source),
+                        Vec::new(),
+                    ),
+                    CompilerPackageSpec::new(
+                        "beta",
+                        ContentDigest::from_bytes(beta_source),
+                        Vec::new(),
+                    ),
+                    CompilerPackageSpec::new(
+                        "app",
+                        ContentDigest::from_bytes(b"app"),
+                        vec!["alpha".to_string(), "beta".to_string()],
+                    ),
+                ],
+                identity,
+                target,
+                profile,
+            )
             .unwrap();
-        let mut plan = context.plan_with_default(app).unwrap();
-        plan.add_compiler_package_actions(
-            &[
-                CompilerPackageSpec::new(
-                    "alpha",
-                    ContentDigest::from_bytes(alpha_source),
-                    Vec::new(),
-                ),
-                CompilerPackageSpec::new(
-                    "app",
-                    ContentDigest::from_bytes(b"app"),
-                    vec!["alpha".to_string()],
-                ),
-            ],
-            identity,
-            target,
-            profile,
-        )
-        .unwrap();
-        plan
-    };
+            plan
+        };
     let plan = make_plan(
         "jet-test-compiler@clean",
         "native-test-target",
         "debug",
         b"alpha",
+        b"beta",
     );
 
-    let compiler = |action: &jet::Comptime::Build::BuildAction, _snapshots: &[ActionInputSnapshot]| {
-        let source = action
-            .labels
-            .get("compiler.source-digest")
-            .map(String::as_str)
-            .unwrap_or_default();
-        let identity = action
-            .labels
-            .get("compiler.identity")
-            .map(String::as_str)
-            .unwrap_or_default();
-        let target = action
-            .labels
-            .get("compiler.target")
-            .map(String::as_str)
-            .unwrap_or_default();
-        let profile = action
-            .labels
-            .get("compiler.profile")
-            .map(String::as_str)
-            .unwrap_or_default();
-        Ok(action
-            .outputs
-            .iter()
-            .map(|_| {
-                format!(
-                    "sealed:{action_name}:{source}:{identity}:{target}:{profile}",
-                    action_name = action.name.as_str()
-                )
-                .into_bytes()
-            })
-            .collect::<Vec<_>>())
-    };
+    let compiler =
+        |action: &jet::Comptime::Build::BuildAction, snapshots: &[ActionInputSnapshot]| {
+            let label = |name: &str| {
+                action
+                    .labels
+                    .get(name)
+                    .map(String::as_str)
+                    .unwrap_or_default()
+            };
+            let dependencies = snapshots
+                .iter()
+                .map(|snapshot| format!("{}={}", snapshot.path.as_str(), snapshot.digest.as_str()))
+                .collect::<Vec<_>>()
+                .join(",");
+            Ok(action
+                .outputs
+                .iter()
+                .map(|_| {
+                    format!(
+                        "sealed:{}:{}:{}:{}:{}:{dependencies}",
+                        action.name.as_str(),
+                        label("compiler.source-digest"),
+                        label("compiler.identity"),
+                        label("compiler.target"),
+                        label("compiler.profile"),
+                    )
+                    .into_bytes()
+                })
+                .collect::<Vec<_>>())
+        };
+
     let first = execute_build_plan_with_front_end_and_compiler(
         &plan,
         &root,
@@ -2947,12 +2951,12 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
             .filter(|event| matches!(
                 event,
                 BuildExecutionEvent::Finished {
+                    action,
                     outcome: ActionOutcome::Succeeded { .. },
-                    ..
-                }
+                } if plan.action_handle(*action).and_then(|handle| plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
             ))
             .count(),
-        2
+        3
     );
 
     let second = execute_build_plan_with_front_end_and_compiler(
@@ -2963,22 +2967,64 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
         &compiler,
     )
     .unwrap();
-    assert_eq!(second.report.metrics.cache_restored_actions, 2);
+    assert_eq!(second.report.metrics.cache_restored_actions, 3);
+    assert_eq!(
+        second
+            .report
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                BuildExecutionEvent::Finished {
+                    action,
+                    outcome: ActionOutcome::RestoredFromCache,
+                } if plan
+                    .action_handle(*action)
+                    .and_then(|handle| plan.action(handle))
+                    .and_then(|action| action.labels.get("compiler.package"))
+                    .is_some_and(|package| package != "app")
+            ))
+            .count(),
+        2,
+        "every unchanged dependency artifact must restore"
+    );
     assert!(second.report.events.iter().all(|event| {
         !matches!(
             event,
             BuildExecutionEvent::Finished {
                 action,
                 outcome: ActionOutcome::Succeeded { .. },
-            } if plan.action_handle(*action).and_then(|handle| plan.action(handle)).is_some_and(|action| action.is_compiler_owned())
+            } if plan
+                .action_handle(*action)
+                .and_then(|handle| plan.action(handle))
+                .and_then(|action| action.labels.get("compiler.package"))
+                .is_some_and(|package| package != "app")
         )
     }));
 
     let rebuild_with = |field: &str, value: &str| {
         let changed_plan = match field {
-            "compiler.identity" => make_plan(value, "native-test-target", "debug", b"alpha"),
-            "compiler.target" => make_plan("jet-test-compiler@clean", value, "debug", b"alpha"),
-            "compiler.profile" => make_plan("jet-test-compiler@clean", "native-test-target", value, b"alpha"),
+            "compiler.identity" => make_plan(
+                value,
+                "native-test-target",
+                "debug",
+                b"alpha",
+                b"beta",
+            ),
+            "compiler.target" => make_plan(
+                "jet-test-compiler@clean",
+                value,
+                "debug",
+                b"alpha",
+                b"beta",
+            ),
+            "compiler.profile" => make_plan(
+                "jet-test-compiler@clean",
+                "native-test-target",
+                value,
+                b"alpha",
+                b"beta",
+            ),
             _ => unreachable!(),
         };
         let rebuilt = execute_build_plan_with_front_end_and_compiler(
@@ -2989,7 +3035,7 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
             &compiler,
         )
         .unwrap();
-        assert_eq!(rebuilt.report.metrics.cache_restored_actions, 0);
+        assert_eq!(rebuilt.report.metrics.cache_restored_actions, 0, "{field}");
         assert_eq!(
             rebuilt
                 .report
@@ -2998,12 +3044,17 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
                 .filter(|event| matches!(
                     event,
                     BuildExecutionEvent::Finished {
+                        action,
                         outcome: ActionOutcome::Succeeded { .. },
-                        ..
-                    }
+                    } if changed_plan
+                        .action_handle(*action)
+                        .and_then(|handle| changed_plan.action(handle))
+                        .and_then(|action| action.labels.get("compiler.package"))
+                        .is_some_and(|package| package != "app")
                 ))
                 .count(),
-            2
+            2,
+            "{field} change must rebuild each dependency artifact once"
         );
     };
     rebuild_with("compiler.identity", "jet-test-compiler@next");
@@ -3015,6 +3066,7 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
         "native-test-target",
         "debug",
         b"alpha-v2",
+        b"beta",
     );
     let changed_source = execute_build_plan_with_front_end_and_compiler(
         &changed_source_plan,
@@ -3024,7 +3076,7 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
         &compiler,
     )
     .unwrap();
-    assert_eq!(changed_source.report.metrics.cache_restored_actions, 0);
+    assert_eq!(changed_source.report.metrics.cache_restored_actions, 1);
     assert_eq!(
         changed_source
             .report
@@ -3033,13 +3085,28 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
             .filter(|event| matches!(
                 event,
                 BuildExecutionEvent::Finished {
+                    action,
                     outcome: ActionOutcome::Succeeded { .. },
-                    ..
-                }
+                } if changed_source_plan
+                    .action_handle(*action)
+                    .and_then(|handle| changed_source_plan.action(handle))
+                    .is_some_and(|action| action.is_compiler_owned())
             ))
             .count(),
-        2
+        2,
+        "changing alpha must rebuild alpha and its app dependent only"
     );
+    assert!(changed_source.report.events.iter().any(|event| matches!(
+        event,
+        BuildExecutionEvent::Finished {
+            action,
+            outcome: ActionOutcome::RestoredFromCache,
+        } if changed_source_plan
+            .action_handle(*action)
+            .and_then(|handle| changed_source_plan.action(handle))
+            .and_then(|action| action.labels.get("compiler.package"))
+            .is_some_and(|package| package == "beta")
+    )));
 
     let dependency = plan
         .actions()
@@ -3061,9 +3128,8 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
                 .is_some_and(|value| value == "app")
         })
         .unwrap();
-    let dependency_output = dependency.outputs[0].clone();
     let original = ActionInputSnapshot {
-        path: dependency_output.clone(),
+        path: dependency.outputs[0].clone(),
         digest: ContentDigest::from_bytes(b"sealed:alpha"),
         byte_len: "sealed:alpha".len() as u64,
     };
@@ -3078,7 +3144,7 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
         plan.action_key_with_inputs(consumer_handle, &[changed]).unwrap()
     );
 
-    let _ = fs::remove_dir_all(&root);
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

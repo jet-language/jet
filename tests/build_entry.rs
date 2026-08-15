@@ -321,18 +321,21 @@ fn multi_dependency_build_restores_every_unchanged_compiler_artifact() {
 fn warm_dependency_cache_still_runs_frontend_diagnostics() {
     let (root, dep_b_source) = multi_dependency_fixture("malformed-dependent-warm-cache");
     let entry = root.join("main.jet");
-    let first = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
     let artifact = root.join(".jet/build-cache/package-artifacts/dep_b.sealed");
     assert!(artifact.is_file(), "first build must seal dep_b");
-    let before = fs::read(&artifact).unwrap();
+    fs::remove_file(&artifact).unwrap();
 
     write(&dep_b_source, "pub fn value() => Int { return 2\n");
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|diagnostic| diagnostic.code != "ICE"));
     assert!(errors.iter().any(|diagnostic| diagnostic.code.starts_with('E')));
-    assert_eq!(fs::read(&artifact).unwrap(), before);
-    drop(first);
+    assert!(
+        !artifact.exists(),
+        "front-end diagnostics must stop before cache restore or compiler codegen"
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -343,7 +346,9 @@ fn compiler_self_speed_reports_clean_and_incremental_medians() {
     for _ in 0..3 {
         let _ = fs::remove_dir_all(root.join(".jet/build-cache"));
         let start = Instant::now();
-        compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        let build = output.build.expect("clean build should expose execution");
+        assert_eq!(build.execution.metrics.cache_restored_actions, 0);
         clean.push(start.elapsed().as_micros());
     }
     let mut incremental = Vec::new();
@@ -357,11 +362,12 @@ fn compiler_self_speed_reports_clean_and_incremental_medians() {
     let clean_median = median_micros(&mut clean);
     let incremental_median = median_micros(&mut incremental);
     eprintln!(
-        "compiler self-speed: clean_median_us={} incremental_median_us={} samples=3",
+        "compiler self-speed: clean_median_us={} incremental_median_us={} clean_restored_actions=0 incremental_restored_actions=3 samples=3",
         clean_median, incremental_median
     );
     assert!(clean_median > 0);
     assert!(incremental_median > 0);
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
