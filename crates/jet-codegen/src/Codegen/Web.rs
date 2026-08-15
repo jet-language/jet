@@ -2080,16 +2080,12 @@ fn js_runtime_stop_metadata() -> String {
             u32::MAX
         );
         let plain_location = format!("  --> __JET_RUNTIME_FILE__:{}\n", u32::MAX);
-        let rendered = report
+        report
             .rendered
             .replace(&rich_location, "")
             .replace(&plain_location, "")
-            .replace(&u32::MAX.to_string(), "__JET_RUNTIME_LINE__");
-        if jet_foundation::Outcome::jet_runtime_stop_has_context(report.code) {
-            rendered.replace("\n Why:", "\n__JET_RUNTIME_CONTEXT__\n Why:")
-        } else {
-            rendered
-        }
+            .replace(&u32::MAX.to_string(), "__JET_RUNTIME_LINE__")
+            .replace("\n Why:", "\n__JET_RUNTIME_CONTEXT__\n Why:")
     };
     let default_report = jet_foundation::Outcome::jet_render_runtime_stop(
         "__JET_RUNTIME_STOP_CODE__",
@@ -2104,13 +2100,12 @@ fn js_runtime_stop_metadata() -> String {
     );
     let default_source = default_report.source.clone();
     let default_exit_code = default_report.exit_code;
-    let default_context = jet_foundation::Outcome::jet_runtime_stop_has_context(default_report.code);
     let default_rendered = report_template(default_report);
     let mut out = format!(
         "const JET_RUNTIME_STACK = [];\n\
          const JET_RUNTIME_STACK_LIMIT = {};\n\
          const JET_STACK_OVERFLOW_MESSAGE = {};\n\
-         const JET_RUNTIME_STOP_DEFAULT = Object.freeze({{ source: {}, exit_code: {}, context: {}, rendered: {} }});\n\
+         const JET_RUNTIME_STOP_DEFAULT = Object.freeze({{ source: {}, exit_code: {}, rich_context: false, rendered: {} }});\n\
          const JET_RUNTIME_STOP_METADATA = Object.freeze({{\n",
         jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT,
         json_quote(&jet_foundation::Outcome::jet_stack_overflow_message(
@@ -2118,7 +2113,6 @@ fn js_runtime_stop_metadata() -> String {
         )),
         json_quote(&default_source),
         default_exit_code,
-        default_context,
         json_quote(&default_rendered),
     );
     for row in jet_foundation::Registry::diagnostic_rows().iter().filter(|row| {
@@ -2143,14 +2137,14 @@ fn js_runtime_stop_metadata() -> String {
         );
         let source = report.source.clone();
         let exit_code = report.exit_code;
-        let context = jet_foundation::Outcome::jet_runtime_stop_has_context(report.code);
+        let rich_context = jet_foundation::Outcome::jet_runtime_stop_has_context(report.code);
         let rendered = report_template(report);
         out.push_str(&format!(
-            "  {}: Object.freeze({{ source: {}, exit_code: {}, context: {}, rendered: {} }}),\n",
+            "  {}: Object.freeze({{ source: {}, exit_code: {}, rich_context: {}, rendered: {} }}),\n",
             json_quote(row.code),
             json_quote(&source),
             exit_code,
-            context,
+            rich_context,
             json_quote(&rendered),
         ));
     }

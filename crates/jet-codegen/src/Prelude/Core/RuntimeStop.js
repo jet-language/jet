@@ -151,28 +151,26 @@ function jet_web_runtime_context(file, line, fn_name, source_line, col, caret_le
   };
 }
 
-function jet_web_runtime_context_frame(context) {
+function jet_web_runtime_context_frame(context, rich_context) {
   let frame = "";
   if (context.file) {
-    frame += `  --> ${context.file}:${context.line}${context.fn_name ? ` in ${context.fn_name}` : ""}\n`;
+    frame += `  --> ${context.file}:${context.line}${rich_context && context.fn_name ? ` in ${context.fn_name}` : ""}\n`;
   }
-  if (context.source_line) {
+  if (rich_context && context.source_line) {
     const margin = String(context.line).length;
     const pad = " ".repeat(margin);
     frame += `   ${pad}|\n`;
     frame += `${context.line} | ${context.source_line}\n`;
     frame += `   ${pad}| ${" ".repeat(Math.max(0, context.col - 1))}${"^".repeat(Math.max(1, context.caret_len))}\n`;
   }
-  if (context.locals) frame += `locals: ${context.locals}\n`;
+  if (rich_context && context.locals) frame += `locals: ${context.locals}\n`;
   return frame;
 }
 
 function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, caret_len, message, locals) {
   const known = Object.prototype.hasOwnProperty.call(JET_RUNTIME_STOP_METADATA, code);
   const projected = known ? JET_RUNTIME_STOP_METADATA[code] : JET_RUNTIME_STOP_DEFAULT;
-  const context = projected.context
-    ? jet_web_runtime_context(file, line, fn_name, source_line, col, caret_len, locals)
-    : {};
+  const context = jet_web_runtime_context(file, line, fn_name, source_line, col, caret_len, locals);
   const substitute = (template, marker, value) => template.split(marker).join(String(value));
   let rendered = projected.rendered;
   const todo_parts = String(message).split(" — expected ");
@@ -185,7 +183,7 @@ function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, ca
   rendered = substitute(rendered, "__JET_RUNTIME_FILE__", context.file);
   rendered = substitute(rendered, "__JET_RUNTIME_LINE__", context.line);
   rendered = substitute(rendered, "__JET_RUNTIME_FUNCTION__", context.fn_name);
-  rendered = substitute(rendered, "__JET_RUNTIME_CONTEXT__", jet_web_runtime_context_frame(context));
+  rendered = substitute(rendered, "__JET_RUNTIME_CONTEXT__", jet_web_runtime_context_frame(context, projected.rich_context));
   return rendered;
 }
 
