@@ -66,6 +66,7 @@
   "if"
   "loop"
   "return"
+  "task"
 ] @keyword.control
 
 ; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl marker migration module priv protocol pub remove rename rust server state struct tag trait use validate via
@@ -82,6 +83,7 @@
   "extern"
   "fn"
   "impl"
+  "marker"
   "migration"
   "module"
   "pub"
@@ -128,6 +130,10 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
+[
+  "check"
+] @function.builtin
+
 ; marker.rule: ABI Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /% /%= /= < << <<= <= <=> == => > >= >> >>= ? ?. ?? ^= | |= || ~| ~|=
