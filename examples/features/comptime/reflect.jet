@@ -22,6 +22,8 @@ fn send_report() =[IO]=> {}
 @view_provenance :: send_report.@view_provenance
 @unit_scale :: Meter.@unit_scale_provenance
 @maturity :: send_report.@maturity
+@unit_scale_is_rational :: @unit_scale.kind == .Rational
+@maturity_is_experimental :: @maturity.level == .Experimental
 
 derive T.Summarize {
     info :: T.reflect()
@@ -32,7 +34,7 @@ derive T.Summarize {
     method_movedness :: info.methods[0].@movedness.known
     method_track_origin :: info.methods[0].@track_origin.tracked
     method_view_mutable :: info.methods[0].@view_provenance.mutable
-    method_maturity :: info.methods[0].@maturity.level == .Experimental
+    method_maturity :: info.methods[0].@maturity.level
     pub_field :: info.fields[0].name
     hidden_pub :: info.fields[1].is_pub
     has_debug :: info.has_marker("Debug")
@@ -57,5 +59,5 @@ fn run() {
     w :: Widget.{label: "gear", secret: 1, level: 2}
     print(w.summary())
     print("planes:{@range.start}-{@range.end}/{@dimension.axes.len()}/{@states[0].name}/{@effects.values.len()}")
-    print("homed:{@sendability.known}/{@movedness.known}/{@attribution.source}/{@track_origin.tracked}/{@view_provenance.mutable}/{@unit_scale.kind == .Rational}/{@maturity.level == .Experimental}")
+    print("homed:{@sendability.known}/{@movedness.known}/{@attribution.source}/{@track_origin.tracked}/{@view_provenance.mutable}/{@unit_scale_is_rational}/{@maturity_is_experimental}")
 }
