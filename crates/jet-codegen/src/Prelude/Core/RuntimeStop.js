@@ -170,7 +170,9 @@ function jet_web_runtime_context_frame(context) {
 function jet_runtime_stop_report(code, file, line, fn_name, source_line, col, caret_len, message, locals) {
   const known = Object.prototype.hasOwnProperty.call(JET_RUNTIME_STOP_METADATA, code);
   const projected = known ? JET_RUNTIME_STOP_METADATA[code] : JET_RUNTIME_STOP_DEFAULT;
-  const context = jet_web_runtime_context(file, line, fn_name, source_line, col, caret_len, locals);
+  const context = projected.context
+    ? jet_web_runtime_context(file, line, fn_name, source_line, col, caret_len, locals)
+    : {};
   const substitute = (template, marker, value) => template.split(marker).join(String(value));
   let rendered = projected.rendered;
   const todo_parts = String(message).split(" — expected ");

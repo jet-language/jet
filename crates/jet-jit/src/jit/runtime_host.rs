@@ -361,16 +361,11 @@ impl JitRuntime {
             .lines()
             .nth((line as usize).saturating_sub(1))
             .unwrap_or_default();
-        let (fn_name, src_line) = if code == "E3001" {
-            (&self.current_function, src_line)
-        } else {
-            (&String::new(), "")
-        };
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             code,
             &self.source_file,
             line,
-            fn_name,
+            &self.current_function,
             src_line,
             1,
             1,

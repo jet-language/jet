@@ -2338,13 +2338,12 @@ impl<'a> EvalCtx<'a> {
             .lines()
             .nth((line as usize).saturating_sub(1))
             .unwrap_or_default();
-        let rich = matches!(code, "E3001" | "E3012");
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             code,
             &self.source_file,
             line,
-            if rich { &self.current_fn } else { "" },
-            if rich { source_line } else { "" },
+            &self.current_fn,
+            source_line,
             1,
             1,
             message,

@@ -557,6 +557,11 @@ pub fn jet_loop_stride_message() -> &'static str {
 // stop before the host stack aborts.
 pub const JET_RUNTIME_STACK_LIMIT: usize = 6;
 
+/// Whether a runtime row carries the rich source context frame.
+pub fn jet_runtime_stop_has_context(code: &str) -> bool {
+    matches!(code, "E3001" | "E3012")
+}
+
 /// D-FAIL-BREACH1=A: the one renderer for a running program's breach stop.
 ///
 /// The source location is data supplied by an execution tier. The active row,
@@ -618,20 +623,21 @@ pub fn jet_render_runtime_stop_from_row(
     let why = row_why;
     let fix = row_fix;
 
+    let show_context = jet_runtime_stop_has_context(code);
     let mut rendered = format!("Stop [{code}]: {what}\n");
     if !file.is_empty() {
         rendered.push_str(&format!(
             "  --> {}:{}{}\n",
             file,
             line,
-            if fn_name.is_empty() {
+            if !show_context || fn_name.is_empty() {
                 String::new()
             } else {
                 format!(" in {fn_name}")
             }
         ));
     }
-    if !src_line.is_empty() {
+    if show_context && !src_line.is_empty() {
         let line_s = line.to_string();
         let margin = line_s.len();
         let pad = " ".repeat(margin);
@@ -645,7 +651,7 @@ pub fn jet_render_runtime_stop_from_row(
             caret
         ));
     }
-    if !locals.is_empty() {
+    if show_context && !locals.is_empty() {
         rendered.push_str(&format!("locals: {locals}\n"));
     }
     rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
