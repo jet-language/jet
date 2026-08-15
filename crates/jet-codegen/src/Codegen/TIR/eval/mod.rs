@@ -3712,7 +3712,18 @@ fn run_program_with_structs_at_stage_and_cli(
     let cli_dispatch = if let Some(bundle) = cli_bundle.filter(|_| {
         program.entry == crate::Codegen::mangle_generated("cli_main")
     }) {
-        let argv = Comptime::runtime_argv().unwrap_or_else(|| std::env::args().collect());
+        // A typed-CLI entry parses the *program's* argv. When no embedder
+        // installed one (`jet dev`, an embedder holding a checked bundle, a
+        // test harness), the program simply received no arguments — it did
+        // not receive the compiler's own command line. Reading
+        // `std::env::args()` here handed `jet dev … --watch=off` and libtest's
+        // `--test-threads=…` to the user's parser, which rejected them and
+        // exited 2 before the body ran. Fall back to the canonical shape a
+        // bare `jet run <file>` installs instead: argv[0] = the entry path,
+        // no program arguments. Parsing, help, and error text stay in the
+        // Prelude Args kernel; this only supplies the argv it reads.
+        let argv = Comptime::runtime_argv()
+            .unwrap_or_else(|| vec![bundle.modules[bundle.entry].display.clone()]);
         match cli::prepare(bundle, &argv)? {
             dispatch @ (cli::Dispatch::Run(_)
             | cli::Dispatch::Direct { .. }
