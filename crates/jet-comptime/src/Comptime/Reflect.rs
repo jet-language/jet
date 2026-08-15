@@ -6,9 +6,10 @@
 //! view contains only derives lowered from them.
 
 use crate::AST::{
-    Dimension, DistinctDef, EnumDef, Expr, Field, Func, FunctionObligations, Item, KnowledgeFact, Marker,
-    MaturityTag, Measure, StructDef, StructLayout, Type, TypeParam, UnitScaleProvenance,
-    UnitFamilyDef, VariantPayload, ViewProvenance,
+    Dimension, DistinctDef, EnumDef, Exactness, Expr, Field, Func, FunctionCallMetadata,
+    FunctionObligations, Item, KnowledgeFact, Marker, MaturityTag, Measure, StructDef,
+    StructLayout, Type, TypeParam, UnitScaleProvenance, UnitFamilyDef, VariantPayload,
+    ViewProvenance,
 };
 
 use crate::AST::CtValue;
@@ -217,6 +218,22 @@ fn measure_info(measure: &Measure) -> CtValue {
     )
 }
 
+fn exactness_info(exactness: &Exactness) -> CtValue {
+    let (kind, precision) = match exactness {
+        Exactness::Exact => ("Exact", None),
+        Exactness::Approximate { precision } => {
+            ("Approximate", Some(CtValue::Int(i64::from(*precision))))
+        }
+    };
+    ct_struct(
+        "ExactnessInfo",
+        &[
+            ("kind", typed_enum("ExactnessKind", kind)),
+            ("precision", optional_value(precision, "Int")),
+        ],
+    )
+}
+
 fn layout_fact_info(bytes: u8) -> CtValue {
     ct_struct("LayoutFact", &[("bytes", CtValue::Int(bytes as i64))])
 }
@@ -240,7 +257,17 @@ fn obligation_info(obligations: &FunctionObligations) -> CtValue {
                 "ObligationParamInfo",
                 &[
                     ("name", ct_str(name.clone())),
-                    ("zone", ct_str(format!("{zone:?}"))),
+                    (
+                        "zone",
+                        typed_enum(
+                            "ParamZone",
+                            match zone {
+                                crate::AST::ParamZone::PositionalOnly => "PositionalOnly",
+                                crate::AST::ParamZone::Either => "Either",
+                                crate::AST::ParamZone::LabelOnly => "LabelOnly",
+                            },
+                        ),
+                    ),
                 ],
             )
         })
@@ -400,6 +427,7 @@ fn fact_value(
                 optional_value(dimension, "DimensionInfo"),
             ),
             ("measure", optional_value(None, "MeasureInfo")),
+            ("exactness", optional_value(None, "ExactnessInfo")),
             ("layout", optional_value(None, "LayoutFact")),
             (
                 "classification",
@@ -448,15 +476,21 @@ fn fact_kind_for(plane: &str, fact: &KnowledgeFact) -> &'static str {
     let registered = jet_foundation::Registry::row(plane)
         .unwrap_or_else(|| panic!("reflection found unregistered plane `{plane}`"));
     assert_eq!(registered.kind(), jet_foundation::Registry::RowKind::Plane);
-    match fact {
+    let kind = jet_foundation::Registry::registered_fact_read(plane)
+        .and_then(jet_foundation::Registry::FactRead::reflection_kind)
+        .unwrap_or_else(|| panic!("reflection found unreadable plane `{plane}`"));
+    let produced = match fact {
         KnowledgeFact::Interval { .. } => "Range",
         KnowledgeFact::Layout { .. } => "Layout",
         KnowledgeFact::Measure(_) => "Measure",
+        KnowledgeFact::Exactness(_) => "Exactness",
         KnowledgeFact::Dimension(_) => "Dimension",
         KnowledgeFact::Classification(_) => "Classification",
         KnowledgeFact::Nominal(_) => "Nominal",
         KnowledgeFact::Obligation(_) => "Obligation",
-    }
+    };
+    assert_eq!(kind, produced, "fact producer disagrees with registered plane `{plane}`");
+    kind
 }
 
 fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
@@ -484,6 +518,13 @@ fn knowledge_fact_value(kind: &str, fact: &KnowledgeFact) -> CtValue {
             std::iter::empty::<String>(),
             measure_info(measure),
             "measure",
+        ),
+        KnowledgeFact::Exactness(exactness) => fact_value_with_detail(
+            kind,
+            "exactness",
+            std::iter::empty::<String>(),
+            exactness_info(exactness),
+            "exactness",
         ),
         KnowledgeFact::Layout { bytes } => fact_value_with_detail(
             kind,
@@ -534,7 +575,7 @@ pub fn build_registered_fact_info(name: &str) -> Option<CtValue> {
         None,
     );
     let path = if row.name == "Attribution" {
-        "report.$attribution".to_string()
+        "report.@attribution".to_string()
     } else {
         row.name.to_string()
     };
@@ -993,6 +1034,10 @@ fn build_reflection_field_info(
                 ct_list(marker_infos(&field.markers, vocabulary)),
             ),
             ("dimensions", ct_list(type_dimensions(&field.ty))),
+            (
+                "facts",
+                ct_list(type_fact_rows(&field.name, &field.ty)),
+            ),
             ("is_pub", ct_bool(field.is_pub)),
             (
                 "span",
@@ -1006,6 +1051,36 @@ fn build_reflection_field_info(
             ),
         ],
     )
+}
+
+fn method_signature_type(method: &Func) -> Type {
+    let param_contract = method
+        .params
+        .iter()
+        .any(|param| param.zone != crate::AST::ParamZone::Either || param.public_label.is_some())
+        .then(|| {
+            method
+                .params
+                .iter()
+                .map(|param| (param.call_label().to_string(), param.zone))
+                .collect()
+        });
+    let call_metadata = method
+        .params
+        .iter()
+        .any(|param| param.variadic)
+        .then(|| FunctionCallMetadata {
+            variadic: method.params.iter().map(|param| param.variadic).collect(),
+            ..FunctionCallMetadata::default()
+        });
+    Type::Fn {
+        params: method.params.iter().map(|param| param.ty.clone()).collect(),
+        ret: method.return_type.clone().map(Box::new),
+        effect_bound: method.declared_effects.clone(),
+        param_contract,
+        call_metadata,
+        return_view_provenance: method.return_view_provenance.clone(),
+    }
 }
 
 /// One reflected inherent method (D-REFLECT1).
@@ -1033,11 +1108,12 @@ fn build_method_info_with_vocabulary(
                 .flat_map(|ty| type_dimensions(ty)),
         )
         .collect();
-    let facts = declared_function_facts(
+    let mut facts = declared_function_facts(
         &method.name,
         method.maturity,
         method.return_view_provenance.as_ref(),
     );
+    facts.extend(type_fact_rows(&method.name, &method_signature_type(method)));
     let effects = method
         .declared_effects
         .as_ref()
@@ -1477,7 +1553,11 @@ pub fn fact_read_value(
         | jet_foundation::Registry::FactRead::TrackOrigin
         | jet_foundation::Registry::FactRead::ViewProvenance
         | jet_foundation::Registry::FactRead::UnitScaleProvenance
-        | jet_foundation::Registry::FactRead::Maturity => {
+        | jet_foundation::Registry::FactRead::Maturity
+        | jet_foundation::Registry::FactRead::Measure
+        | jet_foundation::Registry::FactRead::Exactness
+        | jet_foundation::Registry::FactRead::Classification
+        | jet_foundation::Registry::FactRead::Obligation => {
             registered_fact_value(read, subject_name, items)
         }
         jet_foundation::Registry::FactRead::BuildProfile
@@ -1863,6 +1943,21 @@ fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str, path: &str)
                 .flat_map(|field| type_dimensions(&field.ty))
                 .collect(),
         };
+        let variant_facts = match &variant.payload {
+            VariantPayload::Unit => Vec::new(),
+            VariantPayload::Single(ty, _) => {
+                type_fact_rows(&format!("{}.{}", def.name, variant.name), ty)
+            }
+            VariantPayload::Named(fields) => fields
+                .iter()
+                .flat_map(|field| {
+                    type_fact_rows(
+                        &format!("{}.{}.{}", def.name, variant.name, field.name),
+                        &field.ty,
+                    )
+                })
+                .collect(),
+        };
         ct_struct("FieldInfo", &[
             ("name", ct_str(variant.name.clone())),
             ("ty", ct_str(ty)),
@@ -1871,6 +1966,7 @@ fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str, path: &str)
                 ct_list(marker_infos(&variant.serde_markers, None)),
             ),
             ("dimensions", ct_list(variant_dimensions)),
+            ("facts", ct_list(variant_facts)),
             ("is_pub", ct_bool(def.is_pub)),
             ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[
                 ("start", CtValue::Int(variant.name_span.start as i64)),

@@ -5,7 +5,7 @@
 mod types;
 pub use types::{
     AccessConvention, CallablePolicy, CallablePolicyChain, CompositeTypePairError, Dimension,
-    FunctionCallMetadata, FunctionObligations, InternalTag,
+    Exactness, FunctionCallMetadata, FunctionObligations, InternalTag,
     KnowledgeEntry,
     KnowledgeFact, KnowledgeVector, Measure, TagMarker, Type, TypeIdentity, int_spelling,
     numeric_type_from_name, int_range, canonicalize_tuple_fields, canonicalize_union,

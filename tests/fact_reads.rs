@@ -8,11 +8,14 @@ mod tir_support;
 use jet_foundation::Facts::BuildStamp;
 use jet::AST::Item;
 use std::fs;
+use std::process::Command;
 
 const FIXTURE: &str = include_str!("../examples/features/reflection/fact_reads.jet");
 const FIXTURE_EXPECTED: &str = include_str!("../examples/features/expected/reflection/fact_reads.out");
 const AGGREGATE_FIXTURE: &str =
     include_str!("../examples/features/reflection/reflect-value.jet");
+const AGGREGATE_EXPECTED: &str =
+    include_str!("../examples/features/expected/reflection/reflect-value.out");
 
 fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
     jet::compile(source).expect_err("the fixture must be rejected")
@@ -35,6 +38,32 @@ fn stdout(outcome: jet::Interpreter::RunOutcome, tier: &str) -> String {
 
 fn has_runtime_fact_dispatch(rust: &str) -> bool {
     rust.contains("fact_read(") || rust.contains("jet.fact")
+}
+
+fn web_stdout(name: &str, source: &str) -> Option<String> {
+    if Command::new("node").arg("--version").output().is_err() {
+        return None;
+    }
+    let scratch = common::Scratch::new(name);
+    let shown = scratch.join("app.jet");
+    let output = jet::compile_web_with_path(source, shown.to_str().unwrap())
+        .unwrap_or_else(|diags| panic!("web fact fixture was rejected: {diags:#?}"));
+    let web = output.web.expect("web fact fixture must produce web artifacts");
+    fs::write(scratch.join("app.js"), web.js_app).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
+    fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let node = Command::new("node")
+        .current_dir(&scratch.path)
+        .arg("app.js")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "web fact fixture failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    Some(String::from_utf8_lossy(&node.stdout).into_owned())
 }
 
 #[test]
@@ -111,6 +140,18 @@ fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
 }
 
 #[test]
+fn nested_reflection_fact_reads_fold_across_all_native_tiers() {
+    tir_support::assert_tiers_agree(
+        "reflection_fact_reads",
+        AGGREGATE_FIXTURE,
+        AGGREGATE_EXPECTED,
+    );
+    if let Some(stdout) = web_stdout("reflection-fact-reads-web", AGGREGATE_FIXTURE) {
+        assert_eq!(stdout, AGGREGATE_EXPECTED);
+    }
+}
+
+#[test]
 fn typed_fact_fixture_matches_aot_default_and_interpreter() {
     tir_support::assert_tiers_agree("fact_reads", FIXTURE, FIXTURE_EXPECTED);
 }
@@ -128,6 +169,9 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
         .web
         .expect("web fact fixture must produce artifacts");
     assert!(!has_runtime_fact_dispatch(&web.wasm_rust));
+    if let Some(stdout) = web_stdout("fact-reads-web", FIXTURE) {
+        assert_eq!(stdout, FIXTURE_EXPECTED);
+    }
 }
 
 #[test]

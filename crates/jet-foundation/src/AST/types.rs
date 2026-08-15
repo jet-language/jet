@@ -179,6 +179,14 @@ impl Measure {
     }
 }
 
+/// The exactness grade carried by a numeric type. Exactness is compile-time
+/// knowledge; the runtime carrier remains the ordinary numeric type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Exactness {
+    Exact,
+    Approximate { precision: u16 },
+}
+
 /// Function obligations are facts about how a callable may be used. The
 /// D-APILABEL1 call contract is also part of callable identity; effects and
 /// returned-view provenance remain sema-checked by subsumption.
@@ -414,6 +422,7 @@ pub enum KnowledgeFact {
     Interval { lo: i128, hi: i128 },
     Layout { bytes: u8 },
     Measure(Measure),
+    Exactness(Exactness),
     Dimension(Dimension),
     Classification(String),
     Nominal(String),
@@ -426,6 +435,12 @@ impl KnowledgeFact {
             Self::Interval { lo, hi } => format!("interval:{lo}..{hi}"),
             Self::Layout { bytes } => format!("layout:{bytes}"),
             Self::Measure(measure) => format!("measure:{}", measure.canonical()),
+            Self::Exactness(exactness) => match exactness {
+                Exactness::Exact => "exactness:exact".to_string(),
+                Exactness::Approximate { precision } => {
+                    format!("exactness:approximate:{precision}")
+                }
+            },
             Self::Dimension(dimension) => format!("dimension:{}", dimension.identity()),
             Self::Classification(name) => format!("classification:{name}"),
             Self::Nominal(name) => format!("nominal:{name}"),
@@ -1149,6 +1164,24 @@ impl Type {
     pub fn knowledge_vector(&self) -> KnowledgeVector {
         let mut vector = KnowledgeVector::new();
         match self {
+            Type::Int => {
+                vector.push(
+                    crate::Registry::type_plane("Exactness"),
+                    KnowledgeFact::Exactness(Exactness::Exact),
+                );
+            }
+            Type::Float => {
+                vector.push(
+                    crate::Registry::type_plane("Exactness"),
+                    KnowledgeFact::Exactness(Exactness::Approximate { precision: 53 }),
+                );
+            }
+            Type::Float32 => {
+                vector.push(
+                    crate::Registry::type_plane("Exactness"),
+                    KnowledgeFact::Exactness(Exactness::Approximate { precision: 24 }),
+                );
+            }
             Type::List(inner) => {
                 vector.extend_at(&["element".to_string()], &inner.knowledge_vector());
             }
@@ -1193,6 +1226,10 @@ impl Type {
                     KnowledgeFact::Layout {
                         bytes: (*bits + 7) / 8,
                     },
+                );
+                vector.push(
+                    crate::Registry::type_plane("Exactness"),
+                    KnowledgeFact::Exactness(Exactness::Exact),
                 );
             }
             Type::InlineRange { base, lo, hi } => {
@@ -1290,6 +1327,13 @@ impl Type {
                 }
             }
             Type::Named(name) => {
+                if matches!(name.as_str(), crate::Syntax::TYPE_DECIMAL | crate::Syntax::TYPE_FRACTION)
+                {
+                    vector.push(
+                        crate::Registry::type_plane("Exactness"),
+                        KnowledgeFact::Exactness(Exactness::Exact),
+                    );
+                }
                 let lanes = match name.as_str() {
                     "F32x4" => Some(4),
                     "F64x2" => Some(2),

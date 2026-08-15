@@ -221,6 +221,18 @@ impl<'a> Checker<'a> {
         }
 
         let aggregate_value = match &**inner {
+            Expr::ComptimeName {
+                value: Some(value),
+                ..
+            } => crate::Comptime::reflected_fact_field(value, read)
+                .cloned()
+                .map(|value| (value.jet_type(), value)),
+            Expr::ComptimeName { name, .. } => self
+                .current_ct_globals()
+                .get(name)
+                .and_then(|value| crate::Comptime::reflected_fact_field(value, read))
+                .cloned()
+                .map(|value| (value.jet_type(), value)),
             Expr::MethodCall {
                 receiver,
                 method,
@@ -276,6 +288,18 @@ impl<'a> Checker<'a> {
                             crate::Comptime::build_dimension_info(&dimension),
                         )
                     }),
+                _ => None,
+            },
+            jet_foundation::Registry::FactRead::Measure
+            | jet_foundation::Registry::FactRead::Exactness
+            | jet_foundation::Registry::FactRead::Classification
+            | jet_foundation::Registry::FactRead::Obligation => match &**inner {
+                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
+                    read,
+                    subject_name,
+                    self.items,
+                )
+                .map(|value| (value.jet_type(), value)),
                 _ => None,
             },
             jet_foundation::Registry::FactRead::States => match &**inner {
@@ -451,11 +475,24 @@ impl<'a> Checker<'a> {
     }
 
     fn fold_comptime_struct_field(&mut self, expr: &mut Expr) -> Option<Type> {
-        match expr {
-            Expr::Field(inner, member, span) => {
-                if Syntax::fact_read_kind(member).is_some() {
+        if let Expr::Field(_, member, _) = &*expr {
+            if let Some(read) = Syntax::fact_read_kind(member) {
+                if matches!(
+                    read,
+                    jet_foundation::Registry::FactRead::Layout
+                        | jet_foundation::Registry::FactRead::Name
+                        | jet_foundation::Registry::FactRead::Fields
+                ) {
                     return None;
                 }
+                if let Expr::Field(inner, _, _) = expr {
+                    self.fold_comptime_struct_field(inner);
+                }
+                return self.fold_fact_read(expr).flatten();
+            }
+        }
+        match expr {
+            Expr::Field(inner, member, span) => {
                 self.fold_comptime_struct_field(inner);
                 let member = member.clone();
                 let span = *span;

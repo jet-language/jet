@@ -372,6 +372,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
         | "FactKind" | "FactValue" | "DimensionInfo" | "DimensionAxis"
+        | "MeasureInfo" | "ExactnessInfo" | "ExactnessKind" | "LayoutFact"
+        | "ClassificationInfo" | "NominalInfo" | "ObligationInfo"
+        | "ObligationParamInfo" | "ParamZone"
         | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "TrackOriginInfo"
         | "ViewProvenanceInfo" | "UnitScaleProvenanceInfo" | "UnitScaleProvenanceKind"
         | "MaturityInfo" | "Maturity"
@@ -446,6 +449,14 @@ pub(crate) fn core_fact_kind_variants(
             names.into_iter().map(str::to_string).collect()
         }
         "Maturity" => ["Experimental", "Tested", "Hardened"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        "ExactnessKind" => ["Exact", "Approximate"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        "ParamZone" => ["PositionalOnly", "Either", "LabelOnly"]
             .into_iter()
             .map(str::to_string)
             .collect(),
@@ -923,6 +934,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "measure" => Some(Type::Option(Box::new(Type::Named(
                 "MeasureInfo".to_string(),
             )))),
+            "exactness" => Some(Type::Option(Box::new(Type::Named(
+                "ExactnessInfo".to_string(),
+            )))),
             "layout" => Some(Type::Option(Box::new(Type::Named(
                 "LayoutFact".to_string(),
             )))),
@@ -968,6 +982,13 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "ExactnessInfo" {
+        return match field {
+            "kind" => Some(Type::Named("ExactnessKind".to_string())),
+            "precision" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
     if type_name == "LayoutFact" {
         return match field {
             "bytes" => Some(Type::Int),
@@ -982,7 +1003,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "ObligationParamInfo" {
         return match field {
-            "name" | "zone" => Some(Type::String),
+            "name" => Some(Type::String),
+            "zone" => Some(Type::Named("ParamZone".to_string())),
             _ => None,
         };
     }
@@ -1098,6 +1120,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "name" | "ty" => Some(Type::String),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
+            "facts" => Some(Type::List(Box::new(Type::Named(
+                "FactInfo".to_string(),
+            )))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,

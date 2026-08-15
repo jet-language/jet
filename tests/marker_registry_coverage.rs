@@ -462,6 +462,10 @@ fn every_registered_plane_is_reflectable() {
     for row in &planes {
         assert_eq!(row.kind(), RowKind::Plane);
         assert!(Registry::row(row.name).is_some(), "plane `{}` has no home", row.name);
+        let read = Registry::registered_fact_read(row.name)
+            .unwrap_or_else(|| panic!("plane `{}` has no FactRead projection", row.name));
+        assert_eq!(read.registered_plane().map(|registered| registered.name), Some(row.name));
+        assert_eq!(read.reflection_kind(), Registry::reflection_kind(row.name));
         let info = jet::Comptime::build_registered_fact_info(row.name)
             .unwrap_or_else(|| panic!("plane `{}` has no typed reflection row", row.name));
         assert!(matches!(

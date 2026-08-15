@@ -7,8 +7,8 @@ use jet::Comptime::{
 };
 use jet::Diagnostics::Span;
 use jet::AST::{
-    AccessConvention, Dimension, DistinctDef, Expr, Field, Func, Marker, Param, ParamZone,
-    InternalTag, QuantityKind, StructDef, TagMarker, Type, TypeParam,
+    AccessConvention, Dimension, DistinctDef, Expr, Field, Func, Marker, Param,
+    ParamZone, InternalTag, QuantityKind, StructDef, TagMarker, Type, TypeParam,
 };
 
 fn span() -> Span {
@@ -397,6 +397,7 @@ fn registered_type_planes_reflect_as_typed_values() {
                 return_view_provenance: None,
             },
         ),
+        ("approximate", Type::Float32),
     ] {
         let mut field = field(name, "Int", true);
         field.ty = ty;
@@ -435,6 +436,7 @@ fn registered_type_planes_reflect_as_typed_values() {
         "Range",
         "Layout",
         "Measure",
+        "Exactness",
         "Dimension",
         "Classification",
         "Nominal",
@@ -451,6 +453,99 @@ fn registered_type_planes_reflect_as_typed_values() {
             .unwrap_or_else(|| panic!("missing typed `{expected}` fact in {facts:?}"));
         assert!(matches!(struct_field(fact, "value"), CtValue::Struct { .. }));
     }
+
+    let fact_of_kind = |kind: &str| {
+        facts
+            .iter()
+            .find(|fact| matches!(struct_field(fact, "kind"), CtValue::Enum { variant, .. } if variant == kind))
+            .unwrap_or_else(|| panic!("missing `{kind}` payload in {facts:?}"))
+    };
+    let range = struct_field(struct_field(fact_of_kind("Range"), "value"), "range");
+    let CtValue::Present(range) = range else {
+        panic!("range payload is not present");
+    };
+    assert!(matches!(struct_field(range, "start"), CtValue::Int(-128)));
+    assert!(matches!(struct_field(range, "end"), CtValue::Int(127)));
+
+    let layout = struct_field(struct_field(fact_of_kind("Layout"), "value"), "layout");
+    let CtValue::Present(layout) = layout else {
+        panic!("layout payload is not present");
+    };
+    assert!(matches!(struct_field(layout, "bytes"), CtValue::Int(1)));
+
+    let measure = struct_field(struct_field(fact_of_kind("Measure"), "value"), "measure");
+    let CtValue::Present(measure) = measure else {
+        panic!("measure payload is not present");
+    };
+    assert!(matches!(
+        (struct_field(measure, "kind"), struct_field(measure, "value")),
+        (CtValue::Str(kind), CtValue::Present(value))
+            if kind == "length" && matches!(value.as_ref(), CtValue::Int(4))
+    ));
+
+    let exactness = facts
+        .iter()
+        .filter(|fact| matches!(struct_field(fact, "kind"), CtValue::Enum { variant, .. } if variant == "Exactness"))
+        .find(|fact| {
+            matches!(
+                struct_field(struct_field(fact, "value"), "exactness"),
+                CtValue::Present(value)
+                    if matches!(
+                        struct_field(value, "kind"),
+                        CtValue::Enum { variant, .. } if variant == "Approximate"
+                    )
+            )
+        })
+        .expect("approximate exactness payload");
+    let exactness = struct_field(struct_field(exactness, "value"), "exactness");
+    let CtValue::Present(exactness) = exactness else {
+        panic!("exactness payload is not present");
+    };
+    assert!(matches!(
+        struct_field(exactness, "precision"),
+        CtValue::Present(value) if matches!(value.as_ref(), CtValue::Int(24))
+    ));
+
+    let dimension = struct_field(struct_field(fact_of_kind("Dimension"), "value"), "dimension");
+    let CtValue::Present(dimension) = dimension else {
+        panic!("dimension payload is not present");
+    };
+    assert!(matches!(
+        struct_field(dimension, "axes"),
+        CtValue::List(axes) if axes.iter().any(|axis|
+            matches!(
+                (struct_field(axis, "name"), struct_field(axis, "exponent")),
+                (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
+            ))
+    ));
+
+    let classification = struct_field(
+        struct_field(fact_of_kind("Classification"), "value"),
+        "classification",
+    );
+    let CtValue::Present(classification) = classification else {
+        panic!("classification payload is not present");
+    };
+    assert!(matches!(struct_field(classification, "name"), CtValue::Str(name) if name == "Audited"));
+
+    let nominal = struct_field(struct_field(fact_of_kind("Nominal"), "value"), "nominal");
+    let CtValue::Present(nominal) = nominal else {
+        panic!("nominal payload is not present");
+    };
+    assert!(matches!(struct_field(nominal, "name"), CtValue::Str(name) if name == "core.crypto"));
+
+    let obligation = struct_field(struct_field(fact_of_kind("Obligation"), "value"), "obligation");
+    let CtValue::Present(obligation) = obligation else {
+        panic!("obligation payload is not present");
+    };
+    let CtValue::List(params) = struct_field(obligation, "param_contract") else {
+        panic!("obligation parameter contract");
+    };
+    assert!(matches!(
+        params.first().map(|param| (struct_field(param, "name"), struct_field(param, "zone"))),
+        Some((CtValue::Str(name), CtValue::Enum { type_name, variant, .. }))
+            if name == "value" && type_name == "ParamZone" && variant == "Either"
+    ));
 }
 
 #[test]
@@ -550,7 +645,7 @@ fn orphan_fact_rows_are_typed_and_readable() {
         if name == "Attribution" {
             assert!(matches!(
                 struct_field(&info, "path"),
-                CtValue::Str(path) if path == "report.$attribution"
+                CtValue::Str(path) if path == "report.@attribution"
             ));
         }
     }
