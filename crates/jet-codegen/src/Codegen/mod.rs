@@ -2547,6 +2547,7 @@ mod tests {
 
     #[test]
     fn exact_int_runtime_is_reachable() {
+        install_comptime_bridge();
         let bundle = checked_generic_bundle(
             "fn run() { value :: [U8].{}.len() }",
             "int-runtime",
