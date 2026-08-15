@@ -92,15 +92,32 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     ok
                 }
                 // D-CHOOSE-TEST1=A: Result/Option success bindings reuse the
-                // canonical `??` unwrap TIR. A user-enum variant uses the
-                // shared `RefutableBind` node so every tier keeps captures in
-                // the surrounding scope after the miss route diverges.
+                // canonical `??` unwrap TIR. Before body sema, the comptime
+                // fragment still carries those contextual heads as `.Ok` /
+                // `.Val` variants; admit that raw shape here and let lowering
+                // verify it against the subject carrier type. A user-enum
+                // variant uses the shared `RefutableBind` node so every tier
+                // keeps captures in the surrounding scope after the miss
+                // route diverges.
                 Some(BindPattern::Refutable {
                     pattern,
                     fallback,
                     names,
                     ..
                 }) if matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
+                    || matches!(
+                        pattern,
+                        Pattern::Variant {
+                            variant,
+                            bindings,
+                            ..
+                        } if crate::Codegen::TIR::is_eval_fragment()
+                            && bindings.len() == 1
+                            && matches!(
+                                variant.as_str(),
+                                Syntax::LIT_OK | Syntax::LIT_VALUE
+                            )
+                    )
                     || matches!(
                         pattern,
                         Pattern::Variant { variant, .. }
