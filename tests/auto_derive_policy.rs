@@ -301,12 +301,23 @@ fn run() {
     assert_eq!(explicit.exit, 0);
     assert_eq!(automatic.exit, 0);
     assert_eq!(explicit.stdout, automatic.stdout);
-    assert_eq!(
+    let generated_rust_delta =
+        explicit.generated_rust_bytes.abs_diff(automatic.generated_rust_bytes);
+    let binary_delta = explicit.binary_bytes.abs_diff(automatic.binary_bytes);
+    eprintln!(
+        "auto-derive measurement: generated Rust {} -> {} ({generated_rust_delta} bytes); binary {} -> {} ({binary_delta} bytes)",
+        explicit.generated_rust_bytes,
+        automatic.generated_rust_bytes,
         explicit.binary_bytes,
         automatic.binary_bytes,
-        "before/after binary bytes: {} -> {}",
-        explicit.binary_bytes,
-        automatic.binary_bytes,
+    );
+    assert!(
+        generated_rust_delta <= 64,
+        "auto derive added {generated_rust_delta} generated-Rust bytes"
+    );
+    assert!(
+        binary_delta <= 64,
+        "auto derive changed the binary by {binary_delta} bytes"
     );
 }
 

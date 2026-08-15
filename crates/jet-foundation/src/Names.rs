@@ -2,6 +2,36 @@
 
 use crate::Diagnostics::Span;
 use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+
+/// Stable package scope used by every module identity.
+pub fn package_scope_for(path: &Path, project_root: &Path) -> String {
+    let norm_path = normalize_path(path);
+    let norm_root = normalize_path(project_root);
+    let scope = if norm_path.starts_with(&norm_root) {
+        norm_root
+    } else {
+        norm_path
+            .parent()
+            .map(normalize_path)
+            .unwrap_or(norm_path)
+    };
+    scope.to_string_lossy().into_owned()
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
 
 /// Visibility recorded for a declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +63,6 @@ pub struct NameModule {
     pub path: String,
     pub package: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameDeclaration {
     pub module: usize,
@@ -63,8 +92,8 @@ pub struct NameReference {
     pub semantic_identity: Option<String>,
 }
 
-/// Shared name facts. Loader seeds import edges; sema adds declarations,
-/// aliases, visibility, paths, and checked reference origins.
+/// Shared name facts. Loader seeds module and import identities; sema adds
+/// declarations, aliases, visibility, paths, and checked reference origins.
 #[derive(Debug, Clone, Default)]
 pub struct NameLedger {
     imports: HashMap<(usize, Span), usize>,

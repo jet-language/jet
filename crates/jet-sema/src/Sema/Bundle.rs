@@ -9,7 +9,7 @@ use crate::AST::{
     SwitchArm, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 mod Comptime;
 mod Units;
@@ -922,32 +922,6 @@ fn unit_fact(
 }
 
 
-fn package_scope_for(path: &Path, project_root: &Path) -> PathBuf {
-    let norm_path = normalize_sem_path(path);
-    let norm_root = normalize_sem_path(project_root);
-    if norm_path.starts_with(&norm_root) {
-        return norm_root;
-    }
-    norm_path
-        .parent()
-        .map(normalize_sem_path)
-        .unwrap_or(norm_path)
-}
-
-fn normalize_sem_path(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
 fn declare_name(
     ledger: &mut jet_foundation::Names::NameLedger,
     module: usize,
@@ -1321,9 +1295,10 @@ fn populate_name_ledger(
     ledger: &mut jet_foundation::Names::NameLedger,
 ) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let package = package_scope_for(&module.path, &bundle.project_root)
-            .to_string_lossy()
-            .into_owned();
+        let package = jet_foundation::Names::package_scope_for(
+            &module.path,
+            &bundle.project_root,
+        );
         ledger.set_module(
             module_idx,
             module.alias.clone(),

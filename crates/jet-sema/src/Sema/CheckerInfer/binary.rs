@@ -580,8 +580,14 @@ impl<'a> Checker<'a> {
             BinOp::Eq | BinOp::Ne => {
                 let has_comparable = ty.as_ref().is_some_and(|ty| match ty {
                     Type::Named(name) => {
-                        self.type_implements_trait_for_name(name, crate::Syntax::TRAIT_COMPARABLE)
-                            || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE)
+                        (self.type_implements_trait_for_name(
+                            name,
+                            crate::Syntax::TRAIT_COMPARABLE,
+                        ) || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
+                            && (self.type_implements_trait_for_name(
+                                name,
+                                crate::Syntax::TRAIT_EQUATABLE,
+                            ) || self.type_param_has_bound(ty, crate::Syntax::TRAIT_EQUATABLE))
                     }
                     _ => false,
                 });
@@ -948,9 +954,13 @@ impl<'a> Checker<'a> {
             || self.unit_fact_for_type(&rt).is_some();
         if lt == rt && !dimensional_multiplicative && !unit_operator {
             if let Type::Named(type_name) = &lt {
-                let comparable_hook = self
+                let comparable_hook = (self
                     .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_COMPARABLE)
-                    || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE);
+                    || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE))
+                    && (self.type_implements_trait_for_name(
+                        type_name,
+                        crate::Syntax::TRAIT_EQUATABLE,
+                    ) || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_EQUATABLE));
                 let hook = match op {
                     BinOp::Add => Some((crate::Syntax::TRAIT_ADD, "add", lt.clone())),
                     BinOp::Sub => Some((crate::Syntax::TRAIT_SUB, "sub", lt.clone())),

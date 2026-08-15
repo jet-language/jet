@@ -996,6 +996,14 @@ fn load_entry_with_overlays_mode_with_sink(
     // Pre-resolve every file import to its loaded module index so Codegen doesn't
     // need to call back into Loader (breaks the Codegen→Loader dep cycle).
     let mut name_ledger = crate::AST::NameLedger::default();
+    for (module_idx, module) in modules.iter().enumerate() {
+        name_ledger.set_module(
+            module_idx,
+            module.alias.clone(),
+            module.display.clone(),
+            jet_foundation::Names::package_scope_for(&module.path, &project_root),
+        );
+    }
     for module_idx in 0..modules.len() {
         let (module_path, imports) = {
             let m = &modules[module_idx];
