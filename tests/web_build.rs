@@ -149,7 +149,7 @@ fn knowledge_tier_web_js_and_wasm_runtime_values_match() {
 const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
 const instance = await instantiateWasm("./app.wasm");
 instance.exports.jet_export_run();
-if (takeWasmError(instance.exports)) throw new Error("unexpected Wasm diagnostic");
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
 "#;
     assert_eq!(
         run_node_harness(&dir, "knowledge_tier_wasm_harness.mjs", harness),
