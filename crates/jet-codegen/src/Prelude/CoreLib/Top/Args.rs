@@ -87,7 +87,7 @@ fn jet_args_program_name(prog: &str) -> String {
 }
 
 /// Normalize a source-file argv[0] to the name used by its built program.
-fn jet_args_source_program_name(prog: &str) -> String {
+pub(crate) fn jet_args_source_program_name(prog: &str) -> String {
     let (program, suffix) = prog.split_once(' ').unwrap_or((prog, ""));
     let name = jet_args_program_name(program);
     let source = name.strip_suffix(".jet").unwrap_or(&name);

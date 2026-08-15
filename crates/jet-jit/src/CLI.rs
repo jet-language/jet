@@ -35,10 +35,6 @@ mod runtime {
         Spec(jet_args_description(spec.0, &description.to_string()))
     }
 
-    pub(super) fn program_name(prog: &str) -> String {
-        jet_args_source_program_name(prog)
-    }
-
     pub(super) fn flag(spec: Spec, name: &str, help: &str) -> Spec {
         Spec(jet_args_flag(spec.0, &name.to_string(), &help.to_string()))
     }
@@ -148,9 +144,11 @@ mod runtime {
     }
 }
 
+pub(crate) use runtime::jet_args_source_program_name as program_name;
+
 use runtime::{
     empty_spec, flag, flag_set, flag_short, help_text, option, option_val, parse, positional,
-    program_name, standard_color_mode, standard_log_level, Parsed, Spec,
+    standard_color_mode, standard_log_level, Parsed, Spec,
 };
 
 mod inline_range_semantics {
