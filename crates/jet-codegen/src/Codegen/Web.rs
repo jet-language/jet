@@ -1024,6 +1024,15 @@ fn web_wasm_expr_supported(
                 | TIR::TNumericOp::CastAs { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::BuiltinMethod {
+            recv,
+            op: TIR::TBuiltinOp::LenList,
+            args,
+        } => {
+            args.is_empty()
+                && matches!(&recv.ty, Type::List(_) | Type::FixedList { .. })
+                && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::OrFallback {
             value,
             fallback: TIR::TOrFallback::Panic { msg, .. },
@@ -5176,6 +5185,18 @@ fn wasm_emit_expr(
                 _ => format!("jet_string_view_copy({value})"),
             }
         },
+        TIR::TExprKind::BuiltinMethod {
+            recv,
+            op: TIR::TBuiltinOp::LenList,
+            args,
+        } if args.is_empty()
+            && matches!(&recv.ty, Type::List(_) | Type::FixedList { .. }) =>
+        {
+            format!(
+                "({}).len() as i64",
+                wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?
+            )
+        }
         TIR::TExprKind::Print(inner) => format!(
             "jet_wasm_print({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
