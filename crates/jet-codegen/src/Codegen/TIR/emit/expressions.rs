@@ -10,6 +10,7 @@ use crate::Codegen::TIR::emit::collect_select_arms;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
+use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_require_stop;
 use crate::Codegen::TIR::emit_tir_call_args;
@@ -151,6 +152,25 @@ fn ct_lit_needs_its_type(value: &crate::AST::CtValue) -> bool {
         CtValue::Map(entries) => entries.is_empty(),
         _ => false,
     }
+}
+fn emit_track_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
+    let crate::AST::CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "TrackOriginInfo"
+        || !matches!(ty, Type::Named(name) if name == type_name)
+        || cx.type_names.contains(type_name)
+    {
+        return None;
+    }
+    let parts = fields
+        .iter()
+        .map(|(name, value)| {
+            let field = core_struct_field_rust_name(cx, ty, name)?;
+            Some(format!("{field}: {}", value.serialize()))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(format!("{} {{ {} }}", cx.rust_type(ty), parts.join(", ")))
 }
 
 fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
@@ -1041,13 +1061,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // modules and has no codegen context, so its exact-Int constructor
             // is root-relative only. Add the module prefix at the emission
             // seam; runtime arithmetic still goes through Prelude `jet_int_*`.
-            let baked = match value {
-                crate::AST::CtValue::BigInt(big) => format!(
-                    "{}jet_std::jet_int_from_str({:?}).unwrap()",
-                    cx.root_prefix,
-                    big.to_string_rep()
-                ),
-                _ => value.clone().serialize(),
+            let baked = if let Some(rooted) = emit_track_origin_ct_lit(value, &e.ty, cx) {
+                rooted
+            } else {
+                match value {
+                    crate::AST::CtValue::BigInt(big) => format!(
+                        "{}jet_std::jet_int_from_str({:?}).unwrap()",
+                        cx.root_prefix,
+                        big.to_string_rep()
+                    ),
+                    _ => value.clone().serialize(),
+                }
             };
             // #1537 / I2: some folded values spell a generic constructor that
             // pins none of its parameters — the carrier's `Ok(6i64)` says
