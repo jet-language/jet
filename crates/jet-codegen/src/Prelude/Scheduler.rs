@@ -63,20 +63,66 @@ fn jet_typed_deadline_boundary_should_unwind() -> bool {
     JET_TYPED_DEADLINE_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
 }
 
-static JET_SCHEDULER_PANIC_HOOK: OnceLock<()> = OnceLock::new();
+/// Installed once per process, at the first scheduler catch frame. The wrapped
+/// `previous` hook is captured here, so the initializer lives with the static.
+static JET_SCHEDULER_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !jet_scheduler_suppress_panic_report(info.payload()) {
+            previous(info);
+        }
+    }));
+});
+
+/// A Foundation-rendered report riding through a Rust panic payload. A boundary
+/// that cannot carry a typed report panics with the report text itself
+/// (`SchedulerHost.rs`'s `jet_runtime_diagnostic` and `jet_scheduler_runtime_stop`
+/// for the JIT/interpreter tier), and the catching side republishes that text:
+/// `jet_runtime_caught_stop` keys on this same `Stop [` header and
+/// `jet_scheduler_panic_message` on this same `]: ` header. Foundation renders
+/// exactly two headers — `Stop [<code>]: ` (`jet_render_runtime_stop`) and
+/// `Error [<code>]: ` (`jet_render_err`, `JetTaskDeadline::render`).
+fn jet_scheduler_transported_report(text: &str) -> bool {
+    let head = text.lines().next().unwrap_or(text);
+    (head.starts_with("Stop [") || head.starts_with("Error [")) && head.contains("]: ")
+}
+
+/// The complete set of panic payloads a scheduler catch frame turns into a
+/// status or republishes as a report: the two typed control transfers, a
+/// transported report, and the one private foreign-boundary marker that
+/// `Prelude/Core.rs`'s `jet_runtime_boundary` converts back into a user stop.
+/// Anything else is a host/compiler fault that nothing downstream republishes.
+fn jet_scheduler_converted_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
+    if jet_scheduler_is_cancel_unwind(payload) || payload.is::<JetDeadlineUnwind>() {
+        return true;
+    }
+    let Some(text) = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&'static str>().copied())
+    else {
+        return false;
+    };
+    text.starts_with("__jet_ffi_runtime__: ") || jet_scheduler_transported_report(text)
+}
+
+/// Whether the hook must stay quiet for this panic. A live catch frame is only
+/// half the answer: the flag says a frame exists, not that this panic reaches
+/// it. A non-unwinding panic — `panic_cannot_unwind` at an `extern "C"` edge, a
+/// panic in cleanup, a violated unsafe precondition — runs the hook and then
+/// aborts the process before unwinding starts, so no catch frame can ever
+/// convert it and its hook line is the only evidence anyone gets. Std exposes
+/// no stable `PanicHookInfo::can_unwind`, so the payload answers instead: quiet
+/// for exactly the control transfers the frame converts, loud for the rest.
+fn jet_scheduler_suppress_panic_report(payload: &(dyn std::any::Any + Send)) -> bool {
+    JET_SCHEDULER_CATCHING_PANIC
+        .try_with(|flag| flag.get())
+        .unwrap_or(false)
+        && jet_scheduler_converted_unwind(payload)
+}
 
 fn jet_scheduler_install_panic_hook() {
-    JET_SCHEDULER_PANIC_HOOK.get_or_init(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let caught_task = JET_SCHEDULER_CATCHING_PANIC
-                .try_with(|flag| flag.get())
-                .unwrap_or(false);
-            if !caught_task {
-                previous(info);
-            }
-        }));
-    });
+    std::sync::LazyLock::force(&JET_SCHEDULER_PANIC_HOOK);
 }
 
 fn jet_scheduler_catch_task_unwind<F, T>(f: F) -> std::thread::Result<T>
@@ -3004,5 +3050,107 @@ mod interrupt_boundary_tests {
         assert!(result.is_err());
         assert!(inner.state.lock().unwrap().recv_waiters.is_empty());
         assert!(control.cancel_waiters.lock().unwrap().is_empty());
+    }
+
+    /// Every payload a scheduler catch frame converts, built the way its raise
+    /// site builds it: `jet_task_unwind_cancel`, `jet_deadline_exceeded`, the
+    /// report text `SchedulerHost.rs` panics with, and the foreign-boundary
+    /// marker from `CryptoEntropy.rs` / the generated FFI bridge.
+    fn converted_payloads() -> Vec<(&'static str, Box<dyn std::any::Any + Send>)> {
+        vec![
+            ("cancel", Box::new(JetCancelUnwind)),
+            (
+                "deadline",
+                Box::new(JetDeadlineUnwind {
+                    rendered: "Error [E3003]: deadline exceeded while waiting in task join"
+                        .to_string(),
+                }),
+            ),
+            (
+                "stop report",
+                Box::new("Stop [E3001]: select closed\n  --> a.jet:3:1\n".to_string()),
+            ),
+            (
+                "deadline report",
+                Box::new("Error [E3003]: deadline exceeded while waiting in task join".to_string()),
+            ),
+            (
+                "foreign boundary",
+                Box::new("__jet_ffi_runtime__: os entropy: closed".to_string()),
+            ),
+        ]
+    }
+
+    /// Payloads no catch frame converts. The first two are std's own nounwind
+    /// panics (`core::panicking::panic_cannot_unwind` / `panic_in_cleanup`),
+    /// which abort the process right after the hook returns, so the hook line is
+    /// the only evidence they ever produce.
+    fn escaping_payloads() -> Vec<(&'static str, Box<dyn std::any::Any + Send>)> {
+        vec![
+            ("nounwind", Box::new("panic in a function that cannot unwind")),
+            ("cleanup", Box::new("panic in a destructor during cleanup")),
+            (
+                "host defect",
+                Box::new("called `Option::unwrap()` on a `None` value".to_string()),
+            ),
+        ]
+    }
+
+    #[test]
+    fn panic_hook_prints_an_escaping_task_panic_and_hides_a_converted_one() {
+        // Decisions are collected, never asserted, inside the catch frame: an
+        // assertion failure there would be swallowed as a caught task panic.
+        let decisions = jet_scheduler_catch_task_unwind(|| {
+            let mut decisions = Vec::new();
+            for (label, payload) in converted_payloads()
+                .into_iter()
+                .chain(escaping_payloads())
+            {
+                decisions.push((label, jet_scheduler_suppress_panic_report(&*payload)));
+            }
+            // The same two verdicts against payloads std actually built, from
+            // panics raised inside this live catch frame.
+            let defect = std::panic::catch_unwind(|| {
+                panic!("interpreter defect");
+            })
+            .expect_err("the task-body panic must be captured");
+            decisions.push(("raised defect", jet_scheduler_suppress_panic_report(&*defect)));
+            let cancel = std::panic::catch_unwind(|| {
+                jet_task_unwind_cancel();
+            })
+            .expect_err("the cancel unwind must be captured");
+            decisions.push(("raised cancel", jet_scheduler_suppress_panic_report(&*cancel)));
+            decisions
+        })
+        .expect("the probe frame must not panic");
+
+        assert_eq!(
+            decisions,
+            vec![
+                ("cancel", true),
+                ("deadline", true),
+                ("stop report", true),
+                ("deadline report", true),
+                ("foreign boundary", true),
+                ("nounwind", false),
+                ("cleanup", false),
+                ("host defect", false),
+                ("raised defect", false),
+                ("raised cancel", true),
+            ]
+        );
+    }
+
+    #[test]
+    fn panic_hook_prints_every_payload_with_no_catch_frame_live() {
+        for (label, payload) in converted_payloads()
+            .into_iter()
+            .chain(escaping_payloads())
+        {
+            assert!(
+                !jet_scheduler_suppress_panic_report(&*payload),
+                "{label} must keep its message when no catch frame is live"
+            );
+        }
     }
 }
