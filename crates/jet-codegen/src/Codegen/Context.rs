@@ -3206,7 +3206,6 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.foreign_undos = bundle_foreign_undos(bundle, module_idx);
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
     register_bundle_unit_metadata(cx, bundle, module_idx);
-    register_imported_methods(cx, bundle, module_idx);
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -3231,10 +3230,10 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.package_edition = bundle.edition.clone();
 }
 
-/// Carry authoritative module ownership and package-only guarantee facts into
-/// one codegen context. The name ledger owns declarations because loaded
-/// dependency items may also be present in a module's merged item list. The
-/// dependency ownership projection uses the same longest-root rule as sema.
+/// Carry authoritative module ownership, imported callable metadata, and
+/// package-only guarantee facts into one codegen context. The name ledger owns
+/// declarations because loaded dependency items may also be present in a
+/// module's merged item list. Dependency ownership uses sema's longest-root rule.
 pub(crate) fn populate_cx_module_facts(
     cx: &mut Cx,
     bundle: &ProgramBundle,
@@ -3246,6 +3245,7 @@ pub(crate) fn populate_cx_module_facts(
             .declaration(module_idx, name)
             .is_some()
     });
+    register_imported_methods(cx, bundle, module_idx);
     cx.package_hardened = bundle.package_guarantees.harden;
     let Some(module) = bundle.modules.get(module_idx) else {
         cx.dependency_fenced = false;
