@@ -41,7 +41,9 @@ fn has_runtime_fact_dispatch(rust: &str) -> bool {
 }
 
 fn web_stdout(name: &str, source: &str) -> Option<String> {
-    if Command::new("node").arg("--version").output().is_err() {
+    if Command::new("node").arg("--version").output().is_err()
+        || Command::new("rustc").arg("--version").output().is_err()
+    {
         return None;
     }
     let scratch = common::Scratch::new(name);
@@ -50,8 +52,31 @@ fn web_stdout(name: &str, source: &str) -> Option<String> {
         .unwrap_or_else(|diags| panic!("web fact fixture was rejected: {diags:#?}"));
     let web = output.web.expect("web fact fixture must produce web artifacts");
     fs::write(scratch.join("app.js"), web.js_app).unwrap();
+    fs::write(scratch.join("app_wasm.rs"), web.wasm_rust).unwrap();
     fs::write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let wasm = Command::new("rustc")
+        .current_dir(&scratch.path)
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            "app_wasm.rs",
+            "-o",
+            "app.wasm",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        wasm.status.success(),
+        "rustc rejected web fact fixture: {}",
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+    assert!(scratch.join("app.wasm").is_file(), "web fact fixture did not produce app.wasm");
     let node = Command::new("node")
         .current_dir(&scratch.path)
         .arg("app.js")
@@ -141,11 +166,7 @@ fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
 
 #[test]
 fn nested_reflection_fact_reads_fold_across_all_native_tiers() {
-    tir_support::assert_tiers_agree(
-        "reflection_fact_reads",
-        AGGREGATE_FIXTURE,
-        AGGREGATE_EXPECTED,
-    );
+    tir_support::assert_example_cli_tiers_agree("reflection/reflect-value", AGGREGATE_EXPECTED);
     if let Some(stdout) = web_stdout("reflection-fact-reads-web", AGGREGATE_FIXTURE) {
         assert_eq!(stdout, AGGREGATE_EXPECTED);
     }
