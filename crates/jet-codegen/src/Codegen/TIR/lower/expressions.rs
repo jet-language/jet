@@ -2558,6 +2558,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                 }
             }
+            // D-TYPE2-IMAG1=A: mirror `Checker::complexize_operand`. Sema
+            // promotes the scalar operand of `3 + 4i` through the explicit
+            // `Complex` constructor before the precise rule below fires, but a
+            // comptime item or TirBridge fragment lowers the raw AST first
+            // (`eval_comptime_items` runs early), so the mix still arrives here.
+            let (lhs, rhs) = complexize_operands(*op, lhs, rhs, cx);
             // Overflow decision for trapping JetArith helpers. Prefer the
             // resolved TIR operand types so call results, fields, and other
             // shapes the AST replay cannot see still trap (I2 / #1484). The
@@ -4897,6 +4903,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        // D-UNITLIT1 / D-TYPE2-IMAG1=A: Comptime/TirBridge lower the raw AST,
+        // so sema's unit-literal rewrite has not run yet. Reproduce it and
+        // lower the result, instead of declining a literal every other tier
+        // folds. An unsupported suffix keeps the plain out-of-subset refusal.
+        Expr::UnitLit { .. } => match unit_lit_elaborated(e, cx) {
+            Some(rewritten) => lower_expr(&rewritten, cx, env),
+            None => TExpr {
+                ty: Type::Int,
+                kind: TExprKind::Todo {
+                    line: 0,
+                    expected_type: format!("expression outside TIR subset: {}", expr_tag(e)),
+                },
+            },
+        },
         // Comptime/TirBridge can evaluate function bodies before sema elaborates
         // `Type.{ … }` (eval_comptime_items runs early). Mirror elaborate_typed_lit.
         Expr::TypedLit { head, body, span } => {
@@ -5076,6 +5096,136 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
             | TExprKind::MaterializeView(inner) => work.push(inner),
             _ => {}
         }
+    }
+}
+
+/// D-UNITLIT1 / D-TYPE2-IMAG1=A: the rewrite sema's `Expr::UnitLit` arm
+/// performs (`Sema/CheckerInfer/expr.rs`), reproduced for the raw AST that
+/// comptime items and TirBridge fragments lower before sema elaborates them.
+/// An in-scope unit member wins over the imaginary suffix here too, so a user
+/// `#UnitFamily` member named `i` shadows it exactly like any other unit.
+///
+/// A canonical Time literal (`500ms`) is absent on purpose: sema resolves it
+/// against the Time family's literal facts, which a lowering `Cx` does not
+/// carry, so a member of that family keeps refusing here instead of being
+/// mistaken for an ordinary unit member and folded to the wrong value.
+fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
+    let Expr::UnitLit {
+        int,
+        float,
+        suffix,
+        suffix_span,
+        span,
+        ..
+    } = e
+    else {
+        return None;
+    };
+    let value = float.unwrap_or_else(|| int.unwrap_or(0) as f64);
+    let read_arg = |expr: Expr| CallArg {
+        convention: AccessConvention::Read,
+        expr,
+        span: *span,
+        flags: crate::AST::CallArgFlags::default(),
+        label: None,
+        spread: false,
+    };
+    let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
+    // Sema's `unit_literal("Time", suffix)` lookup, from the one fact a
+    // lowering `Cx` does carry: the minted type's family name.
+    let canonical_time = cx
+        .unit_facts
+        .get(&type_name)
+        .is_some_and(|fact| fact.family == "Time");
+    if !canonical_time
+        && cx
+            .distinct_types
+            .get(&type_name)
+            .is_some_and(|(base, numeric)| *numeric && *base == Type::Float)
+    {
+        return Some(Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(type_name, *suffix_span)),
+            method: Syntax::numeric_conversion_method("Float")
+                .expect("Float has a canonical conversion method")
+                .to_string(),
+            method_span: *suffix_span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args: vec![read_arg(Expr::Float(value, *span, false))],
+            recv_type: None,
+            resolved_ret: None,
+            checked_widen: false,
+        });
+    }
+    if suffix != Syntax::UNIT_SUFFIX_IMAGINARY {
+        return None;
+    }
+    // `4i` is a pure imaginary value: zero real part, the literal imaginary.
+    Some(Expr::Call(Call {
+        name: Syntax::TYPE_COMPLEX.to_string(),
+        name_span: *suffix_span,
+        type_args: Vec::new(),
+        args: vec![
+            read_arg(Expr::Float(0.0, *span, false)),
+            read_arg(Expr::Float(value, *span, false)),
+        ],
+        resolved_ret: None,
+        range_checked: false,
+        widen_approx: false,
+    }))
+}
+
+/// D-TYPE2-IMAG1=A: `Checker::complexize_operand` for lowered operands. Only
+/// the four arithmetic operators the precise `Complex` rule defines promote; a
+/// comparison stays untouched so it keeps refusing instead of inventing an
+/// operation sema rejects.
+fn complexize_operands(op: BinOp, lhs: TExpr, rhs: TExpr, cx: &Cx) -> (TExpr, TExpr) {
+    if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+        || cx.type_names.contains(Syntax::TYPE_COMPLEX)
+    {
+        return (lhs, rhs);
+    }
+    let is_complex = |ty: &Type| matches!(ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX);
+    let is_scalar =
+        |ty: &Type| matches!(ty, Type::Int | Type::IntN { .. } | Type::Float | Type::Float32);
+    match (is_complex(&lhs.ty), is_complex(&rhs.ty)) {
+        (true, false) if is_scalar(&rhs.ty) => (lhs, complex_from_scalar(rhs)),
+        (false, true) if is_scalar(&lhs.ty) => (complex_from_scalar(lhs), rhs),
+        _ => (lhs, rhs),
+    }
+}
+
+/// The shared `Complex` carrier is two `f64` parts on every tier, so an integer
+/// or `F32` operand widens through the same numeric conversion op
+/// `Float.from_int(…)` lowers to before it becomes the real part.
+fn complex_from_scalar(value: TExpr) -> TExpr {
+    let real = if matches!(value.ty, Type::Float) {
+        value
+    } else {
+        let source = value.ty.name();
+        let op = crate::Codegen::TIR::resolve_numeric_conversion_op("Float", &source)
+            .expect("a complex scalar is a registered numeric conversion source");
+        TExpr {
+            ty: Type::Float,
+            kind: TExprKind::NumericMethod {
+                recv: Box::new(value),
+                op,
+            },
+        }
+    };
+    TExpr {
+        ty: Type::Named(Syntax::TYPE_COMPLEX.to_string()),
+        kind: TExprKind::PreciseBuiltin {
+            type_name: Syntax::TYPE_COMPLEX.to_string(),
+            func: "from_parts".to_string(),
+            args: vec![
+                real,
+                TExpr {
+                    ty: Type::Float,
+                    kind: TExprKind::FloatLit(0.0),
+                },
+            ],
+        },
     }
 }
 
