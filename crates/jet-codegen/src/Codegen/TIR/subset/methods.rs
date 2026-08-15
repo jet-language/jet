@@ -676,7 +676,9 @@ pub(crate) fn method_call_in_subset(
                     | ("Cache", "new", 1)
                     | (crate::Syntax::TYPE_BITS, "new", 0)
                     | (crate::Syntax::TYPE_BYTES, "new", 0)
-                    | (crate::Syntax::TYPE_BYTES, "with_capacity", 1) => {
+                    | (crate::Syntax::TYPE_BYTES, "with_capacity", 1)
+                    | (crate::Syntax::TYPE_LIST, "try_new", 0)
+                    | (crate::Syntax::TYPE_LIST, "try_with_capacity", 1) => {
                         return args
                             .iter()
                             .all(|a| expr_in_subset(&a.expr, cx, locals));
