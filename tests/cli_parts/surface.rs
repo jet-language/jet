@@ -551,6 +551,11 @@ fn coverage_help_matches_instrumentation() {
     let man = String::from_utf8_lossy(&man.stdout);
     assert!(man.contains(COVERAGE_HELP), "{man}");
     assert!(!man.contains("function and line coverage"), "{man}");
+    let man = man.replacen(
+        &format!("\"jet {}\"", env!("CARGO_PKG_VERSION")),
+        "\"jet VERSION\"",
+        1,
+    );
     check_snapshot("man.txt", &man);
 }
 
