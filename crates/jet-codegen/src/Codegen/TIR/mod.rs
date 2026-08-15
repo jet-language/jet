@@ -1414,7 +1414,30 @@ fn lower_imported_generated_codecs(bundle: &ProgramBundle, cx: &Cx, funcs: &mut 
     }
 }
 
+/// Lowering is an unbounded-depth recursive descent over user syntax, so the
+/// frame requirement is per source-nesting level. This is the narrowest point
+/// every caller shares -- the driver's seams, the JIT's public entries, a test
+/// helper, and any embedder -- so the sized stack is installed here rather than
+/// chased caller by caller. The boundary is re-entrant, so an outer one already
+/// on the worker makes this run inline.
+///
+/// `LAST_JIT_LOWER_FAILURE` is thread-local and callers read it back through
+/// `lower_jit_program_fail_reason`, so the reason recorded inside the worker is
+/// carried out and restored on the caller's thread.
 pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
+    if jet_foundation::CompilerStack::on_compiler_worker() {
+        return lower_jit_program_on_stack(bundle);
+    }
+    let (program, failure) = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let program = lower_jit_program_on_stack(bundle);
+        let failure = LAST_JIT_LOWER_FAILURE.with(|failure| failure.borrow_mut().take());
+        (program, failure)
+    });
+    LAST_JIT_LOWER_FAILURE.with(|slot| *slot.borrow_mut() = failure);
+    program
+}
+
+fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
     let module = bundle.modules.get(bundle.entry)?;
