@@ -853,12 +853,18 @@ impl TraitRegistry {
                 .or_else(|| self.enum_params.get(type_name))
                 .map_or_else(
                     || Type::Named(type_name.to_string()),
-                    |params| Type::Apply {
-                        name: type_name.to_string(),
-                        args: params
-                            .iter()
-                            .map(|param| Type::Named(param.name.clone()))
-                            .collect(),
+                    |params| {
+                        if params.is_empty() {
+                            Type::Named(type_name.to_string())
+                        } else {
+                            Type::Apply {
+                                name: type_name.to_string(),
+                                args: params
+                                    .iter()
+                                    .map(|param| Type::Named(param.name.clone()))
+                                    .collect(),
+                            }
+                        }
                     },
                 );
             let self_ok = method.params.first().is_some_and(|param| {
