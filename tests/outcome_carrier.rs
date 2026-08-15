@@ -178,13 +178,18 @@ fn run() {
 "#,
     );
     let run = user_body(&rust, "__jet_run");
+    let report = jet::AST::mangle_generated("report");
+    let partial_field = jet::AST::mangle("partial");
+    let notes_field = jet::AST::mangle("notes");
+    let partial_read = format!("|{report}| {report}.{partial_field}.clone()");
+    let notes_read = format!("|{report}| {report}.{notes_field}.clone()");
     assert!(
-        run.contains("jet_partial(&(") && run.contains("__jet_report.user_partial.clone()"),
-        "`.partial` must marshal onto the prelude's `jet_partial`:\n{run}"
+        run.contains("jet_partial(&(") && run.contains(&partial_read),
+        "`.partial` must read the typed carrier field through `jet_partial`:\n{run}"
     );
     assert!(
-        run.contains("jet_notes(&(") && run.contains("__jet_report.user_notes.clone()"),
-        "`.notes` must marshal onto the prelude's `jet_notes`:\n{run}"
+        run.contains("jet_notes(&(") && run.contains(&notes_read),
+        "`.notes` must read the typed carrier field through `jet_notes`:\n{run}"
     );
     // The middle states are the same carrier, so no third type appears.
     assert!(
