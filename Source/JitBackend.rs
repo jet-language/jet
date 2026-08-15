@@ -29,6 +29,13 @@ impl InterpreterBackend {
     }
 }
 
+/// These methods deliberately run on their caller's thread. A resident session
+/// keeps `#Persist` state (D-PERSIST1) in thread-local storage seeded while the
+/// bundle is lowered, and `restart` below clears exactly that store, so hopping
+/// each call onto a fresh worker would drop persisted bindings between hot
+/// swaps. The sized compiler stack therefore wraps the whole session from
+/// outside — `Interpreter::dev_run_bundle` and the `run_*_once` entries — never
+/// one call inside it.
 impl JitBackend for InterpreterBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))

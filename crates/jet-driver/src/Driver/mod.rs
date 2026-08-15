@@ -395,6 +395,18 @@ pub fn compile_bundle_path_with_target_machine(
     mode: crate::Sema::CompileMode,
     machine: &crate::TargetMachine::TargetMachine,
 ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+    // One boundary for both front-end passes below: the machine-usage check
+    // and the compile itself reuse the same worker (I9: same seam, one stack).
+    crate::run_compiler_work(|| {
+        compile_bundle_path_with_target_machine_on_compiler_stack(file, mode, machine)
+    })
+}
+
+fn compile_bundle_path_with_target_machine_on_compiler_stack(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    machine: &crate::TargetMachine::TargetMachine,
+) -> Result<crate::CompileOutput, TargetMachineCompileError> {
     let usage = target_machine_usage_for_file(file, mode)
         .map_err(TargetMachineCompileError::Diagnostics)?;
     let machine_errors = machine.validate(&usage);
@@ -2126,10 +2138,8 @@ fn read_build_file(
 pub fn query_build_plan(
     file: &str,
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-    crate::run_compiler_work(|| {
-        compile_bundle_path_build(file, build_query_options())
-            .map(|output| output.build.map(|build| build.plan))
-    })
+    compile_bundle_path_build(file, build_query_options())
+        .map(|output| output.build.map(|build| build.plan))
 }
 
 /// Read the one build-fact snapshot produced by the query path. This keeps
@@ -2143,7 +2153,7 @@ pub fn query_build_facts(
     let mut options = build_query_options();
     options.profile = profile.to_string();
     options.setting_overrides = setting_overrides.clone();
-    crate::run_compiler_work(|| compile_bundle_path_build(file, options).map(|output| output.build_facts))
+    compile_bundle_path_build(file, options).map(|output| output.build_facts)
 }
 
 fn build_query_options() -> BuildRunOptions {
@@ -2191,15 +2201,13 @@ pub fn query_build_plan_with_overlay(
     file: &str,
     source: &str,
 ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-    crate::run_compiler_work(|| {
-        compile_bundle_path_build_inner(
-            file,
-            build_query_options(),
-            Some((std::path::Path::new(file), source)),
-            None,
-        )
-        .map(|output| output.build.map(|build| build.plan))
-    })
+    compile_bundle_path_build_inner(
+        file,
+        build_query_options(),
+        Some((std::path::Path::new(file), source)),
+        None,
+    )
+    .map(|output| output.build.map(|build| build.plan))
 }
 
 /// One canonical graph representation shared by CLI and LSP.
@@ -2275,7 +2283,27 @@ pub fn compile_bundle_path_build_as_dependency_with_overlay(
     compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file))
 }
 
+/// The one build-graph seam. Every `compile_bundle_path_build*` facade and
+/// every build query reaches the graph through here, so the sized compiler
+/// stack is installed once, around build evaluation *and* the runtime
+/// compile that follows it.
 fn compile_bundle_path_build_inner(
+    file: &str,
+    options: BuildRunOptions,
+    overlay: Option<(&std::path::Path, &str)>,
+    dependency_boundary: Option<&str>,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_build_on_compiler_stack(
+            file,
+            options,
+            overlay,
+            dependency_boundary,
+        )
+    })
+}
+
+fn compile_bundle_path_build_on_compiler_stack(
     file: &str,
     options: BuildRunOptions,
     overlay: Option<(&std::path::Path, &str)>,
@@ -4591,6 +4619,38 @@ fn compile_bundle_path_opts_full(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_opts_on_compiler_stack(
+            file,
+            mode,
+            freestanding,
+            gates,
+            web_target,
+            plugin_target,
+            library_target,
+            debug_linemap,
+            cross_target,
+            explicit_output,
+            profile,
+            setting_overrides,
+        )
+    })
+}
+
+fn compile_bundle_path_opts_on_compiler_stack(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+    explicit_output: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
     // absent or unrecognized, e.g. a wasm/web pseudo-target).
@@ -4828,6 +4888,18 @@ pub fn compile_src_with_options(
 }
 
 fn compile_src_with_options_and_policy(
+    src: &str,
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    options: CompileSrcOptions,
+    generated: bool,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_src_on_compiler_stack(src, file, mode, options, generated)
+    })
+}
+
+fn compile_src_on_compiler_stack(
     src: &str,
     file: &str,
     mode: crate::Sema::CompileMode,
@@ -5074,6 +5146,31 @@ fn check_file_with_effect_facts_impl(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
+    crate::run_compiler_work(|| {
+        check_file_on_compiler_stack(
+            file,
+            overlays,
+            is_lsp,
+            incremental,
+            profile,
+            setting_overrides,
+        )
+    })
+}
+
+fn check_file_on_compiler_stack(
+    file: &str,
+    overlays: &[(&Path, &str)],
+    is_lsp: bool,
+    incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+    Vec<std::path::PathBuf>,
+) {
     let (loaded, dependencies) =
         crate::Loader::load_entry_with_overlays_and_dependencies(file, overlays, is_lsp);
     match loaded {
@@ -5165,6 +5262,19 @@ pub fn check_file_with_overlays_and_import_root(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
+    crate::run_compiler_work(|| {
+        check_file_with_import_root_on_compiler_stack(file, overlays)
+    })
+}
+
+fn check_file_with_import_root_on_compiler_stack(
+    file: &str,
+    overlays: &[(&Path, &str)],
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
     match crate::Loader::load_entry_with_overlays_and_import_root(file, overlays, false) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
@@ -5210,6 +5320,17 @@ pub fn check_file_with_overlays_and_import_root(
 /// consumers. This is the in-memory counterpart of
 /// `check_file_with_effect_facts`; it performs no filesystem I/O.
 pub fn check_eval_with_effect_facts(
+    src: &str,
+    file: &str,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    crate::run_compiler_work(|| check_eval_on_compiler_stack(src, file))
+}
+
+fn check_eval_on_compiler_stack(
     src: &str,
     file: &str,
 ) -> (
@@ -5317,6 +5438,13 @@ pub fn compile_tests(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    crate::run_compiler_work(|| compile_tests_on_compiler_stack(file, coverage))
+}
+
+fn compile_tests_on_compiler_stack(
+    file: &str,
+    coverage: bool,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
@@ -5364,6 +5492,13 @@ pub fn compile_fuzz(
     file: &str,
     test_name: Option<&str>,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
+    crate::run_compiler_work(|| compile_fuzz_on_compiler_stack(file, test_name))
+}
+
+fn compile_fuzz_on_compiler_stack(
+    file: &str,
+    test_name: Option<&str>,
+) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)
         .map_err(FuzzCompileError::Diagnostics)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
@@ -5407,6 +5542,16 @@ pub fn compile_bundle_path_with_entry(
 }
 
 pub fn compile_bundle_path_with_entry_and_settings(
+    file: &str,
+    entry_fn: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_with_entry_on_compiler_stack(file, entry_fn, setting_overrides)
+    })
+}
+
+fn compile_bundle_path_with_entry_on_compiler_stack(
     file: &str,
     entry_fn: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -5602,6 +5747,12 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
 pub fn compile_benches(
     file: &str,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    crate::run_compiler_work(|| compile_benches_on_compiler_stack(file))
+}
+
+fn compile_benches_on_compiler_stack(
+    file: &str,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Bench);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
@@ -5631,6 +5782,16 @@ pub fn compile_bench_override(
 }
 
 fn compile_command_override(
+    file: &str,
+    kind: crate::Codegen::CommandOverrideKind,
+    coverage: bool,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_command_override_on_compiler_stack(file, kind, coverage)
+    })
+}
+
+fn compile_command_override_on_compiler_stack(
     file: &str,
     kind: crate::Codegen::CommandOverrideKind,
     coverage: bool,

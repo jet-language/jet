@@ -533,6 +533,41 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
         .collect()
 }
 
+/// Run one execution tier on the compiler's sized stack.
+///
+/// Running a program walks the same deep recursive descent compiling it does —
+/// TIR lowering for tier 0, Cranelift lowering for tier 1 — so a run entry
+/// needs the same explicit stack as a compile entry, and for the same reason:
+/// a caller's thread (`jet`, the dev server, an embedder, a test harness) does
+/// not know the compiler's frame budget. `run_compiler_work` reuses an active
+/// worker, so nesting these seams still crosses the boundary exactly once.
+///
+/// Three pieces of run state are thread-local on the caller's thread, so they
+/// are carried across explicitly: the program argv a caller installed with
+/// `with_program_args`, the tier-trace toggle read while lowering, and the
+/// tier flags plus trace rows a caller reads after the run. Everything else a
+/// run touches — resident module, JIT runtime, memory sentries, journey
+/// frames, `#Persist` seeding — is established and consumed inside `work`.
+fn on_compiler_stack(work: impl FnOnce() -> RunOutcome + Send) -> RunOutcome {
+    let trace_tiers = jet_jit::trace_tiers_enabled();
+    let argv = crate::Comptime::runtime_argv();
+    let (outcome, flags, rows) = jet_driver::run_compiler_work(move || {
+        jet_jit::set_trace_tiers(trace_tiers);
+        let outcome = match argv.as_deref() {
+            Some(args) => jet_jit::with_program_args(args, work),
+            None => work(),
+        };
+        (
+            outcome,
+            jet_jit::jit_trace_flags_for_test(),
+            jet_jit::take_last_trace(),
+        )
+    });
+    jet_jit::merge_jit_trace_flags_for_test(flags);
+    jet_jit::publish_trace(rows);
+    outcome
+}
+
 /// D-LENS-RUN1: load, check, and execute one native program through strict JIT.
 pub fn run_jit_once(file: &str) -> RunOutcome {
     run_jit_once_with_args_and_settings(file, &[], &BTreeMap::new())
@@ -587,6 +622,21 @@ pub fn run_jit_once_with_args_and_settings(
 }
 
 pub fn run_jit_once_with_args_opts_and_gates_and_settings(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunOutcome {
+    // The whole invocation stays on one worker: the warm-artifact probe, the
+    // front end, the JIT run, and the tier-artifact store that reads what the
+    // run just published all share the same thread-local run state.
+    on_compiler_stack(|| {
+        run_jit_once_on_compiler_stack(file, program_args, json, gates, setting_overrides)
+    })
+}
+
+fn run_jit_once_on_compiler_stack(
     file: &str,
     program_args: &[&str],
     json: bool,
@@ -707,11 +757,9 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings(
     if let Some(outcome) = job_help_if_requested(file, program_args, gates, setting_overrides) {
         return outcome;
     }
-    let trace_tiers = jet_jit::trace_tiers_enabled();
-    let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
-        jet_jit::set_trace_tiers(trace_tiers);
+    on_compiler_stack(|| {
         let requested = requested_job(program_args);
-        let outcome = match checked_bundle_with_entry(
+        match checked_bundle_with_entry(
             file,
             gates,
             requested,
@@ -731,14 +779,8 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings(
                 jet_jit::with_program_args(&args, || dev_run_bundle(&bundle, false, true))
             }
             Err(diags) => RunOutcome::Problems(diags),
-        };
-        let flags = jet_jit::jit_trace_flags_for_test();
-        let rows = jet_jit::take_last_trace();
-        (outcome, flags, rows)
-    });
-    jet_jit::merge_jit_trace_flags_for_test(flags);
-    jet_jit::publish_trace(rows);
-    outcome
+        }
+    })
 }
 
 pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
@@ -808,10 +850,8 @@ pub fn dev_iteration_with_gates_profile_and_settings(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunOutcome {
-    let trace_tiers = jet_jit::trace_tiers_enabled();
-    let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
-        jet_jit::set_trace_tiers(trace_tiers);
-        let outcome = match checked_bundle_with_entry(
+    on_compiler_stack(|| {
+        match checked_bundle_with_entry(
             file,
             gates,
             None,
@@ -820,14 +860,8 @@ pub fn dev_iteration_with_gates_profile_and_settings(
         ) {
             Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
             Err(diags) => RunOutcome::Problems(diags),
-        };
-        let flags = jet_jit::jit_trace_flags_for_test();
-        let rows = jet_jit::take_last_trace();
-        (outcome, flags, rows)
-    });
-    jet_jit::merge_jit_trace_flags_for_test(flags);
-    jet_jit::publish_trace(rows);
-    outcome
+        }
+    })
 }
 
 fn job_help_if_requested(
@@ -865,6 +899,14 @@ fn job_help_if_requested(
 
 /// Run an already-checked bundle through the dev backend seam.
 pub fn dev_run_bundle(
+    bundle: &ProgramBundle,
+    try_anyway: bool,
+    use_interpreter: bool,
+) -> RunOutcome {
+    on_compiler_stack(|| dev_run_bundle_on_compiler_stack(bundle, try_anyway, use_interpreter))
+}
+
+fn dev_run_bundle_on_compiler_stack(
     bundle: &ProgramBundle,
     try_anyway: bool,
     use_interpreter: bool,

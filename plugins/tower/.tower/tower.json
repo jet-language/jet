@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1994,
-    "rev": 37613,
+    "rev": 37616,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99711,6 +99711,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-06T21:35:47.073Z"
+        },
+        {
+          "n": 9,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:15:51.486Z"
+        },
+        {
+          "n": 10,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:15:51.486Z"
+        },
+        {
+          "n": 11,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:15:51.487Z"
+        },
+        {
+          "n": 12,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:15:51.487Z"
         }
       ],
       "refs": [
@@ -99723,8 +99759,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-15T18:53:29.662Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-15T19:15:51.487Z",
+      "updatedBy": "owner",
       "workOrder": 1120
     },
     {
@@ -171990,6 +172026,105 @@
       "created": "2026-08-14T19:53:22.011Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-14"
+    },
+    {
+      "id": "D-PANICROOT1",
+      "cardId": "c09mc3y7",
+      "group": "syntax",
+      "title": "Where Panic sits in the closed effect table",
+      "gist": "Whether `Panic` is an effect root that code must name.",
+      "lesson": "An effect is a right a function needs, such as `FS` for files. Card #1567 heals the closed table to thirteen roots. A panic is not a right. It is a program stop: `jet_panic` renders E3001 and leaves with code 70. Today `Panic` ships as a root in `Prelude/Effects.jet`, so a `#Grant` region or a signature must name it. Two shipped examples already fail the front end for that reason. This choice sets what `Panic` is in the table, and who must type it.",
+      "explainer": "",
+      "story": "Ravi opens Jet for the first time and runs the shipped effects example. It does not run. The front end stops at line 16 and asks him to grant `Panic` in a block about files and console output. Nothing in that example is about stopping. He came to learn `#Grant`, and the first rule he meets is about panics.",
+      "inWild": "// examples/features/effects/effect_grant.jet — shipped today, fails the front end\nuse core.files as fs\n\nfn run() {\n    path :: \"/tmp/jet_scap_grant.txt\"\n    #Grant(caps: FS, IO) {\n        fs.write(path, \"granted\\nthen revoked\") ?? panic(\"write failed\")\n        text :: fs.read(path) ?? panic(\"read failed\")\n        print(text.to_upper())\n    }\n    print(\"done\")\n}\n\n// $ cargo test --test golden\n// Error [E0712]: this `#Grant` region uses the effect `Panic`,\n//               which it has no capability for\n//   --> examples/features/effects/effect_grant.jet:16\n\n// The second shipped failure shows no panic at the call site.\n// examples/features/lowlevel/polyglot_fortran/main.jet\nfn run() =[Fortran, IO]=> {\n    values :: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]\n    print(matrix.probe(values))\n}\n\n// Error [E0740]: `run` uses the effect `Panic`,\n//               which its signature doesn't allow\n// The stop sits in the generated binding, one file away:\n// probe() panics when the array length is not six.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Panic is a deny-only row: nobody grants it",
+          "detail": "`Panic` stays in the vocabulary, but only a denial may name it. No grant and no signature ever lists it. The two shipped examples compile again with no edit.\n\nYou keep the guarantee that matters. A function promises no stop with `=[!Panic]=>`. A package promises the same in one manifest line. Tools still project the inferred row, so an audit can still see which functions can stop.\n\nThe loss: a signature no longer warns a reader that the call can stop. A reader learns that from the deny surface and from tooling instead.",
+          "technical": "Table: thirteen grantable roots, plus `Panic` as one deny-only row. Gate law: the positive subset checks (E0740, E0741, E0712, E0747) drop the `Panic` root from the inferred set before they compare it with a bound.\n\nThe prohibition path does not change. `=[!Panic]=>` and `effects: { deny: [Panic] }` keep E0749, with the `#Pre` and refinement discharge from D-NOPANIC1=D. Seeding stays at `check_panic_call` in `CheckerItems.rs`, so the projected row and the `__jet_panic__` reach edge are untouched.\n\nNaming `Panic` in a positive list becomes proposed error E0751, whose fix names `=[!Panic]=>`. Records the row as deny-only in the D-AUTHORITY-ROOTS1 table.",
+          "code": "// The shipped example compiles again, exactly as written today:\n#Grant(caps: FS, IO) {\n    fs.write(path, \"granted\") ?? panic(\"write failed\")\n    print(\"ok\")\n}\n\n// The guarantee is written only as a denial:\nenum PortError { NotANumber(String) }\n\npub fn parse_port(raw: String) =[!Panic]=> Int ? PortError {\n    n :: Int.parse(raw) ?? return Err(PortError.NotANumber(~raw))\n    return n\n}\n\n// package.jet — the same promise for a whole package:\npackage confkit {\n    effects: { deny: [Panic] }\n}\n\n// A positive mention is rejected, because the row grants nothing:\nfn run() =[Fortran, IO, Panic]=> { }\n// Error [E0751]: `Panic` can't be granted, only denied\n//  Fix: drop `Panic` from the list, or write `=[!Panic]=>` to forbid stops"
+        },
+        {
+          "key": "B",
+          "name": "Panic is the fourteenth root and every gate names it",
+          "detail": "The compiler keeps today's rule and the corpus moves. Every `#Grant`, every `#Caps` block, and every signature row that can reach a stop adds `Panic`.\n\nThe gain is plain reading. A signature that lists `Panic` tells a caller that the call can stop, with no tool needed.\n\nThe cost, counted on master: the 611 example files hold 64 effect-gate sites, and 108 of them hold 561 explicit `panic(` calls. Twelve files hold both a gate and a stop, covering 21 gate sites; the test corpus adds 8 more. Reach crosses files, so the real set is larger than any text count.\n\nThe burden also grows later. Today only an explicit `panic` seeds the row. If a failed bounds check or key check joins it, most ordinary code needs the word.",
+          "technical": "Table: fourteen roots. `Panic` keeps ordinary root behavior in E0740, E0741, E0712 and E0747, and keeps `!Panic` denial.\n\nMigration is mechanical: add `Panic` to every gate that reaches a stop, such as `#Grant(caps: FS, IO, Panic)` and `=[Fortran, IO, Panic]=>`. Generated binder output must carry it too, because reach crosses files. Golden output for the two failing examples updates in the same pass.\n\nAmends the D-AUTHORITY-ROOTS1 root count from thirteen to fourteen, and keeps D-NOPANIC1=D as ratified.",
+          "code": "// examples/features/effects/effect_grant.jet, migrated:\n#Grant(caps: FS, IO, Panic) {\n    fs.write(path, \"granted\") ?? panic(\"write failed\")\n    print(\"ok\")\n}\n\n// examples/features/lowlevel/polyglot_fortran/main.jet, migrated:\nfn run() =[Fortran, IO, Panic]=> {\n    values :: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]\n    print(matrix.probe(values))\n}\n\n// The generated binding carries it too, one file away:\npub fn probe(a: [Float]) =[Fortran, Panic]=> Float {\n    if a.len() != 6 { panic(\"a must contain exactly 6 column-major values\") }\n    return abi.probe(a[0], a[1], a[2], a[3], a[4], a[5])\n}\n\n// Miss it anywhere in the chain and the caller fails:\n// Error [E0740]: `run` uses the effect `Panic`, which its signature doesn't allow"
+        },
+        {
+          "key": "C",
+          "name": "Panic leaves the effect model",
+          "detail": "A stop is not a right, so it leaves the table. Nothing grants it and nothing denies it. Both examples compile again, and the table is exactly the thirteen roots card #1567 names.\n\nThe loss is the guarantee. `=[!Panic]=>` stops parsing, `effects: { deny: [Panic] }` is deleted, and E0749 goes with them. No function and no package can promise that it never stops.\n\nThis reverses the ratified ruling D-NOPANIC1=D and removes shipped enforcement. The stdlib rule that expected failure returns `T ? E` becomes an honor rule again, checked only by review.",
+          "technical": "Table: thirteen roots. The `effect Panic` line leaves `Prelude/Effects.jet`, and `Effect::Panic` leaves the enum.\n\nThe seeding at `check_panic_call`, E0749 and the prohibition path are deleted. The `__jet_panic__` reach edge stays, because the legacy `reaches_panic` fact and the autodiff panic rule read it. `tests/ui/panic_effect_prohibition.jet` and its transitive sibling are deleted.\n\nNeeds an owner amendment that reverses D-NOPANIC1=D by name.",
+          "code": "// Both examples compile with no edit, exactly as written today:\n#Grant(caps: FS, IO) { fs.write(path, \"granted\") ?? panic(\"write failed\") }\nfn run() =[Fortran, IO]=> { print(matrix.probe(values)) }\n\n// The shipped promise no longer exists:\npub fn parse_port(raw: String) =[!Panic]=> Int { }\n// Error [E0119]: `Panic` isn't an effect\n//  Fix: remove the prohibition; a stop is not an effect\n\n// So a library that stops on bad input keeps compiling, unreported:\npub fn parse_port(raw: String) => Int {\n    return Int.parse(raw) ?? panic(\"bad port: {raw}\")\n}"
+        },
+        {
+          "key": "D",
+          "name": "Panic becomes the leaf Exec.Stop",
+          "detail": "The stop moves under the root that already owns leaving a process. `Exec.Exit` is a shipped leaf, and `Exec.Stop` joins it. The table is exactly thirteen roots, with no extra row.\n\nDenial reads `=[!Exec.Stop]=>`, and a manifest denies it the same way. Grants never need the name, as in option A, so both examples compile again.\n\nThe loss is subsumption. `=[Exec]=>` covers every leaf, so a function that runs a program silently admits stops. `=[!Exec]=>` promises no subprocess, and now promises no stop as well. Two unrelated facts share one word.",
+          "technical": "Table: thirteen roots. `Exec.Stop` joins `Exec.Exit` in `BUILTIN_EFFECT_LEAVES` in `effects_surface.rs`.\n\nGate law matches option A: the leaf drops out of the positive subset checks and is enforced only through prohibition. D-EFFTREE1 ancestor subsumption makes `Exec` cover `Exec.Stop`, in a bound and in a denial alike.\n\n`=[!Panic]=>`, `deny: [Panic]`, the E0749 text and both shipped ui tests migrate to the new name. Amends D-NOPANIC1=D on spelling only, and leaves its enforcement rule intact.",
+          "code": "// Grants stay clean, as in option A:\n#Grant(caps: FS, IO) { fs.write(path, \"granted\") ?? panic(\"write failed\") }\n\n// The promise moves under Exec:\npub fn parse_port(raw: String) =[!Exec.Stop]=> Int ? PortError {\n    n :: Int.parse(raw) ?? return Err(PortError.NotANumber(~raw))\n    return n\n}\n\n// package.jet:\npackage confkit { effects: { deny: [Exec.Stop] } }\n\n// But one word now carries two unrelated facts:\nfn build(dir: Path) =[Exec]=> Report { }    // runs a program, and may stop\nfn pure_math(x: Float) =[!Exec]=> Float { } // no subprocess, and no stop"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java",
+          "note": "A checked exception must be declared with `throws`, and the declaration spreads to every caller. An unchecked `Error` needs no declaration at all. That spread is the cost option B accepts.",
+          "code": "int parsePort(String raw) throws PortException { ... }\n// every caller declares or catches it\n\nint parsePort(String raw) {\n    throw new IllegalArgumentException(raw);  // unchecked: no signature word\n}"
+        },
+        {
+          "lang": "Go",
+          "note": "A returned `error` carries expected failure, and the signature shows it. `panic` sits outside that model and never appears in a signature.",
+          "code": "func ParsePort(raw string) (int, error) { ... } // expected failure, in the signature\nfunc mustPort(raw string) int { panic(\"bad port: \" + raw) } // stop, not in the signature"
+        },
+        {
+          "lang": "Rust",
+          "note": "`panic!` sits outside `Result` and never appears in a signature. Panic freedom needs the third-party `no_panic` crate, which works outside the type system.",
+          "code": "fn parse_port(raw: &str) -> Result<u16, PortError> { ... } // expected failure\nfn must_port(raw: &str) -> u16 { panic!(\"bad port: {raw}\") } // stop, unmarked"
+        },
+        {
+          "lang": "Koka",
+          "note": "Koka gives divergence its own row, apart from the rows for input and output. The compiler infers that row, so a programmer never grants it. This is the split option A adopts.",
+          "code": "fun fib(n : int) : div int { ... }        // divergence row, inferred\nfun add(x : int, y : int) : total int { x + y }  // no effect at all"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A panic hands out no authority. It ends the program at the shared boundary with E3001 and exit code 70. A grant cannot make a stop legal, so asking a person to grant one teaches nothing. D-NOPANIC1=D already calls `Panic` a deny-only row, and milestone M12 names it a deniable row. Option A keeps every enforcement surface, removes every word a person must type, and both shipped examples pass with no edit.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It taxes the widest surface in the language to state a fact the compiler already infers. On master that is 21 gate sites across 12 example files, plus 8 more in tests. It reaches most ordinary code once bounds and key checks join the row."
+          },
+          {
+            "key": "C",
+            "reason": "It deletes the only shipped enforcement of the panic rule: `=[!Panic]=>`, the manifest deny list and E0749. It also reverses D-NOPANIC1=D, and option A already removes the whole typing burden without giving that up."
+          },
+          {
+            "key": "D",
+            "reason": "Subsumption makes one word carry two unrelated facts. `=[Exec]=>` would admit stops in any function that runs a program, and `=[!Exec]=>` would promise no stop by accident. The rename buys a tidy root count and no new power."
+          }
+        ],
+        "tradeoff": "A signature stops advertising that a call can stop. A reader learns it from the deny surface, from the projected row, and from tooling instead. We accept that because the row was never a grant, so no reader could act on it."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft set out three routes: keep `Panic` as a root and migrate the corpus, drop it from the model, or make it deny-only. It recommended deny-only after reading D-NOPANIC1=D, which already calls the row deny-only.",
+        "boilOcean": "The breadth pass tested a `#Grant`-only exemption and a per-package strict mode, then folded both away, because neither fixes the E0740 failure without making one signature mean two things. It added option D, the `Exec.Stop` leaf, from the shipped `Exec.Exit` precedent.",
+        "hybrid": "The hybrid pass split the question into table shape and gate law. Options A and D share one gate law and differ only in the name, so D stayed as the naming alternative rather than a second law.",
+        "cooperative": "The cooperative pass strengthened each loser: B gained the caller-visible reading argument, C gained the divergence argument that Rust and Go show, and D gained the exact thirteen-root count. Each detail now states its own strongest case.",
+        "adversarial": "The adversarial pass attacked A for losing audit value, and for opening a path to more ambient rows. The repair names the limit: only a row that hands out no authority qualifies, and the closed table names exactly one."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-15T19:08:26.746Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-15"
     }
   ],
   "questions": [
@@ -173681,6 +173816,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-15T19:15:51.487Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PANICROOT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-15T19:15:51.487Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#12 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-15T19:15:51.487Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#11 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-15T19:15:51.487Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#10 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-15T19:15:51.486Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#9 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-15T19:08:30.714Z",
+      "by": "PanicRootBallot",
+      "action": "decision.update",
+      "ref": "D-PANICROOT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-15T19:08:26.746Z",
+      "by": "PanicRootBallot",
+      "action": "decision.add",
+      "ref": "D-PANICROOT1",
+      "note": "Where Panic sits in the closed effect table (draft)"
+    },
     {
       "at": "2026-08-15T18:59:25.572Z",
       "by": "fable-e3-burndown",
@@ -177131,55 +177315,6 @@
       "action": "card.criteria-meet",
       "ref": "c0qin2v4",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-14T23:03:35.990Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qin2v4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T23:03:35.492Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qin2v4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T23:02:50.802Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-14T23:02:50.802Z"
-    },
-    {
-      "at": "2026-08-14T22:54:17.010Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0o7s5iz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T22:54:16.371Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T22:54:15.873Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T22:54:15.366Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
