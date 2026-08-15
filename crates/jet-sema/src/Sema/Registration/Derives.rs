@@ -145,14 +145,14 @@ fn enum_derive_items(
 ) -> Vec<Item> {
     let mut out = Vec::new();
     let owner_type = applied_owner_type(&e.name, &e.type_params);
+    let recursive = e.variants.iter().any(|variant| match &variant.payload {
+        VariantPayload::Unit => false,
+        VariantPayload::Single(ty, _) => matches!(ty, Type::Named(name) if name == &e.name),
+        VariantPayload::Named(fields) => fields
+            .iter()
+            .any(|field| matches!(&field.ty, Type::Named(name) if name == &e.name)),
+    });
     if equatable {
-        let recursive = e.variants.iter().any(|variant| match &variant.payload {
-            VariantPayload::Unit => false,
-            VariantPayload::Single(ty, _) => matches!(ty, Type::Named(name) if name == &e.name),
-            VariantPayload::Named(fields) => fields.iter().any(|field| {
-                matches!(&field.ty, Type::Named(name) if name == &e.name)
-            }),
-        });
         if recursive {
             let helper_name = format!("_jet_derive_equal_{}", e.name);
             let helper_body = enum_dispatch_body(e, "left", "right", DispatchKind::Equality);
@@ -201,18 +201,57 @@ fn enum_derive_items(
         }
     }
     if comparable {
-        out.push(Item::Impl(derive_impl(
-            &e.name,
-            crate::Generics::COMPARABLE,
-            generated_func(
-                "compare",
-                vec![self_param(e.name_span), named_param("rhs", owner_type, e.name_span)],
+        if recursive {
+            let helper_name = format!("_jet_derive_compare_{}", e.name);
+            let mut helper = generated_func(
+                &helper_name,
+                vec![
+                    named_param("left", owner_type.clone(), e.name_span),
+                    named_param("right", owner_type.clone(), e.name_span),
+                ],
                 Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
-                enum_dispatch_body(e, "self", "rhs", DispatchKind::Comparison),
+                enum_dispatch_body(e, "left", "right", DispatchKind::Comparison),
                 e.name_span,
-            ),
-            e.name_span,
-        )));
+            );
+            helper.type_params = e.type_params.clone();
+            out.push(Item::Func(helper));
+            let call = free_call(
+                &helper_name,
+                vec![ident("self", e.name_span), ident("rhs", e.name_span)],
+                e.name_span,
+            );
+            out.push(Item::Impl(derive_impl(
+                &e.name,
+                crate::Generics::COMPARABLE,
+                generated_func(
+                    "compare",
+                    vec![
+                        self_param(e.name_span),
+                        named_param("rhs", owner_type.clone(), e.name_span),
+                    ],
+                    Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
+                    vec![Stmt::Return(Some(call), e.name_span)],
+                    e.name_span,
+                ),
+                e.name_span,
+            )));
+        } else {
+            out.push(Item::Impl(derive_impl(
+                &e.name,
+                crate::Generics::COMPARABLE,
+                generated_func(
+                    "compare",
+                    vec![
+                        self_param(e.name_span),
+                        named_param("rhs", owner_type, e.name_span),
+                    ],
+                    Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
+                    enum_dispatch_body(e, "self", "rhs", DispatchKind::Comparison),
+                    e.name_span,
+                ),
+                e.name_span,
+            )));
+        }
     }
     out
 }
