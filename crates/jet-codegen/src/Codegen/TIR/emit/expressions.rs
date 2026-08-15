@@ -2916,8 +2916,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let field_rust = emit_field_rust(cx, &recv.ty, field);
             let read = format!("({}).{field_rust}", emit_tir_expr(recv, cx));
-            if *boxed {
+            let read = if *boxed {
                 format!("(*{read})")
+            } else {
+                read
+            };
+            let web_noncopy_int = cx.web_wasm_noncopy_int
+                && match &e.ty {
+                    Type::Int => true,
+                    Type::InlineRange { base, .. } => matches!(base.as_ref(), Type::Int),
+                    _ => false,
+                };
+            if web_noncopy_int {
+                format!("({read}).clone()")
             } else {
                 read
             }

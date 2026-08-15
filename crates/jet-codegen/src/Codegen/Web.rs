@@ -3088,7 +3088,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     out.push_str(WASM_ARITH_PRELUDE);
     out.push_str(
         "mod jet_std {\n\
-         \x20   pub fn jet_int_to_string(value: super::JetWasmInt) -> String { value.to_string() }\n\
+         \x20   pub fn jet_int_to_string(value: impl ToString) -> String { value.to_string() }\n\
          }\n\
          macro_rules! jet_web_scalar_display {\n\
          \x20   ($($ty:ty),+ $(,)?) => { $(\n\
@@ -3470,6 +3470,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             None,
             &extern_funcs,
         );
+        cx.web_wasm_noncopy_int = true;
         populate_cx_from_bundle(&mut cx, bundle, module_index);
         if super::core_usage_matches(&bundle.used_core, &["core.reflect"]) {
             emit_wasm_display_impls(&module.items, &cx, &mut out);
