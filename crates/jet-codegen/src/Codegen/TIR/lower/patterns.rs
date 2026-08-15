@@ -620,16 +620,49 @@ pub(crate) fn tir_add_pattern_bindings(
                 .map(|ty| vec![ty])
                 .or(union_payload)
                 .or_else(|| variant_payload_types(cx, variant, subject_ty));
+            let owner = subject_ty.and_then(|ty| match ty {
+                Type::Named(name) | Type::Apply { name, .. }
+                    if cx.enum_variants.contains_key(name) =>
+                {
+                    Some(name.as_str())
+                }
+                _ => None,
+            });
+            let payload = owner.and_then(|owner| {
+                cx.enum_variants
+                    .get(owner)?
+                    .iter()
+                    .find(|(name, _)| name == variant)
+                    .map(|(_, payload)| payload)
+            });
             for (i, slot) in bindings.iter().enumerate() {
                 if let PatSlot::Bind { name, .. } = slot {
-                    // Payload types are scalar/Char (the enum is covered), so the
-                    // binding is a by-value local; default to Int if unresolved
-                    // (impossible for a covered enum — sema validated the access).
                     let ty = tys
                         .as_ref()
                         .and_then(|ts| ts.get(i).cloned())
                         .unwrap_or(Type::Int);
-                    env.bind(name, TLocal::user(name), Some(ty));
+                    // Recursive enum payloads are `Box<T>` only in Rust. Jet's
+                    // binding remains `T`, so record the representation deref
+                    // on the local once; every downstream use, including a
+                    // generated Encode call, sees the canonical payload type.
+                    let boxed = owner.zip(payload).is_some_and(|(owner, payload)| {
+                        let edge = match payload {
+                            VariantPayload::Single(..) => Some(variant.clone()),
+                            VariantPayload::Named(fields) => fields
+                                .get(i)
+                                .map(|field| format!("{variant}.{}", field.name)),
+                            VariantPayload::Unit => None,
+                        };
+                        edge.is_some_and(|edge| {
+                            cx.boxed_edges.contains(&(owner.to_string(), edge))
+                        })
+                    });
+                    let local = if boxed {
+                        TLocal::user(name).through_ref()
+                    } else {
+                        TLocal::user(name)
+                    };
+                    env.bind(name, local, Some(ty));
                 }
             }
         }
