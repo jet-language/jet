@@ -12,7 +12,7 @@ pub mod Parser;
 
 #[cfg(test)]
 mod generic_module_tests {
-    use super::{AST, AST::{GenericModuleParam, Item, ModuleArg, Type}, Formatter, Lexer, Parser};
+    use super::{AST, AST::{GenericModuleParam, Item, ModuleArg, Type}, Formatter, Lexer, Parser, Syntax};
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
