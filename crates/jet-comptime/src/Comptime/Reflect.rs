@@ -205,8 +205,29 @@ pub fn build_range_info(start: i64, end: i64) -> CtValue {
 
 fn measure_info(measure: &Measure) -> CtValue {
     let (kind, value, symbol) = match measure {
-        Measure::Literal { kind, value } => (kind.clone(), Some(CtValue::Int(*value as i64)), None),
-        Measure::Symbol { kind, name } => (kind.clone(), None, Some(ct_str(name.clone()))),
+        Measure::Literal { kind, value } => {
+            let value = i64::try_from(*value).ok().map(CtValue::Int);
+            let symbol = value
+                .is_none()
+                .then(|| ct_str(measure.expression()));
+            (kind.clone(), value, symbol)
+        }
+        Measure::SignedLiteral { kind, value } => {
+            (kind.clone(), Some(CtValue::Int(*value)), None)
+        }
+        Measure::Symbol { kind, name } => {
+            (kind.clone(), None, Some(ct_str(name.clone())))
+        }
+        Measure::Combined { kind, .. } => {
+            let value = measure
+                .literal_value()
+                .and_then(|value| i64::try_from(value).ok())
+                .map(CtValue::Int);
+            let symbol = value
+                .is_none()
+                .then(|| ct_str(measure.expression()));
+            (kind.clone(), value, symbol)
+        }
     };
     ct_struct(
         "MeasureInfo",
@@ -2620,5 +2641,38 @@ mod tests {
                 (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
             )
         }));
+    }
+
+    #[test]
+    fn measure_reflection_preserves_signed_and_symbolic_values() {
+        let signed = measure_info(&Measure::signed_literal("exponent", -2));
+        assert!(matches!(
+            struct_field(&signed, "value"),
+            CtValue::Present(value) if matches!(value.as_ref(), CtValue::Int(-2))
+        ));
+
+        let combined = Measure::symbol("length", "N")
+            .combine(
+                &Measure::symbol("length", "M"),
+                crate::AST::MeasureRule::Add,
+            )
+            .expect("matching measure kinds combine");
+        let symbolic = measure_info(&combined);
+        assert!(matches!(
+            struct_field(&symbolic, "symbol"),
+            CtValue::Present(symbol)
+                if matches!(symbol.as_ref(), CtValue::Str(value) if value == "(N + M)")
+        ));
+
+        let resolved = combined.resolve_symbols(&|name| match name {
+            "N" => Some(2),
+            "M" => Some(3),
+            _ => None,
+        });
+        let resolved = measure_info(&resolved);
+        assert!(matches!(
+            struct_field(&resolved, "value"),
+            CtValue::Present(value) if matches!(value.as_ref(), CtValue::Int(5))
+        ));
     }
 }

@@ -6375,6 +6375,10 @@ as today, without the placeholder-zero sentinel.
 
 Amends: D-COMPUTE-TYPE1's stored encoding; its semantics stay unchanged.
 
+Implementation (#1553): `Measure` is now the stored representation for list
+lengths, matrix shapes, vector lanes, and dimension exponents. This change
+amends only the stored encoding of D-COMPUTE-TYPE1. Its semantics do not change.
+
 **2026-08-06 — D-TYPE2-EXACT1 = A — The tighten/loosen law for precision**
 *(card #1497, implementation card #1554)*. The knowledge instance of
 D-FACT-LAW1 enters the spec: knowledge tightens silently, loosens only at a
