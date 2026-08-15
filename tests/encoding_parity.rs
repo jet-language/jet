@@ -437,7 +437,10 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
 #[test]
 fn serde_derive_examples_match_production_cli_tiers() {
     for (stem, expected) in [
-        ("serde/codable_default", "web\n[80, 443]\nprod\n[8080]\n"),
+        (
+            "serde/codable_default",
+            "web\n[80, 443]\nprod\n{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n[8080]\n",
+        ),
         (
             "serde/hand_codec",
             "{\"name\":\"Ada\",\"email\":\"ada@lovelace.org\"}\nada@lovelace.org\n",
