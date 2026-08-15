@@ -12,7 +12,7 @@ use super::resident::resident_teardown;
 use super::{
     Archive, Cell as LocalCell, Collections, Compress, Compute, Concurrency, CoreHost, Crypto,
     Encoding, Fmt, JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text, Time,
-    TRY_COMPILE_PANIC_HOOK_LOCK,
+    RESIDENT_JIT_RUN_LOCK,
 };
 
 pub(crate) mod duration_kernel {
@@ -58,6 +58,15 @@ pub(crate) fn add_struct_new_count_for_test(extra: usize) {
 }
 
 thread_local! {
+    /// How many [`catch_jit_panic`] windows are live on THIS thread.
+    ///
+    /// The panic hook is necessarily process-global; the suppression must not
+    /// be. A test binary runs unrelated threads alongside a resident JIT run,
+    /// and their panics have to keep printing their message and location, so
+    /// the hook asks the *panicking* thread whether it is inside a window
+    /// instead of relying on a global install/restore period (#1995).
+    static JIT_PANIC_WINDOW: Cell<u32> = const { Cell::new(0) };
+
     /// Message from the last panic [`catch_jit_panic`] silenced.
     ///
     /// A panic that tries to escape an `extern "C"` JIT host raises the hook
@@ -68,6 +77,85 @@ thread_local! {
     static SILENCED_JIT_PANIC: std::cell::RefCell<Option<String>> =
         const { std::cell::RefCell::new(None) };
 }
+
+/// Whether the panicking thread is inside a [`catch_jit_panic`] window.
+///
+/// `try_with`, not `with`: a panic can be raised from a thread-local
+/// destructor, when this key is already destroyed, and `with` would panic
+/// again from inside the hook.
+fn jit_panic_window_open() -> bool {
+    JIT_PANIC_WINDOW
+        .try_with(|depth| depth.get() != 0)
+        .unwrap_or(false)
+}
+
+fn take_silenced_jit_panic() -> Option<String> {
+    SILENCED_JIT_PANIC
+        .try_with(|slot| slot.borrow_mut().take())
+        .unwrap_or(None)
+}
+
+fn record_silenced_jit_panic(text: String) {
+    let _ = SILENCED_JIT_PANIC.try_with(|slot| *slot.borrow_mut() = Some(text));
+}
+
+/// Marks its thread as running resident JIT work for the hook's benefit.
+struct JitPanicWindow;
+
+impl JitPanicWindow {
+    fn enter() -> Self {
+        JIT_PANIC_WINDOW.with(|depth| {
+            let outer = depth.get();
+            if outer == 0 {
+                let _ = SILENCED_JIT_PANIC.try_with(|slot| *slot.borrow_mut() = None);
+            }
+            depth.set(outer + 1);
+        });
+        Self
+    }
+}
+
+impl Drop for JitPanicWindow {
+    fn drop(&mut self) {
+        JIT_PANIC_WINDOW.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Installed once per process, wrapping whatever hook was live at that point,
+/// and never taken back off — the same shape as
+/// `Prelude/Scheduler.rs`'s `JET_SCHEDULER_PANIC_HOOK`. Install/restore around
+/// each run was not merely over-broad: a scheduler hook installed *during* a
+/// JIT window was silently discarded by the restore, permanently, because that
+/// side installs exactly once too.
+static JIT_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !jit_panic_window_open() {
+            // Nothing to do with this JIT run — report it normally.
+            previous(info);
+            return;
+        }
+        let message = info.payload_as_str().unwrap_or("unknown panic payload");
+        if !is_nounwind_abort(Some(message)) {
+            // Recoverable: the caller converts this into a named gap and
+            // deopts, so the user sees no Rust panic banner. Keep the text
+            // in case the same run then hits a frame edge it cannot cross.
+            let recorded = match info.location() {
+                Some(at) => format!("{message} (at {at})"),
+                None => message.to_string(),
+            };
+            record_silenced_jit_panic(recorded);
+            return;
+        }
+        // The process aborts as soon as this returns. Say what failed, then
+        // let the standard report through: its `panicked at <file>:<line>`
+        // line and `RUST_BACKTRACE` note are the only trail an abort leaves.
+        if let Some(first) = take_silenced_jit_panic() {
+            eprintln!("jit host panic before the non-unwinding abort: {first}");
+        }
+        previous(info);
+    }));
+});
 
 /// The payloads std raises with `can_unwind == false`
 /// (`core::panicking::panic_cannot_unwind` / `panic_in_cleanup`).
@@ -93,36 +181,12 @@ fn is_nounwind_abort(message: Option<&str>) -> bool {
 /// catch inside the `extern "C"` body (see `jit/deopt.rs::jet_deopt_call`).
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
-        let _guard = TRY_COMPILE_PANIC_HOOK_LOCK
+        let _serialize = RESIDENT_JIT_RUN_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        SILENCED_JIT_PANIC.with(|slot| *slot.borrow_mut() = None);
-        let old_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|info| {
-            let message = info.payload_as_str().unwrap_or("unknown panic payload");
-            if !is_nounwind_abort(Some(message)) {
-                // Recoverable: the caller converts this into a named gap and
-                // deopts, so the user sees no Rust panic banner. Keep the text
-                // in case the same run then hits a frame edge it cannot cross.
-                let recorded = match info.location() {
-                    Some(at) => format!("{message} (at {at})"),
-                    None => message.to_string(),
-                };
-                SILENCED_JIT_PANIC.with(|slot| *slot.borrow_mut() = Some(recorded));
-                return;
-            }
-            // The process aborts as soon as this returns. Say what failed.
-            if let Some(first) = SILENCED_JIT_PANIC.with(|slot| slot.borrow_mut().take()) {
-                eprintln!("jit host panic before the non-unwinding abort: {first}");
-            }
-            match info.location() {
-                Some(at) => eprintln!("jit non-unwinding panic at {at}: {message}"),
-                None => eprintln!("jit non-unwinding panic: {message}"),
-            }
-        }));
-        let result = catch_unwind(AssertUnwindSafe(f));
-        std::panic::set_hook(old_hook);
-        result
+        std::sync::LazyLock::force(&JIT_PANIC_HOOK);
+        let _window = JitPanicWindow::enter();
+        catch_unwind(AssertUnwindSafe(f))
     };
     match result {
         Ok(Ok(value)) => Ok(value),
@@ -137,9 +201,7 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
             } else if let Some(s) = payload.downcast_ref::<&str>() {
                 (*s).to_string()
             } else {
-                SILENCED_JIT_PANIC
-                    .with(|slot| slot.borrow_mut().take())
-                    .unwrap_or_else(|| "unknown panic payload".into())
+                take_silenced_jit_panic().unwrap_or_else(|| "unknown panic payload".into())
             };
             Err(format!(
                 "jit {context} panicked before returning an unsupported reason: {detail}"

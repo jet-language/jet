@@ -263,7 +263,18 @@ thread_local! {
     static PROGRAM_ARGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
-static TRY_COMPILE_PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes whole resident JIT runs across the process.
+///
+/// It was introduced to guard a `take_hook`/`set_hook` swap, which
+/// `runtime_host::catch_jit_panic` no longer performs — but it is still
+/// load-bearing, and for a sharper reason. The resident session state above is
+/// thread-local, yet parts of the session reached from it are *not*:
+/// `Data.rs`'s `LAZY_RESOLVED`/`LAZY_FN_TABLE` cache finalized code pointers
+/// keyed by raw `FuncId`, which two independent `JITModule`s hand out from the
+/// same small numbering, and `clear_lazy_state` wipes that cache globally.
+/// Two concurrent resident runs would therefore read each other's code
+/// pointers. Until that state is made per-session, one run at a time.
+static RESIDENT_JIT_RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct ProgramArgsGuard(Vec<String>);
 
