@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1994,
-    "rev": 37616,
+    "nextNum": 1995,
+    "rev": 37621,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -130303,6 +130303,71 @@
       "created": "2026-08-15T18:59:06.877Z",
       "updated": "2026-08-15T18:59:09.210Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c048a8ue",
+      "num": 1994,
+      "title": "Install the sized-stack boundary at the TIR lowering entry",
+      "body": "The sized-stack boundary now exists and is re-entrant (jet-foundation CompilerStack, installed at the driver funnels in d062262ae and at the JIT public entries in 17d04068e). It is still not installed at the narrowest common point, so each caller that bypasses both seams surfaces a fresh stack overflow that aborts the whole test binary. Observed sequence across five verified iterations: resident_jit_safe_named_tuples, then cranelift_covers_float_lists, then body_only_edit_is_type_stable, then cranelift_covers_shield_region, then cranelift_backend_matches_hello. Chasing callers is not converging.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Install the re-entrant boundary at TIR::lower_jit_program (crates/jet-codegen/src/Codegen/TIR/mod.rs:1417) and at Sema::check_bundle, the two narrowest points every path shares. Both crates already take a path dependency on jet-foundation so the shared flag is reachable and the driver/JIT outer boundaries will make these inline. The blocker to watch: lower_jit_program returns diagnostic state through the LAST_JIT_LOWER_FAILURE thread-local that callers read afterwards via lower_jit_program_fail_reason, so the wrapper must take that value inside the worker and restore it on the caller thread. Confirm JitProgram is Send and ProgramBundle is Sync before wrapping; if either is not, add the bound or carry the result through a channel rather than loosening the type. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test dev completes without a stack overflow and without any test being skipped, serialized, or given its own boundary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:48:50.782Z"
+        },
+        {
+          "n": 2,
+          "text": "The boundary is installed at TIR::lower_jit_program and Sema::check_bundle and is re-entrant, so no path spawns a second worker",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:48:51.851Z"
+        },
+        {
+          "n": 3,
+          "text": "LAST_JIT_LOWER_FAILURE survives the boundary: lower_jit_program_fail_reason still reports the reason the wrapped lowering recorded",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:48:53.009Z"
+        },
+        {
+          "n": 4,
+          "text": "tests/compiler_stack.rs gains a case proving a caller that bypasses both the driver and the JIT public entries is still protected",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T19:48:54.146Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "jit",
+        "i9",
+        "stack"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-15T19:48:40.278Z",
+      "updated": "2026-08-15T19:48:54.146Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -173817,6 +173882,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-15T19:48:54.146Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c048a8ue",
+      "note": "#4 tests/compiler_stack.rs gains a case proving a caller that b"
+    },
+    {
+      "at": "2026-08-15T19:48:53.009Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c048a8ue",
+      "note": "#3 LAST_JIT_LOWER_FAILURE survives the boundary: lower_jit_prog"
+    },
+    {
+      "at": "2026-08-15T19:48:51.852Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c048a8ue",
+      "note": "#2 The boundary is installed at TIR::lower_jit_program and Sema"
+    },
+    {
+      "at": "2026-08-15T19:48:50.782Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c048a8ue",
+      "note": "#1 cargo test --test dev completes without a stack overflow and"
+    },
+    {
+      "at": "2026-08-15T19:48:40.278Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c048a8ue",
+      "note": "Install the sized-stack boundary at the TIR lowering entry"
+    },
+    {
       "at": "2026-08-15T19:15:51.487Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -177280,41 +177380,6 @@
       "action": "card.criteria-meet",
       "ref": "c0mjxw0l",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-14T23:03:38.784Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T23:03:38.262Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0bdf0ly",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:03:37.635Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0bdf0ly",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T23:03:37.129Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0qin2v4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:03:36.483Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qin2v4",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
