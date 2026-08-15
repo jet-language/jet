@@ -812,7 +812,6 @@ fn run() {
         &app_facts.auto_printable,
         &app_facts.auto_debug,
         &app_facts.auto_equatable,
-        &app_facts.auto_comparable,
     ] {
         assert!(selected.contains("Token"), "{selected:?}");
         assert!(selected.contains("LocalEnvelope"), "{selected:?}");
@@ -821,6 +820,15 @@ fn run() {
         assert!(!selected.contains("vendor.Token"), "{selected:?}");
         assert!(selected.contains(&badge_identity), "{selected:?}");
     }
+    // Anonymous unions support structural equality, but there is no total
+    // ordering between members of different types.
+    let comparable = &app_facts.auto_comparable;
+    assert!(comparable.contains("Token"), "{comparable:?}");
+    assert!(comparable.contains("LocalEnvelope"), "{comparable:?}");
+    assert!(!comparable.contains("UnionEnvelope"), "{comparable:?}");
+    assert!(!comparable.contains("DependencyEnvelope"), "{comparable:?}");
+    assert!(!comparable.contains("vendor.Token"), "{comparable:?}");
+    assert!(comparable.contains(&badge_identity), "{comparable:?}");
     assert!(app_facts.auto_printable.contains("MapEnvelope"));
     assert!(app_facts.auto_debug.contains("MapEnvelope"));
     assert!(!app_facts.auto_equatable.contains("MapEnvelope"));
