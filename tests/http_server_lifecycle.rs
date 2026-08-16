@@ -97,6 +97,17 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
     jet_runtime_diagnostic(report.rendered);
 }
 
+/// Mirrors `Prelude/Core.rs::jet_runtime_stop`, which the included HTTPServer
+/// fragment calls. That definition lives in a fragment this test does not
+/// include, so the boundary is stubbed here exactly like
+/// `jet_scheduler_runtime_stop` above: render through the shared report
+/// boundary, then stop. An abort is never the outcome.
+fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
+    let report =
+        jet_foundation::Outcome::jet_render_runtime_stop(code, file, line, "", "", 1, 1, msg, "");
+    jet_runtime_diagnostic(report.rendered);
+}
+
 fn jet_runtime_caught_stop(message: &str) {
     if message.starts_with("Stop [E") {
         eprint!("{message}");
