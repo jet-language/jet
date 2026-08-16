@@ -364,7 +364,7 @@ fn jet_process_spec_run_checked(
         return Ok(result);
     }
     let mut cause = format!("process exited unsuccessfully: code={}", result.code);
-    if let Some(signal) = result.signal {
+    if let Ok(signal) = result.signal {
         cause.push_str(&format!(", signal={signal}"));
     }
     cause.push_str(&format!(
@@ -446,7 +446,7 @@ fn jet_process_spec_pipeline(
     Ok(jet_std::ProcessResult {
         code,
         success,
-        signal: None,
+        signal: Err(JetAbsent),
         timed_out: false,
         output,
         errors,
@@ -514,9 +514,11 @@ fn jet_process_child_wait(
     let (output, errors) = jet_process_collect_output(drains)?;
     let code = status.code().unwrap_or(-1) as i64;
     #[cfg(unix)]
-    let signal = std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from);
+    let signal = jet_outcome_of(
+        std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from),
+    );
     #[cfg(not(unix))]
-    let signal = None;
+    let signal = Err(JetAbsent);
     let result = jet_std::ProcessResult {
         code,
         success: status.success(),

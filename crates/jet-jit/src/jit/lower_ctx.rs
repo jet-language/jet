@@ -26410,9 +26410,9 @@ impl LowerCtx<'_, '_> {
                 _ => {}
             }
         }
-        // ProcessResult.signal uses the legacy packed Option carrier
-        // (0 = None, payload + 1 = Some). TIR reports CORE fields as Int;
-        // compare only this exact carrier so repeated signaled waits preserve
+        // ProcessResult.signal is a packed Option carrier in the JIT record
+        // (0 = None, payload + 1 = Some — `Process.rs` `alloc_process_result`).
+        // Compare only this exact carrier so repeated signaled waits preserve
         // their exact result without admitting generic Option equality.
         if matches!(op, BinOp::Eq | BinOp::Ne)
             && is_packed_process_signal(lhs)

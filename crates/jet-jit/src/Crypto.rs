@@ -179,14 +179,14 @@ fn claims_record(claims: runtime::JetAuthClaims) -> i64 {
             .map(|value| rt.heap.alloc_string(value) + 1)
             .unwrap_or(0);
         let (not_before_ok, not_before_bits) = match claims.not_before {
-            Some(value) => (true, value as u64),
-            None => (false, 0),
+            Ok(value) => (true, value as u64),
+            Err(_) => (false, 0),
         };
         let not_before =
             crate::runtime_host::alloc_jit_result(rt, not_before_ok, not_before_bits);
         let (issued_at_ok, issued_at_bits) = match claims.issued_at {
-            Some(value) => (true, value as u64),
-            None => (false, 0),
+            Ok(value) => (true, value as u64),
+            Err(_) => (false, 0),
         };
         // Optional NumericDate claims use the tagged result arena: `ok` is
         // presence and `bits` is the exact i64 payload. No scalar value is
@@ -217,7 +217,9 @@ fn auth_error_bits(error: runtime::JetAuthError) -> u64 {
     const TOKEN_NOT_YET_VALID: u64 = 9;
     enum AuthErrorField {
         Text(String),
-        OptionalText(Option<String>),
+        // Sema declares `AuthError.WrongIssuer.actual` an `Option<Text>`, so
+        // the Prelude payload is the one carrier; this stays a marshalling shim.
+        OptionalText(runtime::JetOutcome<String, runtime::JetAbsent>),
     }
     let named = |disc: u64, fields: Vec<AuthErrorField>| {
         Concurrency::with_runtime_mut(|rt| {
