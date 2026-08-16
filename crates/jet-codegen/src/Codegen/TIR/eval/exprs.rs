@@ -7906,6 +7906,30 @@ impl<'a> EvalCtx<'a> {
                         ],
                     })
                 }
+                // D-ENV-MUTATE1=A: `env.set` lowers to a host call ONLY so a
+                // refused write can carry AOT's rich panic facts. The write
+                // itself is the ordinary `core.sys.set` call, so tier 0
+                // marshals it through the one core-call adapter every other
+                // `core.sys` call uses (I8): at runtime that reaches the
+                // interpreter ambient's `("core.sys", "set")` arm, which
+                // writes Jet's single logical environment table (#2003) — the
+                // same owner AOT and the resident JIT read. Re-deriving the
+                // name/value policy here would give tier 0 a second
+                // environment (I9), so this arm only marshals: the adapter
+                // owns validation and its own refusal.
+                crate::Codegen::TIR::THostCall::EnvSet { name, value, .. } => {
+                    let name = self.eval_expr_child(name, scope)?;
+                    let value = self.eval_expr_child(value, scope)?;
+                    let span = self.span();
+                    self.apply_core_call_with_policy(
+                        "core.sys",
+                        "set",
+                        vec![name, value],
+                        span,
+                        None,
+                    )
+                    .map(|_| CtValue::Unit)
+                }
                 other => {
                     let tag = match other {
                         crate::Codegen::TIR::THostCall::Helper { .. } => "Helper",
@@ -7925,7 +7949,6 @@ impl<'a> EvalCtx<'a> {
                         crate::Codegen::TIR::THostCall::YieldSend { .. } => unreachable!(),
                         crate::Codegen::TIR::THostCall::TypedTextInterp { .. } => "TypedTextInterp",
                         crate::Codegen::TIR::THostCall::ExpectSnapshot { .. } => "ExpectSnapshot",
-                        crate::Codegen::TIR::THostCall::EnvSet { .. } => "EnvSet",
                         _ => "Other",
                     };
                     Err(unsupported(

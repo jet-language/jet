@@ -174,7 +174,14 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
     match name {
         "core.mem" => Some("the low-level `core.mem` tier"),
         "core.files" if debug_impure => Some("a file read or write"),
-        "core.sys" | "core.process" if debug_impure => process_module_feature(name),
+        // `jet debug` refuses the impure module at its IMPORT, because the
+        // source stepper has no per-call pass: `scan_stmts_for_process_edge`
+        // runs for `jet dev` only, so nothing here can tell an interpretable
+        // `env.get` from `sys.fork()`. `jet dev` classifies per leaf instead
+        // (`process_leaf_feature`), which is why these two arms name the
+        // module and that one names the call.
+        "core.sys" if debug_impure => Some("an environment read"),
+        "core.process" if debug_impure => Some("a process launch or an early exit"),
         // `core.time` / `core.math.random` are allowed: deterministic `Clock`/`Rng`
         // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
         // fail at the expression if unsupported.
@@ -182,10 +189,41 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
     }
 }
 
-fn process_module_feature(name: &str) -> Option<&'static str> {
-    match name {
-        "core.sys" => Some("an environment read"),
-        "core.process" => Some("a process launch or an early exit"),
+/// `jet dev`'s per-call verdict for the two process-edge modules: `None` means
+/// the shared evaluator runs this exact leaf, `Some(feature)` is the noun
+/// phrase naming why it cannot.
+///
+/// Keyed by LEAF, never by module. `core.sys` registers ~55 members
+/// (`jet-sema` `module_items`) and the interpreter ambient marshals three of
+/// them, so a module-level "yes" would admit `sys.fork()` along with
+/// `env.get`. The default arms therefore REFUSE: a newly registered
+/// `core.sys` / `core.process` member stays native-only until an ambient arm
+/// exists for it, rather than silently inheriting a neighbour's coverage.
+fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
+    match (module, item) {
+        // Run by the shared evaluator itself: `process.argv` reads the argv
+        // installed for this run, and `process.exit` / `sys.atexit` /
+        // `sys.stop` drive its own exit and cleanup path.
+        ("core.process", "argv" | "exit") | ("core.sys", "atexit" | "stop") => None,
+        // #2003: the interpreter ambient marshals these three through the one
+        // CoreHost accessor over Jet's logical environment table — the same
+        // owner AOT and the resident JIT read (`jet-jit` `ambient_interp`
+        // `("core.sys", "get" | "set" | "home_dir")`). `env.set` arrives as
+        // the `EnvSet` host call, which the TIR evaluator marshals to that
+        // same `core.sys.set` adapter.
+        ("core.sys", "get" | "set" | "home_dir") => None,
+        // Environment surfaces with no ambient arm. Without one the evaluator
+        // falls through to the comptime host-env effect, which reads the
+        // compiler's own `std::env` instead of Jet's table — so these must
+        // stay native-only or one program would see two environments.
+        ("core.sys", "vars" | "expand") => Some("an environment read"),
+        ("core.sys", "unset") => Some("an environment change"),
+        ("core.sys", "current_dir" | "set_current_dir") => {
+            Some("a working-directory read or change")
+        }
+        ("core.sys", "on_interrupt") => Some("an OS signal handler"),
+        ("core.sys", _) => Some("an OS fact or process control call"),
+        ("core.process", _) => Some("a process launch or an early exit"),
         _ => None,
     }
 }
@@ -235,24 +273,10 @@ fn process_edge_boundary(
         _ => return None,
     };
 
-    if is_interpreter_supported_process_leaf(module, item) {
-        return None;
-    }
-
-    process_module_feature(module).map(|feature| Boundary {
+    process_leaf_feature(module, item).map(|feature| Boundary {
         feature: feature.to_string(),
         span: Some(span),
     })
-}
-
-fn is_interpreter_supported_process_leaf(module: &str, item: &str) -> bool {
-    matches!(
-        (module, item),
-        ("core.process", "argv")
-            | ("core.process", "exit")
-            | ("core.sys", "atexit")
-            | ("core.sys", "stop")
-    )
 }
 
 fn scan_stmts_for_mut_arg(
