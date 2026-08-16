@@ -3892,6 +3892,25 @@ fn run() {
     print(band)
 }
 "#;
+    // The unboxed block used to prove only stdout. `run_cranelift_without_fallback`
+    // accepts a silent deopt to the interpreter, so the test's own name -- "run in
+    // resident jit without fallback" -- was never checked for this fixture. Prove
+    // the resident tier first, the same way the `src` block below does.
+    //
+    // `try_compile_bundle` comes first on purpose: `resident_jit_func_safety_detail`
+    // returns `None` (the "covered" answer) when `lower_jit_program` yields nothing,
+    // so on a lowering failure it reads green. The compile hook reports the real
+    // reason instead.
+    let unboxed_proof = std::env::temp_dir().join("jet_jit_range_unboxed_safety.jet");
+    fs::write(&unboxed_proof, unboxed).unwrap();
+    let unboxed_bundle = checked_bundle_from_path(&unboxed_proof.to_string_lossy());
+    jet_jit::try_compile_bundle(&unboxed_bundle)
+        .unwrap_or_else(|error| panic!("unboxed Range resident compilation failed: {error}"));
+    assert_eq!(
+        jet_jit::resident_jit_func_safety_detail(&unboxed_bundle, "run"),
+        None,
+        "unboxed Range values must stay in resident JIT"
+    );
     jet_jit::reset_struct_new_count_for_test();
     let unboxed_run = run_cranelift_without_fallback(unboxed, "range_unboxed");
     assert_eq!(
@@ -4201,7 +4220,7 @@ fn run() {
 fn physical_quantities_run_in_resident_jit_without_fallback() {
     if skip_if_cranelift_host_unsupported() { return; }
     let out = run_cranelift_without_fallback(r#"
-#UnitFamily(Length, base: meter) {
+#UnitFamily(Length, dimension, base: meter) {
     meter
     millimeter(scale: 1/1000)
     thirdish(scale: 2/3)
