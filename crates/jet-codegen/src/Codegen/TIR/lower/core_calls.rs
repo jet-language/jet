@@ -1,4 +1,4 @@
-use crate::AST::{Expr, Type};
+use crate::AST::{Expr, Lambda, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_closure_call_return_ty;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
@@ -11,10 +11,47 @@ use crate::Codegen::TIR::render_lambda_str_expecting_value;
 use crate::Codegen::TIR::render_lambda_str_unboxed;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::TCoreClosureKind;
+use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
+
+/// The JIT spawn-lambda table index for one source callback.
+///
+/// One source lambda is ONE table entry. A lambda body is lowered once per
+/// pass — the AOT closure text, the `executable` TIR, and the JIT spawn body —
+/// and a callback nested in that body is reached again on every one of them.
+/// Pushing per lowering would grow `jit_spawn_lambdas` while
+/// `count_spawn_sites` still sees a single site, and the resident tier planner
+/// requires those two to be equal (jet-jit `tiers.rs` `spawn_ok`). Keying by
+/// `(enclosing fn, lambda span)` keeps that identity true by construction.
+///
+/// This is the ONE place a spawn-lambda table entry is minted. `lower` builds
+/// the entry and runs only when the key is new, so a nested callback inside
+/// this body takes the lower index and is itself minted exactly once.
+pub(crate) fn jit_spawn_site_with(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    lower: impl FnOnce(&Lambda, &Cx, &LowerEnv) -> TJitSpawnLambda,
+) -> usize {
+    let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
+    let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
+    if let Some(site) = existing {
+        return site;
+    }
+    let jit_lambda = lower(lam, cx, env);
+    let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
+    cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+    cx.jit_spawn_sites.borrow_mut().insert(key, site);
+    site
+}
+
+/// [`jit_spawn_site_with`] for a callback that needs no parameter seeding.
+pub(crate) fn jit_spawn_site(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> usize {
+    jit_spawn_site_with(lam, cx, env, lower_spawn_lambda_for_jit)
+}
 
 fn interrupt_callback_value(value: TExpr) -> TExpr {
     let ty = value.ty.clone();
@@ -137,15 +174,7 @@ pub(crate) fn lower_core_closure_call(
     if module == "core.tasks" && method == "spawn" {
         let lam = lam_at(0)?;
         let body_ty = lambda_body_ty(lam, cx, env);
-        let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-        let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
-        let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
-        let site = existing.unwrap_or_else(|| {
-            let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-            cx.jit_spawn_sites.borrow_mut().insert(key, site);
-            site
-        });
+        let site = jit_spawn_site(lam, cx, env);
         let spawn_closure = render_spawn_lambda(lam, cx, env);
         let executable = Box::new(lower_lambda(lam, cx, env));
         return Some(TExpr {
@@ -402,8 +431,7 @@ pub(crate) fn lower_core_closure_call(
             let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
             // Captured signals need the spawn-lambda ABI (explicit capture params).
-            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            let site = jit_spawn_site(lam, cx, env);
             return Some(TExpr {
                 ty: Type::Apply {
                     name: crate::Syntax::TYPE_DERIVED.to_string(),
@@ -413,6 +441,7 @@ pub(crate) fn lower_core_closure_call(
                     kind: TCoreClosureKind::ReactiveDerived {
                         closure,
                         executable,
+                        site,
                     },
                 },
             });
@@ -421,9 +450,12 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
-            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-            TCoreClosureKind::ReactiveEffect { closure, executable }
+            let site = jit_spawn_site(lam, cx, env);
+            TCoreClosureKind::ReactiveEffect {
+                closure,
+                executable,
+                site,
+            }
         }
         // D-SIGNAL1: `computed` is a canonical alias for `derived`.
         ("core.reactive", "computed") => {
@@ -431,8 +463,7 @@ pub(crate) fn lower_core_closure_call(
             let body_ty = lambda_body_ty(lam, cx, env);
             let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
-            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            let site = jit_spawn_site(lam, cx, env);
             return Some(TExpr {
                 ty: Type::Apply {
                     name: crate::Syntax::TYPE_COMPUTED.to_string(),
@@ -442,6 +473,7 @@ pub(crate) fn lower_core_closure_call(
                     kind: TCoreClosureKind::ReactiveDerived {
                         closure,
                         executable,
+                        site,
                     },
                 },
             });
@@ -451,9 +483,12 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
-            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-            TCoreClosureKind::UiReactiveRender { closure, executable }
+            let site = jit_spawn_site(lam, cx, env);
+            TCoreClosureKind::UiReactiveRender {
+                closure,
+                executable,
+                site,
+            }
         }
         // D-WEB-CLICK-PORT1=D: portable `ui.button(label, on_click: …)`.
         ("core.ui", "button") if args.len() == 2 => {
@@ -461,8 +496,7 @@ pub(crate) fn lower_core_closure_call(
             let label = Box::new(lower_expr(&args[0].expr, cx, env));
             let closure = render_lambda_str_unboxed(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
-            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            let site = jit_spawn_site(lam, cx, env);
             return Some(TExpr {
                 ty: Type::Named("UiNode".to_string()),
                 kind: TExprKind::CoreClosureCall {
@@ -470,6 +504,7 @@ pub(crate) fn lower_core_closure_call(
                         label,
                         closure,
                         executable,
+                        site,
                     },
                 },
             });

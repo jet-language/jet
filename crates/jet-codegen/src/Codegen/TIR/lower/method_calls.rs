@@ -91,6 +91,8 @@ use crate::Codegen::TIR::lower_fn_value_call;
 use crate::Codegen::TIR::fixed_list_elem_compatible;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
+use crate::Codegen::TIR::jit_spawn_site;
+use crate::Codegen::TIR::jit_spawn_site_with;
 use crate::Codegen::TIR::lower::static_call_type_name_lower;
 use crate::Codegen::TIR::pool_field_ty_hint;
 use crate::Codegen::TIR::render_router_handler;
@@ -1848,15 +1850,7 @@ fn lower_method_call_impl(
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 return in_own_frame(|| {
                     let body_ty = lambda_body_ty(lam, cx, env);
-                    let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-                    let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
-                    let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
-                    let site = existing.unwrap_or_else(|| {
-                        let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
-                        cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-                        cx.jit_spawn_sites.borrow_mut().insert(key, site);
-                        site
-                    });
+                    let site = jit_spawn_site(lam, cx, env);
                     let spawn_closure = render_spawn_lambda(lam, cx, env);
                     let executable = Box::new(lower_lambda(lam, cx, env));
                     return TExpr {
@@ -1917,15 +1911,7 @@ fn lower_method_call_impl(
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             return in_own_frame(|| {
                 let body_ty = lambda_body_ty(lam, cx, env);
-                let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-                let key = (env.fn_name.clone(), lam.span.start, lam.span.end);
-                let existing = cx.jit_spawn_sites.borrow().get(&key).copied();
-                let site = existing.unwrap_or_else(|| {
-                    let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
-                    cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
-                    cx.jit_spawn_sites.borrow_mut().insert(key, site);
-                    site
-                });
+                let site = jit_spawn_site(lam, cx, env);
                 let spawn_closure = render_spawn_lambda(lam, cx, env);
                 let executable = Box::new(lower_lambda(lam, cx, env));
                 let group = lower_expr(receiver, cx, env);
@@ -3527,17 +3513,25 @@ fn lower_method_call_impl(
                     if handler_idx {
                         if let Expr::Lambda(lam) = &a.expr {
                             let params = expected_payload.clone().into_iter().collect::<Vec<_>>();
-                            let mut jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-                            if let Some(ty) = expected_payload.clone() {
-                                if jit_lambda.params.is_empty() {
-                                    jit_lambda.params.push(("__payload".into(), ty));
-                                } else {
-                                    for (_, pty) in &mut jit_lambda.params {
-                                        *pty = ty.clone();
+                            let payload_ty = expected_payload.clone();
+                            jit_spawn_site_with(
+                                lam,
+                                cx,
+                                env,
+                                |lam: &crate::AST::Lambda, cx: &Cx, env: &LowerEnv| {
+                                let mut jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                                if let Some(ty) = payload_ty {
+                                    if jit_lambda.params.is_empty() {
+                                        jit_lambda.params.push(("__payload".into(), ty));
+                                    } else {
+                                        for (_, pty) in &mut jit_lambda.params {
+                                            *pty = ty.clone();
+                                        }
                                     }
                                 }
-                            }
-                            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                                    jit_lambda
+                                },
+                            );
                             let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
                             return TExpr {
                                 ty: Type::Fn {
@@ -3590,14 +3584,19 @@ fn lower_method_call_impl(
                         if let Expr::Lambda(lam) = &a.expr {
                             let params = vec![Type::Named("WatchEvent".to_string())];
                             let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
-                            let idx = cx.jit_spawn_lambdas.borrow().len();
-                            let jit_lambda = lower_spawn_lambda_for_jit_expecting(
+                            let idx = jit_spawn_site_with(
                                 lam,
                                 cx,
                                 env,
-                                &[Type::Named("WatchEvent".to_string())],
+                                |lam: &crate::AST::Lambda, cx: &Cx, env: &LowerEnv| {
+                                lower_spawn_lambda_for_jit_expecting(
+                                    lam,
+                                    cx,
+                                    env,
+                                    &[Type::Named("WatchEvent".to_string())],
+                                )
+                                },
                             );
-                            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                             callback_index = Some(idx);
                             return TExpr {
                                 ty: Type::Fn {
@@ -3817,8 +3816,7 @@ fn lower_method_call_impl(
             // Resident JIT registers `on_click` via spawn-site (Game on_frame pattern).
             if method == "on_click" {
                 if let Some(Expr::Lambda(lam)) = args.get(1).map(|a| &a.expr) {
-                    let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
-                    cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                    jit_spawn_site(lam, cx, env);
                 }
             }
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -5230,16 +5228,23 @@ fn lower_method_call_impl(
                 // Keep the lowered lambda arg so AOT emit still receives it.
                 if matches!(op, THandleOp::GameSceneOnFrame) {
                     if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
-                        let mut jit_lambda = lower_spawn_lambda_for_jit_expecting(
+                        jit_spawn_site_with(
                             lam,
                             cx,
                             env,
-                            &[Type::Named("GameFrame".to_string())],
+                            |lam: &crate::AST::Lambda, cx: &Cx, env: &LowerEnv| {
+                            let mut jit_lambda = lower_spawn_lambda_for_jit_expecting(
+                                lam,
+                                cx,
+                                env,
+                                &[Type::Named("GameFrame".to_string())],
+                            );
+                            for (_, ty) in &mut jit_lambda.params {
+                                *ty = Type::Named("GameFrame".to_string());
+                            }
+                            jit_lambda
+                            },
                         );
-                        for (_, ty) in &mut jit_lambda.params {
-                            *ty = Type::Named("GameFrame".to_string());
-                        }
-                        cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                     }
                 }
                 let targs: Vec<TExpr> = args

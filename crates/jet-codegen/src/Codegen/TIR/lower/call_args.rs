@@ -15,6 +15,7 @@ use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnCoerce;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::with_lambda_body_expr_cache;
 
 /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
 pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
@@ -116,10 +117,14 @@ pub(crate) fn lambda_body_ty_expecting(
     }
     // Type probing lowers the expression to recover its total type, but the
     // probe is not the executable TIR pass. Do not publish spawn callbacks it
-    // discovers into the shared JIT lambda table; the real lowering pass that
-    // follows owns those entries and their site indexes.
+    // discovers into the shared JIT lambda table — table AND site map, or a
+    // later pass would dedup onto an index whose entry was just discarded; the
+    // real lowering pass that follows owns those entries and their site
+    // indexes. The probe also binds params in an env of its own, so it gets
+    // its own expression memo.
     let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
-    let body_ty = match &lam.body {
+    let saved_spawn_sites = cx.jit_spawn_sites.borrow().clone();
+    let body_ty = with_lambda_body_expr_cache(|| match &lam.body {
         LambdaBody::Expr(e) => {
             let mut lam_env = bind_params(lam, env, expected_params);
             lower_expr(e, cx, &mut lam_env).ty
@@ -137,8 +142,9 @@ pub(crate) fn lambda_body_ty_expecting(
                 unit_type()
             }
         }
-    };
+    });
     *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
+    *cx.jit_spawn_sites.borrow_mut() = saved_spawn_sites;
     body_ty
 }
 

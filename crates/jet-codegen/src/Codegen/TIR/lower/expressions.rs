@@ -761,18 +761,57 @@ struct ExprCacheOwner {
     owns_cache: bool,
 }
 
+/// Run `body` on its own AST-pointer expression memo.
+///
+/// The memo below is keyed by node identity alone, so it is only sound while
+/// one `LowerEnv` is in force. Two lowerings cross that line:
+///
+///   * comptime re-entry, which lowers under a different `Cx` (D-CTCACHE1); and
+///   * a lambda body, which is lowered once per pass — the AOT closure text,
+///     the `executable` TIR, and the JIT spawn body — under a DIFFERENT env
+///     each time. The clone pack rebinds a capture to `__jet___cap_<n>` while
+///     the spawn pack keeps the source slot (`lower/lambdas.rs`), so a value
+///     memoized under one pass replays a `TLocal` the other pass never binds.
+///
+/// One mechanism serves both: take the memo, restore it on the way out.
+struct ExprCacheScope {
+    saved: ExprWorklistCache,
+}
+
+impl ExprCacheScope {
+    fn enter() -> Self {
+        Self {
+            saved: EXPR_WORKLIST_CACHE.with(|cache| std::mem::take(&mut *cache.borrow_mut())),
+        }
+    }
+}
+
+impl Drop for ExprCacheScope {
+    fn drop(&mut self) {
+        let saved = std::mem::take(&mut self.saved);
+        EXPR_WORKLIST_CACHE.with(|cache| *cache.borrow_mut() = saved);
+    }
+}
+
+/// Lower one lambda body on its own memo (see [`ExprCacheScope`]). Every pass
+/// that re-lowers the same body under its own env goes through here.
+pub(crate) fn with_lambda_body_expr_cache<R>(body: impl FnOnce() -> R) -> R {
+    let _scope = ExprCacheScope::enter();
+    body()
+}
+
 // D-CTCACHE1: comptime lowering can recursively invoke TIR while an outer
 // executable lowering worklist is active. Keep the two AST-pointer caches
 // separate; otherwise a comptime-shaped expression can be consumed later by
 // runtime lowering under a different Cx and environment.
 struct ExprComptimeCacheGuard {
-    saved: Option<ExprWorklistCache>,
+    scope: Option<ExprCacheScope>,
 }
 
 impl ExprComptimeCacheGuard {
     fn enter(env: &LowerEnv) -> Self {
         if env.fn_name != "__ct" {
-            return Self { saved: None };
+            return Self { scope: None };
         }
         let nested = EXPR_COMPTIME_CACHE_DEPTH.with(|depth| {
             let nested = depth.get() > 0;
@@ -780,21 +819,18 @@ impl ExprComptimeCacheGuard {
             nested
         });
         if nested {
-            return Self { saved: None };
+            return Self { scope: None };
         }
-        let saved = EXPR_WORKLIST_CACHE.with(|cache| {
-            std::mem::take(&mut *cache.borrow_mut())
-        });
-        Self { saved: Some(saved) }
+        Self {
+            scope: Some(ExprCacheScope::enter()),
+        }
     }
 }
 
 impl Drop for ExprComptimeCacheGuard {
     fn drop(&mut self) {
-        if self.saved.is_some() {
-            let saved = self.saved.take().expect("comptime cache guard owns cache");
-            EXPR_WORKLIST_CACHE.with(|cache| *cache.borrow_mut() = saved);
-        }
+        // The scope restores the outer memo as it drops.
+        self.scope.take();
         EXPR_COMPTIME_CACHE_DEPTH.with(|depth| {
             depth.set(depth.get().saturating_sub(1));
         });
