@@ -1186,6 +1186,63 @@ mod tests {
             }
         }
     }
+
+    /// Card 2021: no engine may answer a Core field's type for itself.
+    ///
+    /// Whenever sema declares a field, the JIT MUST hand back sema's answer
+    /// byte for byte — a private row that merely looks right is how
+    /// `DataError.row` came to be `Int` against sema's `Option<Int>`, and how
+    /// AOT came to read `ProcessResult.output` (a `String`) through the integer
+    /// accessor. The residual rows below the delegation are allowed to exist
+    /// only where sema answers nothing.
+    #[test]
+    fn every_core_field_type_is_the_one_sema_declared() {
+        let mut checked = 0usize;
+        for (spellings, fields) in CORE_STRUCT_FIELDS {
+            for name in *spellings {
+                for field in *fields {
+                    let Some(declared) =
+                        jet_codegen::Sema::core_struct_field_type(name, field, &[])
+                    else {
+                        continue;
+                    };
+                    assert_eq!(
+                        core_struct_field_type(name, field),
+                        Some(declared),
+                        "{name}.{field} disagrees with the sema declaration"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        // A delegation that resolved nothing would pass the loop vacuously.
+        assert!(checked > 100, "only {checked} Core fields resolved");
+    }
+
+    /// The AOT-visible failure of card 2021 in table form: sema declares
+    /// `ProcessResult.output` a `String`, so no tier may read it as an `Int`.
+    #[test]
+    fn process_result_fields_keep_their_declared_types() {
+        for (field, declared) in [
+            ("code", Type::Int),
+            ("output", Type::String),
+            ("errors", Type::String),
+            ("success", Type::Bool),
+            ("timed_out", Type::Bool),
+            ("signal", Type::Option(Box::new(Type::Int))),
+        ] {
+            assert_eq!(
+                core_struct_field_type("ProcessResult", field),
+                Some(declared.clone()),
+                "ProcessResult.{field}"
+            );
+            assert_eq!(
+                jet_codegen::Sema::core_struct_field_type("ProcessResult", field, &[]),
+                Some(declared),
+                "sema ProcessResult.{field}"
+            );
+        }
+    }
 }
 
 /// The one declaration-ordered field table for Prelude ("Core") structs.
@@ -1481,228 +1538,54 @@ fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [T
     Some((shape.names.as_slice(), shape.types.as_ref()?.as_slice()))
 }
 
-/// Sema-known CORE struct field types. TIR `struct_field_type` falls back to
-/// `Int` when `cx.struct_fields` lacks CORE entries (ProcessResult is not a
-/// user struct); recover the real type so JIT field/print/ABI stay total.
+/// Declared type of a CORE ("Prelude") struct field, for JIT field reads, the
+/// `CORE_STRUCTS` layout above, and print.
+///
+/// I9: this is a MARSHALLING ADAPTER over sema's table, not a second table.
+/// Card 2021 — it used to restate about forty rows sema already declared, and
+/// the copies had drifted: `DataError.row`/`.column`/`.index` answered `Int`
+/// where sema declares `Option<Int>`, `DataError.cause` answered `Int` where
+/// sema declares `Option<EncodingError>`, and `DkimConfig.private_key` dropped
+/// the crypto-nominal tag that carries `Secret`'s redaction policy. Each of
+/// those types still fits an i64 slot, so nothing rejected them — they simply
+/// printed the wrong thing.
+///
+/// Only rows sema genuinely cannot answer for a bare type name survive here,
+/// each because of a stated structural reason, never because a row was easier
+/// to copy.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
+    // The one declaring table (jet-sema CheckerCoreLib/core_types.rs). A user
+    // struct never reaches this function: every caller resolves its own
+    // `struct_field_ty` first.
+    if let Some(ty) = jet_codegen::Sema::core_struct_field_type(type_name, field, &[]) {
+        return Some(ty);
+    }
     match type_name {
-        "AllocError" => match field {
-            "requested_bytes" => Some(Type::Int),
-            "allocator" => Some(Type::String),
+        // A reserved core GENERIC resolves these fields FROM ITS TYPE
+        // ARGUMENTS (sema `core_generic_struct_field`), and a JIT field read
+        // reaches this function with a bare type name, so the argument is gone.
+        // `None` means "ask the expression's own type instead", which is what
+        // the callers already do for `DecodeResult.value`.
+        "DecodeResult" => match field {
+            "value" => None,
+            "migration" => Some(Type::Named("MigrationStatus".into())),
             _ => None,
         },
-        "IOContext" => match field {
-            "operation" => Some(Type::Named("IOOperation".into())),
-            "resource" => Some(Type::Option(Box::new(Type::String))),
-            "os_code" => Some(Type::Option(Box::new(Type::Int))),
-            "cause" => Some(Type::Option(Box::new(Type::String))),
-            _ => None,
-        },
-        // No `Point` — collides with user Int Point examples (library, etc.).
-        "Size" => match field {
-            "width" | "height" => Some(Type::Float),
-            _ => None,
-        },
-        "Rect" => match field {
-            "x" | "y" | "width" | "height" => Some(Type::Float),
-            _ => None,
-        },
-        "SizeConstraint" => match field {
-            "min_width" | "min_height" | "max_width" | "max_height" => Some(Type::Float),
-            _ => None,
-        },
-        "UiNode" => match field {
-            "kind" | "role" | "label" | "color" => Some(Type::String),
-            "width" | "height" => Some(Type::Float),
-            "children" => Some(Type::List(Box::new(Type::Named("UiNode".into())))),
-            _ => None,
-        },
-        "Claims" => match field {
-            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
-            "audience" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
-            "not_before" => Some(Type::Option(Box::new(Type::Int))),
-            // The field's source type stays Option<Int>; its JIT carrier is
-            // the one-based tagged result arena, not bits+1.
-            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+        // `DataJoin<L, R>.left`/`.right` are `L`/`R`. The JIT stores both sides
+        // as arena handles, which is what this row describes — not the payload
+        // type, which only the `Type::Apply` receiver knows.
+        "DataJoin" | "Join" => match field {
+            "left" | "right" => Some(Type::Int),
             _ => None,
         },
         "Rotation" => match field {
             "previous" | "current" => Some(Type::Named("KeyRef".into())),
             _ => None,
         },
-        "TestSuite" | "BenchSuite" => match field {
-            "iteration" | "result" => Some(Type::Int),
-            _ => None,
-        },
-        "TLSCertificate" => match field {
-            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
-                signed: false,
-                bits: 8,
-            }))),
-            "dns_names" => Some(Type::List(Box::new(Type::String))),
-            "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
-            "subject" | "issuer" => Some(Type::String),
-            _ => None,
-        },
-        "TLSPeerIdentity" => match field {
-            "verified_server_name" | "cipher_suite" => Some(Type::String),
-            "leaf" => Some(Type::Named("TLSCertificate".into())),
-            "certificate_chain" => Some(Type::List(Box::new(Type::Named(
-                "TLSCertificate".into(),
-            )))),
-            "tls_version" => Some(Type::Named("TLSVersion".into())),
-            _ => None,
-        },
-        "ProcessResult" => match field {
-            "code" => Some(Type::Int),
-            "output" | "errors" => Some(Type::String),
-            "success" | "timed_out" => Some(Type::Bool),
-            "signal" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        },
-        "TerminalSize" => match field {
-            "cols" | "rows" => Some(Type::Int),
-            _ => None,
-        },
-        "TerminalPolicy" => match field {
-            "size" => Some(Type::Named("TerminalSize".into())),
-            "mode" => Some(Type::Named("TerminalMode".into())),
-            _ => None,
-        },
-        // jet_std::TextWidth (Prelude Open.rs): two policy enums, both scraped
-        // into the JIT's Prelude enum table by build.rs.
-        "TextWidth" => match field {
-            "ambiguous" => Some(Type::Named("TextWidthAmbiguous".into())),
-            "controls" => Some(Type::Named("TextWidthControls".into())),
-            _ => None,
-        },
-        // D-EVENT1: jet_std::JetAsyncPolicy (Prelude ReactiveEventWatch.rs).
-        "AsyncPolicy" => match field {
-            "capacity" => Some(Type::Int),
-            "overflow" => Some(Type::Named("Overflow".into())),
-            _ => None,
-        },
-        "ModGrant" => match field {
-            "read" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        },
-        "Envelope" => match field {
-            "from" => Some(Type::Named("Address".into())),
-            "recipients" => Some(Type::List(Box::new(Type::Named("Address".into())))),
-            _ => None,
-        },
-        "RecipientReport" => match field {
-            "address" => Some(Type::Named("Address".into())),
-            "accepted" => Some(Type::Bool),
-            "code" => Some(Type::Int),
-            "message" => Some(Type::String),
-            _ => None,
-        },
-        "SendReport" => match field {
-            "server" | "response" | "accepted_at" => Some(Type::String),
-            "accepted" | "rejected" => {
-                Some(Type::List(Box::new(Type::Named("RecipientReport".into()))))
-            }
-            "response_code" => Some(Type::Int),
-            _ => None,
-        },
-        "Limits" => match field {
-            "max_reply_line_bytes"
-            | "max_reply_lines"
-            | "max_capabilities"
-            | "max_recipients"
-            | "max_message_bytes"
-            | "max_auth_challenge_bytes" => Some(Type::Int),
-            _ => None,
-        },
-        "SMTPConfig" => match field {
-            "host" => Some(Type::String),
-            "port" => Some(Type::Int),
-            "security" => Some(Type::Named("SMTPSecurity".into())),
-            "auth" => Some(Type::Named("SMTPAuth".into())),
-            "recipient_policy" => Some(Type::Named("RecipientPolicy".into())),
-            "trust" => Some(Type::Named("TLSTrust".into())),
-            "limits" => Some(Type::Named("Limits".into())),
-            "dkim" => Some(Type::Option(Box::new(Type::Named("DkimConfig".into())))),
-            _ => None,
-        },
-        "DkimConfig" => match field {
-            "domain" | "selector" => Some(Type::String),
-            "private_key" => Some(Type::Named("Secret".into())),
-            "signed_headers" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        },
-        // D-LSDIR1 / D-FSOPS1 — CORE FS records omitted from TIR ProgramBundle.
-        "DirEntry" => match field {
-            "name" | "path" => Some(Type::String),
-            "is_dir" => Some(Type::Bool),
-            _ => None,
-        },
-        "Stat" => match field {
-            "size" | "modified_ms" | "created_ms" => Some(Type::Int),
-            "readonly" | "is_file" | "is_dir" | "is_symlink" => Some(Type::Bool),
-            "kind" => Some(Type::String),
-            _ => None,
-        },
-        "WalkEntry" => match field {
-            "path" | "relative" => Some(Type::String),
-            "is_dir" => Some(Type::Bool),
-            "depth" => Some(Type::Int),
-            _ => None,
-        },
-        "TempDir" | "TempFile" | "FileLock" => match field {
-            "path" => Some(Type::String),
-            _ => None,
-        },
-        "EncodingLimits" => match field {
-            "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_expansion_depth"
-            | "max_expansion_bytes" => Some(Type::Int),
-            "max_total_bytes" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        },
-        "CBOROptions" => match field {
-            "max_depth" | "max_items" | "max_bytes" => Some(Type::Int),
-            "require_canonical" => Some(Type::Bool),
-            _ => None,
-        },
-        "DataLimits" => match field {
-            "encoding" => Some(Type::Named("EncodingLimits".into())),
-            "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => Some(Type::Int),
-            _ => None,
-        },
-        "DataStatus" => match field {
-            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement" => {
-                Some(Type::String)
-            }
-            _ => None,
-        },
-        "DataGroup" => match field {
-            "key" => Some(Type::String),
-            "count" => Some(Type::Int),
-            "sum" | "mean" => Some(Type::Float),
-            _ => None,
-        },
-        "DataLineOptions" => match field {
-            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
-                Some(Type::String)
-            }
-            "markers" => Some(Type::Bool),
-            "reference" => Some(Type::Option(Box::new(Type::Float))),
-            _ => None,
-        },
-        "DataError" => match field {
-            "kind" | "operation" | "reason" => Some(Type::String),
-            "row" | "column" | "index" | "cause" => Some(Type::Int),
-            _ => None,
-        },
-        "DataSummary" => match field {
-            "count" => Some(Type::Int),
-            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
-                Some(Type::Float)
-            }
-            _ => None,
-        },
+        // D-DATAFRAME1=A: `Table<T>`/`Series<T>`/`LazyFrame<T>` are opaque core
+        // generics — sema types the VALUE and rejects a field read on it
+        // (E0302), so these rows are the JIT handle's own shape, used by Debug
+        // show and clone, never by a user field access.
         "DataTable" | "Table" | "LazyFrame" => match field {
             "rows" => Some(Type::List(Box::new(Type::Int))),
             "missing" => Some(Type::Int),
@@ -1714,63 +1597,12 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "missing" => Some(Type::Int),
             _ => None,
         },
-        "DataColumn" => match field {
-            "name" | "type_name" => Some(Type::String),
-            _ => None,
-        },
-        "DataJoin" | "Join" => match field {
-            "left" | "right" => Some(Type::Int),
-            _ => None,
-        },
-        "DataPivotCell" => match field {
-            "row_key" | "column_key" => Some(Type::String),
-            "count" => Some(Type::Int),
-            "sum" | "mean" => Some(Type::Float),
-            _ => None,
-        },
-        "EncodingCause" => match field {
-            "kind" | "message" => Some(Type::String),
-            "os_code" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        },
-        "EncodingError" => match field {
-            "format" => Some(Type::Named("EncodingFormat".into())),
-            "kind" => Some(Type::Named("EncodingErrorKind".into())),
-            "byte_offset" => Some(Type::Int),
-            "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
-            "path" | "reason" => Some(Type::String),
-            "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".into())))),
-            _ => None,
-        },
-        "CBORError" => match field {
-            "kind" => Some(Type::Named("CBORErrorKind".into())),
-            "byte_offset" => Some(Type::Int),
-            "path" | "reason" => Some(Type::String),
-            _ => None,
-        },
-        "FieldError" => match field {
-            "path" | "reason" => Some(Type::String),
-            _ => None,
-        },
-        "HTTPShutdownReport" => match field {
-            "accepted" | "overloaded" | "completed" | "cancelled" => Some(Type::Int),
-            _ => None,
-        },
-        "MigrationStatus" => match field {
-            "migrated" => Some(Type::Bool),
-            "from" => Some(Type::String),
-            "steps" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        },
-        "DecodeResult" => match field {
-            // `.value` type is the Apply arg; callers pass expr.ty.
-            "value" => None,
-            "migration" => Some(Type::Named("MigrationStatus".into())),
-            _ => None,
-        },
-        "WatchEvent" => match field {
-            "domain" | "kind" | "path" | "detail" => Some(Type::String),
-            "pid" | "port" => Some(Type::Int),
+        // D-RENDERTGT*: sema types `UiNode.label`/`.width`/`.height` for a read
+        // and stops there; the remaining declared fields are still part of the
+        // record's layout, so Debug show and clone need them.
+        "UiNode" => match field {
+            "kind" | "role" | "color" => Some(Type::String),
+            "children" => Some(Type::List(Box::new(Type::Named("UiNode".into())))),
             _ => None,
         },
         _ => None,

@@ -576,9 +576,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HTTPShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "TerminalSize" | "TerminalPolicy" | "ModGrant" | "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
-        return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
-    }
     if type_name == "Envelope" {
         return match field {
             "from" => Some(Type::Named("Address".to_string())),
@@ -1288,7 +1285,37 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
         ("GameFrame", "index") => Some(Type::Int),
         ("GameFrame", "input") => Some(Type::Named("GameInputSnapshot".to_string())),
-        _ => None,
+        // Every remaining CORE struct users can construct answers from the one
+        // constructable-field table instead of a second hand-kept allowlist:
+        // a shape spelled once for `Type.{ … }` cannot then disagree with the
+        // same shape read back through `.field`. Card 2021 — the allowlist form
+        // of this fallback had silently omitted `XMLRenderOptions`,
+        // `XMLCanonical` and `TextWidth`, so their fields constructed but did
+        // not read.
+        _ => core_constructable_fields(type_name)?
+            .into_iter()
+            .find(|(name, _)| name == field)
+            .map(|(_, ty)| ty),
+    }
+}
+
+/// D-MIGRATE3=A / card 2021: the ONE Core-struct field-type oracle every tier
+/// reads. Sema owns it because sema is what typed the field read in the first
+/// place (I3); AOT lowering, the Cranelift JIT and the TIR interpreter are
+/// marshalling adapters that must not re-declare a Core record's shape (I9).
+///
+/// `Type::Named` receivers go through [`core_struct_field`]; a reserved core
+/// GENERIC (`DecodeResult<T>`, `DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`)
+/// goes through [`core_generic_struct_field`], which needs the type arguments.
+/// Neither answers for a USER struct: every caller resolves its own struct
+/// table first (D-SHIFT1 user-type-wins), exactly as `Checker::field_type`
+/// does.
+pub fn core_struct_field_type(type_name: &str, field: &str, args: &[Type]) -> Option<Type> {
+    if args.is_empty() {
+        core_struct_field(type_name, field)
+    } else {
+        core_generic_struct_field(type_name, field, args)
+            .or_else(|| core_struct_field(type_name, field))
     }
 }
 

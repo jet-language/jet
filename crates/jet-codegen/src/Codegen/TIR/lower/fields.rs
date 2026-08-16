@@ -625,14 +625,19 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             .find(|(f, _)| f == field)
             .map(|(_, t)| (**t).clone());
     }
-    // D-MIGRATE3=A: `DecodeResult<T>` — a reserved core generic, not a user
-    // struct, so it normally has no `cx.struct_fields` entry. Mirrors
-    // `core_generic_struct_field` (sema/CheckerCoreLib.rs) so a chained access
-    // (`r.migration.migrated`) resolves the intermediate `.migration` type
-    // instead of falling back to `Type::Int` and mis-mangling the next field.
-    // User-type-wins (D-SHIFT1 precedent): if the user declared their own
-    // `struct DecodeResult<T>`, `cx.struct_fields` has a real entry — try that
-    // first so a same-named user field always wins.
+    // Card 2021: a CORE record's field types are NOT restated here. This
+    // function used to carry a hand-kept ladder of 41 core structs, while sema
+    // declared 115 — so every field of the other 74 (`ProcessResult` among
+    // them) resolved through the caller's `.unwrap_or(Type::Int)` and print
+    // picked the INTEGER accessor for a `String`. Reading the declaring table
+    // instead makes the answer total for every core struct at once, which is
+    // what a site-local repair of one field could never do.
+    //
+    // Precedence mirrors `Checker::field_type` (CheckerInfer/expr.rs) exactly:
+    // a user struct claiming the name wins (D-SHIFT1 user-type-wins), and only
+    // then does the reserved core shape answer. Codegen must agree with the
+    // types sema already committed to; disagreeing is how rustc gets handed
+    // Jet's own ill-typed output, which is an internal compiler error (I2).
     if let Type::Apply { name, args } = recv_ty {
         if let Some(fields) = cx.struct_fields.get(name) {
             let field_ty = fields
@@ -647,355 +652,25 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
                 .collect();
             return Some(crate::Generics::substitute_type(&field_ty, &subst));
         }
-        if name == "DecodeResult" {
-            return match field {
-                "value" => args.first().cloned(),
-                "migration" => Some(Type::Named("MigrationStatus".to_string())),
-                _ => None,
-            };
-        }
-        if name == "DataJoin" && args.len() == 2 {
-            return match field {
-                "left" => Some(args[0].clone()),
-                "right" => Some(args[1].clone()),
-                _ => None,
-            };
-        }
-        if name == "VjpRun" && args.len() == 1 {
-            return match field {
-                "value" => Some(Type::Named("Tensor".to_string())),
-                "pull" => Some(Type::Fn {
-                    params: vec![Type::Named("Tensor".to_string())],
-                    ret: Some(Box::new(args[0].clone())),
-                    effect_bound: None,
-                    param_contract: None,
-                call_metadata: None,
-                    return_view_provenance: None,
-                }),
-                "grads" => Some(args[0].clone()),
-                _ => None,
-            };
-        }
-        return None;
+        // D-MIGRATE3=A: a reserved core GENERIC (`DecodeResult<T>`,
+        // `DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`) resolves its field
+        // against its type arguments, so a chained access (`r.migration
+        // .migrated`) types the intermediate instead of mis-mangling the next
+        // field.
+        return crate::Sema::core_struct_field_type(name, field, args);
     }
     let Type::Named(name) = recv_ty else {
         return None;
     };
-    if name == Syntax::TYPE_MEMO_STATS && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "hits" | "misses" | "size" => Some(Type::Int),
-            "bound" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if name == "Claims" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
-            "audience" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
-            "not_before" => Some(Type::Option(Box::new(Type::Int))),
-            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        };
-    }
-    if name == Syntax::TYPE_ALLOC_ERROR && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "requested_bytes" => Some(Type::Int),
-            "allocator" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if name == "TLSPeerIdentity" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "verified_server_name" => Some(Type::String),
-            "leaf" => Some(Type::Named("TLSCertificate".to_string())),
-            "certificate_chain" => Some(Type::List(Box::new(Type::Named(
-                "TLSCertificate".to_string(),
-            )))),
-            "cipher_suite" => Some(Type::String),
-            "tls_version" => Some(Type::Named("TLSVersion".to_string())),
-            _ => None,
-        };
-    }
-    if name == "TLSCertificate" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
-                signed: false,
-                bits: 8,
-            }))),
-            "dns_names" => Some(Type::List(Box::new(Type::String))),
-            "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
-            "subject" | "issuer" => Some(Type::String),
-            _ => None,
-        };
-    }
-    // D-MIGRATE3=A: `MigrationStatus` is likewise a reserved core struct —
-    // same user-type-wins order.
-    if name == "MigrationStatus" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "migrated" => Some(Type::Bool),
-            "from" => Some(Type::String),
-            "steps" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        };
-    }
-    // D-WATCH-SCOPE1: WatchEvent is a reserved core struct (not a user Item::Struct).
-    if name == "WatchEvent" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "domain" | "kind" | "path" | "detail" => Some(Type::String),
-            "pid" | "port" => Some(Type::Int),
-            _ => None,
-        };
-    }
-    if name == "FieldError" && !cx.struct_fields.contains_key(name) {
-        return matches!(field, "path" | "reason").then_some(Type::String);
-    }
-    if name == "EncodingLimits" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_expansion_depth" | "max_expansion_bytes" => Some(Type::Int),
-            "max_total_bytes" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        };
-    }
-    if name == "EncodingCause" && !cx.struct_fields.contains_key(name) {
-        return match field { "kind" | "message" => Some(Type::String), "os_code" => Some(Type::Option(Box::new(Type::Int))), _ => None };
-    }
-    if name == "EncodingError" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "format" => Some(Type::Named("EncodingFormat".to_string())),
-            "kind" => Some(Type::Named("EncodingErrorKind".to_string())),
-            "byte_offset" => Some(Type::Int),
-            "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
-            "path" | "reason" => Some(Type::String),
-            "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
-            _ => None,
-        };
-    }
-    if name == "CBOROptions" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "max_depth" | "max_items" | "max_bytes" => Some(Type::Int),
-            "require_canonical" => Some(Type::Bool),
-            _ => None,
-        };
-    }
-    if name == "CBORError" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "kind" => Some(Type::Named("CBORErrorKind".to_string())),
-            "byte_offset" => Some(Type::Int),
-            "path" | "reason" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if name == "DimensionAxis" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "name" => Some(Type::String),
-            "exponent" => Some(Type::Int),
-            _ => None,
-        };
-    }
-    if name == "DimensionInfo" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "axes" => Some(Type::List(Box::new(Type::Named(
-                "DimensionAxis".to_string(),
-            )))),
-            "identity" | "display" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if name == "StateRef" && !cx.struct_fields.contains_key(name) {
-        return matches!(field, "owner" | "name" | "path").then_some(Type::String);
-    }
-    if name == "StateInfo" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "name" => Some(Type::String),
-            "path" => Some(Type::Named("StateRef".to_string())),
-            _ => None,
-        };
-    }
-    if name == "EffectInfo" && !cx.struct_fields.contains_key(name) {
-        return (field == "values").then_some(Type::List(Box::new(Type::String)));
-    }
-    if name == "XMLLimits" && !cx.struct_fields.contains_key(name) {
-        return matches!(field, "max_depth" | "max_nodes" | "max_attributes_per_element" | "max_name_bytes" | "max_text_bytes" | "max_entity_declarations" | "max_entity_depth" | "max_entity_replacement_bytes").then_some(Type::Int);
-    }
-    if name == "XMLParseOptions" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "entities" => Some(Type::Named("XMLEntityPolicy".to_string())),
-            "limits" => Some(Type::Named("XMLLimits".to_string())),
-            _ => None,
-        };
-    }
-    if name == "XMLRenderOptions" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "encoding" => Some(Type::Named("XMLEncoding".to_string())),
-            "lexical" => Some(Type::Named("XMLLexicalPolicy".to_string())),
-            _ => None,
-        };
-    }
-    if name == "XMLCanonical" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "mode" => Some(Type::Named("XMLCanonicalMode".to_string())),
-            "comments" => Some(Type::Bool),
-            "inclusive_prefixes" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        };
-    }
-    if name == "XMLError" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "kind" => Some(Type::Named("XMLReason".to_string())),
-            "byte_offset" | "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
-            "path" | "reason" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if name == "GameScene" {
-        return match field {
-            "assets" => Some(Type::Named("GameAssets".to_string())),
-            "input" => Some(Type::Named("GameInputMap".to_string())),
-            _ => None,
-        };
-    }
-    if name == Syntax::TYPE_ERR {
-        return match field {
-            "message" => Some(Type::String),
-            "code" => Some(Type::Option(Box::new(Type::String))),
-            "cause" => Some(Type::Option(Box::new(Type::Named(
-                Syntax::TYPE_ERR.to_string(),
-            )))),
-            _ => None,
-        };
-    }
-    if name == "GameFrame" {
-        return match field {
-            "index" => Some(Type::Int),
-            "input" => Some(Type::Named("GameInputSnapshot".to_string())),
-            _ => None,
-        };
-    }
-    if name == "DataGroup" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "key" => Some(Type::String),
-            "count" => Some(Type::Int),
-            "sum" | "mean" => Some(Type::Float),
-            _ => None,
-        };
-    }
-    if name == "DataLineOptions" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
-                Some(Type::String)
-            }
-            "markers" => Some(Type::Bool),
-            "reference" => Some(Type::Option(Box::new(Type::Float))),
-            _ => None,
-        };
-    }
-    if name == "DataPivotCell" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "row_key" | "column_key" => Some(Type::String),
-            "count" => Some(Type::Int),
-            "sum" | "mean" => Some(Type::Float),
-            _ => None,
-        };
-    }
-    if name == "DataLimits" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "encoding" => Some(Type::Named("EncodingLimits".to_string())),
-            "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => {
-                Some(Type::Int)
-            }
-            _ => None,
-        };
-    }
-    if name == "DataError" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "kind" => Some(Type::Named("DataErrorKind".to_string())),
-            "operation" | "reason" => Some(Type::String),
-            "row" | "column" | "index" => Some(Type::Option(Box::new(Type::Int))),
-            "cause" => Some(Type::Option(Box::new(Type::Named(
-                "EncodingError".to_string(),
-            )))),
-            _ => None,
-        };
-    }
-    if name == "DataColumn" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "name" | "type_name" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if name == "DataStatus" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement" => {
-                Some(Type::String)
-            }
-            _ => None,
-        };
-    }
-    if name == "DataSummary" && !cx.struct_fields.contains_key(name) {
-        return match field {
-            "count" => Some(Type::Int),
-            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
-                Some(Type::Float)
-            }
-            _ => None,
-        };
-    }
-    if name == Syntax::TYPE_TYPE_INFO {
-        return match field {
-            "name" | "path" | "identity" | "kind" => Some(Type::String),
-            "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
-            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
-            "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
-            "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
-            "type_params" => Some(Type::List(Box::new(Type::Named(
-                "TypeParamInfo".to_string(),
-            )))),
-            "markers" | "expanded_markers" => {
-                Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string()))))
-            }
-            "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
-            "transitions" => Some(Type::List(Box::new(Type::Named(
-                "TransitionInfo".to_string(),
-            )))),
-            "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
-            "dimensions" => Some(Type::List(Box::new(Type::Named(
-                "DimensionInfo".to_string(),
-            )))),
-            "implements" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        };
-    }
-    if name == "TypeParamInfo" {
-        return match field {
-            "name" => Some(Type::String),
-            "bounds" => Some(Type::List(Box::new(Type::String))),
-            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
-            _ => None,
-        };
-    }
-    if name == Syntax::TYPE_LAYOUT_INFO {
-        return match field {
-            "kind" | "target" | "guarantee" | "source" => Some(Type::String),
-            "size" | "alignment" | "stride" => Some(Type::Option(Box::new(Type::Int))),
-            "fields" => Some(Type::List(Box::new(Type::Named(
-                Syntax::TYPE_LAYOUT_FIELD.to_string(),
-            )))),
-            _ => None,
-        };
-    }
-    if name == Syntax::TYPE_LAYOUT_FIELD {
-        return match field {
-            "name" | "ty" | "target" | "guarantee" | "source" => Some(Type::String),
-            "offset" | "size" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        };
-    }
-    cx.struct_fields
-        .get(name)?
-        .iter()
-        .find(|(f, _)| f == field)
+    if let Some(field_ty) = cx
+        .struct_fields
+        .get(name)
+        .and_then(|fields| fields.iter().find(|(f, _)| f == field))
         .map(|(_, t)| t.clone())
+    {
+        return Some(field_ty);
+    }
+    crate::Sema::core_struct_field_type(name, field, &[])
 }
 
 /// The type of an integer literal given its elaborated width.
