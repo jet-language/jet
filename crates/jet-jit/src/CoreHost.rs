@@ -2084,7 +2084,17 @@ host_fns! {
     fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
     mod_load: "jet_jit_mod_load" => jet_jit_mod_load: sig_i64_i64_i64;
     mod_on_tick: "jet_jit_mod_on_tick" => jet_jit_mod_on_tick: sig_i64_i64_i64;
-    path_home: "jet_jit_path_home" => jet_jit_path_home: sig_unary_i64;
+    // #1992 io/path: `Path.home()` takes no argument at any tier. CoreLib's body
+    // is `fn jet_path_home() -> JetPath` (jet-codegen Prelude/CoreLib/Top/
+    // PathFiles.rs), AOT emits `jet_path_home()` and comptime eval calls
+    // `path_kernel::jet_std_path_home()` — all receiver-free, safety.rs gates the
+    // op on `args.is_empty()`, and the host itself is `jet_jit_path_home() -> i64`
+    // (above). This row said `sig_unary_i64`, copy-pasted from the `path_from` row
+    // below, so lowering's correct 0-arg call was invalid CLIF against a 1-param
+    // declaration. Nullary like the other ambient-query hosts (`os_temp_dir`,
+    // `env_vars`): the runtime reaches this host through
+    // `Concurrency::with_runtime_mut`, never through a parameter.
+    path_home: "jet_jit_path_home" => jet_jit_path_home: sig_i64;
     path_from: "jet_jit_path_from" => jet_jit_path_from: sig_unary_i64;
     path_write_atomic: "jet_jit_path_write_atomic" => jet_jit_path_write_atomic: sig_i64_i64_i64;
     path_join_handle: "jet_jit_path_join_handle" => jet_jit_path_join_handle: sig_i64_i64_i64;
