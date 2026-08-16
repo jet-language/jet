@@ -2543,6 +2543,52 @@ impl<'a> EvalCtx<'a> {
             .then(|| CtValue::Int(crate::scheduler::jet_std_time_now()))
     }
 
+    /// D-CANCELMODEL1=C: `core.time.sleep` is a scheduler WAIT POINT, so a
+    /// cancelled task unwinds here and the work after the sleep never runs.
+    /// Comptime's core adapter binds `jet_scheduler_sleep_ms` to a bare
+    /// `std::thread::sleep` because pure comptime has no scheduler — routing a
+    /// runtime sleep through it made every sleeping task behave as if it were
+    /// `#Shield`ed. Runtime execution marshals the same Prelude kernel AOT and
+    /// the Cranelift host call (I9) and converts the scheduler's cancel /
+    /// deadline control transfer into the evaluator's diagnostic rail, so no
+    /// Rust panic crosses an eval frame.
+    fn runtime_time_sleep(
+        &self,
+        module: &str,
+        method: &str,
+        argv: &[CtValue],
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        if !(self.runtime_execution && module == "core.time" && method == "sleep") {
+            return None;
+        }
+        // A malformed carrier keeps the shared adapter's diagnostic: fall through.
+        let [CtValue::Struct { type_name, fields }] = argv else {
+            return None;
+        };
+        if type_name.as_str() != crate::Syntax::DURATION_TYPE {
+            return None;
+        }
+        let nanos = fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("ns", CtValue::Int(nanos)) => Some(*nanos),
+                _ => None,
+            })?;
+        // Same deadline plumbing the sibling waits use (`channel send`,
+        // `channel receive`, `select wait`): a task body already runs under its
+        // pushed budget, and a main-thread `#Context(deadline: …)` installs one
+        // here so the shared kernel caps this sleep the way AOT's guard does.
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        Some(
+            self.scheduler_wait("time sleep", || {
+                crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
+            })
+            .map(|()| CtValue::Unit),
+        )
+    }
+
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
         let concrete = crate::Codegen::TIR::generic_method_instance_key(ty, method, &[]);
         self.funcs.get(&concrete).copied().or_else(|| match ty {
@@ -5004,6 +5050,9 @@ impl<'a> EvalCtx<'a> {
         }
         if let Some(value) = self.runtime_time_now(module, method, &argv) {
             return Ok(value);
+        }
+        if let Some(result) = self.runtime_time_sleep(module, method, &argv) {
+            return result;
         }
         let is_shuffle = module == "core.math.random" && method == "shuffle";
         let value = self.apply_core_call_with_policy(
@@ -8494,6 +8543,11 @@ impl<'a> EvalCtx<'a> {
                                 self.runtime_time_now(module, &method.name, &argv)
                             {
                                 return Ok(value);
+                            }
+                            if let Some(result) =
+                                self.runtime_time_sleep(module, &method.name, &argv)
+                            {
+                                return result;
                             }
                             if let Some(diagnostic) = self.comptime_core_fold_diagnostic(
                                 module,
