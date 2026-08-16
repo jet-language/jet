@@ -760,6 +760,12 @@ pub(crate) struct JitMeta<'a> {
     result_option_targets: HashSet<String>,
     result_option_params: HashSet<(String, usize)>,
     reflect_paths: &'a HashMap<String, String>,
+    /// D-MEMO1=A: the ratified cache bound of each `#Memo fn`, so `f.cache()`
+    /// can hand the one Prelude memo store the same bound AOT's
+    /// `JetMemo::with_bound` gets. An untouched function has no entry in that
+    /// store yet, and reporting a bound it never declared would be an
+    /// invention.
+    memo_bounds: HashMap<String, Option<usize>>,
 }
 
 impl<'a> JitMeta<'a> {
@@ -783,6 +789,13 @@ impl<'a> JitMeta<'a> {
             result_option_targets,
             result_option_params,
             reflect_paths: &program.reflect_paths,
+            memo_bounds: program
+                .funcs
+                .iter()
+                .filter_map(|func| {
+                    func.memo_bound.map(|bound| (func.name.clone(), bound))
+                })
+                .collect(),
         }
     }
 
@@ -801,6 +814,12 @@ impl<'a> JitMeta<'a> {
             .and_then(|sources| sources.get(source))
             .map(|values| values.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// D-MEMO1=A: `Some(bound)` for a memoized function (`None` inside spells
+    /// `bound: none`); `None` when the function is not memoized at all.
+    pub(crate) fn memo_bound(&self, function: &str) -> Option<Option<usize>> {
+        self.memo_bounds.get(function).copied()
     }
 
     pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {
@@ -1534,6 +1553,14 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     (
         &["WatchEvent"],
         &["domain", "kind", "path", "detail", "pid", "port"],
+    ),
+    // D-MEMO1=A: the read-only record `name.cache()` projects. Declaration
+    // order matches the TIR evaluator's `memo_stats` and sema's
+    // `core_struct_field`, so a `stats.hits` read resolves to the same slot on
+    // every tier.
+    (
+        &[jet_foundation::Syntax::TYPE_MEMO_STATS],
+        &["hits", "misses", "size", "bound"],
     ),
 ];
 

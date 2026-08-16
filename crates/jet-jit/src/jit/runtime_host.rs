@@ -1832,6 +1832,25 @@ fn jet_jit_memo_clear_slot(record: i64, slot: i64) {
     });
 }
 
+/// D-MEMO1=A / I9: `f.cache()` marshals into the shared Prelude memo store the
+/// deopted memoized function fills; no cache policy lives here. `name` is a
+/// string handle for the Jet function name and `bound` its ratified bound,
+/// where a negative word spells `bound: none`. The result is the four-slot
+/// `MemoStats` record whose field order `types_meta`'s core table declares.
+fn jet_jit_memo_stats(name: i64, bound: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let name = rt.heap.clone_string(name).unwrap_or_default();
+        let stats = super::deopt::deopt_memo_stats(&name, usize::try_from(bound).ok());
+        let record = rt.heap.alloc_record(4);
+        let _ = rt.heap.record_set_int(record, 0, stats.hits);
+        let _ = rt.heap.record_set_int(record, 1, stats.misses);
+        let _ = rt.heap.record_set_int(record, 2, stats.size);
+        let text = rt.heap.alloc_string(stats.bound);
+        let _ = rt.heap.record_set_string(record, 3, text);
+        record
+    })
+}
+
 fn jet_jit_err_new(message: i64, code: i64, cause: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         use jet_foundation::Outcome::{jet_err, JetAbsent};
@@ -3956,6 +3975,7 @@ host_fns! {
     memo_put: "jet_jit_memo_put" => jet_jit_memo_put: sig_struct_set_i64;
     memo_clear: "jet_jit_memo_clear" => jet_jit_memo_clear: sig_i64;
     memo_clear_slot: "jet_jit_memo_clear_slot" => jet_jit_memo_clear_slot: sig_i64_i64;
+    memo_stats: "jet_jit_memo_stats" => jet_jit_memo_stats: sig_struct_get_i64;
     err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
     err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
     err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
