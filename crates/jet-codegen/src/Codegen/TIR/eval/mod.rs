@@ -580,6 +580,20 @@ pub(super) fn place_loan_handle(slot: usize) -> CtValue {
     }
 }
 
+/// D-TASKBORROW1=A: the same loan for a `__JetViewMut` place region. The slot
+/// holds exactly the loaned window, so the handle's indexes rebase onto it and
+/// every existing view call site keeps indexing its owner absolutely.
+pub(super) fn view_loan_handle(slot: usize, width: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetViewMut".into(),
+        fields: vec![
+            ("loan".into(), CtValue::Int(slot as i64)),
+            ("start".into(), CtValue::Int(0)),
+            ("end".into(), CtValue::Int(width - 1)),
+        ],
+    }
+}
+
 /// What a `__JetPlaceMut` handle windows into.
 pub(super) enum PlaceMutTarget {
     /// A place inside an owner local held by the reading scope.
@@ -783,62 +797,40 @@ pub(super) fn view_mut_window_args(fields: &[(String, CtValue)]) -> Option<&[CtV
     }).flatten()
 }
 
-pub(super) fn view_mut_owner_value(
-    fields: &[(String, CtValue)],
-    scope: &HashMap<String, CtValue>,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
-        return Err(unsupported("Tensor view window", span));
+/// D-TASKBORROW1=A: the runtime slot a loaned window addresses. A loaned handle
+/// carries no owner local, because a child thread cannot name its parent's
+/// scope.
+pub(super) fn view_mut_loan(fields: &[(String, CtValue)]) -> Option<usize> {
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("loan", CtValue::Int(slot)) => usize::try_from(*slot).ok(),
+            _ => None,
+        })
+}
+
+/// The inclusive window bounds a `__JetViewMut` handle carries. Unlike
+/// `view_mut_parts` this does not need an owner local, so it also reads a
+/// loaned handle.
+pub(super) fn view_mut_bounds(fields: &[(String, CtValue)]) -> Option<(i64, i64)> {
+    let mut start = None;
+    let mut end = None;
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            ("start", CtValue::Int(n)) => start = Some(*n),
+            ("end", CtValue::Int(n)) => end = Some(*n),
+            _ => {}
+        }
     }
-    let (base, path, _, _) =
-        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
-    let root = scope
-        .get(&base)
-        .ok_or_else(|| unsupported("view-mut owner", span))?;
-    project_list_place(root, &path, span).cloned()
+    Some((start?, end?))
 }
 
-pub(super) fn store_view_mut_owner_value(
-    fields: &[(String, CtValue)],
-    scope: &mut HashMap<String, CtValue>,
-    replacement: CtValue,
-    span: Span,
-) -> Result<(), Diagnostic> {
-    let (base, path, _, _) =
-        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
-    let root = scope
-        .get(&base)
-        .cloned()
-        .ok_or_else(|| unsupported("view-mut owner", span))?;
-    let updated = replace_list_place(root, &path, replacement, span)?;
-    scope.insert(base, updated);
-    Ok(())
-}
-
-pub(super) fn load_view_mut_owner_list(
-    fields: &[(String, CtValue)],
-    scope: &HashMap<String, CtValue>,
-    span: Span,
-) -> Result<Vec<CtValue>, Diagnostic> {
-    let (base, path, _, _) =
-        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
-    let root = scope
-        .get(&base)
-        .ok_or_else(|| unsupported("view-mut owner", span))?;
-    let owner = project_list_place(root, &path, span)?;
+/// The element list behind a view owner, materializing a compute tensor.
+fn view_owner_items(owner: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     match owner {
         CtValue::List(items) => Ok(items.clone()),
-        CtValue::Struct {
-            type_name,
-            fields: _,
-        }
-            if type_name == "Tensor" || type_name == "JetTensor" =>
-        {
-            match crate::Comptime::ComputeLite::tensor_to_list_value(
-                owner,
-                span,
-            )? {
+        CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor" => {
+            match crate::Comptime::ComputeLite::tensor_to_list_value(owner, span)? {
                 CtValue::List(items) => Ok(items),
                 _ => Err(unsupported("Tensor view owner data", span)),
             }
@@ -847,65 +839,142 @@ pub(super) fn load_view_mut_owner_list(
     }
 }
 
-pub(super) fn store_view_mut_owner_list(
-    fields: &[(String, CtValue)],
-    scope: &mut HashMap<String, CtValue>,
+/// The value that replaces a view owner when a window write lands on it.
+fn view_owner_replacement(
+    owner: &CtValue,
     items: Vec<CtValue>,
     span: Span,
-) -> Result<(), Diagnostic> {
-    let (base, path, _, _) =
-        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
-    let root = scope
-        .get(&base)
-        .cloned()
-        .ok_or_else(|| unsupported("view-mut owner", span))?;
-    let replacement = match project_list_place(&root, &path, span)? {
-        CtValue::Struct { type_name, .. }
-            if type_name == "Tensor" || type_name == "JetTensor" =>
-        {
-            crate::Comptime::ComputeLite::tensor_replace_data(
-                project_list_place(&root, &path, span)?,
-                items,
-                span,
-            )?
+) -> Result<CtValue, Diagnostic> {
+    match owner {
+        CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor" => {
+            crate::Comptime::ComputeLite::tensor_replace_data(owner, items, span)
         }
-        _ => CtValue::List(items),
-    };
-    let updated = replace_list_place(root, &path, replacement, span)?;
-    scope.insert(base, updated);
-    Ok(())
+        _ => Ok(CtValue::List(items)),
+    }
 }
 
-/// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
-pub(super) fn materialize_view_mut_window(
-    fields: &[(String, CtValue)],
-    scope: &HashMap<String, CtValue>,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    let (_, _, start, end) =
-        view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
-    let owner = view_mut_owner_value(fields, scope, span)?;
-    if let Some(window) = view_mut_window_args(fields) {
-        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
-            return crate::Comptime::ComputeLite::tensor_view_list(&owner, window, span);
+impl<'a> EvalCtx<'a> {
+    /// The value a `__JetViewMut` handle windows into.
+    ///
+    /// D-TASKBORROW1=A: a loaned handle resolves to its shared runtime slot,
+    /// which holds exactly the loaned window. The slot is therefore the owner
+    /// as far as the borrowing child is concerned, and the handle's absolute
+    /// indexes are already rebased onto it.
+    pub(super) fn view_mut_owner_value(
+        &self,
+        fields: &[(String, CtValue)],
+        scope: &HashMap<String, CtValue>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
+            return Err(unsupported("Tensor view window", span));
         }
+        if let Some(slot) = view_mut_loan(fields) {
+            return Ok(self
+                .place_loan_slot(slot, span)?
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .clone());
+        }
+        let (base, path, _, _) =
+            view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+        let root = scope
+            .get(&base)
+            .ok_or_else(|| unsupported("view-mut owner", span))?;
+        project_list_place(root, &path, span).cloned()
     }
-    let items = load_view_mut_owner_list(fields, scope, span)?;
-    let (start, end_exclusive) = if end < start {
-        if end.checked_add(1) != Some(start) {
-            return Err(view_bounds_diagnostic(
-                range_semantics::jet_view_bounds_error(
-                    start,
-                    end,
-                    false,
-                    items.len() as i64,
-                ),
-                span,
-            ));
+
+    pub(super) fn store_view_mut_owner_value(
+        &self,
+        fields: &[(String, CtValue)],
+        scope: &mut HashMap<String, CtValue>,
+        replacement: CtValue,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if let Some(slot) = view_mut_loan(fields) {
+            let slot = self.place_loan_slot(slot, span)?;
+            *slot
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = replacement;
+            return Ok(());
         }
-        range_semantics::jet_checked_view_bounds(start, start, true, items.len() as i64)
-            .map_err(|_| {
-                view_bounds_diagnostic(
+        let (base, path, _, _) =
+            view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+        let root = scope
+            .get(&base)
+            .cloned()
+            .ok_or_else(|| unsupported("view-mut owner", span))?;
+        let updated = replace_list_place(root, &path, replacement, span)?;
+        scope.insert(base, updated);
+        Ok(())
+    }
+
+    pub(super) fn load_view_mut_owner_list(
+        &self,
+        fields: &[(String, CtValue)],
+        scope: &HashMap<String, CtValue>,
+        span: Span,
+    ) -> Result<Vec<CtValue>, Diagnostic> {
+        if let Some(slot) = view_mut_loan(fields) {
+            let slot = self.place_loan_slot(slot, span)?;
+            let owner = slot.lock().unwrap_or_else(|poison| poison.into_inner());
+            return view_owner_items(&owner, span);
+        }
+        let (base, path, _, _) =
+            view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+        let root = scope
+            .get(&base)
+            .ok_or_else(|| unsupported("view-mut owner", span))?;
+        view_owner_items(project_list_place(root, &path, span)?, span)
+    }
+
+    pub(super) fn store_view_mut_owner_list(
+        &self,
+        fields: &[(String, CtValue)],
+        scope: &mut HashMap<String, CtValue>,
+        items: Vec<CtValue>,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        if let Some(slot) = view_mut_loan(fields) {
+            let slot = self.place_loan_slot(slot, span)?;
+            let mut owner = slot.lock().unwrap_or_else(|poison| poison.into_inner());
+            let replacement = view_owner_replacement(&owner, items, span)?;
+            *owner = replacement;
+            return Ok(());
+        }
+        let (base, path, _, _) =
+            view_mut_parts(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+        let root = scope
+            .get(&base)
+            .cloned()
+            .ok_or_else(|| unsupported("view-mut owner", span))?;
+        let replacement =
+            view_owner_replacement(project_list_place(&root, &path, span)?, items, span)?;
+        let updated = replace_list_place(root, &path, replacement, span)?;
+        scope.insert(base, updated);
+        Ok(())
+    }
+
+    /// Resolve a `__JetViewMut { base | loan, start, end }` handle to the
+    /// inclusive window List.
+    pub(super) fn materialize_view_mut_window(
+        &self,
+        fields: &[(String, CtValue)],
+        scope: &HashMap<String, CtValue>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let (start, end) =
+            view_mut_bounds(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
+        let owner = self.view_mut_owner_value(fields, scope, span)?;
+        if let Some(window) = view_mut_window_args(fields) {
+            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                return crate::Comptime::ComputeLite::tensor_view_list(&owner, window, span);
+            }
+        }
+        let items = self.load_view_mut_owner_list(fields, scope, span)?;
+        let (start, end_exclusive) = if end < start {
+            if end.checked_add(1) != Some(start) {
+                return Err(view_bounds_diagnostic(
                     range_semantics::jet_view_bounds_error(
                         start,
                         end,
@@ -913,14 +982,27 @@ pub(super) fn materialize_view_mut_window(
                         items.len() as i64,
                     ),
                     span,
-                )
-            })?
-    } else {
-        checked_view_window(start, end, false, items.len(), span)?
-    };
-    Ok(CtValue::List(
-        items[start as usize..end_exclusive as usize].to_vec(),
-    ))
+                ));
+            }
+            range_semantics::jet_checked_view_bounds(start, start, true, items.len() as i64)
+                .map_err(|_| {
+                    view_bounds_diagnostic(
+                        range_semantics::jet_view_bounds_error(
+                            start,
+                            end,
+                            false,
+                            items.len() as i64,
+                        ),
+                        span,
+                    )
+                })?
+        } else {
+            checked_view_window(start, end, false, items.len(), span)?
+        };
+        Ok(CtValue::List(
+            items[start as usize..end_exclusive as usize].to_vec(),
+        ))
+    }
 }
 
 fn rebase_view_mut_owners(
@@ -1085,7 +1167,7 @@ pub(super) struct EvalCtx<'a> {
     loan_scopes: Vec<usize>,
 }
 
-/// D-TASKBORROW1=A: one open loan of a whole-place write window.
+/// D-TASKBORROW1=A: one open loan of a write window.
 ///
 /// AOT and Cranelift hand the child a real reference into the owner's storage.
 /// The evaluator runs children on their own threads with their own scopes, so
@@ -1095,9 +1177,14 @@ pub(super) struct EvalCtx<'a> {
 struct EvalPlaceLoan {
     /// Window local rebound to the loan on the spawning side.
     source: String,
+    /// The pre-loan window handle, restored into `source` when the loan closes.
+    restore: CtValue,
     /// Owner local the window projects out of.
     base: String,
     path: Vec<ViewMutPathStep>,
+    /// Inclusive element range a `__JetViewMut` place region covers. `None` is
+    /// a whole-place `__JetPlaceMut` window, which loans the place itself.
+    window: Option<(i64, i64)>,
     slot: usize,
 }
 
@@ -1947,11 +2034,37 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
+    /// D-TASKBORROW1=A: what a capture can loan — an owner-rooted write
+    /// window, either a whole-place `__JetPlaceMut` (`p :: &node`) or the
+    /// `__JetViewMut` place region the split-view planner binds for a constant
+    /// index (`left :: &particles[0]`). Returns the owner local, the path to
+    /// the windowed place, and the inclusive element range for a region.
+    ///
+    /// A window that is already loaned returns `None`: one loan per window,
+    /// shared by every child that names it.
+    #[allow(clippy::type_complexity)]
+    fn loanable_window(
+        value: &CtValue,
+    ) -> Option<(String, Vec<ViewMutPathStep>, Option<(i64, i64)>)> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name == PLACE_MUT_TYPE {
+            return match place_mut_target(value)? {
+                PlaceMutTarget::Owner(base, path) => Some((base, path, None)),
+                PlaceMutTarget::Loan(_) => None,
+            };
+        }
+        if type_name != "__JetViewMut" || view_mut_loan(fields).is_some() {
+            return None;
+        }
+        let (base, path, start, end) = view_mut_parts(fields)?;
+        Some((base, path, Some((start, end))))
+    }
+
     /// D-TASKBORROW1=A: open the loan a capture needs to cross into a child.
     ///
-    /// Values that are not owner-rooted write windows pass straight through,
-    /// including a window that is already loaned by an outer spawn: one loan
-    /// per window, shared by every child that names it.
+    /// Values that are not owner-rooted write windows pass straight through.
     fn open_place_loan(
         &mut self,
         source: &str,
@@ -1959,8 +2072,7 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
-        let target = place_mut_target(&value);
-        let Some(PlaceMutTarget::Owner(base, path)) = target else {
+        let Some((base, path, region)) = Self::loanable_window(&value) else {
             return Ok(value);
         };
         if self.loan_scopes.is_empty() {
@@ -1969,23 +2081,48 @@ impl<'a> EvalCtx<'a> {
             // them: a silent wrong answer is worse than a stop.
             return Err(unsupported("task borrow outside a task group", span));
         }
-        let Some(root) = scope.get(&base) else {
-            return Err(unsupported("place window owner", span));
+        let content = {
+            let Some(root) = scope.get(&base) else {
+                return Err(unsupported("place window owner", span));
+            };
+            let owner = project_list_place(root, &path, span)?;
+            match region {
+                None => owner.clone(),
+                // A place region loans only its own elements. Two disjoint
+                // bands of one owner therefore never share storage, so neither
+                // child's read-modify-write can lose the other's write.
+                Some((start, end)) => {
+                    let CtValue::List(items) = owner else {
+                        return Err(unsupported("task borrow window owner", span));
+                    };
+                    if start < 0 || end < start || end as usize >= items.len() {
+                        return Err(unsupported("task borrow window bounds", span));
+                    }
+                    CtValue::List(items[start as usize..=end as usize].to_vec())
+                }
+            }
         };
-        let current = project_list_place(root, &path, span)?.clone();
         let slot = {
             let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-            runtime.place_loan_slots.push(Arc::new(Mutex::new(current)));
+            runtime.place_loan_slots.push(Arc::new(Mutex::new(content)));
             runtime.place_loan_slots.len() - 1
         };
-        let handle = place_loan_handle(slot);
+        // A region handle rebases onto the slot, which holds exactly the loaned
+        // window: every view call site indexes its owner absolutely, so the
+        // slot is the owner as far as the child is concerned.
+        let handle = match region {
+            None => place_loan_handle(slot),
+            Some((start, end)) => view_loan_handle(slot, end - start + 1),
+        };
         // The owner side addresses the loan too, so a read after the spawn sees
         // the child's writes rather than a stale copy.
         scope.insert(source.to_string(), handle.clone());
         self.place_loans.push(EvalPlaceLoan {
             source: source.to_string(),
+            restore: value,
             base,
             path,
+            window: region,
             slot,
         });
         Ok(handle)
@@ -2014,9 +2151,32 @@ impl<'a> EvalCtx<'a> {
             let Some(root) = scope.get(&loan.base).cloned() else {
                 return Err(unsupported("task loan owner", span));
             };
-            let updated = replace_list_place(root, &loan.path, value, span)?;
+            let replacement = match loan.window {
+                None => value,
+                // Only this loan's own band lands back in the owner, so two
+                // loans on one owner cannot overwrite each other.
+                Some((start, _)) => {
+                    let CtValue::List(loaned) = value else {
+                        return Err(unsupported("task loan window", span));
+                    };
+                    let CtValue::List(mut items) =
+                        project_list_place(&root, &loan.path, span)?.clone()
+                    else {
+                        return Err(unsupported("task loan window owner", span));
+                    };
+                    for (offset, element) in loaned.into_iter().enumerate() {
+                        let index = start as usize + offset;
+                        if index >= items.len() {
+                            return Err(unsupported("task loan window bounds", span));
+                        }
+                        items[index] = element;
+                    }
+                    CtValue::List(items)
+                }
+            };
+            let updated = replace_list_place(root, &loan.path, replacement, span)?;
             scope.insert(loan.base.clone(), updated);
-            scope.insert(loan.source, place_mut_handle(&loan.base, &loan.path));
+            scope.insert(loan.source, loan.restore);
         }
         Ok(())
     }
