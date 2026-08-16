@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2002,
-    "rev": 37717,
+    "nextNum": 2006,
+    "rev": 37735,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -130895,6 +130895,249 @@
       "created": "2026-08-16T01:03:29.268Z",
       "updated": "2026-08-16T01:03:31.389Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0zp0pt2",
+      "num": 2002,
+      "title": "E1004 rejects json.decode and then suggests json.decode",
+      "body": "The untyped D-JSON3 form `json.decode(text)` is rejected by sema with a self-contradicting diagnostic:\n\n  E1004 \"`core.encoding.json` has no item `decode`\"\n  why:  \"standard library modules expose a fixed set of public items\"\n  fix:  \"did you mean `decode`?\"\n\nThe fix suggests the exact name the message just said does not exist. Any user who hits this is told to write what they already wrote.\n\nTwo defects sit on top of each other and both need naming. The DIAGNOSTIC is an I4 failure: a suggestion identical to the rejected name is not product-quality copy, and it also implies the suggester is comparing against a candidate set that contains `decode`, which contradicts the message. Separately, whether `core.encoding.json.decode` should resolve at all in the untyped form is a real surface question -- if D-JSON3 ratifies the untyped spelling, the module surface is the defect, not the fixture.\n\nFound while diagnosing json_coerce_audit_reports_jit_gap_on_default_dev, whose fixture uses this form and therefore never reaches the coercion-audit boundary it exists to test. That test is CORRECT and stays red until this is resolved.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "First settle the surface question by reading D-JSON3: does the untyped `json.decode(text)` form resolve, and to what? If yes, the module surface is missing an item and the fixture is right. If no, the fixture must use the ratified spelling -- and the diagnostic must then say what to write instead of echoing the rejected name.\n\nEither way fix the suggester: a candidate suggestion that equals the rejected identifier must never be emitted. Find where the edit-distance candidate list is built and exclude the exact input, then check whether other E1004/E0107 paths can produce the same echo -- this is a generic suggester bug, not a json one. Note the sibling precedent already found this session: `iter_missing_method_hint` had a related echo problem, so a shared suggester is likely.\n\nA UI snapshot must pin whichever final wording lands (I4: no diagnostic without a snapshot). blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No diagnostic suggests a candidate identical to the identifier it just rejected",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:51.253Z"
+        },
+        {
+          "n": 2,
+          "text": "The untyped json.decode question is settled against D-JSON3, with the fixture or the module surface corrected accordingly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:51.680Z"
+        },
+        {
+          "n": 3,
+          "text": "json_coerce_audit_reports_jit_gap_on_default_dev reaches the coercion-audit boundary it exists to test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:52.115Z"
+        },
+        {
+          "n": 4,
+          "text": "A UI snapshot pins the final wording",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:52.529Z"
+        },
+        {
+          "n": 5,
+          "text": "Other E1004/E0107 suggestion paths are checked for the same echo",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:52.951Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "i4",
+        "sema",
+        "json"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T01:50:50.822Z",
+      "updated": "2026-08-16T01:50:52.951Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c05tpvho",
+      "num": 2003,
+      "title": "Four copies of the raw env lookup want one owner",
+      "body": "The raw-by-name environment lookup over the Jet-owned logical env table is implemented four times: the Prelude's jet_env_value_raw (crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:841), CoreHost::jet_std_env_get (crates/jet-jit/src/CoreHost.rs:75-81), IO.rs::env_value (crates/jet-jit/src/IO.rs:158-164), and ambient_env_value_raw added in bbdc5015d.\n\nThis is the shape that produced the I9 divergence that commit just fixed: the interpreter ambient read the HOST process environment with std::env while AOT and the JIT host read the Jet-owned table, so env.set(\"NO_COLOR\", ..) took effect on two tiers and not the third. With four copies, the next engine to need an env read has four precedents to choose from and no single owner to be wrong about.\n\nRecorded rather than done because the consolidation crosses files that were outside the fixing lane's writable paths.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Add one pub(crate) CoreHost accessor for the raw-by-name read over the env snapshot, and have IO.rs and the interpreter ambient call it. Per I9 the table is the single owner and engines are marshalling adapters, so there should be one lookup and N call sites, not N lookups. Estimated at three lines added plus two deletions by the lane that found it.\n\nWhile there, confirm the Prelude copy is genuinely separate rather than a fifth caller: the Prelude fragment is embedded into generated programs, so it may legitimately need its own definition -- say which, so the count is honest. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One accessor performs the raw-by-name env read; IO.rs and the interpreter ambient call it rather than reimplementing",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:53.800Z"
+        },
+        {
+          "n": 2,
+          "text": "The Prelude copy is either the same accessor or documented as necessarily separate with the reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:54.214Z"
+        },
+        {
+          "n": 3,
+          "text": "A test pins that env.set is visible identically on AOT, resident JIT and interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:50:55.200Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "i9",
+        "env",
+        "cleanup"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T01:50:53.369Z",
+      "updated": "2026-08-16T01:50:55.201Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0drec4f",
+      "num": 2004,
+      "title": "Five Prelude fragments declare a colliding bare `mod tests`",
+      "body": "Prelude fragments are emitted into one flat generated crate, so a crate-root `mod tests` in two fragments collides. Five declare the bare name: crates/jet-codegen/src/Prelude/NumericWiden.rs:45, Prelude/TaskGroup.rs:491, Prelude/TestReport.rs:146, Prelude/Ui.rs:919, Prelude/Core/Progress.rs:71.\n\nThe convention to avoid this already exists and four siblings follow it: SharedProtocol.rs:684 `shared_protocol_tests`, TypedText.rs:147 `typed_boundary_tests`, Auth.rs:657 `auth_tests`, Scheduler.rs:2900 `interrupt_boundary_tests`. So this is five fragments violating an established convention, not a missing one.\n\nTwo of the five are UNCONDITIONAL in PRELUDE_PARTS (NumericWiden since 2026-07-29 in e61c31131, Core/Progress since 2026-08-04 in d0098d284), so every generated program carries two colliding declarations before any conditional fragment is added. TestReport's landed 2026-08-13 in 07ba4870c; TaskGroup's and Ui's wait on conditional fragments.\n\nNot a shipped defect, which is why this is hygiene: nothing ships a cfg(test) build of generated Rust, and `jet test` builds its own harness through TEST_PRELUDE. The collision only surfaces under a raw `rustc --test` of generated code, documented in tests/common/mod.rs:189-191 as an uncommon inspection mode. But it cost one test nine days of latent breakage -- io_style's probe hit E0428 from 2026-08-04 and had it masked by a second, unrelated break -- and it will cost the next person who inspects generated Rust the same way.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "Rename the five bare declarations to fragment-unique names following the existing convention. Purely mechanical: these are unit tests inside embedded fragments and nothing outside a fragment names its own test module.\n\nThen make the convention enforceable rather than aspirational: a test that scans PRELUDE_PARTS for a crate-root `mod tests` and fails, so a sixth cannot appear. Without that this recurs -- two of the five arrived AFTER the convention was already established by the four that follow it.\n\nWhile there, decide whether a raw `rustc --test` build of generated Rust should be supported at all. If it is genuinely unsupported, the harness should fail fast with a clear message rather than surfacing as E0428 from the middle of a 10,000-line generated file. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No two Prelude fragments declare the same crate-root module name",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T02:25:24.406Z"
+        },
+        {
+          "n": 2,
+          "text": "A test scans PRELUDE_PARTS and fails if a fragment declares a bare `mod tests`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T02:25:24.837Z"
+        },
+        {
+          "n": 3,
+          "text": "A raw rustc --test build of generated Rust either works or fails with a clear message naming the reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T02:25:25.252Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "prelude",
+        "hygiene",
+        "codegen"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T02:25:23.969Z",
+      "updated": "2026-08-16T02:25:25.253Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c01j4gal",
+      "num": 2005,
+      "title": "check_latency_under_budget is load-dependent inside the parallel suite",
+      "body": "The test asserts a wall-clock compile-latency budget while running inside the parallel `dev` suite, so its verdict depends on how much else the suite is doing.\n\nDemonstrated at 04c910a45: it FAILS in the full parallel run and PASSES in isolation (`--test-threads=1 --exact check_latency_under_budget`, 0.43s). It passed in the full run at 1c18fd006 and started failing at 04c910a45 -- not from any change to the compiler, but because the suite began running 32 MORE tests once the generator unwind abort was fixed (e074041ce). Reached-test count went 107 to 139 and wall time 454s to 941s in the same window.\n\nSo the budget was being measured against a quieter machine than the suite now is, and it will drift again every time the suite gets faster or slower. As a latency regression detector it currently reports scheduler contention, not compiler latency.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m18-devloop-testing",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Make the measurement independent of suite load. Options in preference order, and the choice is worth stating rather than defaulting: (1) measure work rather than time -- count the compiler-owned steps or bytes the existing budget machinery already tracks, which is what `jet check` budgets do elsewhere in this repo, so a busy machine cannot move the verdict; (2) if wall-clock is genuinely the property under test, run it serialized or outside the parallel suite, and say so in the test name; (3) keep wall-clock but calibrate against a same-run baseline measured on the same machine under the same load, so the ratio is the assertion rather than an absolute.\n\nDo NOT simply widen the budget. That trades a flaky failure for a detector that no longer detects anything, and the number would need widening again on the next machine.\n\nRelated context: #677 covers typed project compile-latency budgets, so this may fold into that card's mechanism rather than needing its own. Check before duplicating. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The latency verdict is independent of how many other tests are running",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T02:57:12.707Z"
+        },
+        {
+          "n": 2,
+          "text": "The test passes in the full parallel suite and in isolation, on the same commit",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T02:57:13.162Z"
+        },
+        {
+          "n": 3,
+          "text": "The budget is not merely widened; the measurement basis is stated in the test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T02:57:13.610Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tests",
+        "flake",
+        "latency"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T02:57:12.268Z",
+      "updated": "2026-08-16T02:57:13.611Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -174409,6 +174652,132 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T02:57:13.611Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01j4gal",
+      "note": "#3 The budget is not merely widened; the measurement basis is s"
+    },
+    {
+      "at": "2026-08-16T02:57:13.162Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01j4gal",
+      "note": "#2 The test passes in the full parallel suite and in isolation,"
+    },
+    {
+      "at": "2026-08-16T02:57:12.707Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01j4gal",
+      "note": "#1 The latency verdict is independent of how many other tests a"
+    },
+    {
+      "at": "2026-08-16T02:57:12.268Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c01j4gal",
+      "note": "check_latency_under_budget is load-dependent inside the parallel suite"
+    },
+    {
+      "at": "2026-08-16T02:25:25.253Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0drec4f",
+      "note": "#3 A raw rustc --test build of generated Rust either works or f"
+    },
+    {
+      "at": "2026-08-16T02:25:24.837Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0drec4f",
+      "note": "#2 A test scans PRELUDE_PARTS and fails if a fragment declares "
+    },
+    {
+      "at": "2026-08-16T02:25:24.407Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0drec4f",
+      "note": "#1 No two Prelude fragments declare the same crate-root module "
+    },
+    {
+      "at": "2026-08-16T02:25:23.969Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0drec4f",
+      "note": "Five Prelude fragments declare a colliding bare `mod tests`"
+    },
+    {
+      "at": "2026-08-16T01:50:55.201Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c05tpvho",
+      "note": "#3 A test pins that env.set is visible identically on AOT, resi"
+    },
+    {
+      "at": "2026-08-16T01:50:54.214Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c05tpvho",
+      "note": "#2 The Prelude copy is either the same accessor or documented a"
+    },
+    {
+      "at": "2026-08-16T01:50:53.800Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c05tpvho",
+      "note": "#1 One accessor performs the raw-by-name env read; IO.rs and th"
+    },
+    {
+      "at": "2026-08-16T01:50:53.370Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c05tpvho",
+      "note": "Four copies of the raw env lookup want one owner"
+    },
+    {
+      "at": "2026-08-16T01:50:52.952Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zp0pt2",
+      "note": "#5 Other E1004/E0107 suggestion paths are checked for the same "
+    },
+    {
+      "at": "2026-08-16T01:50:52.530Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zp0pt2",
+      "note": "#4 A UI snapshot pins the final wording"
+    },
+    {
+      "at": "2026-08-16T01:50:52.115Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zp0pt2",
+      "note": "#3 json_coerce_audit_reports_jit_gap_on_default_dev reaches the"
+    },
+    {
+      "at": "2026-08-16T01:50:51.680Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zp0pt2",
+      "note": "#2 The untyped json.decode question is settled against D-JSON3,"
+    },
+    {
+      "at": "2026-08-16T01:50:51.254Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zp0pt2",
+      "note": "#1 No diagnostic suggests a candidate identical to the identifi"
+    },
+    {
+      "at": "2026-08-16T01:50:50.822Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0zp0pt2",
+      "note": "E1004 rejects json.decode and then suggests json.decode"
+    },
+    {
       "at": "2026-08-16T01:06:45.398Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -177781,132 +178150,6 @@
       "action": "card.criteria-meet",
       "ref": "c0rqe5rb",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-15T06:37:11.959Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:37:11.317Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T06:37:10.328Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:37:09.309Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#16"
-    },
-    {
-      "at": "2026-08-15T06:37:08.329Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#14"
-    },
-    {
-      "at": "2026-08-15T06:37:06.241Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#12"
-    },
-    {
-      "at": "2026-08-15T06:37:03.819Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-15T06:37:02.625Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T06:37:02.106Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T06:37:01.572Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T06:37:01.055Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T06:37:00.528Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T06:37:00.004Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T06:36:59.477Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:29:57.144Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c053e5jw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T06:22:19.546Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c053e5jw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T06:22:18.251Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T06:19:37.495Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#6"
     }
   ],
   "nextNum": 368,
