@@ -56,54 +56,6 @@ fn in_own_frame<R>(body: impl FnOnce() -> R) -> R {
     body()
 }
 
-/// Dynamic nesting depth of scope cleanup (`defer close(^…)`, `scope.guard`)
-/// currently running in this thread's generated code.
-///
-/// `LowerCtx::in_lexical_exit` already suppresses the trap check a frame emits
-/// for its OWN cleanup sequence, but that flag is a lowering-time property of
-/// one function. A cleanup guard calls a SEPARATELY compiled Jet function
-/// (`Close.close`), and every check that function emits — starting with the one
-/// `emit_stack_enter` puts in its prologue — reads the tier's pending-interrupt
-/// channel afresh. The interrupt that STARTED the cleanup is still posted there
-/// (`PENDING_SHIELD_EXIT` is consumed only by `settle_pending_after_native` and
-/// the spawn-wrapper epilogue), so the callee bailed at its own prologue and the
-/// cleanup body never ran at all: `defer` was silently skipped in exactly the
-/// case it exists for. This counter carries the caller's cleanup context into
-/// the callee, and transitively into anything the callee calls, so one cleanup
-/// runs to completion for its whole dynamic extent.
-///
-/// It masks only the PENDING-INTERRUPT half of a check. `jet_jit_is_trapped`
-/// still contributes, so a real fault raised inside a cleanup body (a host
-/// fault, a checked-arithmetic trap, a reported panic) still unwinds and still
-/// reports. Nothing is consumed either: the pending cancel/deadline stays
-/// posted, so the exit path below (`emit_lexical_values_exit`, which reads it
-/// after the guards have run) and the spawn-wrapper epilogue both still see it
-/// and a cancelled producer still reports Cancelled.
-///
-/// Thread-local, like `PENDING_SHIELD_EXIT` itself: cleanup running on a
-/// cancelled producer thread must not mask a live interrupt on the consumer's.
-/// `Cell<u32>` has no destructor, so `with` cannot panic during TLS teardown —
-/// #1997 forbids a panic on any seam a Cranelift frame calls.
-thread_local! {
-    static CLEANUP_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
-
-/// Generated code reaches these three by absolute address (`call_indirect` on an
-/// `iconst`, as it already does for a Jet function value), not through
-/// `HostFns`: cleanup context is lowering state for this file, not a Core
-/// operation, and I9 keeps program semantics in the Prelude.
-extern "C" fn jet_jit_cleanup_enter() {
-    CLEANUP_DEPTH.with(|depth| depth.set(depth.get() + 1));
-}
-
-extern "C" fn jet_jit_cleanup_leave() {
-    CLEANUP_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
-}
-
-extern "C" fn jet_jit_in_cleanup() -> i64 {
-    CLEANUP_DEPTH.with(|depth| i64::from(depth.get() != 0))
-}
-
 #[derive(Clone)]
 pub(crate) struct LoopTargets {
     label: Option<String>,
@@ -213,6 +165,27 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// Suppress nested trap epilogues while the one lexical exit path is
     /// already running its guards. The final trapped-status read propagates it.
     pub(crate) in_lexical_exit: bool,
+    /// This frame's snapshot of the tier's pending-interrupt channel, read once
+    /// in the prologue.
+    ///
+    /// A frame entered while a cancel/deadline was ALREADY posted is running
+    /// cleanup for that interrupt — the guard sequence of some outer frame called
+    /// it (`emit_scope_guards_preserving` → `Close.close`, and whatever that
+    /// calls, at any depth). Reacting to the interrupt inside such a frame aborts
+    /// the cleanup with its own cause: that is what silently skipped
+    /// `defer close(^…)` in the resident tier, and what made a helper called from
+    /// a cleanup body return the ABI dummy instead of its value.
+    ///
+    /// So every check in this frame reacts to `pending AND NOT entry_pending` —
+    /// an interrupt this frame itself reached, never one it inherited.
+    /// `in_lexical_exit` is the same idea one frame up; this carries it into
+    /// callees without any cross-frame runtime state.
+    ///
+    /// The trapped flag is never masked, so a real fault inside a cleanup body
+    /// still unwinds and still reports, and nothing is consumed: the pending
+    /// cancel stays posted for the frame that DID reach the interrupt and for the
+    /// spawn-wrapper epilogue, so a cancelled task still reports Cancelled.
+    pub(crate) entry_pending: Option<Variable>,
     /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
     pub(crate) txn_stack: Vec<TxnFrame>,
     /// Compute handles created in the current lexical lowering path. The
@@ -483,8 +456,9 @@ impl LowerCtx<'_, '_> {
             self.b.ins().iconst(types::I64, fn_name as i64),
             self.b.ins().iconst(types::I64, src_line as i64),
         ];
+        self.seed_entry_pending();
         let _ = self.call_host(self.host.stack_enter, &args);
-        self.emit_trap_check()
+        self.emit_entry_trap_check()
     }
     /// The resident host symbol this Core row projects onto, when the host
     /// registry carries one. A missing candidate is a normal fall-through to
@@ -2814,42 +2788,6 @@ impl LowerCtx<'_, '_> {
         s.replace("\\\"", "\"").replace("\\\\", "\\")
     }
 
-    /// Call one of the zero-argument cleanup-context shims above by address.
-    fn call_cleanup_shim(&mut self, addr: usize, returns: bool) -> Option<Value> {
-        let mut sig = self.module.make_signature();
-        if returns {
-            sig.returns
-                .push(cranelift_codegen::ir::AbiParam::new(types::I64));
-        }
-        let sig_ref = self.b.import_signature(sig);
-        let callee = self.b.ins().iconst(types::I64, addr as i64);
-        let call = self.b.ins().call_indirect(sig_ref, callee, &[]);
-        returns.then(|| self.b.inst_results(call)[0])
-    }
-
-    fn emit_cleanup_enter(&mut self) {
-        let addr = jet_jit_cleanup_enter as extern "C" fn() as usize;
-        self.call_cleanup_shim(addr, false);
-    }
-
-    fn emit_cleanup_leave(&mut self) {
-        let addr = jet_jit_cleanup_leave as extern "C" fn() as usize;
-        self.call_cleanup_shim(addr, false);
-    }
-
-    /// Drop the pending cancel/deadline out of a trap check while a cleanup body
-    /// is running: that interrupt is what asked for the cleanup, so reacting to
-    /// it here would abort the cleanup with its own cause. The flag itself is
-    /// untouched and still reaches every exit path and the spawn epilogue.
-    fn mask_pending_in_cleanup(&mut self, pending: Value) -> Value {
-        let addr = jet_jit_in_cleanup as extern "C" fn() -> i64 as usize;
-        let in_cleanup = self
-            .call_cleanup_shim(addr, true)
-            .expect("cleanup query returns a status");
-        let zero = self.b.ins().iconst(types::I64, 0);
-        self.b.ins().select(in_cleanup, zero, pending)
-    }
-
     fn emit_scope_guards_preserving(&mut self, preserve: &[String]) -> Result<(), String> {
         // Keep the stack: early returns and sibling exit paths each need the
         // same LIFO cleanup (D-DEFER1). Cleared when the function finishes.
@@ -3381,11 +3319,9 @@ impl LowerCtx<'_, '_> {
             status = self.merge_exit_status(status, close_status);
         }
         self.emit_stream_consumer_closes();
-        self.emit_cleanup_enter();
         self.in_lexical_exit = true;
         let guards = self.emit_scope_guards_preserving(preserve_shared_guards);
         self.in_lexical_exit = false;
-        self.emit_cleanup_leave();
         guards?;
         if self.cell_frame {
             let returned = if self.ret_cell_layout != 0 {
@@ -3413,6 +3349,7 @@ impl LowerCtx<'_, '_> {
         let trapped = self.call_host(self.host.is_trapped, &[]);
         status = self.merge_exit_status(status, trapped);
         let pending = self.call_host(self.host.conc.pending_exit_status, &[]);
+        let pending = self.pending_reached_here(pending);
         status = self.merge_exit_status(status, pending);
         let status = status.expect("trap status always contributes");
 
@@ -3610,6 +3547,29 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    /// Snapshot the tier's pending-interrupt channel for this frame, in the entry
+    /// block, before any body code. See `LowerCtx::entry_pending`.
+    pub(crate) fn seed_entry_pending(&mut self) {
+        let pending = self.call_host(self.host.conc.pending_exit_status, &[]);
+        let var = self.fresh_var(types::I64);
+        self.b.def_var(var, pending);
+        self.entry_pending = Some(var);
+    }
+
+    /// The part of the pending-interrupt channel this frame is allowed to react
+    /// to: an interrupt it reached itself, never one it inherited from a caller
+    /// that entered it to run cleanup. Both words are 0/1
+    /// (`jet_jit_pending_exit_status`), so `pending AND NOT inherited` is exact.
+    fn pending_reached_here(&mut self, pending: Value) -> Value {
+        let Some(var) = self.entry_pending else {
+            return pending;
+        };
+        let inherited = self.b.use_var(var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let reached = self.b.ins().bxor(inherited, one);
+        self.b.ins().band(pending, reached)
+    }
+
     /// After any call that may set the runtime's trapped flag — a fallible host
     /// shim (checked arith, list get/set/slice, channel receive/panic) or a call
     /// to another jet function (a callee's trap must propagate transitively) —
@@ -3619,13 +3579,26 @@ impl LowerCtx<'_, '_> {
     /// doing so would be UB, forbidden by I1). `resident_invoke` observes the
     /// flag after `main` returns and reports the trap as `E0953`.
     fn emit_trap_check(&mut self) -> Result<(), String> {
+        self.emit_trap_check_reading_pending(true)
+    }
+
+    /// The check `emit_stack_enter` puts in a function prologue. `seed_entry_pending`
+    /// has just snapshotted the pending channel and `stack_enter` reports its own
+    /// depth failure through the trapped flag, so `pending_reached_here` would be
+    /// zero here by construction — skip the read rather than emit a host call per
+    /// function entry to compute a constant.
+    fn emit_entry_trap_check(&mut self) -> Result<(), String> {
+        self.emit_trap_check_reading_pending(false)
+    }
+
+    fn emit_trap_check_reading_pending(&mut self, read_pending: bool) -> Result<(), String> {
         if self.in_lexical_exit {
             return Ok(());
         }
         let mut flag = self.call_host(self.host.is_trapped, &[]);
-        if self.shield_depth == 0 {
+        if read_pending && self.shield_depth == 0 {
             let pending = self.call_host(self.host.conc.pending_exit_status, &[]);
-            let pending = self.mask_pending_in_cleanup(pending);
+            let pending = self.pending_reached_here(pending);
             flag = self
                 .merge_exit_status(Some(flag), pending)
                 .expect("existing exit status");

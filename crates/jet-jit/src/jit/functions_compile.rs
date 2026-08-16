@@ -538,12 +538,14 @@ fn lower_spawn_function(
             deferred_shared_guards: Vec::new(),
             task_groups: Vec::new(),
             in_lexical_exit: false,
+            entry_pending: None,
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
         };
+        lctx.seed_entry_pending();
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
             lctx.b.def_var(var, param_vals[idx]);
@@ -885,12 +887,14 @@ pub(crate) fn lower_shared_transaction_lambda(
             deferred_shared_guards: Vec::new(),
             task_groups: Vec::new(),
             in_lexical_exit: false,
+            entry_pending: None,
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
         };
+        lctx.seed_entry_pending();
 
         let env = values[0];
         let line = lctx.b.ins().iconst(types::I32, 0);
@@ -1166,12 +1170,14 @@ fn lower_callable_lambda_with_env(
             deferred_shared_guards: Vec::new(),
             task_groups: Vec::new(),
             in_lexical_exit: false,
+            entry_pending: None,
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
         };
+        lctx.seed_entry_pending();
         let mut arg_i = 0usize;
         if capturing {
             let env = values[arg_i];
@@ -1375,8 +1381,10 @@ pub(crate) fn lower_option_lift2_factory(
             deferred_shared_guards: Vec::new(),
             task_groups: Vec::new(),
             in_lexical_exit: false,
+            entry_pending: None,
             txn_stack: Vec::new(),
         };
+        lctx.seed_entry_pending();
         if !captures.is_empty() {
             let env = values[0];
             let line = lctx.b.ins().iconst(types::I32, 0);
@@ -1524,6 +1532,7 @@ fn lower_function(
             deferred_shared_guards: Vec::new(),
             task_groups: Vec::new(),
             in_lexical_exit: false,
+            entry_pending: None,
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
@@ -1798,6 +1807,7 @@ fn lower_generator_body(
             deferred_shared_guards: Vec::new(),
             task_groups: Vec::new(),
             in_lexical_exit: false,
+            entry_pending: None,
             txn_stack: Vec::new(),
             compute_resources: Vec::new(),
             compute_retrack_names: HashSet::new(),
@@ -1811,6 +1821,7 @@ fn lower_generator_body(
                 .collect(),
             contract_posts: Vec::new(),
         };
+        lctx.seed_entry_pending();
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
             let var = lctx.fresh_var(types::I64);
             lctx.b.def_var(var, values[index]);
