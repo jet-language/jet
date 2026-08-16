@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2012,
-    "rev": 37794,
+    "rev": 37796,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -130609,6 +130609,11 @@
         {
           "at": "2026-08-16",
           "by": "fable-e3-burndown",
+          "text": "ARCHITECTURE CALL (orchestrator, technical/internal - not an owner gate). Mechanism (2) boundary conversion is chosen over (1) FDE registration. Reason: (1) makes unwinding a SUPPORTED path through generated code - a far larger semantic commitment than it looks, platform-specific frame registration, and it writes Rust panic propagation into the contract of Jet-generated machine code. (2) matches how the tiers already talk: Shield already delivers deferred cancel as a status rather than an unwind, and 9623985d0 already placed exactly this conversion at jet_deopt_call. COST, which is the design centre and not an afterthought: the guarantee must hold across ~1679 host_fns entries, so it needs a mechanical check rather than review discipline. Lever already exists - card 1633 made host_fns declare each JIT host symbol once, so the boundary conversion is GENERATED from that macro and a test scans for any extern C fn jet_ in crates/jet-jit not routed through it. A guarantee that depends on someone remembering is not a guarantee. No ballot raised: this is an internal mechanism choice, not user-facing syntax, no invariant carve-out, no new dependency."
+        },
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
           "text": "REPRODUCER FOUND (2026-08-15, at f7f21742c). The error-5 abort no longer needs the whole suite: it fires in ~3 seconds from one child case.\n\n  cargo test --no-fail-fast --test dev -- --test-threads=1 --exact --nocapture jit_1216_adversarial_regressions\n\nOutput:\n  generator: stdout:\n    running 1 test\n  stderr:\n    fatal runtime error: failed to initiate panic, error 5, aborting\n\nSo the `generator` adversarial case of jit_1216_adversarial_regressions spawns a child test process that dies with the exact _URC_END_OF_STACK abort this card describes. That child is a single Cranelift-compiled generator program, which is a far smaller surface than a 168-test binary.\n\nWhy this matters for the fix: it confirms the diagnosis independently. Error 5 means phase 1 walked off the top of the stack without finding a handler, and a generator is precisely where JIT frames sit under a resumption/unwind edge -- consistent with cranelift-jit registering no eh_frame for emitted code. It also explains why no full-suite log in this campaign ever contained libtest's `---- <test> stdout ----` failure section: the abort kills the process before libtest prints it, which is why every lane in this session had to reconstruct failure bodies from serial reruns.\n\nUse this reproducer rather than the suite. It is deterministic, isolated, and fast."
         }
       ],
@@ -130670,7 +130675,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-15T22:57:40.077Z",
-      "updated": "2026-08-16T11:01:28.481Z",
+      "updated": "2026-08-16T11:28:48.009Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -175125,6 +175130,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T11:28:48.010Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0js0lqr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T11:24:51.189Z",
+      "by": "fable-e3-burndown",
+      "action": "papercut.add",
+      "ref": "pc0oafxd6",
+      "note": ""
+    },
+    {
       "at": "2026-08-16T11:08:38.932Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -178609,20 +178628,6 @@
       "action": "card.criteria-meet",
       "ref": "c0dv1nkh",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-15T07:36:32.070Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ybltrw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:36:31.379Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ybltrw",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
@@ -179214,6 +179219,14 @@
       "text": "codex-rescue subagent fails immediately with 404 model claude-sonnet-4-0, preventing fresh milestone review; agent profile needs a live model.",
       "cardId": null,
       "created": "2026-08-15T08:00:03.324Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0oafxd6",
+      "by": "fable-e3-burndown",
+      "text": "codex/Luna account usage limit exhausted until 2026-08-19 23:30; the burndown skill mandates Luna as the sole implementer, so all five dispatches died in 10s. Implementation fleet switched to Claude task subagents under the same source-only discipline (no builds, orchestrator owns proof).",
+      "cardId": null,
+      "created": "2026-08-16T11:24:51.182Z",
       "status": "open"
     }
   ]
