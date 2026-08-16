@@ -583,9 +583,18 @@ fn first_diagnostic_summary(diagnostics: &[jet::Diagnostics::Diagnostic]) -> Str
 /// `continue`, so it joined neither set, and the audit then reported `gaps: 0`
 /// over a denominator it never stated. The fourth outcome is named here and the
 /// match on it is exhaustive, so a stem can no longer leave the audit silently.
+///
+/// #2012: `Covered` carries the resident gate too. The three-way differential
+/// battery needs a stricter fact — the lowerer accepted the bundle AND the
+/// resident JIT will run it — and it used to answer that from a second walk of
+/// the same corpus (`jit_covered_example_stems`) carrying the same two silent
+/// `continue`s this enum exists to remove. One oracle now answers both
+/// questions, so the two can no longer disagree (AGENTS.md I8).
 enum JitCompileVerdict {
-    /// The JIT lowerer accepted the bundle.
-    Covered,
+    /// The JIT lowerer accepted the bundle. `resident_refusal` is `None` when
+    /// the resident JIT will also RUN it, or the
+    /// `resident_jit_safe_bundle_detail` reason it will not.
+    Covered { resident_refusal: Option<String> },
     /// The lowerer rejected the bundle: a live I9 compile gap, and its reason.
     Gap(String),
     /// The harness never reached the lowerer, so this run judged nothing about
@@ -593,14 +602,70 @@ enum JitCompileVerdict {
     OutOfUniverse(String),
 }
 
+/// How many example stems the compile oracle must still see (#1998).
+///
+/// A floor, because examples get added: deleting one, or making
+/// `topic_jet_files` stop seeing one, must lower a reviewed constant. It lives
+/// here, outside `examples/features/` and outside `tests/jit_gaps.txt`, for the
+/// same reason `COMPILE_COVERED_FLOOR` does.
+///
+/// #2012: every reader of `collect_jit_coverage` asserts this, not just the
+/// coverage audit, so no battery scoped to a slice of this universe can report
+/// success while the universe itself shrank.
+const EXAMPLE_CORPUS_FLOOR: usize = 496;
+
+/// How many stems the compile oracle is still allowed to be blind to (#1998).
+///
+/// Shrink-only, exactly like GAPS_CEILING and RUN_GAPS_CEILING. Every row is a
+/// stem this oracle cannot judge, so every row is a defect to fix — build the
+/// context the harness is missing, or fix the frontend the stem trips — never a
+/// skip to accept. The rows are derived from the compiler's own diagnostics at
+/// audit time, so this is a counted ceiling and not an allowlist: no stem can be
+/// written out of the universe by hand.
+const OUT_OF_UNIVERSE_CEILING: usize = 81;
+
+/// How many compile-covered stems the resident JIT must still be willing to run
+/// — the universe `cranelift_three_way_differential_battery` is scoped to
+/// (#2012).
+///
+/// A floor for the same reason `EXAMPLE_CORPUS_FLOOR` is one: the corpus grows,
+/// and a stem that quietly stops being resident-safe silently leaves the
+/// battery's denominator, which is exactly how that battery could run a
+/// shrinking slice of the corpus and still pass.
+///
+/// Last recorded observation: `344 ran / 353 resident-safe`, from the #1251
+/// verification at 0f5505640 (2026-07-28), when the corpus was smaller than the
+/// `EXAMPLE_CORPUS_FLOOR` above. It is therefore a conservative floor, to raise
+/// to the observed count in the same diff as the next observed run.
+const RESIDENT_SAFE_FLOOR: usize = 353;
+
+/// How many stems the three-way differential battery must still execute (#2012).
+///
+/// `RESIDENT_SAFE_FLOOR` pins the universe; this pins how much of it the battery
+/// actually ran, so deleting a golden — which moves a stem out of the run set
+/// without moving it out of the universe — cannot pass quietly either. Same
+/// provenance as `RESIDENT_SAFE_FLOOR`: `344 ran` at 0f5505640. It replaces the
+/// original `ran >= 9` M3 seed floor, which stopped saying anything once the
+/// battery reached the hundreds.
+const THREE_WAY_RAN_FLOOR: usize = 344;
+
 /// The audit's whole answer, together with the denominator it was measured over.
 ///
-/// The three lists partition `corpus` exactly; `observe_jit_coverage` asserts it.
+/// `covered`, `gaps` and `out_of_universe` partition `corpus` exactly, and
+/// `resident_safe` and `resident_refused` partition `covered` exactly;
+/// `observe_jit_coverage` asserts both.
 #[derive(Clone)]
 struct JitCoverage {
     /// Every stem `topic_jet_files` yielded — the audit's universe.
     corpus: usize,
     covered: Vec<String>,
+    /// #2012: the subset of `covered` the resident JIT will also RUN — the
+    /// universe `cranelift_three_way_differential_battery` is scoped to.
+    resident_safe: Vec<String>,
+    /// `stem: reason`, one row per compile-covered stem the resident gate turns
+    /// away. The battery cannot run these, so it states how many it held back
+    /// and why, instead of quietly narrowing to the ones it can.
+    resident_refused: Vec<String>,
     gaps: Vec<String>,
     /// `stem: where: CODE: message`, one row per stem the oracle could not
     /// judge. Shrink-only: each row is a defect to fix, never a skip to accept.
@@ -627,12 +692,23 @@ fn observe_jit_coverage() -> JitCoverage {
     paths.sort();
     let corpus = paths.len();
     let mut covered = Vec::new();
+    let mut resident_safe = Vec::new();
+    let mut resident_refused = Vec::new();
     let mut gaps = Vec::new();
     let mut out_of_universe = Vec::new();
     for path in paths {
         let stem = stem_of(&root, &path);
         match classify_jit_compile(&path) {
-            JitCompileVerdict::Covered => covered.push(stem),
+            JitCompileVerdict::Covered { resident_refusal } => {
+                // #2012: the resident split is recorded on the same pass, so the
+                // three-way battery reads this observation instead of walking the
+                // corpus a second time with an oracle that could disagree.
+                match resident_refusal {
+                    None => resident_safe.push(stem.clone()),
+                    Some(reason) => resident_refused.push(format!("{stem}: {reason}")),
+                }
+                covered.push(stem);
+            }
             JitCompileVerdict::Gap(reason) => gaps.push(format!("{stem}: {reason}")),
             JitCompileVerdict::OutOfUniverse(reason) => {
                 out_of_universe.push(format!("{stem}: {reason}"));
@@ -640,6 +716,8 @@ fn observe_jit_coverage() -> JitCoverage {
         }
     }
     covered.sort();
+    resident_safe.sort();
+    resident_refused.sort();
     gaps.sort();
     out_of_universe.sort();
     assert_eq!(
@@ -651,9 +729,22 @@ fn observe_jit_coverage() -> JitCoverage {
         gaps.len(),
         out_of_universe.len()
     );
+    // #2012: and the resident split partitions `covered` exactly, so the
+    // battery's universe cannot lose a stem without this arithmetic failing.
+    assert_eq!(
+        resident_safe.len() + resident_refused.len(),
+        covered.len(),
+        "the resident gate lost a stem: {} compile-covered, {} resident-safe, {} refused. \
+         Every compile-covered stem lands in exactly one of the two (#2012)",
+        covered.len(),
+        resident_safe.len(),
+        resident_refused.len()
+    );
     JitCoverage {
         corpus,
         covered,
+        resident_safe,
+        resident_refused,
         gaps,
         out_of_universe,
     }
@@ -685,7 +776,16 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
         ));
     }
     match jet_jit::try_compile_bundle(&bundle) {
-        Ok(()) => JitCompileVerdict::Covered,
+        // #2012: one more question about a bundle the lowerer already accepted:
+        // will the resident JIT run it? `resident_jit_safe_bundle_detail` is a
+        // pure analysis of the same bundle, so ask it here rather than in a
+        // second corpus walk.
+        Ok(()) => {
+            let refusal = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+            JitCompileVerdict::Covered {
+                resident_refusal: (!refusal.is_empty()).then_some(refusal),
+            }
+        }
         Err(reason) => JitCompileVerdict::Gap(reason),
     }
 }
@@ -8670,6 +8770,10 @@ fn jit_coverage_audit_inner() {
         covered,
         gaps,
         out_of_universe,
+        // #2012: the resident split of `covered` belongs to
+        // `cranelift_three_way_differential_battery`, which states and pins it
+        // there. This ratchet is about compile coverage only.
+        ..
     } = collect_jit_coverage();
     if std::env::var("JET_DUMP_JIT_GAPS").as_deref() == Ok("1") {
         // #1509: this writer regenerates the whole file, so it must carry the
@@ -8701,8 +8805,8 @@ fn jit_coverage_audit_inner() {
              #   gaps and run_gaps may only SHRINK. A new compile gap is a lowering bug to\n\
              #     fix (AGENTS.md I9), not a row to park here.\n\
              # This file is scoped to the stems the audit could judge, never to the corpus.\n\
-             # EXAMPLE_CORPUS_FLOOR and OUT_OF_UNIVERSE_CEILING in\n\
-             # tests/dev.rs::jit_coverage_audit pin how many stems were measured and how many\n\
+             # EXAMPLE_CORPUS_FLOOR and OUT_OF_UNIVERSE_CEILING in tests/dev.rs pin\n\
+             # how many stems were measured and how many\n\
              # could not be judged (#1998), so an empty `gaps:` here is not a claim that the\n\
              # corpus has no compile gap. The audit prints the unjudged stems and their\n\
              # diagnostics on every run.\n\
@@ -8759,14 +8863,15 @@ fn jit_coverage_audit_inner() {
     print_jit_op_report();
 
     // #1998: `COMPILE_COVERED_FLOOR` pins how much of the corpus compiles.
-    // These two pin the corpus itself, so coverage can no longer be greened by a
-    // stem quietly leaving the denominator — the hole that let `gaps: 0` stand
-    // while 81 stems were never judged at all. Both live outside
-    // `tests/jit_gaps.txt`, for the same reason the coverage floor does.
+    // `EXAMPLE_CORPUS_FLOOR` and `OUT_OF_UNIVERSE_CEILING` pin the corpus
+    // itself, so coverage can no longer be greened by a stem quietly leaving the
+    // denominator — the hole that let `gaps: 0` stand while 81 stems were never
+    // judged at all. All three live outside `tests/jit_gaps.txt`, for the same
+    // reason the coverage floor does.
     //
-    // A floor, because examples get added: deleting one, or making
-    // `topic_jet_files` stop seeing one, must lower a reviewed constant.
-    const EXAMPLE_CORPUS_FLOOR: usize = 496;
+    // #2012: the two universe pins are declared once, next to `JitCoverage`, and
+    // asserted by every reader of the shared observation — this ratchet and the
+    // three-way differential battery — rather than copied per test.
     assert!(
         corpus >= EXAMPLE_CORPUS_FLOOR,
         "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem \
@@ -8774,13 +8879,9 @@ fn jit_coverage_audit_inner() {
          it, or lower the floor in the same diff as the deletion."
     );
 
-    // Shrink-only, exactly like GAPS_CEILING and RUN_GAPS_CEILING. Every row is
-    // a stem this oracle is blind to, so every row is a defect to fix — build
-    // the context the harness is missing, or fix the frontend the stem trips —
-    // never a skip to accept. The rows are derived from the compiler's own
-    // diagnostics at audit time, so this is a counted ceiling and not an
-    // allowlist: no stem can be written out of the universe by hand.
-    const OUT_OF_UNIVERSE_CEILING: usize = 81;
+    // Shrink-only, exactly like GAPS_CEILING and RUN_GAPS_CEILING; see
+    // `OUT_OF_UNIVERSE_CEILING` for why every row here is a defect to fix and
+    // why the count is derived, never an allowlist.
     assert!(
         out_of_universe.len() <= OUT_OF_UNIVERSE_CEILING,
         "{} stem(s) sit outside the compile oracle (ceiling {OUT_OF_UNIVERSE_CEILING}); this \
@@ -8877,34 +8978,15 @@ fn rows_missing_from(left: &[String], right: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Stems of type-checked examples the resident JIT can run end-to-end.
-fn jit_covered_example_stems() -> Vec<String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut stems = Vec::new();
-    for path in topic_jet_files(&root) {
-        let file = path.to_string_lossy();
-        let mut bundle = match jet::Loader::load_entry(&file) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-        if diags
-            .iter()
-            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        {
-            continue;
-        }
-        if jet_jit::resident_jit_safe_bundle(&bundle)
-            && jet_jit::try_compile_bundle(&bundle).is_ok()
-        {
-            stems.push(stem_of(&root, &path));
-        }
-    }
-    stems.sort();
-    stems
-}
-
 /// c139 M3+: three-way differential (JIT == interpreter == AOT) on resident-safe examples.
+///
+/// The universe is stated, not implied: the `resident_safe` bucket of the shared
+/// `collect_jit_coverage` observation — the compile-covered stems the resident
+/// JIT will also run — restricted to the ones carrying an `.out` golden. Every
+/// other stem of the corpus is counted and named on every run, and
+/// `EXAMPLE_CORPUS_FLOOR`, `OUT_OF_UNIVERSE_CEILING`, `RESIDENT_SAFE_FLOOR` and
+/// `THREE_WAY_RAN_FLOOR` pin all of it, so this battery cannot pass over a
+/// universe that quietly shrank (#2012).
 #[test]
 fn cranelift_three_way_differential_battery() {
     with_jit_test_scope(cranelift_three_way_differential_battery_inner);
@@ -8924,41 +9006,150 @@ fn cranelift_three_way_differential_battery_inner() {
     // Focused stem: `JET_THREE_WAY_STEM=io/files_depth cargo test --test dev cranelift_three_way_differential_battery`
     if let Ok(stem) = std::env::var("JET_THREE_WAY_STEM") {
         assert_cranelift_three_way(&example_path(&stem), &stem);
-        eprintln!("three-way battery: focused stem `{stem}` ok");
+        eprintln!(
+            "three-way battery: focused stem `{stem}` ok — this run is scoped to that ONE stem \
+             and is NOT the battery"
+        );
         return;
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let jit_covered_stems = jit_covered_example_stems();
+    // #2012: one oracle, one universe. This battery is scoped to the
+    // `resident_safe` bucket of the shared `collect_jit_coverage` walk — the same
+    // observation `jit_coverage_audit` ratchets.
+    //
+    // It used to walk the corpus itself, in `jit_covered_example_stems`, with the
+    // two silent drops #1998 removed from the audit: `Err(_) => continue` on a
+    // loader failure and a bare `continue` on a sema error. A stem this battery
+    // could not even load was therefore never reported as untested — it left the
+    // denominator without a word and the battery still passed. Reading the shared
+    // observation makes that impossible twice over: the walk is total, and a
+    // second oracle that could disagree with the first no longer exists.
+    let JitCoverage {
+        corpus,
+        covered,
+        resident_safe,
+        resident_refused,
+        gaps,
+        out_of_universe,
+    } = collect_jit_coverage();
+
+    // State the universe before spending an hour of AOT builds inside it, and
+    // pin it before trusting anything measured over it. These are the audit's own
+    // pins, asserted here because this battery inherits the audit's denominator:
+    // a stem cannot leave this battery by leaving the corpus, by becoming
+    // unjudgeable by the compile oracle, or by quietly failing the resident gate.
+    report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
     assert!(
-        !jit_covered_stems.is_empty(),
-        "expected at least one resident-safe example"
+        corpus >= EXAMPLE_CORPUS_FLOOR,
+        "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}); this \
+         battery is scoped to a subset of it, so a smaller corpus silently shrinks the battery"
     );
+    assert!(
+        out_of_universe.len() <= OUT_OF_UNIVERSE_CEILING,
+        "{} stem(s) sit outside the compile oracle (ceiling {OUT_OF_UNIVERSE_CEILING}), so this \
+         battery never judged them; the count may only fall:\n{}",
+        out_of_universe.len(),
+        out_of_universe.join("\n")
+    );
+    assert!(
+        resident_safe.len() >= RESIDENT_SAFE_FLOOR,
+        "the resident-safe universe shrank to {} stem(s) of {} compile-covered (floor \
+         {RESIDENT_SAFE_FLOOR}). A stem leaving the resident gate leaves this battery: fix the \
+         gate or the lowering it refuses, and only lower the floor in a reviewed diff. Refused \
+         now:\n{}",
+        resident_safe.len(),
+        covered.len(),
+        resident_refused.join("\n")
+    );
+
+    // Say it before running, not only after: a differential failure inside the
+    // loop must not be the reason nobody learns what the battery was scoped to.
+    eprintln!(
+        "three-way battery scope: {} resident-safe stem(s) of {} compile-covered in a \
+         {corpus}-stem corpus; {} compile-covered stem(s) refused by the resident gate, {} \
+         compile gap(s) and {} stem(s) outside the compile oracle are NOT tested here",
+        resident_safe.len(),
+        covered.len(),
+        resident_refused.len(),
+        gaps.len(),
+        out_of_universe.len()
+    );
+
+    // Every stem of the stated universe lands in exactly one of these three, so
+    // no stem can drop out of the battery without a counted reason.
     let mut ran = 0usize;
-    for stem in &jit_covered_stems {
-        let expected = root.join(format!("examples/features/expected/{stem}.out"));
-        if !expected.exists() {
+    let mut no_golden = Vec::new();
+    let mut held_back = Vec::new();
+    for stem in &resident_safe {
+        if !root
+            .join(format!("examples/features/expected/{stem}.out"))
+            .exists()
+        {
+            no_golden.push(stem.clone());
             continue;
         }
         // JIT lowers only `tir_covers` entry-module funcs; AOT still walks every
         // top-level item. `web/app_hello` keeps unused web.page/app helpers that
         // miss the TIR gate (ICE on `home`) while `run` stays resident-JIT safe.
         if stem == "web/app_hello" {
-            eprintln!(
-                "note: skip three-way for `{stem}`: AOT TIR gate miss on unused web helpers"
-            );
+            held_back.push(format!("{stem}: AOT TIR gate miss on unused web helpers"));
             continue;
         }
         eprintln!("three-way battery: checking `{stem}`");
         assert_cranelift_three_way(&example_path(stem), stem);
         ran += 1;
     }
-    eprintln!(
-        "three-way battery: {} ran / {} resident-safe (with goldens)",
-        ran,
-        jit_covered_stems.len()
+
+    // #2012: totality. The three buckets partition the universe exactly, so the
+    // battery cannot run fewer stems than it speaks for.
+    assert_eq!(
+        ran + no_golden.len() + held_back.len(),
+        resident_safe.len(),
+        "the three-way battery lost a stem: {} resident-safe, {ran} ran, {} without a golden, {} \
+         held back. Every stem of the universe lands in exactly one bucket (#2012)",
+        resident_safe.len(),
+        no_golden.len(),
+        held_back.len()
     );
-    assert!(ran >= 9, "expected battery to grow beyond the M3 seed set");
+
+    // #2012: never print a bare `N ran`. This battery speaks for the
+    // resident-safe stems only, and the line that reports it says so, together
+    // with everything it is NOT a claim about.
+    eprintln!(
+        "three-way battery universe: {} resident-safe stem(s) of {} compile-covered, out of a \
+         {corpus}-stem corpus = {ran} ran + {} with no golden + {} held back at a named AOT gate. \
+         This battery says NOTHING about the {} compile-covered stem(s) the resident gate \
+         refuses, the {} compile gap(s), or the {} stem(s) outside the compile oracle.",
+        resident_safe.len(),
+        covered.len(),
+        no_golden.len(),
+        held_back.len(),
+        resident_refused.len(),
+        gaps.len(),
+        out_of_universe.len()
+    );
+    for row in &resident_refused {
+        eprintln!("  resident gate refused: {row}");
+    }
+    for stem in &no_golden {
+        eprintln!("  no golden: {stem}");
+    }
+    for row in &held_back {
+        eprintln!("  held back: {row}");
+    }
+
+    // Raised from the original `ran >= 9` M3 seed floor, which stopped saying
+    // anything once the battery reached the hundreds: a deleted golden moves a
+    // stem from `ran` to `no_golden` without moving it out of the universe, and
+    // only this floor notices.
+    assert!(
+        ran >= THREE_WAY_RAN_FLOOR,
+        "the three-way battery ran {ran} of its {} resident-safe stem(s) (floor \
+         {THREE_WAY_RAN_FLOOR}); it may only grow. A fallen count means goldens or resident-safe \
+         stems left the battery: restore them, or lower the floor in the same reviewed diff.",
+        resident_safe.len()
+    );
 }
 
 /// The CI entry point for `jit_coverage_audit` — not a second law.
