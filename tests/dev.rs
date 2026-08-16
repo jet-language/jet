@@ -4758,14 +4758,42 @@ fn run() ? {
 
     let failure = success.replace("choose_ok()?", "choose_err()?");
     let failure_jit = run_cranelift_outcome(&failure, "result_failure");
+    // `run_cranelift_outcome` writes the fixture at this exact path, and every
+    // journey frame names it, so the expectation must be built from it.
+    let failure_shown = std::env::temp_dir()
+        .join("jet_jit_result_result_failure.jet")
+        .to_string_lossy()
+        .into_owned();
+    // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each `?` hop joins the
+    // failure journey on every tier, whether it has a note or not." That
+    // authorises the two E3002 frames — `forward`'s `?` on line 11 and `run`'s on
+    // line 16 — in innermost-to-outermost order, spelled exactly as E3002
+    // registers it: `error propagated from: {fn} ({file}:{line}) via ?`.
+    // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?`
+    // means `run() ? Err`, so the `String` error arrives as the default error and
+    // the process edge prints one full report and exits 1. `jet_render_err`
+    // renders `Error: {message}` with no code and `Error [{code}]: {message}`
+    // with one. Same shape as the ratified AOT golden
+    // `examples/features/expected/errors/error_context.err.out`.
     assert_eq!(
         failure_jit,
-        ProgramOutput::ran("".into(), "typed boom\n".into(), 1)
+        ProgramOutput::ran(
+            String::new(),
+            format!(
+                "error propagated from: forward ({failure_shown}:11) via ?\n\
+                 error propagated from: run ({failure_shown}:16) via ?\n\
+                 Error: typed boom\n"
+            ),
+            1
+        )
     );
 
+    // Journey frames name the fixture path (D-FAIL-CTX1=A), so the interpreter
+    // must read the *same* file the JIT ran; a separate `*_interp` temp name
+    // would diff on the path instead of on semantics.
     for (src, tag, expected) in [
-        (success, "result_success_interp", success_jit),
-        (&failure, "result_failure_interp", failure_jit),
+        (success, "result_success", success_jit),
+        (&failure, "result_failure", failure_jit),
     ] {
         let p = std::env::temp_dir().join(format!("jet_jit_result_{tag}.jet"));
         fs::write(&p, src).unwrap();
@@ -4871,7 +4899,16 @@ fn run() ? {
         (
             "both_arms_terminate",
             both_arms_terminate,
-            ProgramOutput::ran("7\n".into(), "left branch\n".into(), 1),
+            // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare
+            // `fn run() ?` means `run() ? Err`, so `return Err("left branch")`
+            // reaches the process edge as one full default-error report and exits
+            // 1. `jet_render_err` renders `Error: {message}` when the error
+            // carries no code — see the ratified golden
+            // `examples/features/expected/errors/default_err_edge.err.out`, which
+            // shows the `Error [CODE]: …` form of the same renderer. No journey
+            // frame here: D-FAIL-CTX1=A appends a frame per `?` hop, and this
+            // `Err` is returned directly rather than re-raised.
+            ProgramOutput::ran("7\n".into(), "Error: left branch\n".into(), 1),
         ),
     ];
 
@@ -6749,7 +6786,28 @@ fn run() {
                 };
                 assert_eq!(stdout, expected);
                 assert!(jet_jit::jit_executed_for_test());
-                assert!(!jet_jit::deopt_invoked_for_test());
+                if expected_case == "raw_alias" {
+                    // D-MEM-SENTRY1=A (ratified 2026-08-12, card #1889) is an
+                    // owner-ratified I9 instrumentation carve-out: raw memory stays
+                    // on canonical TIR so the Prelude witness owns gate state,
+                    // provenance, quarantine, poison and R08xx reporting, and
+                    // Cranelift only marshals safe values rather than growing a
+                    // second memory policy. `raw_alias` is `*Int.{*value}` plus a
+                    // core.mem call, i.e. exactly the two shapes the walker now
+                    // refuses, so the correct route is a silent deopt to canonical
+                    // TIR -- not native execution. This case was authored under
+                    // #1216 on 2026-07-27, sixteen days before that ratification.
+                    assert!(
+                        jet_jit::deopt_invoked_for_test(),
+                        "`raw_alias` must take the D-MEM-SENTRY1 canonical-TIR route"
+                    );
+                    assert!(
+                        !jet_jit::fallback_invoked_for_test(),
+                        "`raw_alias` deopt must not trip forbidden fallback"
+                    );
+                } else {
+                    assert!(!jet_jit::deopt_invoked_for_test());
+                }
             }
         }
         return;
@@ -10309,10 +10367,26 @@ fn persist_marker_is_codegen_inert() {
             )
         })
         .rust;
+    // The binding under test is `counter`. It reaches Rust through the single
+    // naming law: `mangle("counter")` prefixes `GENERATED_NAME_PREFIX` (`__jet_`,
+    // crates/jet-foundation/src/Syntax/predicates.rs:367) and `emit_const`
+    // uppercases the result (crates/jet-codegen/src/Codegen/Items.rs:2832), so
+    // `#Persist counter := 0` can only lower to `static __JET_COUNTER`. Name the
+    // binding in the message: the dump opens with `const __JET_PACKAGE_EDITION`,
+    // unconditional harness boilerplate emitted for every program, which is not
+    // the binding under test.
     assert!(
-        rust.contains("static USER_COUNTER: i64 = 0i64;"),
-        "`#Persist` binding must lower to a plain release `static`:\n{rust}"
+        rust.contains("static __JET_COUNTER: i64 = 0i64;"),
+        "`#Persist counter := 0` must lower to the plain release static \
+         `__JET_COUNTER`:\n{rust}"
     );
+    // Dev-tier persistence lives in `jet_foundation::Persist`
+    // (crates/jet-foundation/src/Persist.rs), which is not part of the embedded
+    // prelude, so a release build that grew a store hook could only name that
+    // store. Keep both needles qualified: the bare stem `persist` occurs in the
+    // prelude's unrelated GC-ledger `self.persist()` calls and in this fixture's
+    // own `jet_persist_parity_*` source path, so a looser filter would report
+    // lines that have nothing to do with `#Persist`.
     let hooks: Vec<&str> = rust
         .lines()
         .filter(|l| l.contains("Persist::") || l.contains("jet_foundation::Persist"))
