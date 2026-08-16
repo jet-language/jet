@@ -3026,8 +3026,16 @@ fn resident_safe_builtin_op(
     args: &[TExpr],
     callees: &HashSet<String>,
 ) -> bool {
-    let recv_safe = resident_safe_expr(recv, callees);
-    if !recv_safe {
+    // D-ZIPPAD1: zero columns is an empty `Iter<Unit>`, so the shape has no
+    // receiver column at all. `lower_empty_zip_family` parks a `Unit`
+    // placeholder in the receiver slot to keep `BuiltinMethod` well formed;
+    // no tier reads it (`LowerCtx::lower_zip_family` guards every receiver and
+    // column use behind `input_count > 0`, and it lowers to a plain `iconst 0`),
+    // so walking it as an ordinary value-carrying receiver only deopts a shape
+    // the JIT covers. The `Zip` arm below still proves the whole shape.
+    let zero_column_zip = matches!(op, TBuiltinOp::Zip { input_count: 0, .. })
+        && matches!(&recv.kind, TExprKind::Unit);
+    if !zero_column_zip && !resident_safe_expr(recv, callees) {
         return false;
     }
     // D-TAINT1/D-TAG-SURFACE1: a `#Input`/other user fact tag on the receiver's
@@ -3312,19 +3320,22 @@ fn resident_safe_builtin_op(
             if *flatten {
                 return false;
             }
-            let input_args = (*input_count).checked_sub(1);
+            // Mirror `LowerCtx::lower_zip_family`'s own arity split. It reads
+            // `input_count.saturating_sub(1)`, checks the same arity, then takes
+            // the zero path; `checked_sub` bailing first made the zero case
+            // below unreachable, so `zip()` deopted for a shape the JIT covers
+            // (D-ZIPPAD1: zero columns is an empty `Iter<Unit>`, and the shared
+            // policy `jet_zip_row_count` answers `Some(0)` rows for it).
+            let input_args = (*input_count).saturating_sub(1);
             let fill_args = match fill_mode {
                 TIR::TZipFillMode::DefaultNone => 0,
                 TIR::TZipFillMode::Common | TIR::TZipFillMode::Columns => 1,
-            };
-            let Some(input_args) = input_args else {
-                return false;
             };
             if args.len() != input_args + fill_args {
                 return false;
             }
             if *input_count == 0 {
-                return args.is_empty() && field_types.is_empty();
+                return field_types.is_empty();
             }
             if field_types.len() != *input_count {
                 return false;

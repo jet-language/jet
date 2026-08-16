@@ -146,6 +146,17 @@ fn cli_target_args(
         if matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
             return Err(format!("jit CLI does not support Range parameter `{}`", target.name));
         }
+        // This predicate MUST be the same set `func_signature` uses to build
+        // the slot it is about to fill (`types_meta.rs::func_signature`, and the
+        // callee-side binding in `lower_function` below). All three read the
+        // DECLARED parameter type, which is still un-erased here, so
+        // `Type::InlineRange` — a scalar carrier the shared TIR boundary only
+        // removes on expression types (`Type::erased_inline_ranges`, applied by
+        // `clif_ty_with_distinct` and `canonicalize_pre_tier_expr`) — has to be
+        // named explicitly. Omitting it declared a pointer slot and passed the
+        // raw scalar, so the callee's `load(clif, MemFlags::trusted(), …)`
+        // dereferenced an integer value: a wild load on a JIT frame that has no
+        // unwind info to turn it into a diagnostic (#1997, I2).
         let scalar_write = matches!(
             convention,
             jet_foundation::AST::AccessConvention::Write
@@ -153,6 +164,7 @@ fn cli_target_args(
             ty,
             Type::Int
                 | Type::IntN { .. }
+                | Type::InlineRange { .. }
                 | Type::Float
                 | Type::Float32
                 | Type::Bool
