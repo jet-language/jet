@@ -652,14 +652,36 @@ fn jet_std_io_terminal_width() -> i64 {
 fn jet_std_io_terminal_height() -> i64 {
     jet_term_height(|name| jet_std_env_get(&name.to_string()))
 }
-fn jet_style_enabled() -> bool {
-    jet_term_style_enabled(
+// The colour decision has two independent halves. This is the environment
+// half, and it is a named seam on purpose: it can be observed even when
+// stdout is a pipe, which is the only way to prove the environment rule
+// without a terminal.
+//
+// PRESENCE semantics (D-ENV-MUTATE1 + #1206): `NO_COLOR` disables colour
+// because it is SET, whatever it holds — empty, `0`, or bytes that are not
+// valid Unicode all disable colour. Hence the raw `OsString` lookup: routing
+// this through `jet_std_env_get` would decode, fail, and report "absent" for
+// a variable that is plainly present. `TERM=dumb` disables colour too, and
+// that one is a value comparison, so it does decode.
+fn jet_style_env_enabled() -> bool {
+    let (no_color, term_is_dumb) = jet_style_env_facts();
+    !no_color && !term_is_dumb
+}
+// One read of the logical env table, shared by both callers, so the seam and
+// the production decision can never disagree about what the environment says.
+fn jet_style_env_facts() -> (bool, bool) {
+    (
         jet_env_value_raw("NO_COLOR").is_some(),
         jet_env_value_raw("TERM")
             .and_then(|term| term.into_string().ok())
             .is_some_and(|term| term == "dumb"),
-        jet_term_stdout_is_terminal(),
     )
+}
+// The stream half joins in here: colour also needs stdout to be a terminal,
+// and `--color=always|never` overrides both (jet_term_set_color_mode).
+fn jet_style_enabled() -> bool {
+    let (no_color, term_is_dumb) = jet_style_env_facts();
+    jet_term_style_enabled(no_color, term_is_dumb, jet_term_stdout_is_terminal())
 }
 fn jet_std_io_style(style: &String, text: &String) -> String {
     jet_term_style(style, text, jet_style_enabled())

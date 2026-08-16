@@ -2295,6 +2295,28 @@ fn ambient_auth_call(
     })())
 }
 
+// #1999 / D-ENV-MUTATE1: Jet owns a process-global logical environment; user
+// mutation never touches the host process environment. AOT reads that table
+// through `jet_env_value_raw` and the JIT host through `IO.rs::env_value`, and
+// both are backed by `CoreHost::jit_env_snapshot_raw` in this process. The
+// interpreter ambient must consult the same owner, or `env.set("NO_COLOR", ..)`
+// means one thing under AOT and resident JIT and another under the interpreter.
+//
+// Raw `OsString` on purpose: `NO_COLOR` counts by PRESENCE, so a value that is
+// not valid Unicode still disables colour. Decoding here would turn "present
+// but not UTF-8" into "absent" — the exact bug #1206's review caught in AOT.
+fn ambient_env_value_raw(name: &str) -> Option<std::ffi::OsString> {
+    let name = std::ffi::OsStr::new(name);
+    crate::CoreHost::jit_env_snapshot_raw()
+        .into_iter()
+        .find(|(candidate, _)| crate::CoreHost::jit_env_key_eq(candidate.as_os_str(), name))
+        .map(|(_, value)| value)
+}
+
+fn ambient_env_value(name: &str) -> Option<String> {
+    ambient_env_value_raw(name).and_then(|value| value.into_string().ok())
+}
+
 pub fn ambient_core_call(
     module: &str,
     method: &str,
@@ -2549,10 +2571,10 @@ pub fn ambient_core_call(
             fields: vec![],
         })),
         ("core.term", "terminal_width") => Some(Ok(CtValue::Int(
-            IO::term_prelude::jet_term_width(|name| std::env::var(name).ok()),
+            IO::term_prelude::jet_term_width(ambient_env_value),
         ))),
         ("core.term", "terminal_height") => Some(Ok(CtValue::Int(
-            IO::term_prelude::jet_term_height(|name| std::env::var(name).ok()),
+            IO::term_prelude::jet_term_height(ambient_env_value),
         ))),
         ("core.term", "style") => {
             let (Some(CtValue::Str(style)), Some(CtValue::Str(text))) =
@@ -2561,10 +2583,8 @@ pub fn ambient_core_call(
                 return Some(Err(unsupported("core.term.style arguments", span)));
             };
             let enabled = IO::term_prelude::jet_term_style_enabled(
-                std::env::var_os("NO_COLOR").is_some(),
-                std::env::var("TERM")
-                    .ok()
-                    .is_some_and(|term| term == "dumb"),
+                ambient_env_value_raw("NO_COLOR").is_some(),
+                ambient_env_value("TERM").is_some_and(|term| term == "dumb"),
                 IO::term_prelude::jet_term_stdout_is_terminal(),
             );
             Some(Ok(CtValue::Str(IO::term_prelude::jet_term_style(
