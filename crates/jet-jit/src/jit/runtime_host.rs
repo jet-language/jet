@@ -2736,6 +2736,16 @@ extern "C" fn jet_jit_duration_difference(a: i64, b: i64) -> i64 {
     duration_kernel::jet_duration_kernel_difference(a, b)
 }
 
+/// Marshalling only: the nanosecond carrier in, a resident string handle out.
+/// The rendering itself stays in the shared Prelude kernel AOT's
+/// `impl JetShow for Duration` calls.
+extern "C" fn jet_jit_duration_show(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .alloc_string(duration_kernel::jet_duration_kernel_show(value))
+    })
+}
+
 extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
@@ -3990,6 +4000,7 @@ host_fns! {
     duration_add: "jet_jit_duration_add" => jet_jit_duration_add: sig_duration_int;
     duration_sub: "jet_jit_duration_sub" => jet_jit_duration_sub: sig_duration_int;
     duration_difference: "jet_jit_duration_difference" => jet_jit_duration_difference: sig_duration_int;
+    duration_show: "jet_jit_duration_show" => jet_jit_duration_show: sig_str_unary_i64;
     perf_fidelity: "jet_jit_perf_fidelity" => jet_jit_perf_fidelity: sig_noarg_f64;
     perf_default_fidelity: "jet_jit_perf_default_fidelity" => jet_jit_perf_default_fidelity: sig_noarg_f64;
     perf_override_fidelity: "jet_jit_perf_override_fidelity" => jet_jit_perf_override_fidelity: sig_perf_override;

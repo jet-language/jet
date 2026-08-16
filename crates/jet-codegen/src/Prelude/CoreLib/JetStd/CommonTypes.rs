@@ -2453,7 +2453,7 @@
     }
     impl super::JetShow for Duration {
         fn jet_show(&self) -> String {
-            format!("{}ns", self.ns)
+            super::jet_duration_kernel_show(self.ns)
         }
     }
     impl super::JetDebug for Duration {
