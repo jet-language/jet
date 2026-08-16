@@ -2228,3 +2228,142 @@ fn run() {}
     );
     assert!(!errors.iter().any(|diagnostic| diagnostic.code == "E3411"));
 }
+
+/// D-BUILDENTRY1: the smallest real build entry beside a real runtime entry.
+/// `b.plan()` selects no target, so the runtime program is just `fn run`.
+const BUILD_ENTRY_PROGRAM: &str = r#"
+fn build(b: BuildContext) => BuildPlan ? {
+    return b.plan()
+}
+
+fn run() {
+    print("runtime program")
+}
+"#;
+
+/// Tower card 2008 / I2 / I3: a build entry must never reach runtime codegen,
+/// on the plain compile path as well as under `jet build`.
+///
+/// The defect this pins: `jet::compile_with_path` left `fn build` in the
+/// program, so `Codegen::emit_func` met a function the typed IR cannot cover —
+/// its `BuildContext` parameter and `BuildPlan` result have no runtime
+/// lowering — and raised an internal compiler error on a program sema had just
+/// accepted. Sema and codegen disagreed about coverage; the fix is on the
+/// admitting side, and it removes the item rather than teaching codegen to
+/// lower a compiler value.
+#[test]
+fn build_entry_is_absent_from_the_runtime_program() {
+    let root = project("build-entry-runtime-program");
+    let entry = root.join("run.jet");
+    write(&entry, BUILD_ENTRY_PROGRAM);
+    let shown = entry.to_string_lossy().into_owned();
+
+    let compiled = jet::compile_with_path(BUILD_ENTRY_PROGRAM, &shown)
+        .expect("a program with a build entry must reach codegen without an ICE");
+    let emitted_build = format!("fn {}(", jet_foundation::Names::mangle("build"));
+    assert!(
+        !compiled.rust.contains(&emitted_build),
+        "the build entry leaked into the runtime program (`{emitted_build}`)"
+    );
+    assert!(
+        compiled.rust.contains("runtime program"),
+        "the runtime entry must still be emitted"
+    );
+
+    // The removal belongs to the front end, so the checked bundle every engine
+    // reads is already the runtime program (I9) — not just the AOT emitter's
+    // private view of it.
+    let mut bundle = jet::Loader::load_entry(&shown).expect("build-entry bundle loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "{diagnostics:#?}"
+    );
+    assert!(
+        !bundle.modules.iter().any(|module| module
+            .items
+            .iter()
+            .any(|item| matches!(item, jet::AST::Item::Func(func) if func.name == "build"))),
+        "sema left the build entry in the checked runtime program"
+    );
+    assert!(
+        bundle.modules[bundle.entry]
+            .items
+            .iter()
+            .any(|item| matches!(item, jet::AST::Item::Func(func) if func.name == "run")),
+        "the runtime entry must survive the projection"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// I9: one program, one answer, on AOT, the resident Cranelift JIT, and the
+/// interpreter. The JIT arm also asserts the function actually compiled, so a
+/// silent deopt cannot pass this test by printing the right line from the wrong
+/// tier.
+#[test]
+fn build_entry_program_runs_the_same_on_every_tier() {
+    use jet_foundation::JitBackend::JitBackend as _;
+
+    let root = project("build-entry-tier-parity");
+    let entry = root.join("run.jet");
+    write(&entry, BUILD_ENTRY_PROGRAM);
+    let shown = entry.to_string_lossy().into_owned();
+    let expected = ("runtime program\n".to_string(), String::new(), 0);
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("build-entry bundle loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "{diagnostics:#?}"
+    );
+
+    let interpreted = match jet::Interpreter::run_checked(&bundle, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("interpreter rejected the build-entry program: {diagnostics:?}")
+        }
+    };
+    assert_eq!(interpreted, expected, "interpreter disagreed");
+
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = jet_jit::CraneliftBackend::new();
+    let jit = jet_jit::with_program_args(&[shown.clone()], || match backend.run(&bundle, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("resident JIT rejected the build-entry program: {diagnostics:?}")
+        }
+    });
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "the build-entry program must execute in the resident JIT, not from a quieter tier"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "the build-entry program must not reach a forbidden fallback"
+    );
+    assert_eq!(jit, interpreted, "resident JIT drifted from the interpreter");
+
+    if common::have_rustc() {
+        let aot = common::build_and_run("jet_build_entry_tiers", "run", BUILD_ENTRY_PROGRAM);
+        assert_eq!(
+            aot,
+            (expected.2, expected.0.clone(), expected.1.clone()),
+            "AOT drifted from the other tiers"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&root);
+}
