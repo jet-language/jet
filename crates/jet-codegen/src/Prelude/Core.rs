@@ -560,6 +560,39 @@ struct JetRenderedRuntimeStop {
     exit_code: i32,
 }
 
+/// Raise a program-side stop through the unwind carrier that THIS frame's
+/// catcher reads (I9; D-CONC-FAIL1=A "a joined child panic becomes
+/// `.Panicked(reason)`").
+///
+/// A scheduler task frame is caught inside `Prelude/Scheduler.rs` — by
+/// `jet_scheduler_catch_task_unwind` for a spawned body, by
+/// `jet_scheduler_wait_without_unwind` for a native wait boundary — and both
+/// publish the child value out of a `String` payload
+/// (`jet_scheduler_panic_message`, `JetSchedulerWait::Panicked`). So a task
+/// frame carries the stop's own message and nothing else: the `reason` in
+/// `.Panicked(reason)` is a value the PROGRAM computed, and a runtime that put
+/// its own stand-in text there would publish a wrong answer, not a vaguer one.
+/// The other tiers already carry the program's message into that same frame —
+/// the resident JIT re-raises it (`jet-jit/src/Concurrency.rs`
+/// `spawn_with_runtime`, from the `msg` recorded by `jet_jit_rich_panic`), and
+/// the interpreter carries it as the child's E0953 `what`
+/// (`Codegen/TIR/eval/exprs.rs` `eval_require_failure`).
+///
+/// Every other unwinding frame keeps the typed report: an `#Interrupt`
+/// handler, `jet test`'s expect-fail region, and the top-level
+/// `jet_runtime_boundary` each want the whole rendered stop and its exit code,
+/// and `jet_runtime_boundary` deliberately treats loose panic text as a host
+/// fault rather than a user stop.
+fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
+    if jet_scheduler_in_task() {
+        std::panic::resume_unwind(Box::new(message.to_string()));
+    }
+    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
+        rendered,
+        exit_code,
+    }))
+}
+
 /// A user-requested process stop unwinds through the same boundary as a
 /// runtime report. This gives guards and deferred resource closes a chance to
 /// run before the final native exit.
@@ -790,15 +823,8 @@ fn jet_sentry_runtime_stop(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-            rendered: report.rendered,
-            exit_code: report.exit_code,
-        }));
     }
-    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-        rendered: report.rendered,
-        exit_code: report.exit_code,
-    }));
+    jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
 }
 
 fn jet_runtime_stop_with_context(
@@ -825,15 +851,8 @@ fn jet_runtime_stop_with_context(
         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-            rendered: report.rendered,
-            exit_code: report.exit_code,
-        }));
     }
-    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-        rendered: report.rendered,
-        exit_code: report.exit_code,
-    }));
+    jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
@@ -1003,15 +1022,8 @@ fn jet_panic_rich(
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
-        std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-            rendered: report.rendered,
-            exit_code: report.exit_code,
-        }));
     }
-    std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
-        rendered: report.rendered,
-        exit_code: report.exit_code,
-    }));
+    jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }
 /// E3002 / D-FAIL-CTX1: `?`-propagation trace.
 ///
