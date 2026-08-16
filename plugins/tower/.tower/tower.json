@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2006,
-    "rev": 37735,
+    "nextNum": 2010,
+    "rev": 37757,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -108581,6 +108581,11 @@
         {
           "at": "2026-08-16",
           "by": "fable-e3-burndown",
+          "text": "See #1998's 2026-08-15 log. The reconciliation in 12648cdcc made compile_covered agree with observe_jit_coverage's observed set, but that oracle skips every stem whose in-process load or sema fails, so it cannot see 81-122 corpus stems. The ledger is now self-consistent with the audit and understates real coverage. Do NOT re-add rows by hand against the corpus gate's classification -- close the universe hole (#1998) first, then re-derive compile_covered once against a complete universe and raise COMPILE_COVERED_FLOOR in the same diff."
+        },
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
           "text": "Ledger reconcile for #1663 surfaced a false pin here: serde_jit_parity_manifest_pins asserts 'serde/encoding_breadth must remain compile-covered', but that stem is NOT observed covered. It never enters the JIT coverage audit's universe at all, because it fails Loader/Sema in-process (root cause carded as #1998, 43 stems in that state). It was already like this at the start of the 2026-08-15 session, so the pin has been asserting something untrue. The stale compile_covered row was REMOVED rather than kept, so the purpose-built alarm now fires instead of being absorbed -- keeping it would have been exactly the falsification #1663 documents. Resolve by deciding which side is wrong: either the stem should be covered (find why it is not; it may be the universe hole rather than a lowering gap), or the pin asserts a capability the product never had and the pin is the defect. Do NOT re-add a compile_covered row to make it pass."
         },
         {
@@ -108676,7 +108681,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:17:01.497Z",
-      "updated": "2026-08-16T00:21:52.714Z",
+      "updated": "2026-08-16T03:48:34.735Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 206
     },
@@ -130626,6 +130631,11 @@
         {
           "at": "2026-08-16",
           "by": "fable-e3-burndown",
+          "text": "SHARPENED COUNT and a consequence I must own, 2026-08-15.\n\nTwo independent lanes counted the universe hole larger than this card's 43: one measured 81 stems absent from observe_jit_coverage's universe, the other measured the corpus at 496-498 top-level stems against 415 compile_covered rows and 374 corpus-gate rows -- 122 stems classified in NO gate section, and 83 absent from compile_covered of which 64 are classified resident_jit or deopt_interp by the gate, i.e. they demonstrably DO compile.\n\nConsequence I own: commit 12648cdcc reconciled tests/jit_gaps.txt to the audit's OBSERVED set, deleting ~63 rows. Verified at f148867d1 that the audit's red arm is `gaps:` (29 unrecorded gaps), NOT the `unrecorded`/GREW arm -- so the deleted stems are not observed covered either, and the ledger is self-consistent with the audit. But that is the weaker property than it sounds: absence from the observed set means EITHER genuinely not covered OR not in the universe, and for at least six named stems (concurrency/parallel_scan, crypto/vault_keys, crypto/vault_secret, memory/expiring_secret, tooling/debug_native and others) the corpus gate classifies them resident_jit. So the reconciliation made the ledger agree with an INCOMPLETE oracle, and the ledger now understates real coverage by roughly the size of this hole.\n\nNo product behaviour changed and nothing was falsified in the 100e24b93 sense -- the rows were removed because the oracle could not see them, not to green a test. But the correct order of work is now clear: CLOSE THIS HOLE FIRST, then re-derive compile_covered against a complete universe and raise COMPILE_COVERED_FLOOR once. Re-adding rows by hand against the gate's classification would be a third hand-edit of a file that has already been falsified three times.\n\nAlso found: examples/features/tooling/data_plot.jet appears in NO corpus-gate section, violating that file's own stated invariant that every top-level example appears in exactly one. It is the surviving half of the same line-plot lineage that produced the data_line orphan deleted in f148867d1."
+        },
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
           "text": "Ledger reconcile for #1663 surfaced a false pin here: serde_jit_parity_manifest_pins asserts 'serde/encoding_breadth must remain compile-covered', but that stem is NOT observed covered. It never enters the JIT coverage audit's universe at all, because it fails Loader/Sema in-process (root cause carded as #1998, 43 stems in that state). It was already like this at the start of the 2026-08-15 session, so the pin has been asserting something untrue. The stale compile_covered row was REMOVED rather than kept, so the purpose-built alarm now fires instead of being absorbed -- keeping it would have been exactly the falsification #1663 documents. Resolve by deciding which side is wrong: either the stem should be covered (find why it is not; it may be the universe hole rather than a lowering gap), or the pin asserts a capability the product never had and the pin is the defect. Do NOT re-add a compile_covered row to make it pass."
         }
       ],
@@ -130677,7 +130687,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T00:20:52.947Z",
-      "updated": "2026-08-16T00:21:52.104Z",
+      "updated": "2026-08-16T03:48:34.076Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -131137,6 +131147,269 @@
       "needsAcceptance": false,
       "created": "2026-08-16T02:57:12.268Z",
       "updated": "2026-08-16T02:57:13.611Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c02esppi",
+      "num": 2006,
+      "title": "A return inside a task body erases later declarations",
+      "body": "One `return` inside a `task { ... }` body makes sema discard every declaration that follows it in the ENCLOSING block, producing a page of phantom \"nothing named X exists here\" errors for bindings that are plainly declared.\n\nObserved: a fixture with `child :: task { return \"child\" }` produced ONE real error (E0113, the return handing a String back from a fallible `run`) followed by ELEVEN phantom ones -- nine E0107 for all_result / cancelled / cancelled_result / failed / failed_result / error, plus two E0003. Removing the single `return` removed all eleven.\n\nMechanism, traced by the diagnosing lane: crates/jet-sema/src/Sema/CheckerCore/statements.rs:370-371 sets `self.flow.reachable = false` after a `Stmt::Return`, and lines 366-369 restore `self.flow = before` for each FOLLOWING statement, discarding its declaration. Nothing saves or restores that flag around a lambda body -- crates/jet-sema/src/Sema/CheckerInfer/calls/lambdas.rs:608-609, `Checker::check_lambda`, the `LambdaBody::Block` arm, calls `check_block(stmts, false)` -- so the task body's `return` leaks into the enclosing block. `child` survived because it was declared before the leak took effect; every later binding did not.\n\nWhy this is wrong on the semantics and not only the ergonomics: a `task { }` body is a closure that may run later or not at all, so statements after the task ARE reachable. Treating the task body's return as an unconditional return of the enclosing function is a category error. Note the enclosing-function targeting itself is correct and the corpus depends on it (examples/features/net/http_get.jet uses `?? return` inside `task { }` to leave `run`) -- what is wrong is the REACHABILITY consequence, not the target.\n\nSeverity is a diagnostic-quality problem as much as a correctness one: one mistake inside a task body buries its own real error under a page of unrelated ones, which is exactly the experience I4 exists to prevent.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Save and restore the reachability flag around a lambda/task body so a `return` inside it cannot mark the enclosing block unreachable. The narrow fix is at the `LambdaBody::Block` arm of `check_lambda`; confirm whether the expression-bodied arm needs it too, and whether any other construct checks a nested body through `check_block` without isolating flow (loop bodies, `#Unsafe` blocks, comptime blocks).\n\nThen decide what SHOULD happen to the enclosing flow. A `return` inside a task body still returns the enclosing function when that task body runs, so it is not a no-op for flow analysis -- but it is conditional, not unconditional. Say explicitly which model you implement: conditional-return (enclosing stays reachable, which is what fixes this) or something stricter.\n\nAdd a regression test that a binding declared AFTER a task containing a `return` resolves. Without it this recurs invisibly, because the phantom errors look like ordinary user mistakes. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A binding declared after a task body containing a return resolves normally",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:19:01.002Z"
+        },
+        {
+          "n": 2,
+          "text": "The one real error in such a program is reported without phantom E0107 cascade",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:19:01.415Z"
+        },
+        {
+          "n": 3,
+          "text": "Every construct checking a nested body through check_block isolates reachability, or is documented as deliberately not doing so",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:19:01.857Z"
+        },
+        {
+          "n": 4,
+          "text": "A regression test pins the no-cascade behaviour",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:19:02.262Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "sema",
+        "diagnostics",
+        "i4",
+        "concurrency"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T03:19:00.567Z",
+      "updated": "2026-08-16T03:19:02.263Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0aps31f",
+      "num": 2007,
+      "title": "Cancel raised while already unwinding aborts the process",
+      "body": "examples/features/streams/generators.jet aborts deterministically on AOT after 'consumer: 1' with 'panic in a destructor during cleanup / thread caused non-unwinding panic. aborting.', exit 1.\n\nChain, confirmed by two independent lanes: JetStreamSender::drop (crates/jet-codegen/src/Prelude/Stream.rs:299) sends completion; JetSchedulerSender::send opens with a cancel wait point (Prelude/Scheduler.rs:2170-2171); that reaches jet_task_deliver_cancel and panic_any(JetCancelUnwind) at Scheduler.rs:334 -- raised while the thread is ALREADY unwinding from the same payload (jet_stream_task resume_unwind, Stream.rs:55). Raising during unwind is a double-panic and aborts.\n\nThe guard already exists one function away: jet_scheduler_shield_leave_status at Scheduler.rs:307 checks std::thread::panicking(). jet_task_deliver_cancel does not.\n\nAffects streams/generators on AOT, so it also fails stream_pull_hostile_matrix_matches_interpreter_jit_and_aot and collections_memory_and_streams_match_interpreter_jit_and_aot. The JIT half of that first test was fixed separately; this is the second, independent defect behind it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m11-concurrency",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Two candidate fixes, and the choice is a semantics call rather than a mechanical one.\n\n(a) Guard jet_task_deliver_cancel on !std::thread::panicking(), matching jet_scheduler_shield_leave_status. Minimal and consistent with existing practice, but it silently drops the cancel delivery when it collides with an unwind.\n\n(b) Send the completion inside a shield, so a dropped consumer still observes Completed or Failed rather than losing the notification. Semantically better -- the consumer learns the real outcome -- but it changes when cancellation is deliverable, which is a D-CANCELMODEL1 call and may need ratification.\n\nWhichever lands, no host seam may panic: under an FDE-less JIT frame a raise aborts (#1997). Prefer a status. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "streams/generators runs to completion on AOT with exit 0 and matches its golden",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:35.583Z"
+        },
+        {
+          "n": 2,
+          "text": "A cancel arriving during an unwind neither aborts nor is silently lost, with the chosen behaviour stated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:36.010Z"
+        },
+        {
+          "n": 3,
+          "text": "Every wait point that can run inside drop glue is audited for the same double-raise",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:36.441Z"
+        },
+        {
+          "n": 4,
+          "text": "stream_pull_hostile_matrix and collections_memory_and_streams both reach their own assertions",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:37.638Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "concurrency",
+        "abort",
+        "i9",
+        "streams"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T03:48:35.147Z",
+      "updated": "2026-08-16T03:48:37.639Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0ubjby5",
+      "num": 2008,
+      "title": "Codegen ICE: emit_func reaches a function the typed IR does not cover",
+      "body": "The strict corpus gate produces two internal compiler errors from crates/jet-codegen/src/Codegen/Items.rs:2858:\n\n  internal compiler error: codegen reached a construct the typed IR does not cover (build) - compiler bug (I2/R7)\n  internal compiler error: codegen reached a construct the typed IR does not cover (run) - compiler bug (I2/R7)\n\nImportant reading correction from the diagnosing lane: `(build)` and `(run)` are NOT compile modes. The ice! at Items.rs:2858-2862 interpolates `f.name`, so those are FUNCTION NAMES -- user functions called `build` and `run`. The panic fires from emit_func when TIR::tir_covers(f, cx) is false at Items.rs:2851.\n\nPer I2 an ICE is a compiler bug by definition, so whichever stems reach this are real defects and the gate is right to be red. It must not be recorded as a tier state in tests/jit_corpus_gate.txt.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Identify the stems whose `build` or `run` function fails tir_covers at emit time. Note the shape of the bug: sema admitted the function and codegen then found the typed IR does not cover it, so the two disagree about coverage -- that disagreement is the defect, not the uncovered construct itself. Per I3 all checking belongs in sema, so if a construct cannot be lowered, sema must reject it with a registered diagnostic rather than letting codegen ICE.\n\nDetermine whether this is the same over-admission polarity found repeatedly this session (a gate saying yes where lowering cannot follow) and fix it on the admitting side. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No corpus stem reaches the Items.rs emit_func ICE",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:39.190Z"
+        },
+        {
+          "n": 2,
+          "text": "A construct codegen cannot lower is rejected in sema with a registered diagnostic, not an ICE",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:40.484Z"
+        },
+        {
+          "n": 3,
+          "text": "The offending stems are named and each either compiles or is rejected with a diagnostic",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:41.488Z"
+        },
+        {
+          "n": 4,
+          "text": "example_corpus_strict_jit_aot_differential_gate reaches its own assertion rather than dying on a panic",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:42.339Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "codegen",
+        "i2",
+        "i3",
+        "ice"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T03:48:38.509Z",
+      "updated": "2026-08-16T03:48:42.339Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0sv6ejg",
+      "num": 2009,
+      "title": "io/terminal_parity loops forever on exhausted input",
+      "body": "The compiled binary for examples/features/io/terminal_parity.jet timesed out after 30s in the strict corpus gate, with stdout showing `> Enter a number from 1 to 2.` repeated indefinitely. It re-prompts forever instead of terminating when its input is exhausted.\n\nA read from a closed or empty stdin must end the prompt loop, not retry it. As written the program cannot terminate in any non-interactive context, which includes every test harness, CI job and piped invocation.\n\nCost beyond the hang: the repeated prompt filled a captured log to over 512MB in one run, which made the whole gate's output unreadable and had to be discarded. Anyone who runs this gate pays that.\n\nLikely the substance behind #1931 (io/terminal_parity diverges between tiers) -- check before treating as separate.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Make the prompt loop terminate on end-of-input. The read should distinguish 'no input available, and none will be' from 'invalid input, retry', and only the second may re-prompt. Then decide the program-level behaviour deliberately: an interactive chooser given no input should either take a documented default or report a clear stop, not spin.\n\nAlso cap the retry count regardless, so a future input bug degrades into a bounded failure rather than an unbounded log. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The compiled binary terminates when stdin is closed or empty, with a documented outcome",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:43.207Z"
+        },
+        {
+          "n": 2,
+          "text": "A non-interactive run of the example completes well within the harness timeout",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:44.048Z"
+        },
+        {
+          "n": 3,
+          "text": "The prompt cannot emit unbounded output on repeated invalid or absent input",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:44.915Z"
+        },
+        {
+          "n": 4,
+          "text": "Checked against #1931 and either folded into it or kept separate with the reason stated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T03:48:45.661Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "io",
+        "terminal",
+        "hang"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T03:48:42.775Z",
+      "updated": "2026-08-16T03:48:45.662Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -174652,6 +174925,160 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T03:48:45.662Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sv6ejg",
+      "note": "#4 Checked against #1931 and either folded into it or kept sepa"
+    },
+    {
+      "at": "2026-08-16T03:48:44.915Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sv6ejg",
+      "note": "#3 The prompt cannot emit unbounded output on repeated invalid "
+    },
+    {
+      "at": "2026-08-16T03:48:44.048Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sv6ejg",
+      "note": "#2 A non-interactive run of the example completes well within t"
+    },
+    {
+      "at": "2026-08-16T03:48:43.207Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sv6ejg",
+      "note": "#1 The compiled binary terminates when stdin is closed or empty"
+    },
+    {
+      "at": "2026-08-16T03:48:42.775Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0sv6ejg",
+      "note": "io/terminal_parity loops forever on exhausted input"
+    },
+    {
+      "at": "2026-08-16T03:48:42.339Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ubjby5",
+      "note": "#4 example_corpus_strict_jit_aot_differential_gate reaches its "
+    },
+    {
+      "at": "2026-08-16T03:48:41.488Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ubjby5",
+      "note": "#3 The offending stems are named and each either compiles or is"
+    },
+    {
+      "at": "2026-08-16T03:48:40.485Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ubjby5",
+      "note": "#2 A construct codegen cannot lower is rejected in sema with a "
+    },
+    {
+      "at": "2026-08-16T03:48:39.190Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ubjby5",
+      "note": "#1 No corpus stem reaches the Items.rs emit_func ICE"
+    },
+    {
+      "at": "2026-08-16T03:48:38.509Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0ubjby5",
+      "note": "Codegen ICE: emit_func reaches a function the typed IR does not cover"
+    },
+    {
+      "at": "2026-08-16T03:48:37.639Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0aps31f",
+      "note": "#4 stream_pull_hostile_matrix and collections_memory_and_stream"
+    },
+    {
+      "at": "2026-08-16T03:48:36.442Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0aps31f",
+      "note": "#3 Every wait point that can run inside drop glue is audited fo"
+    },
+    {
+      "at": "2026-08-16T03:48:36.010Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0aps31f",
+      "note": "#2 A cancel arriving during an unwind neither aborts nor is sil"
+    },
+    {
+      "at": "2026-08-16T03:48:35.583Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0aps31f",
+      "note": "#1 streams/generators runs to completion on AOT with exit 0 and"
+    },
+    {
+      "at": "2026-08-16T03:48:35.147Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0aps31f",
+      "note": "Cancel raised while already unwinding aborts the process"
+    },
+    {
+      "at": "2026-08-16T03:48:34.735Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02ur7xi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T03:48:34.076Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08pvmkh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T03:19:02.263Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02esppi",
+      "note": "#4 A regression test pins the no-cascade behaviour"
+    },
+    {
+      "at": "2026-08-16T03:19:01.857Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02esppi",
+      "note": "#3 Every construct checking a nested body through check_block i"
+    },
+    {
+      "at": "2026-08-16T03:19:01.415Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02esppi",
+      "note": "#2 The one real error in such a program is reported without pha"
+    },
+    {
+      "at": "2026-08-16T03:19:01.002Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02esppi",
+      "note": "#1 A binding declared after a task body containing a return res"
+    },
+    {
+      "at": "2026-08-16T03:19:00.567Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c02esppi",
+      "note": "A return inside a task body erases later declarations"
+    },
+    {
       "at": "2026-08-16T02:57:13.611Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -177996,160 +178423,6 @@
       "action": "card.criteria-meet",
       "ref": "c08ogzrs",
       "note": "#7"
-    },
-    {
-      "at": "2026-08-15T06:57:47.444Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T06:57:46.938Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T06:57:46.421Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T06:57:45.890Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:57:45.374Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T06:57:44.845Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:47:04.538Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kh8udw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:42:35.894Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c01azcl9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T06:42:35.210Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01azcl9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T06:42:34.691Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01azcl9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:42:34.156Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01azcl9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T06:42:33.628Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01azcl9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:41:07.148Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09wyq82",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T06:41:06.482Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09wyq82",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:41:05.964Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09wyq82",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T06:41:05.435Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09wyq82",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:37:18.226Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-15T06:37:17.000Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T06:37:15.576Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T06:37:15.051Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T06:37:14.075Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T06:37:12.506Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#4"
     }
   ],
   "nextNum": 368,

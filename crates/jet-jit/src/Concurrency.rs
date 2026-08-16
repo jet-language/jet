@@ -787,6 +787,36 @@ pub(crate) fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
     ACTIVE_RUNTIME.with(|slot| *slot.borrow())
 }
 
+/// Re-raise an already-reported child stop out of a JIT task body, using the
+/// carrier its catcher reads and *without* running Rust's panic hook.
+///
+/// `jet_scheduler_catch_task_unwind` publishes the child value out of a
+/// `String` payload (`jet_scheduler_panic_message`), so the payload type here
+/// must match `Prelude/Core.rs`'s `jet_runtime_stop_unwind`, which raises
+/// `Box::new(message.to_string())` for the same frame on the AOT tier (I9:
+/// engines marshal, they do not re-decide).
+///
+/// `resume_unwind` rather than `panic!` is the whole point. The scheduler's
+/// process-global hook stays quiet only for `jet_scheduler_converted_unwind`
+/// payloads — a cancel/deadline marker, the `__jet_ffi_runtime__: ` marker, or
+/// a transported `Stop [` / `Error [` report. A child's own panic message is
+/// none of those, so `panic!` here printed a raw `thread '<unnamed>' panicked
+/// at Concurrency.rs` banner beside a failure the parent already reports in Jet
+/// terms (I2/I4). Widening the quiet set instead would silence genuinely
+/// unconvertible host panics, and rendering the report into the payload instead
+/// would corrupt the value: `jet_scheduler_panic_message` splits a transported
+/// report on `]: `, and E3001's row text is `` `panic: {msg}` — with Jet file,
+/// … ``, so `.Panicked(reason)` would carry that whole sentence instead of the
+/// program's own message. `resume_unwind` is also what
+/// `jit/runtime_host.rs`'s `runtime_stop_unwind` already uses.
+///
+/// #1997: cranelift-jit registers no unwind info, so this must never run with a
+/// JIT frame on the stack. It cannot — the callers below raise only after
+/// `f()` has returned, from plain Rust frames.
+fn resume_child_stop(message: String) -> ! {
+    std::panic::resume_unwind(Box::new(message))
+}
+
 /// Run JIT spawn body on a pool worker with the spawner's runtime heap wired up.
 fn spawn_with_runtime<F>(f: F) -> i64
 where
@@ -822,17 +852,16 @@ where
             // resident runtime would report the child as a parent panic too.
             let panic_reason = take_rich_panic_reason();
             let _panic_report = take_rich_panic_report();
-            let rich = panic_reason.is_some();
             set_active_runtime(None);
             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
             if let Some(rendered) = child_deadline {
                 jet_scheduler_propagate_deadline(rendered);
             }
-            if rich {
-                panic!("{}", panic_reason.unwrap_or_else(|| "a task panicked".to_string()));
+            if let Some(reason) = panic_reason {
+                resume_child_stop(reason);
             }
             if let Some(reason) = task_trap {
-                panic!("{reason}");
+                resume_child_stop(reason);
             }
             out
         },

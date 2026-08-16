@@ -56,6 +56,54 @@ fn in_own_frame<R>(body: impl FnOnce() -> R) -> R {
     body()
 }
 
+/// Dynamic nesting depth of scope cleanup (`defer close(^…)`, `scope.guard`)
+/// currently running in this thread's generated code.
+///
+/// `LowerCtx::in_lexical_exit` already suppresses the trap check a frame emits
+/// for its OWN cleanup sequence, but that flag is a lowering-time property of
+/// one function. A cleanup guard calls a SEPARATELY compiled Jet function
+/// (`Close.close`), and every check that function emits — starting with the one
+/// `emit_stack_enter` puts in its prologue — reads the tier's pending-interrupt
+/// channel afresh. The interrupt that STARTED the cleanup is still posted there
+/// (`PENDING_SHIELD_EXIT` is consumed only by `settle_pending_after_native` and
+/// the spawn-wrapper epilogue), so the callee bailed at its own prologue and the
+/// cleanup body never ran at all: `defer` was silently skipped in exactly the
+/// case it exists for. This counter carries the caller's cleanup context into
+/// the callee, and transitively into anything the callee calls, so one cleanup
+/// runs to completion for its whole dynamic extent.
+///
+/// It masks only the PENDING-INTERRUPT half of a check. `jet_jit_is_trapped`
+/// still contributes, so a real fault raised inside a cleanup body (a host
+/// fault, a checked-arithmetic trap, a reported panic) still unwinds and still
+/// reports. Nothing is consumed either: the pending cancel/deadline stays
+/// posted, so the exit path below (`emit_lexical_values_exit`, which reads it
+/// after the guards have run) and the spawn-wrapper epilogue both still see it
+/// and a cancelled producer still reports Cancelled.
+///
+/// Thread-local, like `PENDING_SHIELD_EXIT` itself: cleanup running on a
+/// cancelled producer thread must not mask a live interrupt on the consumer's.
+/// `Cell<u32>` has no destructor, so `with` cannot panic during TLS teardown —
+/// #1997 forbids a panic on any seam a Cranelift frame calls.
+thread_local! {
+    static CLEANUP_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Generated code reaches these three by absolute address (`call_indirect` on an
+/// `iconst`, as it already does for a Jet function value), not through
+/// `HostFns`: cleanup context is lowering state for this file, not a Core
+/// operation, and I9 keeps program semantics in the Prelude.
+extern "C" fn jet_jit_cleanup_enter() {
+    CLEANUP_DEPTH.with(|depth| depth.set(depth.get() + 1));
+}
+
+extern "C" fn jet_jit_cleanup_leave() {
+    CLEANUP_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+}
+
+extern "C" fn jet_jit_in_cleanup() -> i64 {
+    CLEANUP_DEPTH.with(|depth| i64::from(depth.get() != 0))
+}
+
 #[derive(Clone)]
 pub(crate) struct LoopTargets {
     label: Option<String>,
@@ -2766,6 +2814,42 @@ impl LowerCtx<'_, '_> {
         s.replace("\\\"", "\"").replace("\\\\", "\\")
     }
 
+    /// Call one of the zero-argument cleanup-context shims above by address.
+    fn call_cleanup_shim(&mut self, addr: usize, returns: bool) -> Option<Value> {
+        let mut sig = self.module.make_signature();
+        if returns {
+            sig.returns
+                .push(cranelift_codegen::ir::AbiParam::new(types::I64));
+        }
+        let sig_ref = self.b.import_signature(sig);
+        let callee = self.b.ins().iconst(types::I64, addr as i64);
+        let call = self.b.ins().call_indirect(sig_ref, callee, &[]);
+        returns.then(|| self.b.inst_results(call)[0])
+    }
+
+    fn emit_cleanup_enter(&mut self) {
+        let addr = jet_jit_cleanup_enter as extern "C" fn() as usize;
+        self.call_cleanup_shim(addr, false);
+    }
+
+    fn emit_cleanup_leave(&mut self) {
+        let addr = jet_jit_cleanup_leave as extern "C" fn() as usize;
+        self.call_cleanup_shim(addr, false);
+    }
+
+    /// Drop the pending cancel/deadline out of a trap check while a cleanup body
+    /// is running: that interrupt is what asked for the cleanup, so reacting to
+    /// it here would abort the cleanup with its own cause. The flag itself is
+    /// untouched and still reaches every exit path and the spawn epilogue.
+    fn mask_pending_in_cleanup(&mut self, pending: Value) -> Value {
+        let addr = jet_jit_in_cleanup as extern "C" fn() -> i64 as usize;
+        let in_cleanup = self
+            .call_cleanup_shim(addr, true)
+            .expect("cleanup query returns a status");
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.ins().select(in_cleanup, zero, pending)
+    }
+
     fn emit_scope_guards_preserving(&mut self, preserve: &[String]) -> Result<(), String> {
         // Keep the stack: early returns and sibling exit paths each need the
         // same LIFO cleanup (D-DEFER1). Cleared when the function finishes.
@@ -3297,9 +3381,11 @@ impl LowerCtx<'_, '_> {
             status = self.merge_exit_status(status, close_status);
         }
         self.emit_stream_consumer_closes();
+        self.emit_cleanup_enter();
         self.in_lexical_exit = true;
         let guards = self.emit_scope_guards_preserving(preserve_shared_guards);
         self.in_lexical_exit = false;
+        self.emit_cleanup_leave();
         guards?;
         if self.cell_frame {
             let returned = if self.ret_cell_layout != 0 {
@@ -3539,6 +3625,7 @@ impl LowerCtx<'_, '_> {
         let mut flag = self.call_host(self.host.is_trapped, &[]);
         if self.shield_depth == 0 {
             let pending = self.call_host(self.host.conc.pending_exit_status, &[]);
+            let pending = self.mask_pending_in_cleanup(pending);
             flag = self
                 .merge_exit_status(Some(flag), pending)
                 .expect("existing exit status");
