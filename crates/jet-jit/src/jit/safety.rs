@@ -3046,13 +3046,14 @@ fn resident_safe_builtin_op(
     // deopts to tier-0 interp even though the op is fully JIT-native-safe.
     let recv_ty = erase_runtime_qualifiers(&recv.ty);
     match op {
-        TBuiltinOp::LenString => {
-            (matches!(recv_ty, Type::String) || is_process_result_string_field(recv))
-                && args.is_empty()
-        }
+        // A `ProcessResult.output`/`.errors` receiver needs no special case: the
+        // field read carries `Type::String`, the type sema declared. It used to
+        // carry `Type::Int` (card 2021), which is why two of these arms — and
+        // only two, so `child.output.replace(…)` never became resident at all —
+        // used to admit the field structurally.
+        TBuiltinOp::LenString => matches!(recv_ty, Type::String) && args.is_empty(),
         TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower => {
-            (matches!(recv_ty, Type::String) || is_process_result_string_field(recv))
-                && args.is_empty()
+            matches!(recv_ty, Type::String) && args.is_empty()
         }
         TBuiltinOp::Replace => {
             matches!(recv_ty, Type::String)
@@ -5260,18 +5261,6 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
         ),
         _ => false,
     }
-}
-
-fn is_process_result_string_field(expr: &TExpr) -> bool {
-    matches!(
-        &expr.kind,
-        TExprKind::Field {
-            recv,
-            field,
-            boxed: false
-        } if matches!(&recv.ty, Type::Named(n) if n == "ProcessResult")
-            && matches!(field.as_str(), "output" | "errors")
-    )
 }
 
 /// Body of `child.stdout.lines()` — loop var type is erased to Unit in TIR.

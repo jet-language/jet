@@ -3701,73 +3701,68 @@ fn collect_struct_field_types(
     out
 }
 
+/// CORE ("Prelude") records the interpreter must know the shape of: structural
+/// clone and Debug show read a field's declared type from here.
+///
+/// I9 / card 2021: the interpreter states the declaration ORDER of these rows
+/// and nothing else. The field TYPES come from sema's one table, the same one
+/// AOT lowering and the JIT read, because three private copies of a Core
+/// record's shape is exactly how `ProcessResult.output` came to be a `String`
+/// in sema and an `Int` in the emitter.
 fn insert_core_struct_field_types(
     fields: &mut HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) {
-    fields.insert(
-        crate::Syntax::TYPE_MEMO_STATS.to_string(),
-        vec![
-            ("hits".to_string(), Type::Int),
-            ("misses".to_string(), Type::Int),
-            ("size".to_string(), Type::Int),
-            ("bound".to_string(), Type::String),
-        ],
-    );
-    fields.insert(
-        crate::Syntax::TYPE_IO_CONTEXT.to_string(),
-        vec![
-            (
-                "operation".to_string(),
-                Type::Named(crate::Syntax::TYPE_IO_OPERATION.to_string()),
-            ),
-            (
-                "resource".to_string(),
-                Type::Option(Box::new(Type::String)),
-            ),
-            (
-                "os_code".to_string(),
-                Type::Option(Box::new(Type::Int)),
-            ),
-            (
-                "cause".to_string(),
-                Type::Option(Box::new(Type::String)),
-            ),
-        ],
-    );
-    fields.insert(
-        "TestSuite".to_string(),
-        vec![("iteration".to_string(), Type::Int), ("result".to_string(), Type::Int)],
-    );
-    fields.insert(
-        "BenchSuite".to_string(),
-        vec![("iteration".to_string(), Type::Int), ("result".to_string(), Type::Int)],
-    );
-    fields.insert(
-        "TLSCertificate".to_string(),
-        vec![
-            ("der".to_string(), Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
-            ("sha256".to_string(), Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
-            ("spki_sha256".to_string(), Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
-            ("dns_names".to_string(), Type::List(Box::new(Type::String))),
-            ("valid_from_unix_ms".to_string(), Type::Int),
-            ("valid_until_unix_ms".to_string(), Type::Int),
-            ("subject".to_string(), Type::String),
-            ("issuer".to_string(), Type::String),
-        ],
-    );
-    fields.insert(
-        "TLSPeerIdentity".to_string(),
-        vec![
-            ("verified_server_name".to_string(), Type::String),
-            ("leaf".to_string(), Type::Named("TLSCertificate".to_string())),
-            (
-                "certificate_chain".to_string(),
-                Type::List(Box::new(Type::Named("TLSCertificate".to_string()))),
-            ),
-            ("cipher_suite".to_string(), Type::String),
-            ("tls_version".to_string(), Type::Named("TLSVersion".to_string())),
-        ],
-    );
+    const CORE_ROWS: &[(&str, &[&str])] = &[
+        (
+            crate::Syntax::TYPE_MEMO_STATS,
+            &["hits", "misses", "size", "bound"],
+        ),
+        (
+            crate::Syntax::TYPE_IO_CONTEXT,
+            &["operation", "resource", "os_code", "cause"],
+        ),
+        ("TestSuite", &["iteration", "result"]),
+        ("BenchSuite", &["iteration", "result"]),
+        (
+            "TLSCertificate",
+            &[
+                "der",
+                "sha256",
+                "spki_sha256",
+                "dns_names",
+                "valid_from_unix_ms",
+                "valid_until_unix_ms",
+                "subject",
+                "issuer",
+            ],
+        ),
+        (
+            "TLSPeerIdentity",
+            &[
+                "verified_server_name",
+                "leaf",
+                "certificate_chain",
+                "cipher_suite",
+                "tls_version",
+            ],
+        ),
+    ];
+    for (type_name, names) in CORE_ROWS {
+        // A row is inserted whole or not at all. A half-filled row would hand
+        // structural clone and Debug show a record whose field list no longer
+        // matches its declaration order, which prints the wrong field.
+        let Some(row) = names
+            .iter()
+            .map(|field| {
+                crate::Sema::core_struct_field_type(type_name, field, &[])
+                    .map(|ty| ((*field).to_string(), ty))
+            })
+            .collect::<Option<Vec<(String, crate::AST::Type)>>>()
+        else {
+            continue;
+        };
+        fields.insert((*type_name).to_string(), row);
+    }
 }
 
 fn normalize_struct_field_types(

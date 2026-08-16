@@ -4511,6 +4511,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         }
                     }
                 }
+                // The `Int` here is a LAST RESORT, never a default: it is the
+                // guess that emitted `jet_int_to_string(<String>)` for
+                // `child.output` and made rustc reject Jet's own output (card
+                // 2021, an I2 internal compiler error). `struct_field_type` now
+                // answers from the table sema declared the field in, so the
+                // guess is unreachable for every user struct and every CORE
+                // struct. Anything still reaching it is a receiver sema itself
+                // could not name — do not widen it, and never make print's
+                // integer fast path (`emit/expressions.rs`, `Type::Int`) key on
+                // a type that came from here.
                 let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
                 // A field of a CORE struct (`ProcessResult.code`, `JSONError.message`, …) is
                 // emitted by its PLAIN Rust name, never `__jet_<name>` (the core structs in
