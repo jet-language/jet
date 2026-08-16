@@ -1854,12 +1854,12 @@ fn take_file_reader(handle: i64) -> Result<runtime::JetFileReader, String> {
 }
 
 /// Drop a FileWriter handle (BufWriter Drop flushes). Used by `close` / resource cleanup.
-pub(crate) extern "C" fn jet_jit_file_writer_close(handle: i64) {
+pub(crate) fn jet_jit_file_writer_close(handle: i64) {
     let _ = take_file_writer(handle);
 }
 
 /// Drop a FileReader handle.
-pub(crate) extern "C" fn jet_jit_file_reader_close(handle: i64) {
+pub(crate) fn jet_jit_file_reader_close(handle: i64) {
     let _ = take_file_reader(handle);
 }
 
@@ -2127,7 +2127,7 @@ fn option_bits(opt: Option<i64>) -> u64 {
 
 // ── core.files create / open ─────────────────────────────────────────────────
 
-pub(crate) extern "C" fn jet_jit_fs_create(path: i64) -> i64 {
+pub(crate) fn jet_jit_fs_create(path: i64) -> i64 {
     let p = clone_string(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
@@ -2148,7 +2148,7 @@ pub(crate) extern "C" fn jet_jit_fs_create(path: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_fs_open(path: i64) -> i64 {
+pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
     let p = clone_string(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
@@ -2178,7 +2178,7 @@ macro_rules! push_codec {
     }};
 }
 
-pub(crate) extern "C" fn jet_jit_json_writer(file: i64, limits: i64, canonical: i64) -> i64 {
+pub(crate) fn jet_jit_json_writer(file: i64, limits: i64, canonical: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
         Err(e) => return result_err_msg(&e),
@@ -2199,7 +2199,7 @@ pub(crate) extern "C" fn jet_jit_json_writer(file: i64, limits: i64, canonical: 
     }
 }
 
-pub(crate) extern "C" fn jet_jit_json_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_json_reader(file: i64, limits: i64) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -2220,7 +2220,7 @@ pub(crate) extern "C" fn jet_jit_json_reader(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_jsonl_writer(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_jsonl_writer(file: i64, limits: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
         Err(e) => return result_err_msg(&e),
@@ -2241,7 +2241,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_jsonl_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_jsonl_reader(file: i64, limits: i64) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -2262,7 +2262,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_reader(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
         Err(e) => return result_err_msg(&e),
@@ -2283,7 +2283,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -2304,7 +2304,7 @@ pub(crate) extern "C" fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_cbor_writer(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_cbor_writer(file: i64, limits: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
         Err(e) => return result_err_msg(&e),
@@ -2325,7 +2325,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -2346,7 +2346,7 @@ pub(crate) extern "C" fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
         Err(e) => return result_err_msg(&e),
@@ -2368,7 +2368,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_xml_reader(file: i64, limits: i64) -> i64 {
+pub(crate) fn jet_jit_xml_reader(file: i64, limits: i64) -> i64 {
     let r = match take_file_reader(file) {
         Ok(r) => r,
         Err(e) => return result_err_msg(&e),
@@ -2404,7 +2404,7 @@ macro_rules! with_writer {
     }};
 }
 
-pub(crate) extern "C" fn jet_jit_json_writer_write(handle: i64, event: i64) -> i64 {
+pub(crate) fn jet_jit_json_writer_write(handle: i64, event: i64) -> i64 {
     let ev = match read_data_event(event) {
         Ok(e) => e,
         Err(e) => return result_err_msg(&e),
@@ -2418,7 +2418,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_write(handle: i64, event: i64) -> i
     }
 }
 
-pub(crate) extern "C" fn jet_jit_json_writer_flush(handle: i64) -> i64 {
+pub(crate) fn jet_jit_json_writer_flush(handle: i64) -> i64 {
     match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
         runtime::enc_json_writer_flush(w)
     }) {
@@ -2428,7 +2428,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_flush(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_json_writer_finish(handle: i64) -> i64 {
+pub(crate) fn jet_jit_json_writer_finish(handle: i64) -> i64 {
     match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
         runtime::enc_json_writer_finish(w)
     }) {
@@ -2438,7 +2438,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_finish(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_json_reader_next(handle: i64) -> i64 {
+pub(crate) fn jet_jit_json_reader_next(handle: i64) -> i64 {
     match with_writer!(json_readers, JSONReaderSlot, handle, |r| {
         runtime::enc_json_reader_next(r)
     }) {
@@ -2452,7 +2452,7 @@ pub(crate) extern "C" fn jet_jit_json_reader_next(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_jsonl_writer_write(handle: i64, tree: i64) -> i64 {
+pub(crate) fn jet_jit_jsonl_writer_write(handle: i64, tree: i64) -> i64 {
     let Some(dt) = read_datatree(tree) else {
         return result_err_msg("bad DataTree");
     };
@@ -2466,7 +2466,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer_write(handle: i64, tree: i64) -> i
     }
 }
 
-pub(crate) extern "C" fn jet_jit_jsonl_writer_flush(handle: i64) -> i64 {
+pub(crate) fn jet_jit_jsonl_writer_flush(handle: i64) -> i64 {
     match with_writer!(jsonl_writers, JsonlWriterSlot, handle, |w| {
         runtime::enc_jsonl_writer_flush(w)
     }) {
@@ -2476,7 +2476,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer_flush(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_jsonl_writer_finish(handle: i64) -> i64 {
+pub(crate) fn jet_jit_jsonl_writer_finish(handle: i64) -> i64 {
     match with_writer!(jsonl_writers, JsonlWriterSlot, handle, |w| {
         runtime::enc_jsonl_writer_finish(w)
     }) {
@@ -2486,7 +2486,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_writer_finish(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_jsonl_reader_next(handle: i64) -> i64 {
+pub(crate) fn jet_jit_jsonl_reader_next(handle: i64) -> i64 {
     match with_writer!(jsonl_readers, JsonlReaderSlot, handle, |r| {
         runtime::enc_jsonl_reader_next(r)
     }) {
@@ -2500,7 +2500,7 @@ pub(crate) extern "C" fn jet_jit_jsonl_reader_next(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 {
+pub(crate) fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 {
     let cells = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(row).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
@@ -2519,7 +2519,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 
     }
 }
 
-pub(crate) extern "C" fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
+pub(crate) fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
     match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
         runtime::enc_csv_writer_flush(w)
     }) {
@@ -2529,7 +2529,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
+pub(crate) fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
     match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
         runtime::enc_csv_writer_finish(w)
     }) {
@@ -2539,7 +2539,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_csv_reader_next(handle: i64) -> i64 {
+pub(crate) fn jet_jit_csv_reader_next(handle: i64) -> i64 {
     match with_writer!(csv_readers, CSVReaderSlot, handle, |r| {
         runtime::enc_csv_reader_next(r)
     }) {
@@ -2560,7 +2560,7 @@ pub(crate) extern "C" fn jet_jit_csv_reader_next(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i64 {
+pub(crate) fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i64 {
     let ev = match read_data_event(event) {
         Ok(e) => e,
         Err(e) => return result_err_msg(&e),
@@ -2574,7 +2574,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i
     }
 }
 
-pub(crate) extern "C" fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
+pub(crate) fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
     match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
         runtime::enc_cbor_writer_flush(w)
     }) {
@@ -2584,7 +2584,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
+pub(crate) fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
     match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
         runtime::enc_cbor_writer_finish(w)
     }) {
@@ -2594,7 +2594,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
+pub(crate) fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
     match with_writer!(cbor_readers, CBORReaderSlot, handle, |r| {
         runtime::enc_cbor_reader_next(r)
     }) {
@@ -2608,7 +2608,7 @@ pub(crate) extern "C" fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_xml_writer_write(handle: i64, tree: i64) -> i64 {
+pub(crate) fn jet_jit_xml_writer_write(handle: i64, tree: i64) -> i64 {
     let Some(dt) = read_datatree(tree) else {
         return result_err_msg("bad DataTree");
     };
@@ -2622,7 +2622,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer_write(handle: i64, tree: i64) -> i64
     }
 }
 
-pub(crate) extern "C" fn jet_jit_xml_writer_flush(handle: i64) -> i64 {
+pub(crate) fn jet_jit_xml_writer_flush(handle: i64) -> i64 {
     match with_writer!(xml_writers, XmlWriterSlot, handle, |w| {
         runtime::enc_xml_writer_flush(w)
     }) {
@@ -2632,7 +2632,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer_flush(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_xml_writer_finish(handle: i64) -> i64 {
+pub(crate) fn jet_jit_xml_writer_finish(handle: i64) -> i64 {
     match with_writer!(xml_writers, XmlWriterSlot, handle, |w| {
         runtime::enc_xml_writer_finish(w)
     }) {
@@ -2642,7 +2642,7 @@ pub(crate) extern "C" fn jet_jit_xml_writer_finish(handle: i64) -> i64 {
     }
 }
 
-pub(crate) extern "C" fn jet_jit_xml_reader_next(handle: i64) -> i64 {
+pub(crate) fn jet_jit_xml_reader_next(handle: i64) -> i64 {
     match with_writer!(xml_readers, XmlReaderSlot, handle, |r| {
         runtime::enc_xml_reader_next(r)
     }) {

@@ -134,7 +134,7 @@ fn push_struct_f64(fields: &[f64]) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_node_label(node: i64) -> i64 {
+fn jet_jit_ui_node_label(node: i64) -> i64 {
     with_rt(|rt| {
         let label = rt
             .ui
@@ -146,7 +146,7 @@ extern "C" fn jet_jit_ui_node_label(node: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_node_dim(node: i64, which: i64) -> f64 {
+fn jet_jit_ui_node_dim(node: i64, which: i64) -> f64 {
     with_rt(|rt| {
         let Some(n) = rt.ui.nodes.get(node.saturating_sub(1) as usize) else {
             return 0.0;
@@ -159,28 +159,28 @@ extern "C" fn jet_jit_ui_node_dim(node: i64, which: i64) -> f64 {
     })
 }
 
-extern "C" fn jet_jit_ui_null_backend() -> i64 {
+fn jet_jit_ui_null_backend() -> i64 {
     with_rt(|rt| {
         rt.ui.backends.push(UiBackendSlot::Null(ui_rt::jet_ui_null()));
         rt.ui.backends.len() as i64
     })
 }
 
-extern "C" fn jet_jit_ui_tui_backend() -> i64 {
+fn jet_jit_ui_tui_backend() -> i64 {
     with_rt(|rt| {
         rt.ui.backends.push(UiBackendSlot::Tui(ui_rt::jet_ui_tui()));
         rt.ui.backends.len() as i64
     })
 }
 
-extern "C" fn jet_jit_ui_gtk_backend() -> i64 {
+fn jet_jit_ui_gtk_backend() -> i64 {
     with_rt(|rt| {
         rt.ui.backends.push(UiBackendSlot::Gtk(ui_rt::jet_ui_gtk()));
         rt.ui.backends.len() as i64
     })
 }
 
-extern "C" fn jet_jit_ui_node(label: i64, w: f64, h: f64) -> i64 {
+fn jet_jit_ui_node(label: i64, w: f64, h: f64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
         rt.ui.nodes.push(ui_rt::jet_ui_node(&label, w, h));
@@ -188,7 +188,7 @@ extern "C" fn jet_jit_ui_node(label: i64, w: f64, h: f64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_text(label: i64) -> i64 {
+fn jet_jit_ui_text(label: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
         rt.ui.nodes.push(ui_rt::jet_ui_text(&label));
@@ -196,7 +196,7 @@ extern "C" fn jet_jit_ui_text(label: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_button(label: i64) -> i64 {
+fn jet_jit_ui_button(label: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
         rt.ui.nodes.push(ui_rt::jet_ui_button(&label));
@@ -206,7 +206,7 @@ extern "C" fn jet_jit_ui_button(label: i64) -> i64 {
 
 /// D-WEB-CLICK-PORT1=D: portable `ui.button(label, on_click:)` — same Prelude
 /// registration AOT uses (`jet_ui_button_on_click`).
-extern "C" fn jet_jit_ui_button_on_click(
+fn jet_jit_ui_button_on_click(
     label: i64,
     fn_ptr: i64,
     n_caps: i64,
@@ -229,7 +229,7 @@ extern "C" fn jet_jit_ui_button_on_click(
     })
 }
 
-extern "C" fn jet_jit_ui_node_color(label: i64, w: f64, h: f64, color: i64) -> i64 {
+fn jet_jit_ui_node_color(label: i64, w: f64, h: f64, color: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
         let color = rt.heap.clone_string(color).unwrap_or_default();
@@ -240,7 +240,7 @@ extern "C" fn jet_jit_ui_node_color(label: i64, w: f64, h: f64, color: i64) -> i
     })
 }
 
-extern "C" fn jet_jit_ui_node_role(label: i64, w: f64, h: f64, role: i64) -> i64 {
+fn jet_jit_ui_node_role(label: i64, w: f64, h: f64, role: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
         let role = *rt
@@ -255,7 +255,7 @@ extern "C" fn jet_jit_ui_node_role(label: i64, w: f64, h: f64, role: i64) -> i64
     })
 }
 
-extern "C" fn jet_jit_ui_box(children: i64) -> i64 {
+fn jet_jit_ui_box(children: i64) -> i64 {
     with_rt(|rt| {
         let n = rt.heap.list_len(children).unwrap_or(0);
         let mut kids = Vec::new();
@@ -270,21 +270,21 @@ extern "C" fn jet_jit_ui_box(children: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_constraint(a: f64, b: f64, c: f64, d: f64) -> i64 {
+fn jet_jit_ui_constraint(a: f64, b: f64, c: f64, d: f64) -> i64 {
     with_rt(|rt| {
         rt.ui.constraints.push(ui_rt::jet_ui_constraint(a, b, c, d));
         rt.ui.constraints.len() as i64
     })
 }
 
-extern "C" fn jet_jit_ui_rect(x: f64, y: f64, w: f64, h: f64) -> i64 {
+fn jet_jit_ui_rect(x: f64, y: f64, w: f64, h: f64) -> i64 {
     with_rt(|rt| {
         rt.ui.rects.push(ui_rt::jet_ui_rect(x, y, w, h));
         rt.ui.rects.len() as i64
     })
 }
 
-extern "C" fn jet_jit_ui_key_event(code: i64) -> i64 {
+fn jet_jit_ui_key_event(code: i64) -> i64 {
     with_rt(|rt| {
         let code = rt.heap.clone_string(code).unwrap_or_default();
         rt.ui.events.push(ui_rt::jet_ui_key_event(&code));
@@ -292,7 +292,7 @@ extern "C" fn jet_jit_ui_key_event(code: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_aria_role(kind: i64) -> i64 {
+fn jet_jit_ui_aria_role(kind: i64) -> i64 {
     with_rt(|rt| {
         let role = match kind {
             0 => ui_rt::jet_ui_aria_role_button(),
@@ -305,7 +305,7 @@ extern "C" fn jet_jit_ui_aria_role(kind: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_measure(backend: i64, node: i64, constraint: i64) -> i64 {
+fn jet_jit_ui_measure(backend: i64, node: i64, constraint: i64) -> i64 {
     with_rt(|rt| {
         let node = rt
             .ui
@@ -342,7 +342,7 @@ extern "C" fn jet_jit_ui_measure(backend: i64, node: i64, constraint: i64) -> i6
     })
 }
 
-extern "C" fn jet_jit_ui_layout(backend: i64, node: i64, rect: i64) {
+fn jet_jit_ui_layout(backend: i64, node: i64, rect: i64) {
     with_rt(|rt| {
         let node = rt
             .ui
@@ -368,7 +368,7 @@ extern "C" fn jet_jit_ui_layout(backend: i64, node: i64, rect: i64) {
     });
 }
 
-extern "C" fn jet_jit_ui_paint(backend: i64, node: i64) {
+fn jet_jit_ui_paint(backend: i64, node: i64) {
     with_rt(|rt| {
         let node = rt
             .ui
@@ -390,7 +390,7 @@ extern "C" fn jet_jit_ui_paint(backend: i64, node: i64) {
 }
 
 /// D-UI-MOUNT1=A: measure → layout → paint (I9: same Prelude methods AOT uses).
-extern "C" fn jet_jit_ui_mount(backend: i64, node: i64, constraint: i64) {
+fn jet_jit_ui_mount(backend: i64, node: i64, constraint: i64) {
     with_rt(|rt| {
         let node = rt
             .ui
@@ -416,7 +416,7 @@ extern "C" fn jet_jit_ui_mount(backend: i64, node: i64, constraint: i64) {
     });
 }
 
-extern "C" fn jet_jit_ui_mount_default(backend: i64, node: i64) {
+fn jet_jit_ui_mount_default(backend: i64, node: i64) {
     with_rt(|rt| {
         let node = rt
             .ui
@@ -437,7 +437,7 @@ extern "C" fn jet_jit_ui_mount_default(backend: i64, node: i64) {
     });
 }
 
-extern "C" fn jet_jit_ui_on_event(backend: i64, event: i64) -> i64 {
+fn jet_jit_ui_on_event(backend: i64, event: i64) -> i64 {
     with_rt(|rt| {
         let event = rt
             .ui
@@ -463,7 +463,7 @@ extern "C" fn jet_jit_ui_on_event(backend: i64, event: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_commands(backend: i64) -> i64 {
+fn jet_jit_ui_commands(backend: i64) -> i64 {
     with_rt(|rt| {
         let cmds = match rt
             .ui
@@ -484,7 +484,7 @@ extern "C" fn jet_jit_ui_commands(backend: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_frame_lines(backend: i64) -> i64 {
+fn jet_jit_ui_frame_lines(backend: i64) -> i64 {
     with_rt(|rt| {
         let lines = match rt
             .ui
@@ -504,7 +504,7 @@ extern "C" fn jet_jit_ui_frame_lines(backend: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_render_count(backend: i64) -> i64 {
+fn jet_jit_ui_render_count(backend: i64) -> i64 {
     with_rt(|rt| match rt
         .ui
         .backends
@@ -516,7 +516,7 @@ extern "C" fn jet_jit_ui_render_count(backend: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_set_focus_group(backend: i64, nodes: i64) {
+fn jet_jit_ui_set_focus_group(backend: i64, nodes: i64) {
     with_rt(|rt| {
         let n = rt.heap.list_len(nodes).unwrap_or(0);
         let mut group = Vec::new();
@@ -539,7 +539,7 @@ extern "C" fn jet_jit_ui_set_focus_group(backend: i64, nodes: i64) {
     });
 }
 
-extern "C" fn jet_jit_ui_focused_label(backend: i64) -> i64 {
+fn jet_jit_ui_focused_label(backend: i64) -> i64 {
     with_rt(|rt| {
         let label = match rt
             .ui
@@ -555,7 +555,7 @@ extern "C" fn jet_jit_ui_focused_label(backend: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_gtk_button(backend: i64, label: i64) -> i64 {
+fn jet_jit_ui_gtk_button(backend: i64, label: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_default();
         let widget = match rt
@@ -572,7 +572,7 @@ extern "C" fn jet_jit_ui_gtk_button(backend: i64, label: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_ui_gtk_on_click(
+fn jet_jit_ui_gtk_on_click(
     backend: i64,
     widget: i64,
     fn_ptr: i64,
@@ -604,7 +604,7 @@ extern "C" fn jet_jit_ui_gtk_on_click(
     });
 }
 
-extern "C" fn jet_jit_ui_gtk_present(backend: i64, title: i64) {
+fn jet_jit_ui_gtk_present(backend: i64, title: i64) {
     with_rt(|rt| {
         let title = rt.heap.clone_string(title).unwrap_or_default();
         if let UiBackendSlot::Gtk(b) = rt
@@ -618,7 +618,7 @@ extern "C" fn jet_jit_ui_gtk_present(backend: i64, title: i64) {
     });
 }
 
-extern "C" fn jet_jit_ui_reactive_render(
+fn jet_jit_ui_reactive_render(
     fn_ptr: i64,
     n_caps: i64,
     c0: i64,

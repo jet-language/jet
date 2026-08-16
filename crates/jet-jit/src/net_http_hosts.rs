@@ -565,14 +565,14 @@ fn wrap_http_handler(fn_ptr: i64) -> JetHTTPHandler {
 
 // ── core.net ───────────────────────────────────────────────────────────────
 
-extern "C" fn jet_jit_net_socket_addr(host: i64, port: i64) -> i64 {
+fn jet_jit_net_socket_addr(host: i64, port: i64) -> i64 {
     let host = clone_string(host);
     map_net_ok(jet_net_socket_addr(&host, port), |a| {
         push_handle(NetHttpHandle::SocketAddr(a))
     })
 }
 
-extern "C" fn jet_jit_net_socket_to_string(addr: i64) -> i64 {
+fn jet_jit_net_socket_to_string(addr: i64) -> i64 {
     match with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(a) => Some(jet_net_socket_to_string(a)),
         _ => None,
@@ -582,7 +582,7 @@ extern "C" fn jet_jit_net_socket_to_string(addr: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_socket_host(addr: i64) -> i64 {
+fn jet_jit_net_socket_host(addr: i64) -> i64 {
     match with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(a) => Some(jet_net_socket_host(a)),
         _ => None,
@@ -592,7 +592,7 @@ extern "C" fn jet_jit_net_socket_host(addr: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_socket_port_typed(addr: i64) -> i64 {
+fn jet_jit_net_socket_port_typed(addr: i64) -> i64 {
     with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(a) => Some(jet_net_socket_port(a)),
         _ => None,
@@ -600,14 +600,14 @@ extern "C" fn jet_jit_net_socket_port_typed(addr: i64) -> i64 {
     .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_net_tcp_listen_str(addr: i64) -> i64 {
+fn jet_jit_net_tcp_listen_str(addr: i64) -> i64 {
     let addr = clone_string(addr);
     map_net_ok(jet_net_tcp_listen(&addr), |l| {
         push_handle(NetHttpHandle::TcpListener(Arc::new(l)))
     })
 }
 
-extern "C" fn jet_jit_net_tcp_listen_addr(addr: i64) -> i64 {
+fn jet_jit_net_tcp_listen_addr(addr: i64) -> i64 {
     let Some(addr) = with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
         _ => None,
@@ -619,14 +619,14 @@ extern "C" fn jet_jit_net_tcp_listen_addr(addr: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_net_tcp_connect(addr: i64) -> i64 {
+fn jet_jit_net_tcp_connect(addr: i64) -> i64 {
     let addr = clone_string(addr);
     map_net_ok(jet_net_tcp_connect(&addr), |s| {
         push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(s))))
     })
 }
 
-extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
+fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
         return net_invalid("listener local address", "TcpListener");
     };
@@ -636,7 +636,7 @@ extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
+fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("set_timeout", "TcpStream");
     };
@@ -644,7 +644,7 @@ extern "C" fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
     map_net_unit(jet_net_set_timeout(&mut guard, ms))
 }
 
-extern "C" fn jet_jit_net_nodelay(stream: i64) -> i64 {
+fn jet_jit_net_nodelay(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("nodelay", "TcpStream");
     };
@@ -655,7 +655,7 @@ extern "C" fn jet_jit_net_nodelay(stream: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
+fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("set_nodelay", "TcpStream");
     };
@@ -663,7 +663,7 @@ extern "C" fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
     map_net_unit(jet_net_set_nodelay(&guard, enabled != 0))
 }
 
-extern "C" fn jet_jit_net_ttl(stream: i64) -> i64 {
+fn jet_jit_net_ttl(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("ttl", "TcpStream");
     };
@@ -674,7 +674,7 @@ extern "C" fn jet_jit_net_ttl(stream: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_set_ttl(stream: i64, ttl: i64) -> i64 {
+fn jet_jit_net_set_ttl(stream: i64, ttl: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("set_ttl", "TcpStream");
     };
@@ -682,7 +682,7 @@ extern "C" fn jet_jit_net_set_ttl(stream: i64, ttl: i64) -> i64 {
     map_net_unit(jet_net_set_ttl(&guard, ttl))
 }
 
-extern "C" fn jet_jit_net_socket_type(stream: i64) -> i64 {
+fn jet_jit_net_socket_type(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return alloc_string(String::new());
     };
@@ -690,7 +690,7 @@ extern "C" fn jet_jit_net_socket_type(stream: i64) -> i64 {
     alloc_string(jet_net_socket_type(&guard))
 }
 
-extern "C" fn jet_jit_net_sendfile(stream: i64, path: i64) -> i64 {
+fn jet_jit_net_sendfile(stream: i64, path: i64) -> i64 {
     let path = clone_string(path);
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("sendfile", "TcpStream");
@@ -702,7 +702,7 @@ extern "C" fn jet_jit_net_sendfile(stream: i64, path: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_dns_ptr(name: i64, ms: i64) -> i64 {
+fn jet_jit_net_dns_ptr(name: i64, ms: i64) -> i64 {
     let name = clone_string(name);
     match jet_net_dns_result(jet_net_dns_ptr(&name, ms), &name) {
         Ok(rows) => result_ok_handle(list_of_strings(rows)),
@@ -710,7 +710,7 @@ extern "C" fn jet_jit_net_dns_ptr(name: i64, ms: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_getservbyname(name: i64) -> i64 {
+fn jet_jit_net_getservbyname(name: i64) -> i64 {
     let name = clone_string(name);
     match jet_net_getservbyname(&name) {
         Ok(port) => result_ok(port as u64),
@@ -718,14 +718,14 @@ extern "C" fn jet_jit_net_getservbyname(name: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_getservbyport(port: i64) -> i64 {
+fn jet_jit_net_getservbyport(port: i64) -> i64 {
     match jet_net_getservbyport(port) {
         Ok(name) => result_ok_handle(alloc_string(name)),
         Err(e) => net_err(e),
     }
 }
 
-extern "C" fn jet_jit_net_tcp_reply(stream: i64, status: i64, body: i64) -> i64 {
+fn jet_jit_net_tcp_reply(stream: i64, status: i64, body: i64) -> i64 {
     let status = clone_string(status);
     let body = clone_string(body);
     let Some(NetHttpHandle::TcpStream(s)) = take_handle(stream) else {
@@ -738,14 +738,14 @@ extern "C" fn jet_jit_net_tcp_reply(stream: i64, status: i64, body: i64) -> i64 
     map_net_unit(jet_net_tcp_reply(stream, &status, &body))
 }
 
-extern "C" fn jet_jit_net_udp_bind(addr: i64) -> i64 {
+fn jet_jit_net_udp_bind(addr: i64) -> i64 {
     let addr = clone_string(addr);
     map_net_ok(jet_net_udp_bind(&addr), |s| {
         push_handle(NetHttpHandle::UdpSocket(Arc::new(s)))
     })
 }
 
-extern "C" fn jet_jit_net_udp_local_addr(socket: i64) -> i64 {
+fn jet_jit_net_udp_local_addr(socket: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
         return net_invalid("udp_local_addr", "UdpSocket");
     };
@@ -755,14 +755,14 @@ extern "C" fn jet_jit_net_udp_local_addr(socket: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_udp_set_timeout(socket: i64, ms: i64) -> i64 {
+fn jet_jit_net_udp_set_timeout(socket: i64, ms: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
         return net_invalid("udp_set_timeout", "UdpSocket");
     };
     map_net_unit(jet_net_udp_set_timeout(&socket, ms))
 }
 
-extern "C" fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -> i64 {
+fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(addr) = with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
@@ -779,7 +779,7 @@ extern "C" fn jet_jit_net_udp_send_bytes_to(socket: i64, data: i64, addr: i64) -
     }
 }
 
-extern "C" fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
+fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
         return net_invalid("udp_receive", "UdpSocket");
     };
@@ -789,7 +789,7 @@ extern "C" fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_udp_send_bytes_to_deadline(
+fn jet_jit_net_udp_send_bytes_to_deadline(
     socket: i64,
     data: i64,
     addr: i64,
@@ -812,7 +812,7 @@ extern "C" fn jet_jit_net_udp_send_bytes_to_deadline(
     }
 }
 
-extern "C" fn jet_jit_net_udp_receive_deadline(
+fn jet_jit_net_udp_receive_deadline(
     socket: i64,
     limit: i64,
     deadline: i64,
@@ -827,7 +827,7 @@ extern "C" fn jet_jit_net_udp_receive_deadline(
     }
 }
 
-extern "C" fn jet_jit_net_udp_packet_bytes(packet: i64) -> i64 {
+fn jet_jit_net_udp_packet_bytes(packet: i64) -> i64 {
     match with_handle(packet, |h| match h {
         NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_bytes(p)),
         _ => None,
@@ -837,7 +837,7 @@ extern "C" fn jet_jit_net_udp_packet_bytes(packet: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_udp_packet_original_len(packet: i64) -> i64 {
+fn jet_jit_net_udp_packet_original_len(packet: i64) -> i64 {
     with_handle(packet, |h| match h {
         NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_original_len(p)),
         _ => None,
@@ -845,7 +845,7 @@ extern "C" fn jet_jit_net_udp_packet_original_len(packet: i64) -> i64 {
     .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_net_udp_packet_truncated(packet: i64) -> i64 {
+fn jet_jit_net_udp_packet_truncated(packet: i64) -> i64 {
     i64::from(
         with_handle(packet, |h| match h {
             NetHttpHandle::UDPPacket(p) => Some(jet_net_udp_packet_truncated(p)),
@@ -856,7 +856,7 @@ extern "C" fn jet_jit_net_udp_packet_truncated(packet: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_listen(path: i64) -> i64 {
+fn jet_jit_net_unix_listen(path: i64) -> i64 {
     let path = clone_string(path);
     map_net_ok(jet_net_unix_listen(&path), |l| {
         push_handle(NetHttpHandle::UnixListener(Arc::new(l)))
@@ -864,7 +864,7 @@ extern "C" fn jet_jit_net_unix_listen(path: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_accept(listener: i64) -> i64 {
+fn jet_jit_net_unix_accept(listener: i64) -> i64 {
     let Some(listener) = unix_listener(listener) else {
         return net_invalid("unix accept", "UnixListener");
     };
@@ -877,7 +877,7 @@ extern "C" fn jet_jit_net_unix_accept(listener: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_connect(path: i64) -> i64 {
+fn jet_jit_net_unix_connect(path: i64) -> i64 {
     let path = clone_string(path);
     map_net_ok(jet_net_unix_connect(&path), |s| {
         push_handle(NetHttpHandle::UnixStream(Arc::new(Mutex::new(s))))
@@ -885,7 +885,7 @@ extern "C" fn jet_jit_net_unix_connect(path: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_read(stream: i64) -> i64 {
+fn jet_jit_net_unix_read(stream: i64) -> i64 {
     let Some(stream) = unix_stream(stream) else {
         return net_invalid("unix read", "UnixStream");
     };
@@ -897,7 +897,7 @@ extern "C" fn jet_jit_net_unix_read(stream: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_write(stream: i64, data: i64) -> i64 {
+fn jet_jit_net_unix_write(stream: i64, data: i64) -> i64 {
     let data = clone_string(data);
     let Some(stream) = unix_stream(stream) else {
         return net_invalid("unix_write", "UnixStream");
@@ -907,7 +907,7 @@ extern "C" fn jet_jit_net_unix_write(stream: i64, data: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_write_all_bytes(stream: i64, data: i64) -> i64 {
+fn jet_jit_net_unix_write_all_bytes(stream: i64, data: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(stream) = unix_stream(stream) else {
         return net_invalid("unix_write_all_bytes", "UnixStream");
@@ -917,7 +917,7 @@ extern "C" fn jet_jit_net_unix_write_all_bytes(stream: i64, data: i64) -> i64 {
 }
 
 #[cfg(unix)]
-extern "C" fn jet_jit_net_unix_close(stream: i64) -> i64 {
+fn jet_jit_net_unix_close(stream: i64) -> i64 {
     let Some(stream) = unix_stream(stream) else {
         return net_invalid("unix_close", "UnixStream");
     };
@@ -926,22 +926,22 @@ extern "C" fn jet_jit_net_unix_close(stream: i64) -> i64 {
 }
 
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_listen(path: i64) -> i64 {
+fn jet_jit_net_unix_listen(path: i64) -> i64 {
     let path = clone_string(path);
     map_net_ok(jet_net_unix_listen(&path), |_| 0)
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_accept(_listener: i64) -> i64 {
+fn jet_jit_net_unix_accept(_listener: i64) -> i64 {
     let listener = JetUnixListener;
     map_net_ok(jet_net_unix_accept(&listener), |_| 0)
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_connect(path: i64) -> i64 {
+fn jet_jit_net_unix_connect(path: i64) -> i64 {
     let path = clone_string(path);
     map_net_ok(jet_net_unix_connect(&path), |_| 0)
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_read(_stream: i64) -> i64 {
+fn jet_jit_net_unix_read(_stream: i64) -> i64 {
     let mut stream = JetUnixStream;
     match jet_net_unix_read(&mut stream) {
         Ok(value) => result_ok_handle(alloc_string(value)),
@@ -949,26 +949,26 @@ extern "C" fn jet_jit_net_unix_read(_stream: i64) -> i64 {
     }
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_write(_stream: i64, data: i64) -> i64 {
+fn jet_jit_net_unix_write(_stream: i64, data: i64) -> i64 {
     let mut stream = JetUnixStream;
     let data = clone_string(data);
     map_net_unit(jet_net_unix_write(&mut stream, &data))
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_write_all_bytes(_stream: i64, data: i64) -> i64 {
+fn jet_jit_net_unix_write_all_bytes(_stream: i64, data: i64) -> i64 {
     let mut stream = JetUnixStream;
     let data = clone_bytes(data);
     map_net_unit(jet_net_unix_write_all_bytes(&mut stream, &data))
 }
 #[cfg(not(unix))]
-extern "C" fn jet_jit_net_unix_close(_stream: i64) -> i64 {
+fn jet_jit_net_unix_close(_stream: i64) -> i64 {
     let mut stream = JetUnixStream;
     map_net_unit(jet_net_unix_close(&mut stream))
 }
 
 // ── TcpListener / TcpStream handle methods ─────────────────────────────────
 
-extern "C" fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
+fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
         return net_invalid("tcp accept", "TcpListener");
     };
@@ -980,7 +980,7 @@ extern "C" fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
+fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
         return net_invalid("tcp local address", "TcpListener");
     };
@@ -990,7 +990,7 @@ extern "C" fn jet_jit_tcp_listener_local_addr(listener: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
+fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("tcp read", "TcpStream");
     };
@@ -1001,7 +1001,7 @@ extern "C" fn jet_jit_tcp_stream_read_text(stream: i64, limit: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
+fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("write_all", "TcpStream");
@@ -1010,7 +1010,7 @@ extern "C" fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 
     map_net_unit(jet_net_tcp_write_all_bytes(&mut guard, &bytes))
 }
 
-extern "C" fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
+fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("tcp close", "TcpStream");
     };
@@ -1018,7 +1018,7 @@ extern "C" fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
     map_net_unit(jet_net_tcp_close(&mut guard))
 }
 
-extern "C" fn jet_jit_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+fn jet_jit_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
     let Some(interest) = net_ready_interest(interest) else {
         return net_invalid("tcp ready", "NetReadyInterest");
     };
@@ -1166,11 +1166,11 @@ fn tls_client_configured(
     )
 }
 
-extern "C" fn jet_jit_tls_client_config_default() -> i64 {
+fn jet_jit_tls_client_config_default() -> i64 {
     push_handle(NetHttpHandle::TLSClientConfig(jet_tls_client_config_default()))
 }
 
-extern "C" fn jet_jit_tls_root_certificates_from_pem(pem: i64) -> i64 {
+fn jet_jit_tls_root_certificates_from_pem(pem: i64) -> i64 {
     let pem = clone_bytes(pem);
     match jet_tls_root_certificates_from_pem(
         &pem,
@@ -1181,7 +1181,7 @@ extern "C" fn jet_jit_tls_root_certificates_from_pem(pem: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tls_client_identity_from_pem(cert_chain: i64, private_key: i64) -> i64 {
+fn jet_jit_tls_client_identity_from_pem(cert_chain: i64, private_key: i64) -> i64 {
     let cert_chain = clone_bytes(cert_chain);
     let private_key = clone_bytes(private_key);
     match jet_tls_client_identity_from_pem(
@@ -1194,7 +1194,7 @@ extern "C" fn jet_jit_tls_client_identity_from_pem(cert_chain: i64, private_key:
     }
 }
 
-extern "C" fn jet_jit_tls_client_config_with_alpn(config: i64, protocols: i64) -> i64 {
+fn jet_jit_tls_client_config_with_alpn(config: i64, protocols: i64) -> i64 {
     let Some(config) = tls_client_config(config) else {
         return io_err(jet_tls_config_error(
             "ClientConfig.with_alpn",
@@ -1208,7 +1208,7 @@ extern "C" fn jet_jit_tls_client_config_with_alpn(config: i64, protocols: i64) -
     }
 }
 
-extern "C" fn jet_jit_tls_client_config_with_trust(config: i64, trust: i64) -> i64 {
+fn jet_jit_tls_client_config_with_trust(config: i64, trust: i64) -> i64 {
     let Some(config) = tls_client_config(config) else {
         return io_err(jet_tls_config_error(
             "ClientConfig.with_trust",
@@ -1227,7 +1227,7 @@ extern "C" fn jet_jit_tls_client_config_with_trust(config: i64, trust: i64) -> i
     }
 }
 
-extern "C" fn jet_jit_tls_client_config_with_identity(config: i64, identity: i64) -> i64 {
+fn jet_jit_tls_client_config_with_identity(config: i64, identity: i64) -> i64 {
     let Some(config) = tls_client_config(config) else {
         return io_err(jet_tls_config_error(
             "ClientConfig.with_client_identity",
@@ -1246,7 +1246,7 @@ extern "C" fn jet_jit_tls_client_config_with_identity(config: i64, identity: i64
     }
 }
 
-extern "C" fn jet_jit_tls_client_config_with_version_bounds(
+fn jet_jit_tls_client_config_with_version_bounds(
     config: i64,
     min: i64,
     max: i64,
@@ -1306,15 +1306,15 @@ fn tls_client_result(stream: i64, server_name: i64, config: Option<i64>, deadlin
     })
 }
 
-extern "C" fn jet_jit_tls_client(stream: i64, server_name: i64) -> i64 {
+fn jet_jit_tls_client(stream: i64, server_name: i64) -> i64 {
     tls_client_result(stream, server_name, None, None)
 }
 
-extern "C" fn jet_jit_tls_client_deadline(stream: i64, server_name: i64, deadline: i64) -> i64 {
+fn jet_jit_tls_client_deadline(stream: i64, server_name: i64, deadline: i64) -> i64 {
     tls_client_result(stream, server_name, None, Some(deadline))
 }
 
-extern "C" fn jet_jit_tls_client_config_deadline(
+fn jet_jit_tls_client_config_deadline(
     stream: i64,
     server_name: i64,
     config: i64,
@@ -1323,7 +1323,7 @@ extern "C" fn jet_jit_tls_client_config_deadline(
     tls_client_result(stream, server_name, Some(config), Some(deadline))
 }
 
-extern "C" fn jet_jit_tls_read_bytes(stream: i64, limit: i64) -> i64 {
+fn jet_jit_tls_read_bytes(stream: i64, limit: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
             "TLSStream.read",
@@ -1337,7 +1337,7 @@ extern "C" fn jet_jit_tls_read_bytes(stream: i64, limit: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tls_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+fn jet_jit_tls_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
             "TLSStream.read",
@@ -1351,7 +1351,7 @@ extern "C" fn jet_jit_tls_read_bytes_deadline(stream: i64, limit: i64, deadline:
     }
 }
 
-extern "C" fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
+fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
             "TLSStream.read_text",
@@ -1365,7 +1365,7 @@ extern "C" fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tls_write_bytes(stream: i64, data: i64) -> i64 {
+fn jet_jit_tls_write_bytes(stream: i64, data: i64) -> i64 {
     let data = clone_bytes(data);
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
@@ -1380,7 +1380,7 @@ extern "C" fn jet_jit_tls_write_bytes(stream: i64, data: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_tls_write_all_bytes(stream: i64, data: i64) -> i64 {
+fn jet_jit_tls_write_all_bytes(stream: i64, data: i64) -> i64 {
     let data = clone_bytes(data);
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
@@ -1392,7 +1392,7 @@ extern "C" fn jet_jit_tls_write_all_bytes(stream: i64, data: i64) -> i64 {
     map_io_unit(jet_net_tls_write_all_bytes(&mut stream, &data))
 }
 
-extern "C" fn jet_jit_tls_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+fn jet_jit_tls_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
     let data = clone_bytes(data);
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
@@ -1408,7 +1408,7 @@ extern "C" fn jet_jit_tls_write_all_bytes_deadline(stream: i64, data: i64, deadl
     ))
 }
 
-extern "C" fn jet_jit_tls_write_text(stream: i64, text: i64) -> i64 {
+fn jet_jit_tls_write_text(stream: i64, text: i64) -> i64 {
     let text = clone_string(text);
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
@@ -1420,7 +1420,7 @@ extern "C" fn jet_jit_tls_write_text(stream: i64, text: i64) -> i64 {
     map_io_unit(jet_net_tls_write_text(&mut stream, &text))
 }
 
-extern "C" fn jet_jit_tls_close(stream: i64) -> i64 {
+fn jet_jit_tls_close(stream: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
             "TLSStream.close",
@@ -1431,7 +1431,7 @@ extern "C" fn jet_jit_tls_close(stream: i64) -> i64 {
     map_io_unit(jet_net_tls_close(&mut stream))
 }
 
-extern "C" fn jet_jit_tls_close_write(stream: i64, deadline: i64) -> i64 {
+fn jet_jit_tls_close_write(stream: i64, deadline: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
             "TLSStream.close_write",
@@ -1445,7 +1445,7 @@ extern "C" fn jet_jit_tls_close_write(stream: i64, deadline: i64) -> i64 {
     ))
 }
 
-extern "C" fn jet_jit_tls_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+fn jet_jit_tls_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
     let Some(interest) = net_ready_interest(interest) else {
         return io_err(jet_tls_config_error(
             "TLSStream.ready",
@@ -1465,7 +1465,7 @@ extern "C" fn jet_jit_tls_ready(stream: i64, interest: i64, deadline: i64) -> i6
     )
 }
 
-extern "C" fn jet_jit_tls_peer_identity(stream: i64) -> i64 {
+fn jet_jit_tls_peer_identity(stream: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return 0;
     };
@@ -1473,7 +1473,7 @@ extern "C" fn jet_jit_tls_peer_identity(stream: i64) -> i64 {
     tls_peer_identity_handle(jet_net_tls_peer_identity(&stream))
 }
 
-extern "C" fn jet_jit_udp_socket_ready(socket: i64, interest: i64, deadline: i64) -> i64 {
+fn jet_jit_udp_socket_ready(socket: i64, interest: i64, deadline: i64) -> i64 {
     let Some(interest) = net_ready_interest(interest) else {
         return net_invalid("udp ready", "NetReadyInterest");
     };
@@ -1486,14 +1486,14 @@ extern "C" fn jet_jit_udp_socket_ready(socket: i64, interest: i64, deadline: i64
     })
 }
 
-extern "C" fn jet_jit_udp_socket_close(socket: i64) -> i64 {
+fn jet_jit_udp_socket_close(socket: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
         return net_invalid("udp close", "UdpSocket");
     };
     map_net_unit(jet_net_udp_close(&socket))
 }
 
-extern "C" fn jet_jit_net_ready_readable(ready: i64) -> i64 {
+fn jet_jit_net_ready_readable(ready: i64) -> i64 {
     i64::from(
         net_ready(ready)
             .map(|ready| jet_net_ready_readable(&ready))
@@ -1501,7 +1501,7 @@ extern "C" fn jet_jit_net_ready_readable(ready: i64) -> i64 {
     )
 }
 
-extern "C" fn jet_jit_net_ready_writable(ready: i64) -> i64 {
+fn jet_jit_net_ready_writable(ready: i64) -> i64 {
     i64::from(
         net_ready(ready)
             .map(|ready| jet_net_ready_writable(&ready))
@@ -1511,11 +1511,11 @@ extern "C" fn jet_jit_net_ready_writable(ready: i64) -> i64 {
 
 // ── core.http.server ───────────────────────────────────────────────────────
 
-extern "C" fn jet_jit_http_mux_new() -> i64 {
+fn jet_jit_http_mux_new() -> i64 {
     push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
 }
 
-extern "C" fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64 {
+fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64 {
     let method = clone_string(method);
     let pattern = clone_string(pattern);
     let handler = wrap_http_handler(fn_ptr);
@@ -1525,14 +1525,14 @@ extern "C" fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, fn_ptr: 
     0
 }
 
-extern "C" fn jet_jit_http_response(status: i64, body: i64) -> i64 {
+fn jet_jit_http_response(status: i64, body: i64) -> i64 {
     let body = clone_string(body);
     push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response(
         status, &body,
     )))
 }
 
-extern "C" fn jet_jit_http_req_body(req: i64) -> i64 {
+fn jet_jit_http_req_body(req: i64) -> i64 {
     match with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_body(r)),
         _ => None,
@@ -1542,7 +1542,7 @@ extern "C" fn jet_jit_http_req_body(req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_req_method(req: i64) -> i64 {
+fn jet_jit_http_req_method(req: i64) -> i64 {
     match with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_method(r)),
         _ => None,
@@ -1552,7 +1552,7 @@ extern "C" fn jet_jit_http_req_method(req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_req_path(req: i64) -> i64 {
+fn jet_jit_http_req_path(req: i64) -> i64 {
     match with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_path(r)),
         _ => None,
@@ -1562,7 +1562,7 @@ extern "C" fn jet_jit_http_req_path(req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_req_param(req: i64, name: i64) -> i64 {
+fn jet_jit_http_req_param(req: i64, name: i64) -> i64 {
     let name = clone_string(name);
     option_string(with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_param(r, &name)),
@@ -1571,7 +1571,7 @@ extern "C" fn jet_jit_http_req_param(req: i64, name: i64) -> i64 {
     .and_then(|r| r.ok()))
 }
 
-extern "C" fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
+fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
     let name = clone_string(name);
     option_string(with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_header(r, &name)),
@@ -1580,7 +1580,7 @@ extern "C" fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
     .and_then(|r| r.ok()))
 }
 
-extern "C" fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
+fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
     match with_handle(body, |h| match h {
         NetHttpHandle::HTTPBody(b) => Some(jet_http_body_text(b, limit)),
         _ => None,
@@ -1591,7 +1591,7 @@ extern "C" fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_body_bytes(body: i64, limit: i64) -> i64 {
+fn jet_jit_http_body_bytes(body: i64, limit: i64) -> i64 {
     match with_handle(body, |h| match h {
         NetHttpHandle::HTTPBody(b) => Some(jet_http_body_bytes(b, limit)),
         _ => None,
@@ -1602,7 +1602,7 @@ extern "C" fn jet_jit_http_body_bytes(body: i64, limit: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_body_json_text(body: i64, has_limit: i64, limit: i64) -> i64 {
+fn jet_jit_http_body_json_text(body: i64, has_limit: i64, limit: i64) -> i64 {
     match with_handle(body, |h| match h {
         NetHttpHandle::HTTPBody(b) => Some(jet_http_body_json_text_defaulted(
             b,
@@ -1677,7 +1677,7 @@ fn http_file_writer_write(handle: i64, bytes: &[u8]) -> Result<(), JetHTTPError>
     })
 }
 
-extern "C" fn jet_jit_http_body_copy_to(body: i64, writer: i64, limit: i64) -> i64 {
+fn jet_jit_http_body_copy_to(body: i64, writer: i64, limit: i64) -> i64 {
     let result = with_handle(body, |handle| match handle {
         NetHttpHandle::HTTPBody(body) => Some(jet_http_body_bytes(body, limit)),
         _ => None,
@@ -1695,7 +1695,7 @@ extern "C" fn jet_jit_http_body_copy_to(body: i64, writer: i64, limit: i64) -> i
 /// D-HTTP-NOMINAL1: resident JIT marshals nominal HTTP constructors through
 /// the same Prelude functions that AOT emits. The op is a closed compiler
 /// mapping; arguments are already carrier handles and unused slots are zero.
-extern "C" fn jet_jit_http_nominal_static(
+fn jet_jit_http_nominal_static(
     op: i64,
     arg0: i64,
     arg1: i64,
@@ -1778,7 +1778,7 @@ extern "C" fn jet_jit_http_nominal_static(
     }
 }
 
-extern "C" fn jet_jit_http_nominal_show(handle: i64) -> i64 {
+fn jet_jit_http_nominal_show(handle: i64) -> i64 {
     let shown = with_handle(handle, |value| match value {
         NetHttpHandle::HTTPMethod(value) => Some(value.jet_show()),
         NetHttpHandle::HTTPStatus(value) => Some(value.jet_show()),
@@ -1792,12 +1792,12 @@ extern "C" fn jet_jit_http_nominal_show(handle: i64) -> i64 {
 }
 
 /// D-HTTP-JSON1=A: `server.json(status, body)` — body is already JSON text.
-extern "C" fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
+fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
     runtime_json_response(status, clone_string(body))
 }
 
 /// D-HTTP-STATIC-FILES1=A: mount a directory under a prefix.
-extern "C" fn jet_jit_http_static_files(
+fn jet_jit_http_static_files(
     mux: i64,
     prefix: i64,
     root: i64,
@@ -1818,7 +1818,7 @@ extern "C" fn jet_jit_http_static_files(
 
 /// D-HTTP-CORS1=A: build a CORS policy from a named-origin list or `.Any`.
 /// `origins_mode`: 0 = `.Any`, 1 = string-list handle.
-extern "C" fn jet_jit_http_cors_policy(
+fn jet_jit_http_cors_policy(
     origins_mode: i64,
     origins: i64,
     methods: i64,
@@ -1847,7 +1847,7 @@ extern "C" fn jet_jit_http_cors_policy(
 }
 
 /// Map JSON typed-decode `Result` errs to `HTTPError::InvalidFraming` (AOT parity).
-extern "C" fn jet_jit_http_project_json_decode_error(result: i64) -> i64 {
+fn jet_jit_http_project_json_decode_error(result: i64) -> i64 {
     let is_error = Concurrency::with_runtime_mut(|rt| {
         result
             .checked_sub(1)
@@ -1862,12 +1862,12 @@ extern "C" fn jet_jit_http_project_json_decode_error(result: i64) -> i64 {
 }
 
 /// D-HTTP-CORS1=A: install a policy on a mux.
-extern "C" fn jet_jit_http_cors(mux: i64, policy: i64) -> i64 {
+fn jet_jit_http_cors(mux: i64, policy: i64) -> i64 {
     let _ = runtime_cors(mux, policy);
     0
 }
 
-extern "C" fn jet_jit_http_resp_status(resp: i64) -> i64 {
+fn jet_jit_http_resp_status(resp: i64) -> i64 {
     with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_srv_response_status(r)),
         _ => None,
@@ -1875,7 +1875,7 @@ extern "C" fn jet_jit_http_resp_status(resp: i64) -> i64 {
     .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_http_resp_body(resp: i64) -> i64 {
+fn jet_jit_http_resp_body(resp: i64) -> i64 {
     match with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_srv_response_body(r)),
         _ => None,
@@ -1885,7 +1885,7 @@ extern "C" fn jet_jit_http_resp_body(resp: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_client_resp_body(resp: i64) -> i64 {
+fn jet_jit_http_client_resp_body(resp: i64) -> i64 {
     match with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_body(r)),
         _ => None,
@@ -1895,7 +1895,7 @@ extern "C" fn jet_jit_http_client_resp_body(resp: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_server_bind(addr: i64, mux: i64) -> i64 {
+fn jet_jit_http_server_bind(addr: i64, mux: i64) -> i64 {
     let addr = clone_string(addr);
     let Some(mux) = http_mux(mux) else {
         return result_err("invalid HTTPMux".into());
@@ -1906,7 +1906,7 @@ extern "C" fn jet_jit_http_server_bind(addr: i64, mux: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_server_local_addr(server: i64) -> i64 {
+fn jet_jit_http_server_local_addr(server: i64) -> i64 {
     let Some(server) = http_server(server) else {
         return result_err("invalid HTTPServer".into());
     };
@@ -1916,7 +1916,7 @@ extern "C" fn jet_jit_http_server_local_addr(server: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_server_serve(server: i64) -> i64 {
+fn jet_jit_http_server_serve(server: i64) -> i64 {
     let Some(server) = http_server(server) else {
         return result_err("invalid HTTPServer".into());
     };
@@ -1926,7 +1926,7 @@ extern "C" fn jet_jit_http_server_serve(server: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_server_shutdown(server: i64, grace_ms: i64) -> i64 {
+fn jet_jit_http_server_shutdown(server: i64, grace_ms: i64) -> i64 {
     let grace = jet_std::Duration {
         ns: grace_ms.saturating_mul(1_000_000),
     };
@@ -1939,7 +1939,7 @@ extern "C" fn jet_jit_http_server_shutdown(server: i64, grace_ms: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_shutdown_report_field(report: i64, field: i64) -> i64 {
+fn jet_jit_http_shutdown_report_field(report: i64, field: i64) -> i64 {
     with_handle(report, |h| match h {
         NetHttpHandle::HTTPShutdownReport(r) => Some(match field {
             0 => r.user_accepted,
@@ -2092,7 +2092,7 @@ fn native_http_request(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPEr
     ))
 }
 
-extern "C" fn jet_jit_http_client_get(url: i64) -> i64 {
+fn jet_jit_http_client_get(url: i64) -> i64 {
     let url = clone_string(url);
     match native_http_response(native_http::jet_http_client_get_impl(&url)) {
         Ok(resp) => result_ok_handle(push_handle(NetHttpHandle::HTTPResponse(resp))),
@@ -2100,7 +2100,7 @@ extern "C" fn jet_jit_http_client_get(url: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_client_post(url: i64, body: i64) -> i64 {
+fn jet_jit_http_client_post(url: i64, body: i64) -> i64 {
     let url = clone_string(url);
     let body = clone_string(body);
     match native_http_response(native_http::jet_http_client_post_impl(&url, &body)) {
@@ -2109,7 +2109,7 @@ extern "C" fn jet_jit_http_client_post(url: i64, body: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_serve_once_listener(listener: i64, mux: i64) -> i64 {
+fn jet_jit_http_serve_once_listener(listener: i64, mux: i64) -> i64 {
     let Some(listener) = tcp_listener(listener) else {
         return result_err("invalid TcpListener".into());
     };
@@ -2122,7 +2122,7 @@ extern "C" fn jet_jit_http_serve_once_listener(listener: i64, mux: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_ws_upgrade(req: i64) -> i64 {
+fn jet_jit_ws_upgrade(req: i64) -> i64 {
     match with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_ws_upgrade(r)),
         _ => None,
@@ -2135,7 +2135,7 @@ extern "C" fn jet_jit_ws_upgrade(req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_ws_connect(url: i64) -> i64 {
+fn jet_jit_ws_connect(url: i64) -> i64 {
     let url = clone_string(url);
     match jet_ws_connect(&url) {
         Ok(c) => result_ok_handle(push_handle(NetHttpHandle::WsConn(Arc::new(Mutex::new(
@@ -2145,7 +2145,7 @@ extern "C" fn jet_jit_ws_connect(url: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_ws_send_text(conn: i64, text: i64) -> i64 {
+fn jet_jit_ws_send_text(conn: i64, text: i64) -> i64 {
     let text = clone_string(text);
     let Some(conn) = ws_conn(conn) else {
         return result_err("invalid WsConn".into());
@@ -2157,7 +2157,7 @@ extern "C" fn jet_jit_ws_send_text(conn: i64, text: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_ws_recv(conn: i64) -> i64 {
+fn jet_jit_ws_recv(conn: i64) -> i64 {
     let Some(conn) = ws_conn(conn) else {
         return result_err("invalid WsConn".into());
     };
@@ -2168,7 +2168,7 @@ extern "C" fn jet_jit_ws_recv(conn: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_ws_close(conn: i64, code: i64, reason: i64) -> i64 {
+fn jet_jit_ws_close(conn: i64, code: i64, reason: i64) -> i64 {
     let reason = clone_string(reason);
     let Some(conn) = ws_conn(conn) else {
         return result_err("invalid WsConn".into());
@@ -2180,7 +2180,7 @@ extern "C" fn jet_jit_ws_close(conn: i64, code: i64, reason: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_ws_message_is_text(msg: i64) -> i64 {
+fn jet_jit_ws_message_is_text(msg: i64) -> i64 {
     i64::from(
         with_handle(msg, |h| match h {
             NetHttpHandle::WsMessage(m) => Some(jet_ws_message_is_text(m)),
@@ -2190,7 +2190,7 @@ extern "C" fn jet_jit_ws_message_is_text(msg: i64) -> i64 {
     )
 }
 
-extern "C" fn jet_jit_ws_message_text(msg: i64) -> i64 {
+fn jet_jit_ws_message_text(msg: i64) -> i64 {
     match with_handle(msg, |h| match h {
         NetHttpHandle::WsMessage(m) => Some(jet_ws_message_text(m)),
         _ => None,
@@ -2216,7 +2216,7 @@ fn list_of_strings(rows: Vec<String>) -> i64 {
 }
 
 /// Bind a capturing Jet HTTP handler. `caps` is a heap list of capture handles.
-extern "C" fn jet_jit_http_handler_bind(fn_ptr: i64, caps: i64) -> i64 {
+fn jet_jit_http_handler_bind(fn_ptr: i64, caps: i64) -> i64 {
     let env = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         let len = rt.heap.list_len(caps).unwrap_or(0);
@@ -2231,7 +2231,7 @@ extern "C" fn jet_jit_http_handler_bind(fn_ptr: i64, caps: i64) -> i64 {
 }
 
 /// Single-capture bind: pack `cap0` into a fresh env list in the host.
-extern "C" fn jet_jit_http_handler_bind1(fn_ptr: i64, cap0: i64) -> i64 {
+fn jet_jit_http_handler_bind1(fn_ptr: i64, cap0: i64) -> i64 {
     let env = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         let _ = rt.heap.list_push_int(list, cap0);
@@ -2275,7 +2275,7 @@ fn bind_http_closure(fn_ptr: i64, env: i64) -> i64 {
     push_handle(NetHttpHandle::HTTPHandler(handler))
 }
 
-extern "C" fn jet_jit_http_handler_handle(handler: i64, req: i64) -> i64 {
+fn jet_jit_http_handler_handle(handler: i64, req: i64) -> i64 {
     let Some(handler) = with_handle(handler, |h| match h {
         NetHttpHandle::HTTPHandler(h) => Some(Arc::clone(h)),
         _ => None,
@@ -2297,7 +2297,7 @@ extern "C" fn jet_jit_http_handler_handle(handler: i64, req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
+fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
     let Some(mux) = http_mux(mux) else {
         return 0;
     };
@@ -2335,14 +2335,14 @@ extern "C" fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
     0
 }
 
-extern "C" fn jet_jit_http_request_id(mux: i64) -> i64 {
+fn jet_jit_http_request_id(mux: i64) -> i64 {
     if let Some(mux) = http_mux(mux) {
         jet_http_srv_install_request_id(&mux);
     }
     0
 }
 
-extern "C" fn jet_jit_http_req_trailers(req: i64) -> i64 {
+fn jet_jit_http_req_trailers(req: i64) -> i64 {
     match with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_trailers(r)),
         _ => None,
@@ -2353,7 +2353,7 @@ extern "C" fn jet_jit_http_req_trailers(req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_resp_trailers(resp: i64, trailers: i64) -> i64 {
+fn jet_jit_http_resp_trailers(resp: i64, trailers: i64) -> i64 {
     let Some(resp) = take_handle(resp).and_then(|h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(r),
         other => {
@@ -2378,7 +2378,7 @@ extern "C" fn jet_jit_http_resp_trailers(resp: i64, trailers: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_req_body_len(req: i64) -> i64 {
+fn jet_jit_http_req_body_len(req: i64) -> i64 {
     with_handle(req, |h| match h {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_body_len(r)),
         _ => None,
@@ -2386,7 +2386,7 @@ extern "C" fn jet_jit_http_req_body_len(req: i64) -> i64 {
     .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_http_req_under_limit(req: i64, max: i64) -> i64 {
+fn jet_jit_http_req_under_limit(req: i64, max: i64) -> i64 {
     i64::from(
         with_handle(req, |h| match h {
             NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_under_limit(r, max)),
@@ -2396,12 +2396,12 @@ extern "C" fn jet_jit_http_req_under_limit(req: i64, max: i64) -> i64 {
     )
 }
 
-extern "C" fn jet_jit_http_sse(data: i64) -> i64 {
+fn jet_jit_http_sse(data: i64) -> i64 {
     let data = clone_string(data);
     push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_sse(&data)))
 }
 
-extern "C" fn jet_jit_http_static_file_range(req: i64, path: i64, mime: i64) -> i64 {
+fn jet_jit_http_static_file_range(req: i64, path: i64, mime: i64) -> i64 {
     let path = clone_string(path);
     let mime = clone_string(mime);
     match with_handle(req, |h| match h {
@@ -2414,7 +2414,7 @@ extern "C" fn jet_jit_http_static_file_range(req: i64, path: i64, mime: i64) -> 
     }
 }
 
-extern "C" fn jet_jit_http_client_request_new(method: i64, url: i64) -> i64 {
+fn jet_jit_http_client_request_new(method: i64, url: i64) -> i64 {
     let method = clone_string(method);
     let url = clone_string(url);
     push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
@@ -2432,7 +2432,7 @@ fn take_http_request(handle: i64) -> Option<JetHTTPRequest> {
     })
 }
 
-extern "C" fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
+fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
     let body = clone_string(body);
     let Some(req) = take_http_request(req) else {
         return 0;
@@ -2442,7 +2442,7 @@ extern "C" fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
     )))
 }
 
-extern "C" fn jet_jit_http_client_request_form(req: i64, name: i64, value: i64) -> i64 {
+fn jet_jit_http_client_request_form(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
     let Some(req) = take_http_request(req) else {
@@ -2453,7 +2453,7 @@ extern "C" fn jet_jit_http_client_request_form(req: i64, name: i64, value: i64) 
     )))
 }
 
-extern "C" fn jet_jit_http_client_request_cookie(req: i64, name: i64, value: i64) -> i64 {
+fn jet_jit_http_client_request_cookie(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
     let Some(req) = take_http_request(req) else {
@@ -2464,7 +2464,7 @@ extern "C" fn jet_jit_http_client_request_cookie(req: i64, name: i64, value: i64
     )))
 }
 
-extern "C" fn jet_jit_http_client_request_header(req: i64, name: i64, value: i64) -> i64 {
+fn jet_jit_http_client_request_header(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
     let Some(req) = take_http_request(req) else {
@@ -2475,7 +2475,7 @@ extern "C" fn jet_jit_http_client_request_header(req: i64, name: i64, value: i64
     )))
 }
 
-extern "C" fn jet_jit_http_client_request_redirects(req: i64, limit: i64) -> i64 {
+fn jet_jit_http_client_request_redirects(req: i64, limit: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
@@ -2484,7 +2484,7 @@ extern "C" fn jet_jit_http_client_request_redirects(req: i64, limit: i64) -> i64
     ))
 }
 
-extern "C" fn jet_jit_http_client_request_connect_timeout(req: i64, ms: i64) -> i64 {
+fn jet_jit_http_client_request_connect_timeout(req: i64, ms: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
@@ -2493,7 +2493,7 @@ extern "C" fn jet_jit_http_client_request_connect_timeout(req: i64, ms: i64) -> 
     ))
 }
 
-extern "C" fn jet_jit_http_client_request_read_timeout(req: i64, ms: i64) -> i64 {
+fn jet_jit_http_client_request_read_timeout(req: i64, ms: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return 0;
     };
@@ -2502,7 +2502,7 @@ extern "C" fn jet_jit_http_client_request_read_timeout(req: i64, ms: i64) -> i64
     ))
 }
 
-extern "C" fn jet_jit_http_client_request_send(req: i64) -> i64 {
+fn jet_jit_http_client_request_send(req: i64) -> i64 {
     let Some(req) = take_http_request(req) else {
         return result_err("invalid HTTPRequest".into());
     };
@@ -2512,7 +2512,7 @@ extern "C" fn jet_jit_http_client_request_send(req: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
+fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
     let name = clone_string(name);
     option_string(with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_header(r, &name)),
@@ -2521,7 +2521,7 @@ extern "C" fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
     .and_then(|r| r.ok()))
 }
 
-extern "C" fn jet_jit_http_resp_cookies(resp: i64) -> i64 {
+fn jet_jit_http_resp_cookies(resp: i64) -> i64 {
     match with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_response_cookies(r)),
         _ => None,

@@ -449,14 +449,20 @@ pub(crate) fn lower_deopt_stub(
 
 /// Host: interpret one deopted function with packed i64 args.
 ///
-/// `extern "C"` makes this a nounwind frame: rustc wraps the body in an
-/// abort-on-unwind shim, so an unwind that reaches this edge calls
-/// `core::panicking::panic_cannot_unwind` and the process dies with SIGABRT
-/// *before* unwinding starts — no `catch_unwind` further out can intercept it
-/// (#1995). The whole TIR evaluator runs below this line, so every unwind it
-/// can raise is converted here, inside the frame, onto the tier's existing
-/// status channel.
-pub(crate) extern "C" fn jet_deopt_call(
+/// The whole TIR evaluator runs below this line, so this seam raises every kind
+/// of unwind the interpreter can — a cancel delivered at a wait point
+/// (`Prelude/Scheduler.rs::jet_task_deliver_cancel`) most of all. None of them
+/// may reach the Cranelift frame that called it (#1995).
+///
+/// This is a plain Rust `fn`, deliberately: generated code reaches it through
+/// the `extern "C"` shim `host_seam::guarded` builds for the `deopt_call` entry
+/// in `host_fns!`, and that shim catches and converts inside its own C frame.
+/// It used to be an `extern "C" fn` with its own hand-written `catch_unwind`,
+/// which was the right conversion in the wrong place: an `extern "C"` body
+/// aborts an escaping unwind at its own edge, so the conversion could never be
+/// added from outside and had to be repeated at every seam by hand. See
+/// `host_seam.rs` for the decision record.
+pub(crate) fn jet_deopt_call(
     fn_idx: i64,
     argc: i64,
     a0: i64,
@@ -556,56 +562,15 @@ pub(crate) extern "C" fn jet_deopt_call(
             }
         }
     };
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(interpret)) {
-        Ok(bits) => bits,
-        Err(payload) => {
-            convert_deopt_unwind(payload.as_ref());
-            0
-        }
-    }
-}
-
-/// Convert an unwind caught at the [`jet_deopt_call`] boundary. Always returns
-/// normally: generated code reads the runtime's trap flag at its next
-/// `emit_trap_check` and reaches its epilogue through Cranelift control flow,
-/// never through a Rust unwind (I1).
-fn convert_deopt_unwind(payload: &(dyn std::any::Any + Send)) {
-    // A shared-Prelude stop recorded its own report in `runtime_stop_unwind`
-    // before unwinding; a second engine-local message would be an invention.
-    if payload.is::<super::runtime_host::JitRuntimeStop>() {
-        return;
-    }
-    // D-CANCELMODEL1=C: a cancel raised at an interpreter wait point is an
-    // ordinary program event, not a defect. Deliver the same status `#Shield`
-    // already delivers for a deferred cancel (`Concurrency::…ShieldExit`).
-    if jet_codegen::scheduler::jet_scheduler_is_cancel_unwind(payload) {
-        Concurrency::with_runtime_mut(|rt| rt.set_trap("a task was cancelled"));
-        return;
-    }
-    // Anything else is a Jet defect. `JitRuntime::set_host_fault` puts it on
-    // the branded ICE rail: `resident.rs::take_host_fault_outcome` renders the
-    // report and the run exits `ExitCodes::ICE` (I2).
-    let message = payload
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| {
-            payload
-                .downcast_ref::<&'static str>()
-                .map(|message| (*message).to_string())
-        })
-        .unwrap_or_else(|| "a JIT deopt host panicked".to_string());
-    let recorded = Concurrency::with_runtime_mut(|rt| {
-        rt.set_host_fault(&message);
-        true
-    });
-    if !recorded {
-        // No resident runtime owns this call, so there is no status channel to
-        // put the fault on. Never return a silent success: say it on stderr.
-        let _ = super::runtime_host::write_jit_stderr(
-            &format!("internal compiler error: {message}\n"),
-            true,
-        );
-    }
+    // No catch here on purpose. The `extern "C"` shim `host_seam::guarded`
+    // generated for the `deopt_call` symbol is the boundary, and
+    // `Concurrency::deliver_caught_unwind` is the one place a caught payload
+    // becomes a status: a cancel raised at an interpreter wait point lands on
+    // the tier's pending-interrupt channel — the status `#Shield` already
+    // delivers for a deferred cancel (D-CANCELMODEL1=C) — and anything else
+    // takes the branded ICE rail (I2). A second `catch_unwind` here would be a
+    // second boundary beside the generated one (I8).
+    interpret()
 }
 
 fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnostic> {

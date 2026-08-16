@@ -38,7 +38,7 @@ fn display_enabled() -> bool {
     std::env::var("JET_RAYLIB_DISPLAY").as_deref() == Ok("1")
 }
 
-extern "C" fn jet_jit_raylib_window_open(width: i64, height: i64, title: i64) -> i64 {
+fn jet_jit_raylib_window_open(width: i64, height: i64, title: i64) -> i64 {
     with_rt(|rt| {
         let title_s = rt.heap.clone_string(title).unwrap_or_default();
         // Headless unless display is explicitly requested. Native init lives in
@@ -55,16 +55,16 @@ extern "C" fn jet_jit_raylib_window_open(width: i64, height: i64, title: i64) ->
     })
 }
 
-extern "C" fn jet_jit_raylib_color(r: i64, g: i64, b: i64, a: i64) -> i64 {
+fn jet_jit_raylib_color(r: i64, g: i64, b: i64, a: i64) -> i64 {
     with_rt(|rt| {
         rt.raylib_colors.push(RaylibColorState { r, g, b, a });
         rt.raylib_colors.len() as i64
     })
 }
 
-extern "C" fn jet_jit_raylib_set_target_fps(_fps: i64) {}
+fn jet_jit_raylib_set_target_fps(_fps: i64) {}
 
-extern "C" fn jet_jit_raylib_key_down(name: i64) -> i8 {
+fn jet_jit_raylib_key_down(name: i64) -> i8 {
     with_rt(|rt| {
         let _ = rt.heap.clone_string(name);
         // Headless bridge never reports keys pressed.
@@ -72,9 +72,9 @@ extern "C" fn jet_jit_raylib_key_down(name: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_raylib_begin_drawing(_window: i64) {}
-extern "C" fn jet_jit_raylib_clear_background(_color: i64) {}
-extern "C" fn jet_jit_raylib_draw_rectangle(
+fn jet_jit_raylib_begin_drawing(_window: i64) {}
+fn jet_jit_raylib_clear_background(_color: i64) {}
+fn jet_jit_raylib_draw_rectangle(
     _x: i64,
     _y: i64,
     _w: i64,
@@ -82,7 +82,7 @@ extern "C" fn jet_jit_raylib_draw_rectangle(
     _color: i64,
 ) {
 }
-extern "C" fn jet_jit_raylib_draw_text(
+fn jet_jit_raylib_draw_text(
     _text: i64,
     _x: i64,
     _y: i64,
@@ -90,10 +90,10 @@ extern "C" fn jet_jit_raylib_draw_text(
     _color: i64,
 ) {
 }
-extern "C" fn jet_jit_raylib_end_drawing() {}
-extern "C" fn jet_jit_raylib_close_window(_window: i64) {}
+fn jet_jit_raylib_end_drawing() {}
+fn jet_jit_raylib_close_window(_window: i64) {}
 
-extern "C" fn jet_jit_raylib_window_should_close(window: i64) -> i8 {
+fn jet_jit_raylib_window_should_close(window: i64) -> i8 {
     with_rt(|rt| {
         let native = rt
             .raylib_windows
@@ -105,7 +105,7 @@ extern "C" fn jet_jit_raylib_window_should_close(window: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_raylib_window_ready(window: i64) -> i8 {
+fn jet_jit_raylib_window_ready(window: i64) -> i8 {
     with_rt(|rt| {
         let native = rt
             .raylib_windows
@@ -116,7 +116,7 @@ extern "C" fn jet_jit_raylib_window_ready(window: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_raylib_load_sound(path: i64) -> i64 {
+fn jet_jit_raylib_load_sound(path: i64) -> i64 {
     with_rt(|rt| {
         let path_s = rt.heap.clone_string(path).unwrap_or_default();
         rt.raylib_sounds.push(RaylibSoundState { path: path_s });
@@ -124,7 +124,7 @@ extern "C" fn jet_jit_raylib_load_sound(path: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_raylib_play_sound(sound: i64) -> i8 {
+fn jet_jit_raylib_play_sound(sound: i64) -> i8 {
     with_rt(|rt| {
         let ok = rt
             .raylib_sounds

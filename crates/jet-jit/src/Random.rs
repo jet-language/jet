@@ -159,35 +159,35 @@ fn list_is_float(list: i64) -> bool {
     })
 }
 
-extern "C" fn jet_jit_random_seed(n: i64) {
+fn jet_jit_random_seed(n: i64) {
     ambient_random_kernel::seed(n);
 }
 
-extern "C" fn jet_jit_random_int(low: i64, high: i64) -> i64 {
+fn jet_jit_random_int(low: i64, high: i64) -> i64 {
     ambient_random_kernel::int(low, high)
 }
 
-extern "C" fn jet_jit_random_float() -> f64 {
+fn jet_jit_random_float() -> f64 {
     ambient_random_kernel::float()
 }
 
-extern "C" fn jet_jit_random_bool(p: f64) -> i8 {
+fn jet_jit_random_bool(p: f64) -> i8 {
     i8::from(ambient_random_kernel::bool_p(p))
 }
 
-extern "C" fn jet_jit_random_float_range(low: f64, high: f64) -> f64 {
+fn jet_jit_random_float_range(low: f64, high: f64) -> f64 {
     ambient_random_kernel::float_range(low, high)
 }
 
-extern "C" fn jet_jit_random_normal(mean: f64, stddev: f64) -> f64 {
+fn jet_jit_random_normal(mean: f64, stddev: f64) -> f64 {
     ambient_random_kernel::normal(mean, stddev)
 }
 
-extern "C" fn jet_jit_random_exponential(lambda: f64) -> f64 {
+fn jet_jit_random_exponential(lambda: f64) -> f64 {
     ambient_random_kernel::exponential(lambda)
 }
 
-extern "C" fn jet_jit_random_pick(items: i64) -> i64 {
+fn jet_jit_random_pick(items: i64) -> i64 {
     if list_is_float(items) {
         let values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
@@ -199,7 +199,7 @@ extern "C" fn jet_jit_random_pick(items: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_random_shuffle(items: i64) {
+fn jet_jit_random_shuffle(items: i64) {
     if list_is_float(items) {
         let mut values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
@@ -217,7 +217,7 @@ extern "C" fn jet_jit_random_shuffle(items: i64) {
     }
 }
 
-extern "C" fn jet_jit_random_split(seed: i64) -> i64 {
+fn jet_jit_random_split(seed: i64) -> i64 {
     let state = ambient_random_kernel::split(seed).state;
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState { state });
@@ -225,7 +225,7 @@ extern "C" fn jet_jit_random_split(seed: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_random_bytes(n: i64) -> i64 {
+fn jet_jit_random_bytes(n: i64) -> i64 {
     let bytes = ambient_random_kernel::bytes(n);
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -250,7 +250,7 @@ fn pack_option_float(opt: Option<f64>) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_random_weighted_pick(items: i64, weights: i64) -> i64 {
+fn jet_jit_random_weighted_pick(items: i64, weights: i64) -> i64 {
     let Some(ws) = read_list(weights, |heap, index| heap.list_get_float(weights, index)) else {
         return pack_option_i64(None);
     };
@@ -267,7 +267,7 @@ extern "C" fn jet_jit_random_weighted_pick(items: i64, weights: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_random_sample(items: i64, k: i64) -> i64 {
+fn jet_jit_random_sample(items: i64, k: i64) -> i64 {
     if list_is_float(items) {
         let values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
@@ -305,7 +305,7 @@ fn with_rng<T: Default>(handle: i64, f: impl FnOnce(&mut RngState) -> T) -> T {
     })
 }
 
-extern "C" fn jet_jit_rng_new(seed: i64) -> i64 {
+fn jet_jit_rng_new(seed: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.rngs.push(RngState {
             state: seed as u64,
@@ -314,46 +314,46 @@ extern "C" fn jet_jit_rng_new(seed: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
+fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
     with_rng(handle, |r| rng_int(r, lo, hi))
 }
 
-extern "C" fn jet_jit_rng_float(handle: i64) -> f64 {
+fn jet_jit_rng_float(handle: i64) -> f64 {
     with_rng(handle, rng_float)
 }
 
-extern "C" fn jet_jit_rng_float_range(handle: i64, low: f64, high: f64) -> f64 {
+fn jet_jit_rng_float_range(handle: i64, low: f64, high: f64) -> f64 {
     with_rng(handle, |r| {
         seeded_random_kernel::jet_seeded_rng_float_range(&mut r.state, low, high)
     })
 }
 
-extern "C" fn jet_jit_rng_bool_p(handle: i64, p: f64) -> i8 {
+fn jet_jit_rng_bool_p(handle: i64, p: f64) -> i8 {
     with_rng(handle, |r| {
         i8::from(seeded_random_kernel::jet_seeded_rng_bool_p(&mut r.state, p))
     })
 }
 
-extern "C" fn jet_jit_rng_bool(handle: i64) -> i8 {
+fn jet_jit_rng_bool(handle: i64) -> i8 {
     // Match AOT `jet_rng_bool` / comptime seeded rng: LSB of SplitMix64 next.
     with_rng(handle, |r| {
         i8::from(seeded_random_kernel::jet_seeded_rng_bool(&mut r.state))
     })
 }
 
-extern "C" fn jet_jit_rng_normal(handle: i64, mean: f64, stddev: f64) -> f64 {
+fn jet_jit_rng_normal(handle: i64, mean: f64, stddev: f64) -> f64 {
     with_rng(handle, |r| {
         seeded_random_kernel::jet_seeded_rng_normal(&mut r.state, mean, stddev)
     })
 }
 
-extern "C" fn jet_jit_rng_exponential(handle: i64, lambda: f64) -> f64 {
+fn jet_jit_rng_exponential(handle: i64, lambda: f64) -> f64 {
     with_rng(handle, |r| {
         seeded_random_kernel::jet_seeded_rng_exponential(&mut r.state, lambda)
     })
 }
 
-extern "C" fn jet_jit_rng_pick(handle: i64, items: i64) -> i64 {
+fn jet_jit_rng_pick(handle: i64, items: i64) -> i64 {
     if list_is_float(items) {
         let values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
@@ -371,7 +371,7 @@ extern "C" fn jet_jit_rng_pick(handle: i64, items: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_rng_shuffle(handle: i64, items: i64) {
+fn jet_jit_rng_shuffle(handle: i64, items: i64) {
     if list_is_float(items) {
         let mut values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
@@ -393,7 +393,7 @@ extern "C" fn jet_jit_rng_shuffle(handle: i64, items: i64) {
     }
 }
 
-extern "C" fn jet_jit_rng_weighted_pick(handle: i64, items: i64, weights: i64) -> i64 {
+fn jet_jit_rng_weighted_pick(handle: i64, items: i64, weights: i64) -> i64 {
     let Some(ws) = read_list(weights, |heap, index| heap.list_get_float(weights, index)) else {
         return pack_option_i64(None);
     };
@@ -416,7 +416,7 @@ extern "C" fn jet_jit_rng_weighted_pick(handle: i64, items: i64, weights: i64) -
     }
 }
 
-extern "C" fn jet_jit_rng_sample(handle: i64, items: i64, k: i64) -> i64 {
+fn jet_jit_rng_sample(handle: i64, items: i64, k: i64) -> i64 {
     if list_is_float(items) {
         let values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
@@ -434,7 +434,7 @@ extern "C" fn jet_jit_rng_sample(handle: i64, items: i64, k: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_rng_bytes(handle: i64, n: i64) -> i64 {
+fn jet_jit_rng_bytes(handle: i64, n: i64) -> i64 {
     let n = n.max(0);
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -449,7 +449,7 @@ extern "C" fn jet_jit_rng_bytes(handle: i64, n: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_rng_split(handle: i64) -> i64 {
+fn jet_jit_rng_split(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let state = {
             let r = rt

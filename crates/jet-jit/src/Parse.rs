@@ -77,13 +77,13 @@ fn clone_byte_list(handle: i64) -> Vec<u8> {
     })
 }
 
-extern "C" fn jet_jit_reader_over(bytes: i64) -> i64 {
+fn jet_jit_reader_over(bytes: i64) -> i64 {
     push_reader(kernel::jet_reader_over(&clone_byte_list(bytes)))
 }
 
 macro_rules! reader_read {
     ($name:ident, $kernel:path) => {
-        extern "C" fn $name(handle: i64) -> i64 {
+        fn $name(handle: i64) -> i64 {
             match with_reader_mut(handle, |r| $kernel(r).map(|v| v as i64)) {
                 Some(Ok(v)) => result_ok(v),
                 Some(Err(e)) => result_err(e),
@@ -101,7 +101,7 @@ reader_read!(jet_jit_reader_read_u32_be, kernel::jet_reader_read_u32_be);
 reader_read!(jet_jit_reader_read_u64_le, kernel::jet_reader_read_u64_le);
 reader_read!(jet_jit_reader_read_u64_be, kernel::jet_reader_read_u64_be);
 
-extern "C" fn jet_jit_reader_take(handle: i64, n: i64) -> i64 {
+fn jet_jit_reader_take(handle: i64, n: i64) -> i64 {
     match with_reader_mut(handle, |r| kernel::jet_reader_take(r, n)) {
         Some(Ok(bytes)) => result_ok_bytes(bytes),
         Some(Err(e)) => result_err(e),
@@ -109,24 +109,24 @@ extern "C" fn jet_jit_reader_take(handle: i64, n: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_reader_remaining(handle: i64) -> i64 {
+fn jet_jit_reader_remaining(handle: i64) -> i64 {
     with_reader_mut(handle, |r| kernel::jet_reader_remaining(r)).unwrap_or(0)
 }
 
-extern "C" fn jet_jit_reader_at_end(handle: i64) -> i8 {
+fn jet_jit_reader_at_end(handle: i64) -> i8 {
     with_reader_mut(handle, |r| i8::from(kernel::jet_reader_at_end(r))).unwrap_or(1)
 }
 
-extern "C" fn jet_jit_cursor_over(text: i64) -> i64 {
+fn jet_jit_cursor_over(text: i64) -> i64 {
     let s = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(text).unwrap_or_default());
     push_cursor(kernel::jet_cursor_over(&s))
 }
 
-extern "C" fn jet_jit_cursor_skip_ws(handle: i64) {
+fn jet_jit_cursor_skip_ws(handle: i64) {
     let _ = with_cursor_mut(handle, kernel::jet_cursor_skip_ws);
 }
 
-extern "C" fn jet_jit_cursor_take_until(handle: i64, delim: i64) -> i64 {
+fn jet_jit_cursor_take_until(handle: i64, delim: i64) -> i64 {
     let delim = Concurrency::with_runtime_mut(|rt| {
         rt.heap.clone_string(delim).unwrap_or_default()
     });
@@ -140,21 +140,11 @@ extern "C" fn jet_jit_cursor_take_until(handle: i64, delim: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_cursor_advance(handle: i64, nbytes: i64) {
+fn jet_jit_cursor_advance(handle: i64, nbytes: i64) {
     let _ = with_cursor_mut(handle, |c| {
         c.pos = (c.pos + nbytes as usize).min(c.buf.len());
     });
 }
-
-extern "C" fn jet_jit_reader_advance_bits(handle: i64, bits: i64) {
-    let _ = with_reader_mut(handle, |r| {
-        let bytes = (bits as usize + 7) / 8;
-        // bit-accurate: store bit pos in pos*8... keep byte pos when aligned
-        r.pos = (r.pos * 8 + bits as usize) / 8;
-        let _ = bytes;
-    });
-}
-
 
 pub(crate) fn install_str_pattern(parts: Vec<StrMatchPart>) -> i64 {
     let mut table = STR_PATTERNS.lock().expect("str pattern table");
@@ -235,7 +225,7 @@ fn bin_pattern(pattern: i64) -> Option<Vec<BinMatchPart>> {
 }
 
 /// Full-match probe: 1 = Some, 0 = None.
-extern "C" fn jet_jit_str_match_is_some(subject: i64, pattern: i64) -> i8 {
+fn jet_jit_str_match_is_some(subject: i64, pattern: i64) -> i8 {
     let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(subject).unwrap_or_default());
     let Some(parts) = str_pattern(pattern) else {
         return 0;
@@ -244,7 +234,7 @@ extern "C" fn jet_jit_str_match_is_some(subject: i64, pattern: i64) -> i8 {
 }
 
 /// Full-match unwrap → tuple struct handle (caller proved Some).
-extern "C" fn jet_jit_str_match_unwrap(subject: i64, pattern: i64) -> i64 {
+fn jet_jit_str_match_unwrap(subject: i64, pattern: i64) -> i64 {
     let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(subject).unwrap_or_default());
     let Some(parts) = str_pattern(pattern) else {
         return 0;
@@ -255,7 +245,7 @@ extern "C" fn jet_jit_str_match_unwrap(subject: i64, pattern: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_bin_match_is_some(subject: i64, pattern: i64) -> i8 {
+fn jet_jit_bin_match_is_some(subject: i64, pattern: i64) -> i8 {
     let bytes = clone_byte_list(subject);
     let Some(parts) = bin_pattern(pattern) else {
         return 0;
@@ -263,7 +253,7 @@ extern "C" fn jet_jit_bin_match_is_some(subject: i64, pattern: i64) -> i8 {
     i8::from(bin_match_scan(&bytes, &parts, false).is_some())
 }
 
-extern "C" fn jet_jit_bin_match_unwrap(subject: i64, pattern: i64) -> i64 {
+fn jet_jit_bin_match_unwrap(subject: i64, pattern: i64) -> i64 {
     let bytes = clone_byte_list(subject);
     let Some(parts) = bin_pattern(pattern) else {
         return 0;
@@ -275,7 +265,7 @@ extern "C" fn jet_jit_bin_match_unwrap(subject: i64, pattern: i64) -> i64 {
 }
 
 /// Cursor.take_pattern — Result<tuple, String>. Advances cursor on Ok.
-extern "C" fn jet_jit_cursor_take_pattern(handle: i64, pattern: i64) -> i64 {
+fn jet_jit_cursor_take_pattern(handle: i64, pattern: i64) -> i64 {
     let Some(parts) = str_pattern(pattern) else {
         return result_err("Cursor.take_pattern: bad pattern".into());
     };
@@ -300,7 +290,7 @@ extern "C" fn jet_jit_cursor_take_pattern(handle: i64, pattern: i64) -> i64 {
 }
 
 /// Reader.take_pattern — Result<tuple, String>. Advances reader on Ok.
-extern "C" fn jet_jit_reader_take_pattern(handle: i64, pattern: i64) -> i64 {
+fn jet_jit_reader_take_pattern(handle: i64, pattern: i64) -> i64 {
     let Some(parts) = bin_pattern(pattern) else {
         return result_err("Reader.take_pattern: bad pattern".into());
     };

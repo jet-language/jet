@@ -67,11 +67,11 @@ pub(crate) fn ambient_instant_value() -> CtValue {
     }
 }
 
-extern "C" fn jet_jit_time_start() -> i64 {
+fn jet_jit_time_start() -> i64 {
     ambient_monotonic_now_ms()
 }
 
-extern "C" fn jet_jit_stopwatch_elapsed_millis(start_ms: i64) -> i64 {
+fn jet_jit_stopwatch_elapsed_millis(start_ms: i64) -> i64 {
     ambient_monotonic_now_ms().saturating_sub(start_ms)
 }
 
@@ -110,15 +110,15 @@ fn result_err(msg: String) -> i64 {
     result_err_msg(&msg)
 }
 
-extern "C" fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
+fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
     push(TimeValue::Date(time_rt::JetDate::new(y, m, d)))
 }
 
-extern "C" fn jet_jit_date_today() -> i64 {
+fn jet_jit_date_today() -> i64 {
     push(TimeValue::Date(time_rt::JetDate::today_utc()))
 }
 
-extern "C" fn jet_jit_date_equal(left: i64, right: i64) -> i8 {
+fn jet_jit_date_equal(left: i64, right: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         let left = left
             .checked_sub(1)
@@ -135,60 +135,60 @@ extern "C" fn jet_jit_date_equal(left: i64, right: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_date_parse(s: i64) -> i64 {
+fn jet_jit_date_parse(s: i64) -> i64 {
     match time_rt::JetDate::parse(&clone_string(s)) {
         Ok(d) => result_ok(push(TimeValue::Date(d)) as u64),
         Err(e) => result_err(e),
     }
 }
 
-extern "C" fn jet_jit_datetime_from_timestamp(ts: i64) -> i64 {
+fn jet_jit_datetime_from_timestamp(ts: i64) -> i64 {
     push(TimeValue::DateTime(time_rt::JetDateTime::from_timestamp(ts)))
 }
 
-extern "C" fn jet_jit_datetime_now() -> i64 {
+fn jet_jit_datetime_now() -> i64 {
     push(TimeValue::DateTime(time_rt::JetDateTime::now()))
 }
 
-extern "C" fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
+fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
     match time_rt::JetDateTime::parse_rfc3339(&clone_string(s)) {
         Ok(dt) => result_ok(push(TimeValue::DateTime(dt)) as u64),
         Err(e) => result_err(e),
     }
 }
 
-extern "C" fn jet_jit_time_from_unix_ms(ms: i64) -> i64 {
+fn jet_jit_time_from_unix_ms(ms: i64) -> i64 {
     push(TimeValue::DateTime(time_rt::JetDateTime::from_unix_ms(ms)))
 }
 
-extern "C" fn jet_jit_time_utc() -> i64 {
+fn jet_jit_time_utc() -> i64 {
     push(TimeValue::Zone(time_rt::JetZone::utc()))
 }
 
-extern "C" fn jet_jit_time_period_months(months: i64) -> i64 {
+fn jet_jit_time_period_months(months: i64) -> i64 {
     push(TimeValue::Period(time_rt::JetPeriod::months(months)))
 }
 
-extern "C" fn jet_jit_time_period(years: i64, months: i64, days: i64) -> i64 {
+fn jet_jit_time_period(years: i64, months: i64, days: i64) -> i64 {
     push(TimeValue::Period(time_rt::JetPeriod::new(years, months, days)))
 }
 
-extern "C" fn jet_jit_time_period_days(days: i64) -> i64 {
+fn jet_jit_time_period_days(days: i64) -> i64 {
     push(TimeValue::Period(time_rt::JetPeriod::days(days)))
 }
 
-extern "C" fn jet_jit_time_period_years(years: i64) -> i64 {
+fn jet_jit_time_period_years(years: i64) -> i64 {
     push(TimeValue::Period(time_rt::JetPeriod::years(years)))
 }
 
-extern "C" fn jet_jit_time_zone(name: i64) -> i64 {
+fn jet_jit_time_zone(name: i64) -> i64 {
     match time_rt::JetZone::named(&clone_string(name)) {
         Ok(zone) => result_ok(push(TimeValue::Zone(zone)) as u64),
         Err(error) => result_err(error),
     }
 }
 
-extern "C" fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
+fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
     let date = with_time(date, |value| match value {
         TimeValue::Date(date) => Some(date.clone()),
         _ => None,
@@ -211,7 +211,7 @@ extern "C" fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_time_parse_time(value: i64) -> i64 {
+fn jet_jit_time_parse_time(value: i64) -> i64 {
     fn parse_local_time(value: &str) -> Result<time_rt::JetLocalTime, String> {
         time_rt::JetLocalTime::parse(value)
     }
@@ -222,11 +222,11 @@ extern "C" fn jet_jit_time_parse_time(value: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_time_instant() -> i64 {
+fn jet_jit_time_instant() -> i64 {
     push(TimeValue::Instant(time_rt::JetInstant::now()))
 }
 
-extern "C" fn jet_jit_instant_add_duration(instant: i64, duration_ns: i64) -> i64 {
+fn jet_jit_instant_add_duration(instant: i64, duration_ns: i64) -> i64 {
     let instant = with_time(instant, |value| match value {
         TimeValue::Instant(value) => Some(*value),
         _ => None,
@@ -236,7 +236,7 @@ extern "C" fn jet_jit_instant_add_duration(instant: i64, duration_ns: i64) -> i6
         .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_instant_sub_duration(instant: i64, duration_ns: i64) -> i64 {
+fn jet_jit_instant_sub_duration(instant: i64, duration_ns: i64) -> i64 {
     let instant = with_time(instant, |value| match value {
         TimeValue::Instant(value) => Some(*value),
         _ => None,
@@ -246,7 +246,7 @@ extern "C" fn jet_jit_instant_sub_duration(instant: i64, duration_ns: i64) -> i6
         .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_instant_difference(left: i64, right: i64) -> i64 {
+fn jet_jit_instant_difference(left: i64, right: i64) -> i64 {
     let left = with_time(left, |value| match value {
         TimeValue::Instant(value) => Some(*value),
         _ => None,
@@ -261,7 +261,7 @@ extern "C" fn jet_jit_instant_difference(left: i64, right: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_instant_compare(left: i64, right: i64) -> i64 {
+fn jet_jit_instant_compare(left: i64, right: i64) -> i64 {
     let left = with_time(left, |value| match value {
         TimeValue::Instant(value) => Some(*value),
         _ => None,
@@ -276,7 +276,7 @@ extern "C" fn jet_jit_instant_compare(left: i64, right: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
+fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
     let datetime = with_time(dt, |v| match v {
         TimeValue::DateTime(d) => Some(d.clone()),
         _ => None,
@@ -291,15 +291,15 @@ extern "C" fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_time_days_in_month(year: i64, month: i64) -> i64 {
+fn jet_jit_time_days_in_month(year: i64, month: i64) -> i64 {
     time_rt::JetDate::days_in_month_of(year, month.clamp(1, 12))
 }
 
-extern "C" fn jet_jit_time_is_leap_year(year: i64) -> i8 {
+fn jet_jit_time_is_leap_year(year: i64) -> i8 {
     i8::from(time_rt::JetDate::is_leap(year))
 }
 
-extern "C" fn jet_jit_time_datetime(
+fn jet_jit_time_datetime(
     year: i64,
     month: i64,
     day: i64,
@@ -312,7 +312,7 @@ extern "C" fn jet_jit_time_datetime(
     )))
 }
 
-extern "C" fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
+fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
     push(TimeValue::LocalTime(time_rt::JetLocalTime::new(
         hour, minute, second,
     )))
@@ -320,7 +320,7 @@ extern "C" fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i6
 
 /// Civil-time method dispatch. `kind`: 0=Date, 1=DateTime, 2=Period, 3=Instant, 4=Zone, 5=Zoned.
 /// `method` is a string handle; args packed as i64 list handle (or 0).
-extern "C" fn jet_jit_civil_time_method(
+fn jet_jit_civil_time_method(
     recv: i64,
     method: i64,
     arg0: i64,

@@ -69,7 +69,7 @@ mod io_line_stream {
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
 
-    pub(super) extern "C" fn jet_jit_io_take(n: i64) -> i64 {
+    pub(super) fn jet_jit_io_take(n: i64) -> i64 {
         match jet_std_io_take(n) {
             Ok(buf) => {
                 let list = super::Concurrency::with_runtime_mut(|rt| {
@@ -85,7 +85,7 @@ mod io_line_stream {
         }
     }
 
-    pub(super) extern "C" fn jet_jit_io_read_until(delim: i64) -> i64 {
+    pub(super) fn jet_jit_io_read_until(delim: i64) -> i64 {
         let needle = super::clone_string(delim);
         match jet_std_io_read_until(&needle) {
             Ok(s) => {
@@ -96,7 +96,7 @@ mod io_line_stream {
         }
     }
 
-    pub(super) extern "C" fn jet_jit_io_readline() -> i64 {
+    pub(super) fn jet_jit_io_readline() -> i64 {
         match jet_std_io_readline() {
             Ok(s) => {
                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
@@ -262,19 +262,19 @@ pub(crate) fn prompt_input_secret_with_sink(
     )
 }
 
-extern "C" fn jet_jit_io_stdout() -> i64 {
+fn jet_jit_io_stdout() -> i64 {
     1
 }
 
-extern "C" fn jet_jit_io_stderr() -> i64 {
+fn jet_jit_io_stderr() -> i64 {
     2
 }
 
-extern "C" fn jet_jit_io_stdin() -> i64 {
+fn jet_jit_io_stdin() -> i64 {
     3
 }
 
-extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
+fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
         return result_err_msg("fault injected: IO.Write");
@@ -285,7 +285,7 @@ extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
+fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     let text = format!("{s}\n");
     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
@@ -297,7 +297,7 @@ extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
+fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
         return result_err_msg("fault injected: IO.Write");
     }
@@ -316,7 +316,7 @@ extern "C" fn jet_jit_stdout_write_bytes(_h: i64, list: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stdout_flush(_h: i64) -> i64 {
+fn jet_jit_stdout_flush(_h: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
         return result_err_msg("fault injected: IO.Flush");
     }
@@ -326,11 +326,11 @@ extern "C" fn jet_jit_stdout_flush(_h: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
+fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
     i8::from(term_prelude::jet_term_stdout_is_terminal())
 }
 
-extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
+fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
         return result_err_msg("fault injected: IO.Write");
@@ -341,7 +341,7 @@ extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
+fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
     let s = clone_string(text);
     let text = format!("{s}\n");
     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
@@ -353,7 +353,7 @@ extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
+fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("IO.Write") {
         return result_err_msg("fault injected: IO.Write");
     }
@@ -372,7 +372,7 @@ extern "C" fn jet_jit_stderr_write_bytes(_h: i64, list: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stderr_flush(_h: i64) -> i64 {
+fn jet_jit_stderr_flush(_h: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
         return result_err_msg("fault injected: IO.Flush");
     }
@@ -382,33 +382,33 @@ extern "C" fn jet_jit_stderr_flush(_h: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_stderr_is_tty(_h: i64) -> i8 {
+fn jet_jit_stderr_is_tty(_h: i64) -> i8 {
     i8::from(term_prelude::jet_term_stderr_is_terminal())
 }
 
-extern "C" fn jet_jit_terminal_width() -> i64 {
+fn jet_jit_terminal_width() -> i64 {
     term_prelude::jet_term_width(jit_env_value)
 }
 
-extern "C" fn jet_jit_terminal_height() -> i64 {
+fn jet_jit_terminal_height() -> i64 {
     term_prelude::jet_term_height(jit_env_value)
 }
 
-extern "C" fn jet_jit_io_style(style: i64, text: i64) -> i64 {
+fn jet_jit_io_style(style: i64, text: i64) -> i64 {
     let style = clone_string(style);
     let text = clone_string(text);
     let out = term_prelude::jet_term_style(&style, &text, style_enabled());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
-extern "C" fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
+fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
     let style = clone_string(style);
     let text = clone_string(text);
     let out = term_prelude::jet_term_style_force(&style, &text);
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
 }
 
-extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
+fn jet_jit_io_progress(text: i64) -> i64 {
     let s = clone_string(text);
     let frame = term_prelude::jet_term_progress_frame(
         term_prelude::jet_term_stdout_is_terminal(),
@@ -452,7 +452,7 @@ fn jet_jit_io_progress_iter_with_total(
     wrapped
 }
 
-extern "C" fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64) -> i64 {
+fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64) -> i64 {
     let known_total = known_iter_lists()
         .lock()
         .expect("JIT progress known-iter state poisoned")
@@ -463,7 +463,7 @@ extern "C" fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64)
     jet_jit_io_progress_iter_with_total(list, description, format, total)
 }
 
-extern "C" fn jet_jit_io_progress_list(list: i64, description: i64, format: i64) -> i64 {
+fn jet_jit_io_progress_list(list: i64, description: i64, format: i64) -> i64 {
     known_iter_lists()
         .lock()
         .expect("JIT progress known-iter state poisoned")
@@ -472,7 +472,7 @@ extern "C" fn jet_jit_io_progress_list(list: i64, description: i64, format: i64)
     jet_jit_io_progress_iter_with_total(list, description, format, Some(total))
 }
 
-extern "C" fn jet_jit_io_mark_exact_iter(list: i64) -> i64 {
+fn jet_jit_io_mark_exact_iter(list: i64) -> i64 {
     known_iter_lists()
         .lock()
         .expect("JIT progress known-iter state poisoned")
@@ -961,47 +961,47 @@ pub(crate) fn progress_finish_state(list: i64) {
     }
 }
 
-extern "C" fn jet_jit_io_progress_pull(list: i64, pulls: i64) {
+fn jet_jit_io_progress_pull(list: i64, pulls: i64) {
     jet_jit_io_progress_pull_n(list, pulls);
 }
 
-extern "C" fn jet_jit_io_progress_finish(list: i64) {
+fn jet_jit_io_progress_finish(list: i64) {
     progress_finish_state(list);
 }
 
-extern "C" fn jet_jit_io_progress_exhaust(list: i64) {
+fn jet_jit_io_progress_exhaust(list: i64) {
     progress_exhaust_state(list);
 }
 
-extern "C" fn jet_jit_io_progress_transfer(source: i64, target: i64) {
+fn jet_jit_io_progress_transfer(source: i64, target: i64) {
     progress_transfer_state(source, target);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_filter(source: i64, target: i64) {
+fn jet_jit_io_progress_transfer_filter(source: i64, target: i64) {
     progress_transfer_filter_state(source, target);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_dedup(source: i64, target: i64, string_elems: i64) {
+fn jet_jit_io_progress_transfer_dedup(source: i64, target: i64, string_elems: i64) {
     progress_transfer_dedup_state(source, target, string_elems != 0);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_chunks(source: i64, target: i64, n: i64) {
+fn jet_jit_io_progress_transfer_chunks(source: i64, target: i64, n: i64) {
     progress_transfer_chunks_state(source, target, n);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_windows(source: i64, target: i64, n: i64) {
+fn jet_jit_io_progress_transfer_windows(source: i64, target: i64, n: i64) {
     progress_transfer_windows_state(source, target, n);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_flatten(source: i64, target: i64) {
+fn jet_jit_io_progress_transfer_flatten(source: i64, target: i64) {
     progress_transfer_flatten_state(source, target);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_intersperse(source: i64, target: i64) {
+fn jet_jit_io_progress_transfer_intersperse(source: i64, target: i64) {
     progress_transfer_intersperse_state(source, target);
 }
 
-extern "C" fn jet_jit_io_progress_transfer_take_while(
+fn jet_jit_io_progress_transfer_take_while(
     source: i64,
     target: i64,
     is_skip: i64,
@@ -1009,13 +1009,13 @@ extern "C" fn jet_jit_io_progress_transfer_take_while(
     progress_transfer_take_while_state(source, target, is_skip != 0);
 }
 
-extern "C" fn jet_jit_io_progress_source_pull(source: i64, index: i64) -> i64 {
+fn jet_jit_io_progress_source_pull(source: i64, index: i64) -> i64 {
     progress_source_plan(source)
         .and_then(|(plan, _)| plan.get(index.max(0) as usize).copied())
         .unwrap_or(1) as i64
 }
 
-extern "C" fn jet_jit_io_progress_transfer_plan(
+fn jet_jit_io_progress_transfer_plan(
     source: i64,
     target: i64,
     plan: i64,
@@ -1032,7 +1032,7 @@ extern "C" fn jet_jit_io_progress_transfer_plan(
     progress_transfer_plan(source, target, plan, tail.max(0) as usize);
 }
 
-extern "C" fn jet_jit_io_progress_collect(list: i64) -> i64 {
+fn jet_jit_io_progress_collect(list: i64) -> i64 {
     let active = progress_states()
         .lock()
         .expect("JIT progress state poisoned")
@@ -1045,11 +1045,11 @@ extern "C" fn jet_jit_io_progress_collect(list: i64) -> i64 {
     list
 }
 
-extern "C" fn jet_jit_io_confirm(prompt: i64) -> i8 {
+fn jet_jit_io_confirm(prompt: i64) -> i8 {
     i8::from(prompt_confirm(&clone_string(prompt)))
 }
 
-extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
+fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
     let prompt = clone_string(prompt);
     let values = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(items).unwrap_or(0);
@@ -1071,7 +1071,7 @@ extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
+fn jet_jit_io_input_secret(prompt: i64) -> i64 {
     match prompt_input_secret(&clone_string(prompt)) {
         Ok(secret) => {
             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
@@ -1082,7 +1082,7 @@ extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
 }
 
 /// Materialize stdin lines into a string list (for-in walk).
-extern "C" fn jet_jit_stdin_lines(_h: i64) -> i64 {
+fn jet_jit_stdin_lines(_h: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("IO.Read") {
         return result_err_msg("fault injected: IO.Read");
     }
@@ -1098,7 +1098,7 @@ extern "C" fn jet_jit_stdin_lines(_h: i64) -> i64 {
 }
 
 /// Materialize FileReader lines into a string list without consuming the handle.
-extern "C" fn jet_jit_file_lines(handle: i64) -> i64 {
+fn jet_jit_file_lines(handle: i64) -> i64 {
     use super::enc_stream::FileReaderSlot;
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg("fault injected: FS.Read");
@@ -1131,7 +1131,7 @@ extern "C" fn jet_jit_file_lines(handle: i64) -> i64 {
     list_from_lines(lines)
 }
 
-extern "C" fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
+fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
     use super::enc_stream::FileWriterSlot;
     use std::io::Write;
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
@@ -1157,7 +1157,7 @@ extern "C" fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_file_writer_flush(handle: i64) -> i64 {
+fn jet_jit_file_writer_flush(handle: i64) -> i64 {
     use super::enc_stream::FileWriterSlot;
     use std::io::Write;
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
@@ -1180,11 +1180,11 @@ extern "C" fn jet_jit_file_writer_flush(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_term_enter() {
+fn jet_jit_term_enter() {
     let _ = term_prelude::jet_term_mode_enter(true);
 }
 
-extern "C" fn jet_jit_term_leave() {
+fn jet_jit_term_leave() {
     term_prelude::jet_term_mode_leave();
 }
 

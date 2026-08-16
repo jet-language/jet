@@ -46,26 +46,26 @@ fn list_from_strings(items: Vec<String>) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_hll_new() -> i64 {
+fn jet_jit_hll_new() -> i64 {
     push_sketch(SketchSlot::Hll(sketch_rt::JetHyperLogLog::new()))
 }
 
-extern "C" fn jet_jit_tdigest_new() -> i64 {
+fn jet_jit_tdigest_new() -> i64 {
     push_sketch(SketchSlot::TDigest(sketch_rt::JetTDigest::new()))
 }
 
-extern "C" fn jet_jit_cms_new() -> i64 {
+fn jet_jit_cms_new() -> i64 {
     push_sketch(SketchSlot::Cms(sketch_rt::JetCountMinSketch::new()))
 }
 
-extern "C" fn jet_jit_reservoir_new(capacity: i64) -> i64 {
+fn jet_jit_reservoir_new(capacity: i64) -> i64 {
     push_sketch(SketchSlot::Reservoir(sketch_rt::JetReservoirSampler::new(
         capacity,
     )))
 }
 
 /// `kind`: 0=HLL, 1=TDigest (unused here), 2=CMS, 3=Reservoir.
-extern "C" fn jet_jit_sketch_add_str(handle: i64, kind: i64, s: i64) {
+fn jet_jit_sketch_add_str(handle: i64, kind: i64, s: i64) {
     let item = clone_string(s);
     with_sketch_mut(handle, |slot| match (kind, slot) {
         (0, SketchSlot::Hll(h)) => h.add(&item),
@@ -75,7 +75,7 @@ extern "C" fn jet_jit_sketch_add_str(handle: i64, kind: i64, s: i64) {
     });
 }
 
-extern "C" fn jet_jit_sketch_add_f64(handle: i64, v: f64) {
+fn jet_jit_sketch_add_f64(handle: i64, v: f64) {
     with_sketch_mut(handle, |slot| {
         if let SketchSlot::TDigest(td) = slot {
             td.add(v);
@@ -83,14 +83,14 @@ extern "C" fn jet_jit_sketch_add_f64(handle: i64, v: f64) {
     });
 }
 
-extern "C" fn jet_jit_sketch_count0(handle: i64) -> i64 {
+fn jet_jit_sketch_count0(handle: i64) -> i64 {
     with_sketch_mut(handle, |slot| match slot {
         SketchSlot::Hll(h) => h.count(),
         _ => 0,
     })
 }
 
-extern "C" fn jet_jit_sketch_count1(handle: i64, key: i64) -> i64 {
+fn jet_jit_sketch_count1(handle: i64, key: i64) -> i64 {
     let k = clone_string(key);
     with_sketch_mut(handle, |slot| match slot {
         SketchSlot::Cms(c) => c.count(&k),
@@ -98,14 +98,14 @@ extern "C" fn jet_jit_sketch_count1(handle: i64, key: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_sketch_quantile(handle: i64, q: f64) -> f64 {
+fn jet_jit_sketch_quantile(handle: i64, q: f64) -> f64 {
     with_sketch_mut(handle, |slot| match slot {
         SketchSlot::TDigest(td) => td.quantile(q),
         _ => 0.0,
     })
 }
 
-extern "C" fn jet_jit_sketch_sample(handle: i64) -> i64 {
+fn jet_jit_sketch_sample(handle: i64) -> i64 {
     let items = with_sketch_mut(handle, |slot| -> Option<Vec<String>> {
         match slot {
             SketchSlot::Reservoir(r) => Some(r.sample()),

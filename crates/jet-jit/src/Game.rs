@@ -48,7 +48,7 @@ where
     Concurrency::with_runtime_mut(f)
 }
 
-extern "C" fn jet_jit_game_scene_new(name: i64) -> i64 {
+fn jet_jit_game_scene_new(name: i64) -> i64 {
     with_rt(|rt| {
         let name = rt.heap.clone_string(name).unwrap_or_default();
         rt.game_scenes.push(GameSceneState {
@@ -59,7 +59,7 @@ extern "C" fn jet_jit_game_scene_new(name: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_replay_record(path: i64) -> i64 {
+fn jet_jit_game_replay_record(path: i64) -> i64 {
     with_rt(|rt| {
         let path = rt.heap.clone_string(path).unwrap_or_default();
         rt.game_replays.push(GameReplayState { path });
@@ -67,7 +67,7 @@ extern "C" fn jet_jit_game_replay_record(path: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_backend_headless() -> i64 {
+fn jet_jit_game_backend_headless() -> i64 {
     with_rt(|rt| {
         rt.game_backends.push(GameBackendState {
             renderer: "headless".into(),
@@ -79,7 +79,7 @@ extern "C" fn jet_jit_game_backend_headless() -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_backend_should_continue(backend: i64) -> i64 {
+fn jet_jit_game_backend_should_continue(backend: i64) -> i64 {
     with_rt(|rt| {
         let backend = rt
             .game_backends
@@ -92,7 +92,7 @@ extern "C" fn jet_jit_game_backend_should_continue(backend: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_backend_present(backend: i64) {
+fn jet_jit_game_backend_present(backend: i64) {
     with_rt(|rt| {
         let backend = rt
             .game_backends
@@ -105,7 +105,7 @@ extern "C" fn jet_jit_game_backend_present(backend: i64) {
 }
 
 /// Register `on_frame` callback: `fn_ptr` with `n_caps` captures then frame handle.
-extern "C" fn jet_jit_game_scene_on_frame(
+fn jet_jit_game_scene_on_frame(
     scene: i64,
     fn_ptr: i64,
     n_caps: i64,
@@ -128,7 +128,7 @@ extern "C" fn jet_jit_game_scene_on_frame(
     });
 }
 
-extern "C" fn jet_jit_game_scene_component(scene: i64, name: i64) {
+fn jet_jit_game_scene_component(scene: i64, name: i64) {
     with_rt(|rt| {
         let name = rt.heap.clone_string(name).unwrap_or_default();
         let scene = rt
@@ -141,7 +141,7 @@ extern "C" fn jet_jit_game_scene_component(scene: i64, name: i64) {
     });
 }
 
-extern "C" fn jet_jit_game_scene_query(scene: i64, names: i64) -> i64 {
+fn jet_jit_game_scene_query(scene: i64, names: i64) -> i64 {
     with_rt(|rt| {
         let names_s = rt.heap.clone_string(names).unwrap_or_default();
         let scene = rt
@@ -170,7 +170,7 @@ extern "C" fn jet_jit_game_scene_query(scene: i64, names: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_assets_image(scene: i64, path: i64) -> i64 {
+fn jet_jit_game_assets_image(scene: i64, path: i64) -> i64 {
     with_rt(|rt| {
         let path_s = rt.heap.clone_string(path).unwrap_or_default();
         if path_s.contains("missing") {
@@ -189,7 +189,7 @@ extern "C" fn jet_jit_game_assets_image(scene: i64, path: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_assets_sound(scene: i64, path: i64) -> i64 {
+fn jet_jit_game_assets_sound(scene: i64, path: i64) -> i64 {
     with_rt(|rt| {
         let path_s = rt.heap.clone_string(path).unwrap_or_default();
         if path_s.contains("missing") {
@@ -208,7 +208,7 @@ extern "C" fn jet_jit_game_assets_sound(scene: i64, path: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_input_bind(scene: i64, action: i64, key: i64) {
+fn jet_jit_game_input_bind(scene: i64, action: i64, key: i64) {
     with_rt(|rt| {
         let action_s = rt.heap.clone_string(action).unwrap_or_default();
         let key_s = rt.heap.clone_string(key).unwrap_or_default();
@@ -226,7 +226,7 @@ extern "C" fn jet_jit_game_input_bind(scene: i64, action: i64, key: i64) {
     });
 }
 
-extern "C" fn jet_jit_game_input_pressed(frame: i64, action: i64) -> i8 {
+fn jet_jit_game_input_pressed(frame: i64, action: i64) -> i8 {
     with_rt(|rt| {
         let action_s = rt.heap.clone_string(action).unwrap_or_default();
         let frame = rt
@@ -237,7 +237,7 @@ extern "C" fn jet_jit_game_input_pressed(frame: i64, action: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_game_frame_index(frame: i64) -> i64 {
+fn jet_jit_game_frame_index(frame: i64) -> i64 {
     with_rt(|rt| {
         rt.game_frames
             .get(frame.saturating_sub(1) as usize)
@@ -246,7 +246,7 @@ extern "C" fn jet_jit_game_frame_index(frame: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_game_asset_show(kind: i64, path: i64) -> i64 {
+fn jet_jit_game_asset_show(kind: i64, path: i64) -> i64 {
     with_rt(|rt| {
         let path_s = rt.heap.clone_string(path).unwrap_or_default();
         let text = if kind == 0 {
@@ -288,7 +288,7 @@ fn invoke_frame_cb(cb: GameFrameCb, frame: i64) {
 }
 
 /// `core.game.run(scene, replay?: …, backend?: …)` — headless 3-frame transcript.
-extern "C" fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
+fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
     with_rt(|rt| {
         let scene_idx = scene.saturating_sub(1) as usize;
         let name = rt

@@ -63,12 +63,23 @@ thread_local! {
 /// (`library/unwind/src/types.rs`), which libgcc's phase-1 loop returns when
 /// it walked off the top of the stack without finding a *handler*
 /// (`unwind.inc` -> `uw_frame_state_for`): a panic raised where no
-/// `catch_unwind` is above it at all. The usual source is a thread-local
-/// destructor — glibc runs those from `__call_tls_dtors` after the thread's
-/// Rust entry frame and its `catch_unwind` have already returned, which is
-/// also why the `extern "C" destroy` shim does not convert it into the
-/// "non-unwinding panic" abort: that shim is a phase-2 cleanup pad, and
-/// phase 2 never starts.
+/// `catch_unwind` is above it at all. Two sources produce it.
+///
+/// The first is a thread-local destructor — glibc runs those from
+/// `__call_tls_dtors` after the thread's Rust entry frame and its
+/// `catch_unwind` have already returned, which is also why the
+/// `extern "C" destroy` shim does not convert it into the "non-unwinding
+/// panic" abort: that shim is a phase-2 cleanup pad, and phase 2 never starts.
+///
+/// The second is a Cranelift JIT frame. `cranelift-jit` registers no unwind
+/// information for the code it emits, so phase 1 cannot walk past one and any
+/// outer `catch_unwind` is unreachable even though it exists. That class is
+/// fixed at the boundary, not here: `jet-jit`'s `host_seam` generates an
+/// `extern "C"` shim per host symbol that catches and converts inside its own
+/// C frame (#1997). If you are reading this because you saw error 5, check
+/// which of the two you have before touching this number — neither is a
+/// stack-space condition, and this constant answers for exactly one abort,
+/// the `has overflowed its stack` pair above.
 pub const COMPILER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 /// Raising the accepted nesting depth must raise the stack that lowers it.

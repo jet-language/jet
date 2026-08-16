@@ -119,21 +119,21 @@ mod runtime {
         }
     }
 
-    pub(super) extern "C" fn jet_jit_args_spec() -> i64 {
+    pub(super) fn jet_jit_args_spec() -> i64 {
         push_spec(jet_args_spec())
     }
 
-    pub(super) extern "C" fn jet_jit_args_description(h: i64, description: i64) -> i64 {
+    pub(super) fn jet_jit_args_description(h: i64, description: i64) -> i64 {
         let spec = jet_args_description(take_spec(h), &clone_string(description));
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_flag(h: i64, name: i64, help: i64) -> i64 {
+    pub(super) fn jet_jit_args_flag(h: i64, name: i64, help: i64) -> i64 {
         let spec = jet_args_flag(take_spec(h), &clone_string(name), &clone_string(help));
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_flag_short(
+    pub(super) fn jet_jit_args_flag_short(
         h: i64,
         name: i64,
         short: i64,
@@ -148,7 +148,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_option(
+    pub(super) fn jet_jit_args_option(
         h: i64,
         name: i64,
         help: i64,
@@ -163,7 +163,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_option_default(
+    pub(super) fn jet_jit_args_option_default(
         h: i64,
         name: i64,
         help: i64,
@@ -180,7 +180,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_option_int(
+    pub(super) fn jet_jit_args_option_int(
         h: i64,
         name: i64,
         help: i64,
@@ -195,7 +195,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_option_choice(
+    pub(super) fn jet_jit_args_option_choice(
         h: i64,
         name: i64,
         help: i64,
@@ -212,7 +212,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_repeat(
+    pub(super) fn jet_jit_args_repeat(
         h: i64,
         name: i64,
         help: i64,
@@ -227,7 +227,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_positional(
+    pub(super) fn jet_jit_args_positional(
         h: i64,
         name: i64,
         help: i64,
@@ -236,7 +236,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_subcommand(
+    pub(super) fn jet_jit_args_subcommand(
         h: i64,
         name: i64,
         help: i64,
@@ -247,61 +247,61 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_version(h: i64, version: i64) -> i64 {
+    pub(super) fn jet_jit_args_version(h: i64, version: i64) -> i64 {
         let spec = jet_args_version(take_spec(h), &clone_string(version));
         replace_spec(h, spec)
     }
 
-    pub(super) extern "C" fn jet_jit_args_help(h: i64) -> i64 {
+    pub(super) fn jet_jit_args_help(h: i64) -> i64 {
         alloc_string(take_spec(h).help())
     }
 
-    pub(super) extern "C" fn jet_jit_args_completion(h: i64, shell: i64) -> i64 {
+    pub(super) fn jet_jit_args_completion(h: i64, shell: i64) -> i64 {
         alloc_string(jet_args_completion(&take_spec(h), &clone_string(shell)))
     }
 
-    pub(super) extern "C" fn jet_jit_args_parse(h: i64, argv: i64) -> i64 {
+    pub(super) fn jet_jit_args_parse(h: i64, argv: i64) -> i64 {
         match jet_args_parse(&take_spec(h), &list_of_strings(argv)) {
             Ok(parsed) => result_ok(push_parsed(parsed) as u64),
             Err(msg) => result_err(&msg),
         }
     }
 
-    pub(super) extern "C" fn jet_jit_args_parse_or_exit(h: i64, argv: i64) -> i64 {
+    pub(super) fn jet_jit_args_parse_or_exit(h: i64, argv: i64) -> i64 {
         push_parsed(jet_args_parse_or_exit(
             &take_spec(h),
             &list_of_strings(argv),
         ))
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_flag(h: i64, name: i64) -> i8 {
+    pub(super) fn jet_jit_parsed_flag(h: i64, name: i64) -> i8 {
         with_parsed(h, |p| i8::from(jet_parsed_flag(p, &clone_string(name))))
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_option(h: i64, name: i64) -> i64 {
+    pub(super) fn jet_jit_parsed_option(h: i64, name: i64) -> i64 {
         with_parsed(h, |p| pack_option_str(jet_parsed_option(p, &clone_string(name))))
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_option_int(h: i64, name: i64) -> i64 {
+    pub(super) fn jet_jit_parsed_option_int(h: i64, name: i64) -> i64 {
         with_parsed(h, |p| pack_option_i64(jet_parsed_option_int(p, &clone_string(name))))
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_option_float_opt(h: i64, name: i64) -> i64 {
+    pub(super) fn jet_jit_parsed_option_float_opt(h: i64, name: i64) -> i64 {
         with_parsed(h, |p| match jet_parsed_option_float(p, &clone_string(name)) {
             Ok(v) => (v.to_bits() as i64).wrapping_add(1),
             Err(JetAbsent) => 0,
         })
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_options(h: i64, name: i64) -> i64 {
+    pub(super) fn jet_jit_parsed_options(h: i64, name: i64) -> i64 {
         with_parsed(h, |p| list_from_strings(jet_parsed_options(p, &clone_string(name))))
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_positional(h: i64, idx: i64) -> i64 {
+    pub(super) fn jet_jit_parsed_positional(h: i64, idx: i64) -> i64 {
         with_parsed(h, |p| pack_option_str(jet_parsed_positional(p, idx)))
     }
 
-    pub(super) extern "C" fn jet_jit_parsed_subcommand(h: i64) -> i64 {
+    pub(super) fn jet_jit_parsed_subcommand(h: i64) -> i64 {
         with_parsed(h, |p| pack_option_str(jet_parsed_subcommand(p)))
     }
 }

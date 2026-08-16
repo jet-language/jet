@@ -7,24 +7,24 @@ mod runtime {
     include!("../../jet-pkg-model/src/Prelude/Compress.rs");
 }
 
-extern "C" fn jet_jit_gzip_compress(bytes: i64) -> i64 {
+fn jet_jit_gzip_compress(bytes: i64) -> i64 {
     let out = runtime::jet_compress_gzip_compress(&clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 
-extern "C" fn jet_jit_gzip_decompress(bytes: i64) -> i64 {
+fn jet_jit_gzip_decompress(bytes: i64) -> i64 {
     match runtime::jet_compress_gzip_decompress(&clone_bytes(bytes)) {
         Ok(out) => result_ok(alloc_byte_list(&out) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
-extern "C" fn jet_jit_zstd_compress(bytes: i64) -> i64 {
+fn jet_jit_zstd_compress(bytes: i64) -> i64 {
     let out = runtime::jet_compress_zstd_compress(&clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 
-extern "C" fn jet_jit_zstd_decompress(bytes: i64) -> i64 {
+fn jet_jit_zstd_decompress(bytes: i64) -> i64 {
     match runtime::jet_compress_zstd_decompress(&clone_bytes(bytes)) {
         Ok(out) => result_ok(alloc_byte_list(&out) as u64),
         Err(e) => result_err_msg(&e),

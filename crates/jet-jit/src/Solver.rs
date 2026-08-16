@@ -16,14 +16,14 @@ mod solver_kernel {
 
 pub(crate) use solver_kernel::jet_std::Solver as SolverState;
 
-extern "C" fn jet_jit_solver_new(seed: i64) -> i64 {
+fn jet_jit_solver_new(seed: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.solvers.push(solver_kernel::jet_solver_new(seed));
         rt.solvers.len() as i64
     })
 }
 
-extern "C" fn jet_jit_solver_require(handle: i64, ok: i8) {
+fn jet_jit_solver_require(handle: i64, ok: i8) {
     Concurrency::with_runtime_mut(|rt| {
         let solver = rt
             .solvers
@@ -33,7 +33,7 @@ extern "C" fn jet_jit_solver_require(handle: i64, ok: i8) {
     });
 }
 
-extern "C" fn jet_jit_solver_failure_count(handle: i64) -> i64 {
+fn jet_jit_solver_failure_count(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let solver = rt
             .solvers
@@ -43,7 +43,7 @@ extern "C" fn jet_jit_solver_failure_count(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_solver_status(handle: i64) -> i64 {
+fn jet_jit_solver_status(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let solver = rt
             .solvers

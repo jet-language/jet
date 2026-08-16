@@ -53,7 +53,7 @@ pub(crate) mod jet_encoding_json {
 /// #1633: one canonical listing per JIT host symbol.
 ///
 /// Each per-module host-symbol table used to write every symbol four times:
-/// the `extern "C" fn` (real code, unaffected here), a `FuncId` struct field,
+/// the host `fn` itself (real code, unaffected here), a `FuncId` struct field,
 /// a `builder.symbol(...)` registration, and a `module.declare_function(...)`
 /// import — about 1,300 symbols x the last three listings. Missing one of
 /// those three did not fail the build; it failed silently at JIT run time.
@@ -75,6 +75,19 @@ pub(crate) mod jet_encoding_json {
 /// `jet_jit_event_scope` — are registered once by `Reactive` and imported by
 /// both `Reactive` and `Watcher`). Left out of `$register_fn` so
 /// registration stays single-owner per symbol.
+///
+/// D-JITUNWIND1 (#1995 / #1997): the same one-entry-per-symbol input also
+/// generates the crate's **no-unwind boundary**. `builder.symbol` registers
+/// `host_seam::guarded($host_fn)` — a shim with the same C signature that runs
+/// the seam inside `guard_seam` — never `$host_fn` itself. A JIT frame carries
+/// no unwind information (`cranelift-jit` registers none), so a Rust panic
+/// raised above one aborts the process with `failed to initiate panic,
+/// error 5` before any outer `catch_unwind` can exist. Boundary conversion was
+/// chosen over registering FDEs for generated code, and its recorded cost is
+/// that the guarantee must hold for every entry below — which is why it is
+/// generated here instead of reviewed per call site. `host_seam.rs` carries the
+/// full decision record and `tests/jit_no_unwind_boundary.rs` is the mechanical
+/// check. See also `docs/spec/architecture.md` R13.
 macro_rules! host_fns {
     (
         struct $StructName:ident;
@@ -112,7 +125,7 @@ macro_rules! host_fns {
         pub(crate) fn $register_fn(builder: &mut cranelift_jit::JITBuilder) {
             $(
                 $(
-                    builder.symbol($symbol, $host_fn as *const u8);
+                    builder.symbol($symbol, $crate::host_seam::guarded($host_fn));
                     #[cfg(test)]
                     $crate::host_fns_audit::record_registered($symbol);
                 )?
@@ -198,6 +211,7 @@ mod Encoding;
 mod enc_stream;
 mod Fmt;
 mod Game;
+mod host_seam;
 mod IO;
 mod Layout;
 mod Marshal;

@@ -351,14 +351,14 @@ pub(crate) fn vault_key_tag(ty: &Type) -> Option<i64> {
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_generate() -> i64 {
+fn jet_jit_crypto_x25519_generate() -> i64 {
     match runtime::jet_crypto_x25519_generate_impl() {
         Ok(key) => result(true, push(CryptoValue::X25519SecretKey(key)) as u64),
         Err(err) => error(err.to_string()),
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
+fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::X25519SecretKey(key) => Some(runtime::jet_crypto_x25519_public_typed_impl(key)),
         _ => None,
@@ -371,14 +371,14 @@ extern "C" fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_signing_generate() -> i64 {
+fn jet_jit_crypto_signing_generate() -> i64 {
     match runtime::jet_crypto_signing_generate_impl() {
         Ok(key) => result(true, push(CryptoValue::SigningKey(key)) as u64),
         Err(err) => error(err.to_string()),
     }
 }
 
-extern "C" fn jet_jit_crypto_signing_public(handle: i64) -> i64 {
+fn jet_jit_crypto_signing_public(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::SigningKey(key) => Some(runtime::jet_crypto_signing_public_impl(key)),
         _ => None,
@@ -391,7 +391,7 @@ extern "C" fn jet_jit_crypto_signing_public(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_sign(key_handle: i64, message_handle: i64) -> i64 {
+fn jet_jit_crypto_sign(key_handle: i64, message_handle: i64) -> i64 {
     let message = clone_bytes(message_handle);
     let signed = with_crypto(key_handle, |value| match value {
         CryptoValue::SigningKey(key) => {
@@ -406,7 +406,7 @@ extern "C" fn jet_jit_crypto_sign(key_handle: i64, message_handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_verify(
+fn jet_jit_crypto_verify(
     key_handle: i64,
     message_handle: i64,
     signature_handle: i64,
@@ -425,47 +425,47 @@ extern "C" fn jet_jit_crypto_verify(
     }
 }
 
-extern "C" fn jet_jit_crypto_sha256(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha256(data_handle: i64) -> i64 {
     let digest = runtime::jet_crypto_sha256_typed_impl(&clone_bytes(data_handle));
     push(CryptoValue::Digest256(digest))
 }
 
-extern "C" fn jet_jit_crypto_sha1(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha1(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha1_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_sha224(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha224(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha224_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_sha384(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha384(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha384_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_sha3_224(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha3_224(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha3_224_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_sha3_256(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha3_256(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha3_256_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_sha3_384(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha3_384(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha3_384_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_sha3_512(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha3_512(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha3_512_hex(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_pbkdf2_hmac(password: i64, salt: i64, iterations: i64, key_len: i64) -> i64 {
+fn jet_jit_crypto_pbkdf2_hmac(password: i64, salt: i64, iterations: i64, key_len: i64) -> i64 {
     let out = runtime::jet_crypto_pbkdf2_hmac(
         &clone_bytes(password),
         &clone_bytes(salt),
@@ -475,11 +475,11 @@ extern "C" fn jet_jit_crypto_pbkdf2_hmac(password: i64, salt: i64, iterations: i
     alloc_bytes(&out)
 }
 
-extern "C" fn jet_jit_crypto_hasher_new() -> i64 {
+fn jet_jit_crypto_hasher_new() -> i64 {
     push(CryptoValue::Hasher(runtime::jet_crypto_hasher_new()))
 }
 
-extern "C" fn jet_jit_crypto_hasher_update(handle: i64, data: i64) -> i64 {
+fn jet_jit_crypto_hasher_update(handle: i64, data: i64) -> i64 {
     let bytes = clone_bytes(data);
     if with_crypto_mut(handle, |value| match value {
         CryptoValue::Hasher(hasher) => {
@@ -497,7 +497,7 @@ extern "C" fn jet_jit_crypto_hasher_update(handle: i64, data: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
+fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Hasher(hasher) => Some(runtime::jet_crypto_hasher_digest(hasher)),
         _ => None,
@@ -510,17 +510,17 @@ extern "C" fn jet_jit_crypto_hasher_digest(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_sha512_bytes(data_handle: i64) -> i64 {
+fn jet_jit_crypto_sha512_bytes(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_sha512_impl(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_blake3_bytes(data_handle: i64) -> i64 {
+fn jet_jit_crypto_blake3_bytes(data_handle: i64) -> i64 {
     let text = runtime::jet_crypto_blake3_impl(&clone_bytes(data_handle));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_crypto_digest256_hex(handle: i64) -> i64 {
+fn jet_jit_crypto_digest256_hex(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Digest256(digest) => Some(runtime::jet_crypto_digest256_hex_impl(digest)),
         _ => None,
@@ -533,7 +533,7 @@ extern "C" fn jet_jit_crypto_digest256_hex(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_digest256_bytes(handle: i64) -> i64 {
+fn jet_jit_crypto_digest256_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Digest256(digest) => Some(runtime::jet_crypto_digest256_bytes_impl(digest)),
         _ => None,
@@ -546,7 +546,7 @@ extern "C" fn jet_jit_crypto_digest256_bytes(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
+fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Signature(signature) => Some(runtime::jet_crypto_signature_bytes_impl(signature)),
         _ => None,
@@ -559,7 +559,7 @@ extern "C" fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_sealed_bytes(handle: i64) -> i64 {
+fn jet_jit_crypto_sealed_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Sealed(sealed) => Some(runtime::jet_crypto_sealed_bytes_impl(sealed)),
         _ => None,
@@ -572,7 +572,7 @@ extern "C" fn jet_jit_crypto_sealed_bytes(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_public_bytes(handle: i64) -> i64 {
+fn jet_jit_crypto_x25519_public_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::X25519PublicKey(key) => Some(runtime::jet_crypto_x25519_public_bytes_impl(key)),
         _ => None,
@@ -585,7 +585,7 @@ extern "C" fn jet_jit_crypto_x25519_public_bytes(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_public_text(handle: i64) -> i64 {
+fn jet_jit_crypto_x25519_public_text(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::X25519PublicKey(key) => Some(runtime::jet_crypto_x25519_public_text_impl(key)),
         _ => None,
@@ -598,22 +598,22 @@ extern "C" fn jet_jit_crypto_x25519_public_text(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_public_from_text(text: i64) -> i64 {
+fn jet_jit_crypto_x25519_public_from_text(text: i64) -> i64 {
     match runtime::jet_crypto_x25519_public_from_text_impl(clone_string(text)) {
         Ok(key) => result(true, push(CryptoValue::X25519PublicKey(key)) as u64),
         Err(err) => error(err.to_string()),
     }
 }
 
-extern "C" fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
+fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
     push(CryptoValue::Secret(runtime::jet_crypto_secret_from_text_impl(clone_string(text))))
 }
 
-extern "C" fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
+fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
     alloc_bytes(&runtime::jet_std_crypto_random_bytes(count))
 }
 
-extern "C" fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> i64 {
+fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> i64 {
     let Some(recipients) = public_keys(recipients) else {
         return error("invalid seal recipient list".to_string());
     };
@@ -623,7 +623,7 @@ extern "C" fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> 
     }
 }
 
-extern "C" fn jet_jit_crypto_open(recipient: i64, sealed: i64, aad: i64) -> i64 {
+fn jet_jit_crypto_open(recipient: i64, sealed: i64, aad: i64) -> i64 {
     let aad = clone_bytes(aad);
     let recipient_key = with_crypto(recipient, |value| match value {
         CryptoValue::X25519SecretKey(key) => Some(runtime::clone_x25519_secret(key)),
@@ -641,7 +641,7 @@ extern "C" fn jet_jit_crypto_open(recipient: i64, sealed: i64, aad: i64) -> i64 
     }
 }
 
-extern "C" fn jet_jit_crypto_password_hash(password: i64) -> i64 {
+fn jet_jit_crypto_password_hash(password: i64) -> i64 {
     let Some(secret) = with_crypto(password, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
         _ => None,
@@ -654,7 +654,7 @@ extern "C" fn jet_jit_crypto_password_hash(password: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_password_verify(password: i64, stored: i64) -> i64 {
+fn jet_jit_crypto_password_verify(password: i64, stored: i64) -> i64 {
     let password = with_crypto(password, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
         _ => None,
@@ -674,7 +674,7 @@ extern "C" fn jet_jit_crypto_password_verify(password: i64, stored: i64) -> i64 
     }
 }
 
-extern "C" fn jet_jit_crypto_password_text(handle: i64) -> i64 {
+fn jet_jit_crypto_password_text(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::PasswordHash(hash) => Some(runtime::jet_crypto_password_text_impl(hash)),
         _ => None,
@@ -687,7 +687,7 @@ extern "C" fn jet_jit_crypto_password_text(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -> i64 {
+fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -> i64 {
     let source = path_string(source);
     let dest = path_string(dest);
     let Some(recipient) = with_crypto(recipient, |value| match value {
@@ -702,13 +702,13 @@ extern "C" fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -
     }
 }
 
-extern "C" fn jet_jit_crypto_secret_from_bytes(bytes: i64) -> i64 {
+fn jet_jit_crypto_secret_from_bytes(bytes: i64) -> i64 {
     push(CryptoValue::Secret(runtime::jet_crypto_secret_from_bytes_impl(
         clone_bytes(bytes),
     )))
 }
 
-extern "C" fn jet_jit_crypto_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
+fn jet_jit_crypto_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
     let Some(secret) = with_crypto(ikm, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
         _ => None,
@@ -726,21 +726,21 @@ extern "C" fn jet_jit_crypto_hkdf_sha256(ikm: i64, salt: i64, info: i64, length:
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_public_bytes_raw(secret: i64) -> i64 {
+fn jet_jit_crypto_x25519_public_bytes_raw(secret: i64) -> i64 {
     match runtime::jet_crypto_x25519_public_impl(&clone_bytes(secret)) {
         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
         Err(err) => error(err),
     }
 }
 
-extern "C" fn jet_jit_crypto_x25519_shared(secret: i64, public: i64) -> i64 {
+fn jet_jit_crypto_x25519_shared(secret: i64, public: i64) -> i64 {
     match runtime::jet_crypto_x25519_shared_impl(&clone_bytes(secret), &clone_bytes(public)) {
         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
         Err(err) => error(err),
     }
 }
 
-extern "C" fn jet_jit_crypto_constant_time_equal(a: i64, b: i64) -> i64 {
+fn jet_jit_crypto_constant_time_equal(a: i64, b: i64) -> i64 {
     let left = with_crypto(a, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
         _ => None,
@@ -757,14 +757,14 @@ extern "C" fn jet_jit_crypto_constant_time_equal(a: i64, b: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_crypto_constant_time_equal_bytes(a: i64, b: i64) -> i64 {
+fn jet_jit_crypto_constant_time_equal_bytes(a: i64, b: i64) -> i64 {
     i64::from(runtime::jet_crypto_constant_time_equal_bytes_impl(
         &clone_bytes(a),
         &clone_bytes(b),
     ))
 }
 
-extern "C" fn jet_jit_crypto_file_seal(recipients: i64, source: i64, dest: i64) -> i64 {
+fn jet_jit_crypto_file_seal(recipients: i64, source: i64, dest: i64) -> i64 {
     let source = path_string(source);
     let dest = path_string(dest);
     let Some(keys) = public_keys(recipients) else {
@@ -776,7 +776,7 @@ extern "C" fn jet_jit_crypto_file_seal(recipients: i64, source: i64, dest: i64) 
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_aes256gcm_seal(key: i64, nonce: i64, plaintext: i64, aad: i64) -> i64 {
+fn jet_jit_crypto_expert_aes256gcm_seal(key: i64, nonce: i64, plaintext: i64, aad: i64) -> i64 {
     match runtime::jet_crypto_expert_aes256gcm_seal_impl(
         &clone_bytes(key),
         &clone_bytes(nonce),
@@ -788,7 +788,7 @@ extern "C" fn jet_jit_crypto_expert_aes256gcm_seal(key: i64, nonce: i64, plainte
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_aes256gcm_open(key: i64, nonce: i64, ciphertext: i64, aad: i64) -> i64 {
+fn jet_jit_crypto_expert_aes256gcm_open(key: i64, nonce: i64, ciphertext: i64, aad: i64) -> i64 {
     match runtime::jet_crypto_expert_aes256gcm_open_impl(
         &clone_bytes(key),
         &clone_bytes(nonce),
@@ -800,14 +800,14 @@ extern "C" fn jet_jit_crypto_expert_aes256gcm_open(key: i64, nonce: i64, ciphert
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_open_v1(key: i64, blob: i64) -> i64 {
+fn jet_jit_crypto_expert_open_v1(key: i64, blob: i64) -> i64 {
     match runtime::jet_crypto_expert_open_v1_impl(&clone_bytes(key), &clone_bytes(blob)) {
         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
         Err(err) => error(err.to_string()),
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_migrate_v1(key: i64, source: i64, recipients: i64, dest: i64) -> i64 {
+fn jet_jit_crypto_expert_migrate_v1(key: i64, source: i64, recipients: i64, dest: i64) -> i64 {
     let Some(recipients) = public_keys(recipients) else {
         return error("invalid migrate recipients".to_string());
     };
@@ -823,7 +823,7 @@ extern "C" fn jet_jit_crypto_expert_migrate_v1(key: i64, source: i64, recipients
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_zero: i64) -> i64 {
+fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_zero: i64) -> i64 {
     match runtime::jet_crypto_expert_x25519_impl(
         &clone_bytes(secret),
         &clone_bytes(public),
@@ -834,7 +834,7 @@ extern "C" fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_hkdf_sha256(
+fn jet_jit_crypto_expert_hkdf_sha256(
     ikm: i64,
     salt: i64,
     info: i64,
@@ -851,7 +851,7 @@ extern "C" fn jet_jit_crypto_expert_hkdf_sha256(
     }
 }
 
-extern "C" fn jet_jit_crypto_expert_secret_bytes(secret: i64) -> i64 {
+fn jet_jit_crypto_expert_secret_bytes(secret: i64) -> i64 {
     match with_crypto(secret, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::jet_crypto_expert_secret_bytes_impl(secret)),
         CryptoValue::SharedSecret(secret) => {
@@ -867,7 +867,7 @@ extern "C" fn jet_jit_crypto_expert_secret_bytes(secret: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_auth_verify_jwt(
+fn jet_jit_auth_verify_jwt(
     token: i64,
     key: i64,
     audience: i64,
@@ -892,7 +892,7 @@ extern "C" fn jet_jit_auth_verify_jwt(
     }
 }
 
-extern "C" fn jet_jit_auth_verify_paseto(
+fn jet_jit_auth_verify_paseto(
     token: i64,
     key: i64,
     audience: i64,
@@ -995,14 +995,14 @@ fn result_text(value: String) -> i64 {
     result(true, handle as u64)
 }
 
-extern "C" fn jet_jit_auth_register_user(user_id: i64, password_hash: i64) -> i64 {
+fn jet_jit_auth_register_user(user_id: i64, password_hash: i64) -> i64 {
     match runtime::auth_register_user(clone_string(user_id), clone_string(password_hash)) {
         Ok(()) => result(true, 0),
         Err(message) => error(message),
     }
 }
 
-extern "C" fn jet_jit_auth_password_login(
+fn jet_jit_auth_password_login(
     user_id: i64,
     password_hash: i64,
     now_ms: i64,
@@ -1019,7 +1019,7 @@ extern "C" fn jet_jit_auth_password_login(
     }
 }
 
-extern "C" fn jet_jit_auth_session_validate(session_id: i64, now_ms: i64) -> i64 {
+fn jet_jit_auth_session_validate(session_id: i64, now_ms: i64) -> i64 {
     let session_id = clone_string(session_id);
     match runtime::auth_session_validate(&session_id, now_ms) {
         Ok(session) => result(true, session_record(session) as u64),
@@ -1027,7 +1027,7 @@ extern "C" fn jet_jit_auth_session_validate(session_id: i64, now_ms: i64) -> i64
     }
 }
 
-extern "C" fn jet_jit_auth_magic_link_issue(
+fn jet_jit_auth_magic_link_issue(
     user_id: i64,
     now_ms: i64,
     ttl_ms: i64,
@@ -1038,7 +1038,7 @@ extern "C" fn jet_jit_auth_magic_link_issue(
     }
 }
 
-extern "C" fn jet_jit_auth_magic_link_consume(
+fn jet_jit_auth_magic_link_consume(
     token: i64,
     now_ms: i64,
     ttl_ms: i64,
@@ -1049,14 +1049,14 @@ extern "C" fn jet_jit_auth_magic_link_consume(
     }
 }
 
-extern "C" fn jet_jit_auth_oauth_begin(provider: i64) -> i64 {
+fn jet_jit_auth_oauth_begin(provider: i64) -> i64 {
     match runtime::auth_oauth_begin(clone_string(provider)) {
         Ok(state) => result_text(state),
         Err(message) => error(message),
     }
 }
 
-extern "C" fn jet_jit_auth_oauth_finish(
+fn jet_jit_auth_oauth_finish(
     state: i64,
     subject: i64,
     now_ms: i64,
@@ -1073,7 +1073,7 @@ extern "C" fn jet_jit_auth_oauth_finish(
     }
 }
 
-extern "C" fn jet_jit_auth_session_show(session: i64) -> i64 {
+fn jet_jit_auth_session_show(session: i64) -> i64 {
     let Some(session) = session_from_record(session) else {
         return invalid_auth_handle("invalid Session handle");
     };
@@ -1081,7 +1081,7 @@ extern "C" fn jet_jit_auth_session_show(session: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
-extern "C" fn jet_jit_auth_session_user(session: i64) -> i64 {
+fn jet_jit_auth_session_user(session: i64) -> i64 {
     let Some(session) = session_from_record(session) else {
         return invalid_auth_handle("invalid Session handle");
     };
@@ -1089,7 +1089,7 @@ extern "C" fn jet_jit_auth_session_user(session: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
-extern "C" fn jet_jit_auth_session_cookie(session: i64) -> i64 {
+fn jet_jit_auth_session_cookie(session: i64) -> i64 {
     let Some(session) = session_from_record(session) else {
         return invalid_auth_handle("invalid Session handle");
     };
@@ -1097,7 +1097,7 @@ extern "C" fn jet_jit_auth_session_cookie(session: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
-extern "C" fn jet_jit_auth_session_id(session: i64) -> i64 {
+fn jet_jit_auth_session_id(session: i64) -> i64 {
     let Some(session) = session_from_record(session) else {
         return invalid_auth_handle("invalid Session handle");
     };
@@ -1105,18 +1105,18 @@ extern "C" fn jet_jit_auth_session_id(session: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
-extern "C" fn jet_jit_app_auth(users_table: i64) -> i64 {
+fn jet_jit_app_auth(users_table: i64) -> i64 {
     app_record(runtime::app_auth(clone_string(users_table)))
 }
 
-extern "C" fn jet_jit_app_auth_oauth(auth: i64, providers: i64) -> i64 {
+fn jet_jit_app_auth_oauth(auth: i64, providers: i64) -> i64 {
     let Some(auth) = app_from_record(auth) else {
         return invalid_auth_handle("invalid Auth handle");
     };
     app_record(runtime::app_auth_oauth(auth, clone_string(providers)))
 }
 
-extern "C" fn jet_jit_app_auth_routes(auth: i64) -> i64 {
+fn jet_jit_app_auth_routes(auth: i64) -> i64 {
     let Some(auth) = app_from_record(auth) else {
         return invalid_auth_handle("invalid Auth handle");
     };
@@ -1124,7 +1124,7 @@ extern "C" fn jet_jit_app_auth_routes(auth: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
-extern "C" fn jet_jit_app_auth_show(auth: i64) -> i64 {
+fn jet_jit_app_auth_show(auth: i64) -> i64 {
     let Some(auth) = app_from_record(auth) else {
         return invalid_auth_handle("invalid Auth handle");
     };
@@ -1132,14 +1132,14 @@ extern "C" fn jet_jit_app_auth_show(auth: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value))
 }
 
-extern "C" fn jet_jit_vault_get(name: i64) -> i64 {
+fn jet_jit_vault_get(name: i64) -> i64 {
     match runtime::jet_vault_get_impl(&clone_string(name)) {
         None => 0,
         Some(value) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value) + 1),
     }
 }
 
-extern "C" fn jet_jit_vault_key_ref_show(handle: i64) -> i64 {
+fn jet_jit_vault_key_ref_show(handle: i64) -> i64 {
     let text = with_crypto(handle, |value| match value {
         CryptoValue::KeyRefSigning(key) => Some(key.to_string()),
         CryptoValue::KeyRefX25519(key) => Some(key.to_string()),
@@ -1149,7 +1149,7 @@ extern "C" fn jet_jit_vault_key_ref_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_vault_current(name: i64, tag: i64) -> i64 {
+fn jet_jit_vault_current(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     match tag {
         1 => match runtime::jet_vault_current_impl::<runtime::JetSigningKey>(&name) {
@@ -1166,7 +1166,7 @@ extern "C" fn jet_jit_vault_current(name: i64, tag: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_prepare_generate(name: i64, tag: i64) -> i64 {
+fn jet_jit_vault_prepare_generate(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     match tag {
         1 => match runtime::jet_vault_prepare_generate_impl::<runtime::JetSigningKey>(&name) {
@@ -1181,7 +1181,7 @@ extern "C" fn jet_jit_vault_prepare_generate(name: i64, tag: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_authorize_write(plan: i64, reason: i64, tag: i64) -> i64 {
+fn jet_jit_vault_authorize_write(plan: i64, reason: i64, tag: i64) -> i64 {
     let reason = clone_string(reason);
     match tag {
         1 => match with_crypto(plan, |value| match value {
@@ -1208,7 +1208,7 @@ extern "C" fn jet_jit_vault_authorize_write(plan: i64, reason: i64, tag: i64) ->
     }
 }
 
-extern "C" fn jet_jit_vault_commit_generate(write: i64, plan: i64, tag: i64) -> i64 {
+fn jet_jit_vault_commit_generate(write: i64, plan: i64, tag: i64) -> i64 {
     match tag {
         1 => match (take_crypto(write), take_crypto(plan)) {
             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
@@ -1232,7 +1232,7 @@ extern "C" fn jet_jit_vault_commit_generate(write: i64, plan: i64, tag: i64) -> 
     }
 }
 
-extern "C" fn jet_jit_vault_prepare_rotate(name: i64, tag: i64) -> i64 {
+fn jet_jit_vault_prepare_rotate(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     match tag {
         1 => match runtime::jet_vault_prepare_rotate_impl::<runtime::JetSigningKey>(&name) {
@@ -1247,7 +1247,7 @@ extern "C" fn jet_jit_vault_prepare_rotate(name: i64, tag: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_prepare_store(name: i64, key: i64, tag: i64) -> i64 {
+fn jet_jit_vault_prepare_store(name: i64, key: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     match tag {
         1 => match take_crypto(key) {
@@ -1272,7 +1272,7 @@ extern "C" fn jet_jit_vault_prepare_store(name: i64, key: i64, tag: i64) -> i64 
     }
 }
 
-extern "C" fn jet_jit_vault_prepare_retire(key_ref: i64, reason: i64, tag: i64) -> i64 {
+fn jet_jit_vault_prepare_retire(key_ref: i64, reason: i64, tag: i64) -> i64 {
     let reason = clone_string(reason);
     match tag {
         1 => match with_crypto(key_ref, |value| match value {
@@ -1299,7 +1299,7 @@ extern "C" fn jet_jit_vault_prepare_retire(key_ref: i64, reason: i64, tag: i64) 
     }
 }
 
-extern "C" fn jet_jit_vault_prepare_revoke(key_ref: i64, reason: i64, tag: i64) -> i64 {
+fn jet_jit_vault_prepare_revoke(key_ref: i64, reason: i64, tag: i64) -> i64 {
     let reason = clone_string(reason);
     match tag {
         1 => match with_crypto(key_ref, |value| match value {
@@ -1326,7 +1326,7 @@ extern "C" fn jet_jit_vault_prepare_revoke(key_ref: i64, reason: i64, tag: i64) 
     }
 }
 
-extern "C" fn jet_jit_vault_commit_store(write: i64, plan: i64, tag: i64) -> i64 {
+fn jet_jit_vault_commit_store(write: i64, plan: i64, tag: i64) -> i64 {
     match tag {
         1 => match (take_crypto(write), take_crypto(plan)) {
             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
@@ -1372,7 +1372,7 @@ fn rotation_record_x25519(rotation: runtime::JetVaultRotation<runtime::JetX25519
     })
 }
 
-extern "C" fn jet_jit_vault_commit_rotate(write: i64, plan: i64, tag: i64) -> i64 {
+fn jet_jit_vault_commit_rotate(write: i64, plan: i64, tag: i64) -> i64 {
     match tag {
         1 => match (take_crypto(write), take_crypto(plan)) {
             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
@@ -1396,7 +1396,7 @@ extern "C" fn jet_jit_vault_commit_rotate(write: i64, plan: i64, tag: i64) -> i6
     }
 }
 
-extern "C" fn jet_jit_vault_commit_retire(write: i64, plan: i64, tag: i64) -> i64 {
+fn jet_jit_vault_commit_retire(write: i64, plan: i64, tag: i64) -> i64 {
     match tag {
         1 => match (take_crypto(write), take_crypto(plan)) {
             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
@@ -1420,7 +1420,7 @@ extern "C" fn jet_jit_vault_commit_retire(write: i64, plan: i64, tag: i64) -> i6
     }
 }
 
-extern "C" fn jet_jit_vault_commit_revoke(write: i64, plan: i64, tag: i64) -> i64 {
+fn jet_jit_vault_commit_revoke(write: i64, plan: i64, tag: i64) -> i64 {
     match tag {
         1 => match (take_crypto(write), take_crypto(plan)) {
             (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
@@ -1444,7 +1444,7 @@ extern "C" fn jet_jit_vault_commit_revoke(write: i64, plan: i64, tag: i64) -> i6
     }
 }
 
-extern "C" fn jet_jit_vault_load(key_ref: i64, tag: i64) -> i64 {
+fn jet_jit_vault_load(key_ref: i64, tag: i64) -> i64 {
     match tag {
         1 => match with_crypto(key_ref, |value| match value {
             CryptoValue::KeyRefSigning(key) => Some(runtime::jet_vault_load_impl(key)),
@@ -1466,7 +1466,7 @@ extern "C" fn jet_jit_vault_load(key_ref: i64, tag: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_status(key_ref: i64, tag: i64) -> i64 {
+fn jet_jit_vault_status(key_ref: i64, tag: i64) -> i64 {
     let status = match tag {
         1 => with_crypto(key_ref, |value| match value {
             CryptoValue::KeyRefSigning(key) => Some(runtime::jet_vault_status_impl(key)),
@@ -1485,7 +1485,7 @@ extern "C" fn jet_jit_vault_status(key_ref: i64, tag: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_versions(name: i64, tag: i64) -> i64 {
+fn jet_jit_vault_versions(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     match tag {
         1 => match runtime::jet_vault_versions_impl::<runtime::JetSigningKey>(&name) {
@@ -1514,7 +1514,7 @@ extern "C" fn jet_jit_vault_versions(name: i64, tag: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_export_to_recipients(key_ref: i64, recipients: i64, tag: i64) -> i64 {
+fn jet_jit_vault_export_to_recipients(key_ref: i64, recipients: i64, tag: i64) -> i64 {
     let Some(recipients) = public_keys(recipients) else {
         return error("invalid export recipients".to_string());
     };
@@ -1543,7 +1543,7 @@ extern "C" fn jet_jit_vault_export_to_recipients(key_ref: i64, recipients: i64, 
     }
 }
 
-extern "C" fn jet_jit_vault_export_to_passphrase(key_ref: i64, passphrase: i64, tag: i64) -> i64 {
+fn jet_jit_vault_export_to_passphrase(key_ref: i64, passphrase: i64, tag: i64) -> i64 {
     let passphrase = with_crypto(passphrase, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
         _ => None,
@@ -1576,14 +1576,14 @@ extern "C" fn jet_jit_vault_export_to_passphrase(key_ref: i64, passphrase: i64, 
     }
 }
 
-extern "C" fn jet_jit_vault_wrapped_from_bytes(bytes: i64) -> i64 {
+fn jet_jit_vault_wrapped_from_bytes(bytes: i64) -> i64 {
     match runtime::jet_vault_wrapped_from_bytes_impl(clone_bytes(bytes)) {
         Ok(wrapped) => result(true, push(CryptoValue::WrappedVaultKey(wrapped)) as u64),
         Err(err) => err_debug(err),
     }
 }
 
-extern "C" fn jet_jit_vault_wrapped_bytes(handle: i64) -> i64 {
+fn jet_jit_vault_wrapped_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::WrappedVaultKey(wrapped) => Some(runtime::jet_vault_wrapped_bytes_impl(wrapped)),
         _ => None,
@@ -1596,15 +1596,15 @@ extern "C" fn jet_jit_vault_wrapped_bytes(handle: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_vault_unlock_recipient(identity: i64) -> i64 {
+fn jet_jit_vault_unlock_recipient(identity: i64) -> i64 {
     push(CryptoValue::UnlockRecipient(identity))
 }
 
-extern "C" fn jet_jit_vault_unlock_passphrase(passphrase: i64) -> i64 {
+fn jet_jit_vault_unlock_passphrase(passphrase: i64) -> i64 {
     push(CryptoValue::UnlockPassphrase(passphrase))
 }
 
-extern "C" fn jet_jit_vault_prepare_import_wrapped(name: i64, wrapped: i64, unlock: i64, tag: i64) -> i64 {
+fn jet_jit_vault_prepare_import_wrapped(name: i64, wrapped: i64, unlock: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     let wrapped = match take_crypto(wrapped) {
         Some(CryptoValue::WrappedVaultKey(wrapped)) => wrapped,
@@ -1668,7 +1668,7 @@ extern "C" fn jet_jit_vault_prepare_import_wrapped(name: i64, wrapped: i64, unlo
     }
 }
 
-extern "C" fn jet_jit_vault_authorize_wrapped_import(plan: i64, reason: i64, tag: i64) -> i64 {
+fn jet_jit_vault_authorize_wrapped_import(plan: i64, reason: i64, tag: i64) -> i64 {
     let reason = clone_string(reason);
     match tag {
         1 => match with_crypto(plan, |value| match value {
@@ -1695,7 +1695,7 @@ extern "C" fn jet_jit_vault_authorize_wrapped_import(plan: i64, reason: i64, tag
     }
 }
 
-extern "C" fn jet_jit_vault_commit_import_wrapped(write: i64, plan: i64, tag: i64) -> i64 {
+fn jet_jit_vault_commit_import_wrapped(write: i64, plan: i64, tag: i64) -> i64 {
     match tag {
         1 => match (take_crypto(write), take_crypto(plan)) {
             (
@@ -1721,7 +1721,7 @@ extern "C" fn jet_jit_vault_commit_import_wrapped(write: i64, plan: i64, tag: i6
     }
 }
 
-extern "C" fn jet_jit_vault_expert_prepare_import_signing(name: i64, bytes: i64) -> i64 {
+fn jet_jit_vault_expert_prepare_import_signing(name: i64, bytes: i64) -> i64 {
     match runtime::jet_vault_expert_prepare_import_signing_impl(&clone_string(name), clone_bytes(bytes))
     {
         Ok(plan) => result(true, push(CryptoValue::PlanSigning(plan)) as u64),
@@ -1729,7 +1729,7 @@ extern "C" fn jet_jit_vault_expert_prepare_import_signing(name: i64, bytes: i64)
     }
 }
 
-extern "C" fn jet_jit_vault_expert_commit_import_signing(write: i64, plan: i64) -> i64 {
+fn jet_jit_vault_expert_commit_import_signing(write: i64, plan: i64) -> i64 {
     match (take_crypto(write), take_crypto(plan)) {
         (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
             match runtime::jet_vault_expert_commit_import_signing_impl(write, plan) {

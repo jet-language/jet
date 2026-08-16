@@ -74,15 +74,15 @@ fn with_complex<R>(handle: i64, f: impl FnOnce(&JetComplex) -> R) -> Option<R> {
 
 // D-INTBIG1: default `Int` keeps a signed 63-bit payload inline and spills
 // through the same JetArena/CtBigInt implementation only when required.
-extern "C" fn jet_jit_int_from_int(n: i64) -> i64 {
+fn jet_jit_int_from_int(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(n))
 }
 
-extern "C" fn jet_jit_int_from_u64(n: i64) -> i64 {
+fn jet_jit_int_from_u64(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_from_u64(n as u64))
 }
 
-extern "C" fn jet_jit_int_from_str(str_id: i64) -> i64 {
+fn jet_jit_int_from_str(str_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let s = rt.heap.clone_string(str_id).unwrap_or_default();
         match rt.heap.int_from_str(&s) {
@@ -95,43 +95,43 @@ extern "C" fn jet_jit_int_from_str(str_id: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_add(a: i64, b: i64) -> i64 {
+fn jet_jit_int_add(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_add(a, b))
 }
 
-extern "C" fn jet_jit_int_sub(a: i64, b: i64) -> i64 {
+fn jet_jit_int_sub(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_sub(a, b))
 }
 
-extern "C" fn jet_jit_int_mul(a: i64, b: i64) -> i64 {
+fn jet_jit_int_mul(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_mul(a, b))
 }
 
-extern "C" fn jet_jit_int_bit_and(a: i64, b: i64) -> i64 {
+fn jet_jit_int_bit_and(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_bit_and(a, b))
 }
 
-extern "C" fn jet_jit_int_bit_or(a: i64, b: i64) -> i64 {
+fn jet_jit_int_bit_or(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_bit_or(a, b))
 }
 
-extern "C" fn jet_jit_int_bit_xor(a: i64, b: i64) -> i64 {
+fn jet_jit_int_bit_xor(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_bit_xor(a, b))
 }
 
-extern "C" fn jet_jit_int_compare(a: i64, b: i64) -> i64 {
+fn jet_jit_int_compare(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_compare(a, b))
 }
 
-extern "C" fn jet_jit_int_neg(a: i64) -> i64 {
+fn jet_jit_int_neg(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_neg(a))
 }
 
-extern "C" fn jet_jit_int_abs(a: i64) -> i64 {
+fn jet_jit_int_abs(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_abs(a))
 }
 
-extern "C" fn jet_jit_int_not(a: i64) -> i64 {
+fn jet_jit_int_not(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let negated = rt.heap.int_neg(a);
         let one = rt.heap.int_from_i64(1);
@@ -139,7 +139,7 @@ extern "C" fn jet_jit_int_not(a: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_shl(a: i64, b: i64) -> i64 {
+fn jet_jit_int_shl(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_shl(a, b) {
         Some(value) => value,
         None => {
@@ -149,7 +149,7 @@ extern "C" fn jet_jit_int_shl(a: i64, b: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_shr(a: i64, b: i64) -> i64 {
+fn jet_jit_int_shr(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_shr(a, b) {
         Some(value) => value,
         None => {
@@ -159,18 +159,18 @@ extern "C" fn jet_jit_int_shr(a: i64, b: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_to_string(a: i64) -> i64 {
+fn jet_jit_int_to_string(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.int_to_string(a);
         rt.heap.alloc_string(text)
     })
 }
 
-extern "C" fn jet_jit_int_to_f64(a: i64) -> f64 {
+fn jet_jit_int_to_f64(a: i64) -> f64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_to_f64(a))
 }
 
-extern "C" fn jet_jit_int_div(a: i64, b: i64) -> i64 {
+fn jet_jit_int_div(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div(a, b) {
         Some(value) => value,
         None => {
@@ -180,7 +180,7 @@ extern "C" fn jet_jit_int_div(a: i64, b: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_floor_div(a: i64, b: i64) -> i64 {
+fn jet_jit_int_floor_div(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_floor_div(a, b) {
         Some(value) => value,
         None => {
@@ -190,7 +190,7 @@ extern "C" fn jet_jit_int_floor_div(a: i64, b: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_mod(a: i64, b: i64) -> i64 {
+fn jet_jit_int_mod(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_mod(a, b) {
         Some(value) => value,
         None => {
@@ -200,7 +200,7 @@ extern "C" fn jet_jit_int_mod(a: i64, b: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_rem(a: i64, b: i64) -> i64 {
+fn jet_jit_int_rem(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_rem(a, b) {
         Some(value) => value,
         None => {
@@ -210,7 +210,7 @@ extern "C" fn jet_jit_int_rem(a: i64, b: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_pow(a: i64, b: i64) -> i64 {
+fn jet_jit_int_pow(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_pow(a, b) {
         Some(value) => value,
         None => {
@@ -221,7 +221,7 @@ extern "C" fn jet_jit_int_pow(a: i64, b: i64) -> i64 {
 }
 
 /// Packed legacy option ABI: `0` is absent, otherwise payload + 1.
-extern "C" fn jet_jit_int_factorial(a: i64) -> i64 {
+fn jet_jit_int_factorial(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         match rt.heap.int_factorial(a) {
             Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
@@ -244,133 +244,133 @@ fn int_pair(rt: &mut JitRuntime, quotient: i64, remainder: i64) -> i64 {
     handle
 }
 
-extern "C" fn jet_jit_int_is_even(value: i64) -> i8 {
+fn jet_jit_int_is_even(value: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.int_is_even(value)))
 }
 
-extern "C" fn jet_jit_int_is_odd(value: i64) -> i8 {
+fn jet_jit_int_is_odd(value: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.int_is_odd(value)))
 }
 
-extern "C" fn jet_jit_int_isqrt(value: i64) -> i64 {
+fn jet_jit_int_isqrt(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_isqrt(value);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_binomial(n: i64, k: i64) -> i64 {
+fn jet_jit_int_binomial(n: i64, k: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_binomial(n, k);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_digits(value: i64) -> i64 {
+fn jet_jit_int_digits(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_digits(value))
 }
 
-extern "C" fn jet_jit_int_leading_ones(value: i64) -> i64 {
+fn jet_jit_int_leading_ones(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_leading_ones(value))
 }
 
-extern "C" fn jet_jit_int_trailing_ones(value: i64) -> i64 {
+fn jet_jit_int_trailing_ones(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_trailing_ones(value))
 }
 
-extern "C" fn jet_jit_int_checked_abs(value: i64) -> i64 {
+fn jet_jit_int_checked_abs(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_abs(value);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_neg(value: i64) -> i64 {
+fn jet_jit_int_checked_neg(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_neg(value);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_add(left: i64, right: i64) -> i64 {
+fn jet_jit_int_checked_add(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_add(left, right);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_sub(left: i64, right: i64) -> i64 {
+fn jet_jit_int_checked_sub(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_sub(left, right);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_mul(left: i64, right: i64) -> i64 {
+fn jet_jit_int_checked_mul(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_mul(left, right);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_div(left: i64, right: i64) -> i64 {
+fn jet_jit_int_checked_div(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_div(left, right);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_rem(left: i64, right: i64) -> i64 {
+fn jet_jit_int_checked_rem(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_rem(left, right);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_checked_pow(left: i64, right: i64) -> i64 {
+fn jet_jit_int_checked_pow(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = rt.heap.int_checked_pow(left, right);
         int_option(rt, result)
     })
 }
 
-extern "C" fn jet_jit_int_saturating_add(left: i64, right: i64) -> i64 {
+fn jet_jit_int_saturating_add(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_add(left, right))
 }
 
-extern "C" fn jet_jit_int_saturating_sub(left: i64, right: i64) -> i64 {
+fn jet_jit_int_saturating_sub(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_sub(left, right))
 }
 
-extern "C" fn jet_jit_int_saturating_mul(left: i64, right: i64) -> i64 {
+fn jet_jit_int_saturating_mul(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_mul(left, right))
 }
 
-extern "C" fn jet_jit_int_wrapping_add(left: i64, right: i64) -> i64 {
+fn jet_jit_int_wrapping_add(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_add(left, right))
 }
 
-extern "C" fn jet_jit_int_wrapping_sub(left: i64, right: i64) -> i64 {
+fn jet_jit_int_wrapping_sub(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_sub(left, right))
 }
 
-extern "C" fn jet_jit_int_wrapping_mul(left: i64, right: i64) -> i64 {
+fn jet_jit_int_wrapping_mul(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_mul(left, right))
 }
 
-extern "C" fn jet_jit_int_int_pow(left: i64, right: i64) -> i64 {
+fn jet_jit_int_int_pow(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_int_pow(left, right))
 }
 
-extern "C" fn jet_jit_int_gcd(left: i64, right: i64) -> i64 {
+fn jet_jit_int_gcd(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_gcd(left, right))
 }
 
-extern "C" fn jet_jit_int_lcm(left: i64, right: i64) -> i64 {
+fn jet_jit_int_lcm(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_lcm(left, right))
 }
 
-extern "C" fn jet_jit_int_div_mod(left: i64, right: i64) -> i64 {
+fn jet_jit_int_div_mod(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_mod(left, right) {
         Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
         None => {
@@ -380,7 +380,7 @@ extern "C" fn jet_jit_int_div_mod(left: i64, right: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
+fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_rem(left, right) {
         Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
         None => {
@@ -390,7 +390,7 @@ extern "C" fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_decimal_from_str(str_id: i64) -> i64 {
+fn jet_jit_decimal_from_str(str_id: i64) -> i64 {
     let s = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(str_id).unwrap_or_default());
     match CtDecimal::from_str(&s) {
         Ok(d) => push_decimal(d),
@@ -401,38 +401,38 @@ extern "C" fn jet_jit_decimal_from_str(str_id: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_decimal_add(a: i64, b: i64) -> i64 {
+fn jet_jit_decimal_add(a: i64, b: i64) -> i64 {
     let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
     let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
     push_decimal(left.add(&right))
 }
 
-extern "C" fn jet_jit_decimal_sub(a: i64, b: i64) -> i64 {
+fn jet_jit_decimal_sub(a: i64, b: i64) -> i64 {
     let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
     let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
     push_decimal(left.sub(&right))
 }
 
-extern "C" fn jet_jit_decimal_mul(a: i64, b: i64) -> i64 {
+fn jet_jit_decimal_mul(a: i64, b: i64) -> i64 {
     let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
     let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
     push_decimal(left.mul(&right))
 }
 
-extern "C" fn jet_jit_decimal_to_string(a: i64) -> i64 {
+fn jet_jit_decimal_to_string(a: i64) -> i64 {
     let text = with_decimal(a, |d| d.to_string_rep()).unwrap_or_else(|| "0".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
 /// Packed `Option<Fraction>` ABI: `0` = None, else `handle.wrapping_add(1)`.
-extern "C" fn jet_jit_fraction_new(numerator: i64, denominator: i64) -> i64 {
+fn jet_jit_fraction_new(numerator: i64, denominator: i64) -> i64 {
     match CtFraction::new(numerator, denominator) {
         Some(f) => push_fraction(f).wrapping_add(1),
         None => 0,
     }
 }
 
-extern "C" fn jet_jit_fraction_add(a: i64, b: i64) -> i64 {
+fn jet_jit_fraction_add(a: i64, b: i64) -> i64 {
     let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
         numerator: 0,
         denominator: 1,
@@ -450,7 +450,7 @@ extern "C" fn jet_jit_fraction_add(a: i64, b: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_fraction_sub(a: i64, b: i64) -> i64 {
+fn jet_jit_fraction_sub(a: i64, b: i64) -> i64 {
     let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
         numerator: 0,
         denominator: 1,
@@ -468,7 +468,7 @@ extern "C" fn jet_jit_fraction_sub(a: i64, b: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_fraction_mul(a: i64, b: i64) -> i64 {
+fn jet_jit_fraction_mul(a: i64, b: i64) -> i64 {
     let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
         numerator: 0,
         denominator: 1,
@@ -486,7 +486,7 @@ extern "C" fn jet_jit_fraction_mul(a: i64, b: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_fraction_div(a: i64, b: i64) -> i64 {
+fn jet_jit_fraction_div(a: i64, b: i64) -> i64 {
     let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
         numerator: 0,
         denominator: 1,
@@ -504,7 +504,7 @@ extern "C" fn jet_jit_fraction_div(a: i64, b: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_fraction_equal(a: i64, b: i64) -> i8 {
+fn jet_jit_fraction_equal(a: i64, b: i64) -> i8 {
     let left = with_fraction(a, |f| *f);
     let right = with_fraction(b, |f| *f);
     match (left, right) {
@@ -513,60 +513,60 @@ extern "C" fn jet_jit_fraction_equal(a: i64, b: i64) -> i8 {
     }
 }
 
-extern "C" fn jet_jit_fraction_numerator(a: i64) -> i64 {
+fn jet_jit_fraction_numerator(a: i64) -> i64 {
     with_fraction(a, |f| f.numerator).unwrap_or(0)
 }
 
-extern "C" fn jet_jit_fraction_denominator(a: i64) -> i64 {
+fn jet_jit_fraction_denominator(a: i64) -> i64 {
     with_fraction(a, |f| f.denominator).unwrap_or(1)
 }
 
-extern "C" fn jet_jit_fraction_to_string(a: i64) -> i64 {
+fn jet_jit_fraction_to_string(a: i64) -> i64 {
     let text = with_fraction(a, |f| f.to_string_rep()).unwrap_or_else(|| "0/1".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
-extern "C" fn jet_jit_fraction_to_float(a: i64) -> f64 {
+fn jet_jit_fraction_to_float(a: i64) -> f64 {
     with_fraction(a, |f| f.numerator as f64 / f.denominator as f64).unwrap_or(0.0)
 }
 
-extern "C" fn jet_jit_fraction_is_zero(a: i64) -> i8 {
+fn jet_jit_fraction_is_zero(a: i64) -> i8 {
     with_fraction(a, |f| f.numerator == 0).unwrap_or(false) as i8
 }
 
-extern "C" fn jet_jit_complex_from_parts(real: f64, imaginary: f64) -> i64 {
+fn jet_jit_complex_from_parts(real: f64, imaginary: f64) -> i64 {
     push_complex(JetComplex::from_parts(real, imaginary))
 }
 
-extern "C" fn jet_jit_complex_add(a: i64, b: i64) -> i64 {
+fn jet_jit_complex_add(a: i64, b: i64) -> i64 {
     let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     push_complex(left.add(&right))
 }
 
-extern "C" fn jet_jit_complex_sub(a: i64, b: i64) -> i64 {
+fn jet_jit_complex_sub(a: i64, b: i64) -> i64 {
     let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     push_complex(left.sub(&right))
 }
 
-extern "C" fn jet_jit_complex_mul(a: i64, b: i64) -> i64 {
+fn jet_jit_complex_mul(a: i64, b: i64) -> i64 {
     let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     push_complex(left.mul(&right))
 }
 
-extern "C" fn jet_jit_complex_div(a: i64, b: i64) -> i64 {
+fn jet_jit_complex_div(a: i64, b: i64) -> i64 {
     let left = with_complex(a, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     let right = with_complex(b, |value| *value).unwrap_or_else(|| JetComplex::from_parts(0.0, 0.0));
     push_complex(left.div(&right))
 }
 
-extern "C" fn jet_jit_complex_abs(a: i64) -> f64 {
+fn jet_jit_complex_abs(a: i64) -> f64 {
     with_complex(a, |value| value.abs()).unwrap_or(0.0)
 }
 
-extern "C" fn jet_jit_complex_to_string(a: i64) -> i64 {
+fn jet_jit_complex_to_string(a: i64) -> i64 {
     let text = with_complex(a, |value| value.to_string_rep())
         .unwrap_or_else(|| "0 + 0i".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))

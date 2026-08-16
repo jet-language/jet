@@ -823,7 +823,7 @@ fn finish_cli_version(plan: &CLIPlan) {
 }
 
 /// Zero-arg trampoline installed as `jet_jit_cli_main` for typed CLI programs.
-pub(crate) extern "C" fn jet_jit_cli_main() -> i64 {
+pub(crate) fn jet_jit_cli_main() -> i64 {
     let plan = CLI_PLAN.with(|slot| slot.borrow().clone());
     let Some(plan) = plan else {
         Concurrency::with_runtime_mut(|rt| {

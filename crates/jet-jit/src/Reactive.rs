@@ -129,7 +129,7 @@ fn live_query<'a>(rt: &'a crate::runtime_host::JitRuntime, handle: i64) -> Optio
         .and_then(Option::as_ref)
 }
 
-extern "C" fn jet_jit_app_live(footprint: i64, initial: i64) -> i64 {
+fn jet_jit_app_live(footprint: i64, initial: i64) -> i64 {
     with_rt(|rt| {
         let footprint = rt.heap.clone_string(footprint).unwrap_or_default();
         let initial = rt.heap.clone_string(initial).unwrap_or_default();
@@ -138,7 +138,7 @@ extern "C" fn jet_jit_app_live(footprint: i64, initial: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_app_subscribe(source: i64) -> i64 {
+fn jet_jit_app_subscribe(source: i64) -> i64 {
     with_rt(|rt| {
         let source = rt.heap.clone_string(source).unwrap_or_default();
         rt.reactive.live_queries.push(Some(jet_app_subscribe(source)));
@@ -146,21 +146,21 @@ extern "C" fn jet_jit_app_subscribe(source: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_app_invalidate(footprint: i64) -> i64 {
+fn jet_jit_app_invalidate(footprint: i64) -> i64 {
     with_rt(|rt| {
         let footprint = rt.heap.clone_string(footprint).unwrap_or_default();
         jet_app_invalidate(footprint)
     })
 }
 
-extern "C" fn jet_jit_app_transact_invalidate(write_set: i64) -> i64 {
+fn jet_jit_app_transact_invalidate(write_set: i64) -> i64 {
     with_rt(|rt| {
         let write_set = rt.heap.clone_string(write_set).unwrap_or_default();
         jet_app_transact_invalidate(write_set)
     })
 }
 
-extern "C" fn jet_jit_app_signal_push(query: i64, payload: i64) -> i64 {
+fn jet_jit_app_signal_push(query: i64, payload: i64) -> i64 {
     with_rt(|rt| {
         let Some(index) = live_index(query) else {
             return 0;
@@ -184,7 +184,7 @@ extern "C" fn jet_jit_app_signal_push(query: i64, payload: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_app_live_get(query: i64) -> i64 {
+fn jet_jit_app_live_get(query: i64) -> i64 {
     with_rt(|rt| {
         let Some(query) = live_query(rt, query).cloned() else {
             return rt.heap.alloc_string("LiveError(live query is closed)".to_string());
@@ -193,7 +193,7 @@ extern "C" fn jet_jit_app_live_get(query: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_app_live_show(query: i64) -> i64 {
+fn jet_jit_app_live_show(query: i64) -> i64 {
     with_rt(|rt| {
         let Some(query) = live_query(rt, query).cloned() else {
             return rt
@@ -204,7 +204,7 @@ extern "C" fn jet_jit_app_live_show(query: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_app_live_stats() -> i64 {
+fn jet_jit_app_live_stats() -> i64 {
     with_rt(|rt| rt.heap.alloc_string(jet_app_live_stats()))
 }
 
@@ -216,7 +216,7 @@ where
     Concurrency::with_runtime_mut(f)
 }
 
-extern "C" fn jet_jit_reactive_signal(init: i64) -> i64 {
+fn jet_jit_reactive_signal(init: i64) -> i64 {
     with_rt(|rt| {
         rt.reactive
             .signals
@@ -225,7 +225,7 @@ extern "C" fn jet_jit_reactive_signal(init: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_reactive_get(handle: i64) -> i64 {
+fn jet_jit_reactive_get(handle: i64) -> i64 {
     with_rt(|rt| {
         rt.reactive
             .signals
@@ -235,7 +235,7 @@ extern "C" fn jet_jit_reactive_get(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_reactive_set(handle: i64, value: i64) {
+fn jet_jit_reactive_set(handle: i64, value: i64) {
     with_rt(|rt| {
         rt.reactive
             .signals
@@ -245,7 +245,7 @@ extern "C" fn jet_jit_reactive_set(handle: i64, value: i64) {
     });
 }
 
-extern "C" fn jet_jit_reactive_derived(
+fn jet_jit_reactive_derived(
     fn_ptr: i64,
     n_caps: i64,
     c0: i64,
@@ -265,7 +265,7 @@ extern "C" fn jet_jit_reactive_derived(
     })
 }
 
-extern "C" fn jet_jit_reactive_derived_get(handle: i64) -> i64 {
+fn jet_jit_reactive_derived_get(handle: i64) -> i64 {
     with_rt(|rt| {
         rt.reactive
             .deriveds
@@ -275,7 +275,7 @@ extern "C" fn jet_jit_reactive_derived_get(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_reactive_effect(
+fn jet_jit_reactive_effect(
     fn_ptr: i64,
     n_caps: i64,
     c0: i64,
@@ -295,7 +295,7 @@ extern "C" fn jet_jit_reactive_effect(
     })
 }
 
-extern "C" fn jet_jit_reactive_effect_rooted(
+fn jet_jit_reactive_effect_rooted(
     fn_ptr: i64,
     n_caps: i64,
     c0: i64,
@@ -311,21 +311,21 @@ extern "C" fn jet_jit_reactive_effect_rooted(
     reactive_rt::jet_reactive_effect_rooted(move || cb.invoke_void());
 }
 
-extern "C" fn jet_jit_loadable_idle() -> i64 {
+fn jet_jit_loadable_idle() -> i64 {
     // disc=Idle(0), no payload — packed enum ABI
     i64::from(loadable_kernel::JET_LOADABLE_IDLE)
 }
-extern "C" fn jet_jit_loadable_loading() -> i64 {
+fn jet_jit_loadable_loading() -> i64 {
     i64::from(loadable_kernel::JET_LOADABLE_LOADING)
 }
-extern "C" fn jet_jit_loadable_loaded(payload: i64) -> i64 {
+fn jet_jit_loadable_loaded(payload: i64) -> i64 {
     (payload << 8) | i64::from(loadable_kernel::JET_LOADABLE_LOADED)
 }
-extern "C" fn jet_jit_loadable_failed(payload: i64) -> i64 {
+fn jet_jit_loadable_failed(payload: i64) -> i64 {
     (payload << 8) | i64::from(loadable_kernel::JET_LOADABLE_FAILED)
 }
 
-extern "C" fn jet_jit_loadable_is(handle: i64, kind: i64) -> i8 {
+fn jet_jit_loadable_is(handle: i64, kind: i64) -> i8 {
     if loadable_kernel::jet_loadable_is_tag((handle & 0xff) as u8, kind as u8) {
         1
     } else {
@@ -333,11 +333,11 @@ extern "C" fn jet_jit_loadable_is(handle: i64, kind: i64) -> i8 {
     }
 }
 
-extern "C" fn jet_jit_loadable_payload(handle: i64) -> i64 {
+fn jet_jit_loadable_payload(handle: i64) -> i64 {
     handle >> 8
 }
 
-extern "C" fn jet_jit_loadable_or_else(handle: i64, default: i64) -> i64 {
+fn jet_jit_loadable_or_else(handle: i64, default: i64) -> i64 {
     if loadable_kernel::jet_loadable_has_value((handle & 0xff) as u8) {
         handle >> 8
     } else {
@@ -347,7 +347,7 @@ extern "C" fn jet_jit_loadable_or_else(handle: i64, default: i64) -> i64 {
 
 // ── Events (thin adapters over canonical JetEvent*) ──────────────────────────
 
-extern "C" fn jet_jit_event_scope() -> i64 {
+fn jet_jit_event_scope() -> i64 {
     // One EventScope handle for watcher (#1219) and UI/reactive (#1225).
     let wid = crate::Watcher::mirror_event_scope();
     with_rt(|rt| {
@@ -361,14 +361,14 @@ extern "C" fn jet_jit_event_scope() -> i64 {
     })
 }
 
-extern "C" fn jet_jit_event_new() -> i64 {
+fn jet_jit_event_new() -> i64 {
     with_rt(|rt| {
         rt.reactive.events.push(reactive_rt::JetEvent::new());
         rt.reactive.events.len() as i64
     })
 }
 
-extern "C" fn jet_jit_event_on(
+fn jet_jit_event_on(
     event: i64,
     scope: i64,
     fn_ptr: i64,
@@ -419,7 +419,7 @@ extern "C" fn jet_jit_event_on(
     })
 }
 
-extern "C" fn jet_jit_event_once(
+fn jet_jit_event_once(
     event: i64,
     scope: i64,
     fn_ptr: i64,
@@ -470,7 +470,7 @@ extern "C" fn jet_jit_event_once(
     })
 }
 
-extern "C" fn jet_jit_event_emit(event: i64, payload: i64) -> i64 {
+fn jet_jit_event_emit(event: i64, payload: i64) -> i64 {
     with_rt(|rt| {
         let event = rt
             .reactive
@@ -484,7 +484,7 @@ extern "C" fn jet_jit_event_emit(event: i64, payload: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_event_trace_summary(trace: i64) -> i64 {
+fn jet_jit_event_trace_summary(trace: i64) -> i64 {
     with_rt(|rt| {
         let summary = rt
             .reactive
@@ -496,7 +496,7 @@ extern "C" fn jet_jit_event_trace_summary(trace: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_event_scope_active(scope: i64) -> i64 {
+fn jet_jit_event_scope_active(scope: i64) -> i64 {
     with_rt(|rt| {
         rt.reactive
             .event_scopes
@@ -506,7 +506,7 @@ extern "C" fn jet_jit_event_scope_active(scope: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_event_scope_cancel(scope: i64) {
+fn jet_jit_event_scope_cancel(scope: i64) {
     crate::Watcher::mirror_event_scope_cancel(scope);
     with_rt(|rt| {
         if let Some(s) = rt
@@ -519,7 +519,7 @@ extern "C" fn jet_jit_event_scope_cancel(scope: i64) {
     });
 }
 
-extern "C" fn jet_jit_subscription_unsubscribe(sub: i64) {
+fn jet_jit_subscription_unsubscribe(sub: i64) {
     with_rt(|rt| {
         rt.reactive
             .subscriptions
@@ -529,7 +529,7 @@ extern "C" fn jet_jit_subscription_unsubscribe(sub: i64) {
     });
 }
 
-extern "C" fn jet_jit_hook_new(name: i64) -> i64 {
+fn jet_jit_hook_new(name: i64) -> i64 {
     with_rt(|rt| {
         let name = rt.heap.clone_string(name).unwrap_or_default();
         rt.reactive.hooks.push(reactive_rt::JetHook::new(name));
@@ -537,7 +537,7 @@ extern "C" fn jet_jit_hook_new(name: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_hook_on_priority(
+fn jet_jit_hook_on_priority(
     hook: i64,
     scope: i64,
     priority: i64,
@@ -585,7 +585,7 @@ extern "C" fn jet_jit_hook_on_priority(
     });
 }
 
-extern "C" fn jet_jit_hook_run(hook: i64, payload: i64, fallback: i64) -> i64 {
+fn jet_jit_hook_run(hook: i64, payload: i64, fallback: i64) -> i64 {
     with_rt(|rt| {
         let fallback = rt.heap.clone_string(fallback).unwrap_or_default();
         let hook = rt
@@ -599,7 +599,7 @@ extern "C" fn jet_jit_hook_run(hook: i64, payload: i64, fallback: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_decision_hook_new(policy: i64) -> i64 {
+fn jet_jit_decision_hook_new(policy: i64) -> i64 {
     let _ = policy; // HookPolicy.FirstCancelElseTransform — default for example
     with_rt(|rt| {
         rt.reactive.decision_hooks.push(reactive_rt::JetDecisionHook::new(
@@ -609,7 +609,7 @@ extern "C" fn jet_jit_decision_hook_new(policy: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_decision_hook_on(
+fn jet_jit_decision_hook_on(
     hook: i64,
     scope: i64,
     priority: i64,
@@ -678,7 +678,7 @@ extern "C" fn jet_jit_decision_hook_on(
     });
 }
 
-extern "C" fn jet_jit_decision_hook_run(hook: i64, payload: i64) -> i64 {
+fn jet_jit_decision_hook_run(hook: i64, payload: i64) -> i64 {
     with_rt(|rt| {
         let hook = rt
             .reactive
@@ -698,22 +698,22 @@ extern "C" fn jet_jit_decision_hook_run(hook: i64, payload: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_hook_decision_continue() -> i64 {
+fn jet_jit_hook_decision_continue() -> i64 {
     0
 }
-extern "C" fn jet_jit_hook_decision_transform(v: i64) -> i64 {
+fn jet_jit_hook_decision_transform(v: i64) -> i64 {
     (v << 8) | 1
 }
-extern "C" fn jet_jit_hook_decision_cancel() -> i64 {
+fn jet_jit_hook_decision_cancel() -> i64 {
     2
 }
-extern "C" fn jet_jit_hook_decision_fail(msg: i64) -> i64 {
+fn jet_jit_hook_decision_fail(msg: i64) -> i64 {
     (msg << 8) | 3
 }
 
 // ── Async event thin host (same golden as JetAsyncEvent sync path) ───────────
 
-extern "C" fn jet_jit_async_event_new(_capacity: i64, _overflow: i64, _failure: i64) -> i64 {
+fn jet_jit_async_event_new(_capacity: i64, _overflow: i64, _failure: i64) -> i64 {
     with_rt(|rt| {
         rt.reactive.async_events.push(AsyncEventSlot::default());
         // High bit tags async handles so EventMethod.on can dispatch correctly.
@@ -721,7 +721,7 @@ extern "C" fn jet_jit_async_event_new(_capacity: i64, _overflow: i64, _failure: 
     })
 }
 
-extern "C" fn jet_jit_async_event_on(
+fn jet_jit_async_event_on(
     event: i64,
     _scope: i64,
     fn_ptr: i64,
@@ -744,7 +744,7 @@ extern "C" fn jet_jit_async_event_on(
     });
 }
 
-extern "C" fn jet_jit_async_event_emit(event: i64, payload: i64) -> i64 {
+fn jet_jit_async_event_emit(event: i64, payload: i64) -> i64 {
     let idx = (event & !(1 << 62)).saturating_sub(1) as usize;
     with_rt(|rt| {
         let Some(slot) = rt.reactive.async_events.get_mut(idx) else {
@@ -781,7 +781,7 @@ extern "C" fn jet_jit_async_event_emit(event: i64, payload: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_async_event_close(event: i64) {
+fn jet_jit_async_event_close(event: i64) {
     let idx = (event & !(1 << 62)).saturating_sub(1) as usize;
     with_rt(|rt| {
         if let Some(slot) = rt.reactive.async_events.get_mut(idx) {
@@ -790,11 +790,11 @@ extern "C" fn jet_jit_async_event_close(event: i64) {
     });
 }
 
-extern "C" fn jet_jit_async_event_join(task: i64) -> i64 {
+fn jet_jit_async_event_join(task: i64) -> i64 {
     task
 }
 
-extern "C" fn jet_jit_dispatch_report_state(report: i64) -> i64 {
+fn jet_jit_dispatch_report_state(report: i64) -> i64 {
     // 0 = Delivered for `state() == .Delivered` comparison in examples.
     with_rt(|rt| {
         let ok = rt
@@ -811,7 +811,7 @@ extern "C" fn jet_jit_dispatch_report_state(report: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_dispatch_report_handlers(report: i64) -> i64 {
+fn jet_jit_dispatch_report_handlers(report: i64) -> i64 {
     with_rt(|rt| {
         rt.reactive
             .dispatch_reports

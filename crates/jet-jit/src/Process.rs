@@ -170,11 +170,11 @@ fn process_duration(ns: i64) -> process_prelude::Duration {
     process_prelude::Duration { ns }
 }
 
-extern "C" fn jet_jit_process_cmd(cmd_list: i64) -> i64 {
+fn jet_jit_process_cmd(cmd_list: i64) -> i64 {
     push_spec(process_prelude::spec_new(clone_string_list(cmd_list)))
 }
 
-extern "C" fn jet_jit_process_run(cmd_list: i64) -> i64 {
+fn jet_jit_process_run(cmd_list: i64) -> i64 {
     let spec = process_prelude::spec_new(clone_string_list(cmd_list));
     match process_prelude::spec_run(&spec) {
         Ok(result) => outcome_to_result(result),
@@ -182,7 +182,7 @@ extern "C" fn jet_jit_process_run(cmd_list: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
+fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
     let handles = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(spec_list).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
@@ -204,31 +204,31 @@ extern "C" fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_process_spec_stdout(spec: i64, mode: i64) -> i64 {
+fn jet_jit_process_spec_stdout(spec: i64, mode: i64) -> i64 {
     let mode = process_stream_mode(mode);
     update_spec(spec, |spec| process_prelude::spec_stdout(spec, &mode))
 }
 
-extern "C" fn jet_jit_process_spec_stderr(spec: i64, mode: i64) -> i64 {
+fn jet_jit_process_spec_stderr(spec: i64, mode: i64) -> i64 {
     let mode = process_stream_mode(mode);
     update_spec(spec, |spec| process_prelude::spec_stderr(spec, &mode))
 }
 
-extern "C" fn jet_jit_process_spec_stdin(spec: i64, mode: i64) -> i64 {
+fn jet_jit_process_spec_stdin(spec: i64, mode: i64) -> i64 {
     let mode = process_stream_mode(mode);
     update_spec(spec, |spec| process_prelude::spec_stdin(spec, &mode))
 }
 
-extern "C" fn jet_jit_process_spec_timeout(spec: i64, timeout: i64) -> i64 {
+fn jet_jit_process_spec_timeout(spec: i64, timeout: i64) -> i64 {
     let timeout = process_duration(timeout);
     update_spec(spec, |spec| process_prelude::spec_timeout(spec, &timeout))
 }
 
-extern "C" fn jet_jit_process_spec_output_limit(spec: i64, limit: i64) -> i64 {
+fn jet_jit_process_spec_output_limit(spec: i64, limit: i64) -> i64 {
     update_spec(spec, |spec| process_prelude::spec_output_limit(spec, limit))
 }
 
-extern "C" fn jet_jit_process_spec_run(spec: i64) -> i64 {
+fn jet_jit_process_spec_run(spec: i64) -> i64 {
     let Some(spec) = clone_spec(spec) else {
         return invalid_process_spec();
     };
@@ -238,7 +238,7 @@ extern "C" fn jet_jit_process_spec_run(spec: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_process_spec_run_checked(spec: i64) -> i64 {
+fn jet_jit_process_spec_run_checked(spec: i64) -> i64 {
     let Some(spec) = clone_spec(spec) else {
         return invalid_process_spec();
     };
@@ -248,7 +248,7 @@ extern "C" fn jet_jit_process_spec_run_checked(spec: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_process_spec_spawn(spec: i64) -> i64 {
+fn jet_jit_process_spec_spawn(spec: i64) -> i64 {
     let Some(spec) = clone_spec(spec) else {
         return invalid_process_spec();
     };
@@ -263,11 +263,11 @@ extern "C" fn jet_jit_process_spec_spawn(spec: i64) -> i64 {
     result_ok(handle as u64)
 }
 
-extern "C" fn jet_jit_process_spec_env_clear(spec: i64) -> i64 {
+fn jet_jit_process_spec_env_clear(spec: i64) -> i64 {
     update_spec(spec, process_prelude::spec_env_clear)
 }
 
-extern "C" fn jet_jit_process_spec_detached(spec: i64) -> i64 {
+fn jet_jit_process_spec_detached(spec: i64) -> i64 {
     update_spec(spec, process_prelude::spec_detached)
 }
 
@@ -297,18 +297,18 @@ fn terminal_size_from_handle(size: i64) -> process_prelude::TerminalSize {
     })
 }
 
-extern "C" fn jet_jit_process_spec_terminal(spec: i64) -> i64 {
+fn jet_jit_process_spec_terminal(spec: i64) -> i64 {
     update_spec(spec, process_prelude::spec_terminal)
 }
 
-extern "C" fn jet_jit_process_spec_terminal_with_policy(spec: i64, policy: i64) -> i64 {
+fn jet_jit_process_spec_terminal_with_policy(spec: i64, policy: i64) -> i64 {
     let policy = terminal_policy_from_handle(policy);
     update_spec(spec, |spec| {
         process_prelude::spec_terminal_with_policy(spec, &policy)
     })
 }
 
-extern "C" fn jet_jit_process_spec_capabilities(spec: i64) -> i64 {
+fn jet_jit_process_spec_capabilities(spec: i64) -> i64 {
     let Some(spec) = clone_spec(spec) else {
         return 0;
     };
@@ -324,7 +324,7 @@ extern "C" fn jet_jit_process_spec_capabilities(spec: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_process_child_terminal(child: i64) -> i64 {
+fn jet_jit_process_child_terminal(child: i64) -> i64 {
     if child <= 0 {
         return 0;
     }
@@ -338,7 +338,7 @@ extern "C" fn jet_jit_process_child_terminal(child: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_terminal_session_resize(session: i64, size: i64) -> i64 {
+fn jet_jit_terminal_session_resize(session: i64, size: i64) -> i64 {
     if session <= 0 {
         return invalid_process_child();
     }
@@ -364,24 +364,24 @@ extern "C" fn jet_jit_terminal_session_resize(session: i64, size: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_process_spec_cwd(spec: i64, cwd: i64) -> i64 {
+fn jet_jit_process_spec_cwd(spec: i64, cwd: i64) -> i64 {
     let cwd = clone_string(cwd);
     update_spec(spec, |spec| process_prelude::spec_cwd(spec, &cwd))
 }
 
-extern "C" fn jet_jit_process_spec_env(spec: i64, name: i64, value: i64) -> i64 {
+fn jet_jit_process_spec_env(spec: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
     update_spec(spec, |spec| process_prelude::spec_env(spec, &name, &value))
 }
 
-extern "C" fn jet_jit_process_spec_env_remove(spec: i64, name: i64) -> i64 {
+fn jet_jit_process_spec_env_remove(spec: i64, name: i64) -> i64 {
     let name = clone_string(name);
     update_spec(spec, |spec| process_prelude::spec_env_remove(spec, &name))
 }
 
 /// 0 selects stdout; 1 selects stderr.
-extern "C" fn jet_jit_process_stream_lines(child: i64, tag: i64) -> i64 {
+fn jet_jit_process_stream_lines(child: i64, tag: i64) -> i64 {
     let reader = if child <= 0 {
         None
     } else {
@@ -417,7 +417,7 @@ extern "C" fn jet_jit_process_stream_lines(child: i64, tag: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_process_child_id(child: i64) -> i64 {
+fn jet_jit_process_child_id(child: i64) -> i64 {
     if child <= 0 {
         return 0;
     }
@@ -430,7 +430,7 @@ extern "C" fn jet_jit_process_child_id(child: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_process_child_exited(child: i64) -> i64 {
+fn jet_jit_process_child_exited(child: i64) -> i64 {
     if child <= 0 {
         return invalid_process_child();
     }
@@ -467,19 +467,19 @@ fn process_child_unit(
     }
 }
 
-extern "C" fn jet_jit_process_child_kill(child: i64) -> i64 {
+fn jet_jit_process_child_kill(child: i64) -> i64 {
     process_child_unit(child, process_prelude::child_kill)
 }
 
-extern "C" fn jet_jit_process_child_terminate(child: i64) -> i64 {
+fn jet_jit_process_child_terminate(child: i64) -> i64 {
     process_child_unit(child, process_prelude::child_terminate)
 }
 
-extern "C" fn jet_jit_process_child_interrupt(child: i64) -> i64 {
+fn jet_jit_process_child_interrupt(child: i64) -> i64 {
     process_child_unit(child, process_prelude::child_interrupt)
 }
 
-extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
+fn jet_jit_process_child_wait(child: i64) -> i64 {
     if child <= 0 {
         return invalid_process_child();
     }

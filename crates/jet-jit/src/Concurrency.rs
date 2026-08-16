@@ -2,7 +2,8 @@
 
 use jet_codegen::scheduler::{
     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_all, jet_scheduler_any,
-    jet_scheduler_current_task_trace, jet_scheduler_deliver_shield_exit, jet_scheduler_race,
+    jet_scheduler_classify_unwind, jet_scheduler_current_task_trace,
+    jet_scheduler_deliver_shield_exit, jet_scheduler_race,
     jet_scheduler_propagate_deadline,
     jet_scheduler_panic_should_unwind,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
@@ -224,7 +225,7 @@ fn clear_task_trap() {
 }
 
 
-extern "C" fn jet_jit_wait_value() -> i64 {
+fn jet_jit_wait_value() -> i64 {
     WAIT_VALUE.with(|slot| slot.get())
 }
 
@@ -269,7 +270,7 @@ fn take_rich_panic_reason() -> Option<String> {
     RICH_PANIC_REASON.with(|slot| slot.borrow_mut().take())
 }
 
-extern "C" fn jet_jit_pending_exit_status() -> i64 {
+fn jet_jit_pending_exit_status() -> i64 {
     let pending = PENDING_SHIELD_EXIT.with(|slot| slot.get() != 0);
     let deadline = jet_codegen::task_group::jet_task_deadline_pending();
     i64::from(pending || deadline)
@@ -400,17 +401,16 @@ fn host_fault(message: &str) {
     }
 }
 
-/// Contain an unwind at a host seam that Cranelift calls directly.
+/// Contain an unwind raised by shared-Prelude cleanup inside a host seam.
 ///
-/// #1997: cranelift-jit 0.112.3 registers no unwind information for the code it
-/// emits, so a JIT frame carries no FDE. A Rust panic raised above one makes
-/// libgcc's phase 1 walk off the top of the stack and std rtaborts the process
-/// with `failed to initiate panic, error 5` (`_URC_END_OF_STACK`) before any
-/// outer `catch_unwind` can see it. Note that this is NOT a stack-space
-/// condition — real exhaustion prints `has overflowed its stack` instead, so
-/// raising `COMPILER_STACK_SIZE` cannot affect error 5. `extern "C"` does not
-/// save the seam either: its abort-on-unwind shim is a cleanup landing pad,
-/// which phase 1 walks straight past on its way into the FDE-less frame.
+/// The crate-wide no-unwind boundary is generated (`host_seam.rs`, #1997) and
+/// already stands between every seam and its Cranelift caller. This is the
+/// narrower, *inner* form for the handful of seam bodies that run a scheduler
+/// wait point directly: `jet_scheduler_wait_without_unwind` marks the frame as
+/// a live task catch frame, which is what makes a cancelled wait point choose
+/// to unwind here at all instead of returning a cooperative sentinel. The outer
+/// boundary would convert the same transfer, but only after abandoning the rest
+/// of the seam body's cleanup.
 ///
 /// The seams that need this are the ones running shared-Prelude cleanup with no
 /// `wait_status` around them. Dropping a `JetStreamSender` sends its completion
@@ -428,7 +428,17 @@ fn contain_seam_unwind<F>(f: F)
 where
     F: FnOnce(),
 {
-    match jet_scheduler_wait_without_unwind(f) {
+    deliver_wait_status(jet_scheduler_wait_without_unwind(f));
+}
+
+/// Put one converted control transfer on the tier's existing status channel.
+///
+/// I8: this is the single delivery point. The wait-point form
+/// ([`contain_seam_unwind`]) and the plain-seam form
+/// ([`deliver_caught_unwind`]) differ only in how they catch — never in what a
+/// cancel, a blown deadline, or a defect then means.
+fn deliver_wait_status(status: JetSchedulerWait<()>) {
+    match status {
         JetSchedulerWait::Ready(()) => {}
         JetSchedulerWait::Cancelled => set_pending_shield_exit(JetShieldExit::Cancelled),
         JetSchedulerWait::Deadline(rendered) => record_deadline_interrupt(rendered),
@@ -447,7 +457,22 @@ where
     }
 }
 
-extern "C" fn jet_jit_channel_new() -> i64 {
+/// Deliver an unwind caught at the generated `extern "C"` boundary — the
+/// `host_seam` shim `host_fns!` registers for every JIT host symbol, including
+/// `jet_deopt_call`. Always returns normally: generated code reads
+/// the runtime's status at its next `emit_trap_check` and leaves through
+/// Cranelift control flow, never through a Rust unwind (I1).
+pub(crate) fn deliver_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
+    // A shared-Prelude stop recorded its complete report in
+    // `runtime_stop_unwind` before it unwound; a second engine-local message
+    // here would be an invention.
+    if payload.is::<crate::runtime_host::JitRuntimeStop>() {
+        return;
+    }
+    deliver_wait_status(jet_scheduler_classify_unwind(payload));
+}
+
+fn jet_jit_channel_new() -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
         rt.channels.push(JetSchedulerChannel::new());
@@ -456,7 +481,7 @@ extern "C" fn jet_jit_channel_new() -> i64 {
 }
 
 /// `tasks.channel<T>(capacity)` — bounded buffer (D-TASKRUNTIME1).
-extern "C" fn jet_jit_channel_bounded(capacity: i64) -> i64 {
+fn jet_jit_channel_bounded(capacity: i64) -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
         rt.channels
@@ -465,7 +490,7 @@ extern "C" fn jet_jit_channel_bounded(capacity: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_generator_channel_new() -> i64 {
+fn jet_jit_generator_channel_new() -> i64 {
     with_runtime_mut(|rt| {
         let (producer, consumer) = jet_codegen::scheduler::jet_stream::<i64>();
         let channel = rt.next_stream_channel;
@@ -480,7 +505,7 @@ extern "C" fn jet_jit_generator_channel_new() -> i64 {
 /// Attach the generic scheduler child created by the generator wrapper to its
 /// shared Stream consumer. The handle tables only marshal Cranelift words;
 /// `JetStream` owns cancellation and join/drain semantics.
-extern "C" fn jet_jit_generator_stream_attach(ch: i64, task: i64) {
+fn jet_jit_generator_stream_attach(ch: i64, task: i64) {
     let attached: Option<(JetStream<i64>, JetSchedulerJoin<i64>, Arc<JetTaskControl>)> =
         with_runtime_mut(|rt| {
             let index = task as usize;
@@ -516,12 +541,12 @@ extern "C" fn jet_jit_generator_stream_attach(ch: i64, task: i64) {
 }
 
 /// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
-extern "C" fn jet_jit_time_now() -> i64 {
+fn jet_jit_time_now() -> i64 {
     jet_codegen::scheduler::jet_std_time_now()
 }
 
 /// `#Context(deadline: …)` enter.
-extern "C" fn jet_jit_deadline_push(deadline_ms: i64) {
+fn jet_jit_deadline_push(deadline_ms: i64) {
     DEADLINE_STACK.with(|stack| {
         stack
             .borrow_mut()
@@ -529,7 +554,7 @@ extern "C" fn jet_jit_deadline_push(deadline_ms: i64) {
     });
 }
 
-extern "C" fn jet_jit_deadline_pop() {
+fn jet_jit_deadline_pop() {
     DEADLINE_STACK.with(|stack| {
         let _ = stack.borrow_mut().pop();
     });
@@ -539,7 +564,7 @@ thread_local! {
     static DEADLINE_STACK: RefCell<Vec<JetDeadlineGuard>> = const { RefCell::new(Vec::new()) };
 }
 
-extern "C" fn jet_jit_channel_close(ch: i64) {
+fn jet_jit_channel_close(ch: i64) {
     if ch < 0 {
         let (consumer, pending_producer) = with_runtime_mut(|rt| {
             (
@@ -565,7 +590,7 @@ extern "C" fn jet_jit_channel_close(ch: i64) {
     });
 }
 
-extern "C" fn jet_jit_channel_sender(ch: i64) -> i64 {
+fn jet_jit_channel_sender(ch: i64) -> i64 {
     with_runtime_mut(|rt| {
         if let Some(producer) = rt.stream_producers.remove(&ch) {
             let id = rt.next_stream_sender;
@@ -583,7 +608,7 @@ extern "C" fn jet_jit_channel_sender(ch: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_sender_clone(s: i64) -> i64 {
+fn jet_jit_sender_clone(s: i64) -> i64 {
     with_runtime_mut(|rt| {
         if let Some(sender) = rt.stream_senders.get(&s).cloned() {
             let id = rt.next_stream_sender;
@@ -601,7 +626,7 @@ extern "C" fn jet_jit_sender_clone(s: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
+fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
     if s < 0 {
         let sender = with_runtime_mut(|rt| rt.stream_senders.get(&s).cloned());
         let Some(sender) = sender else {
@@ -618,7 +643,7 @@ extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
     wait_status(|| i64::from(tx.send(v)))
 }
 
-extern "C" fn jet_jit_sender_close(s: i64, failed: i64) {
+fn jet_jit_sender_close(s: i64, failed: i64) {
     if s < 0 {
         let sender = with_runtime_mut(|rt| rt.stream_senders.remove(&s));
         if failed != 0 {
@@ -646,7 +671,7 @@ extern "C" fn jet_jit_sender_close(s: i64, failed: i64) {
 /// `0` = closed; otherwise `received + 1`. A Stream pull acknowledges the
 /// preceding value before waiting for the next one. That acknowledgement is
 /// the exact suspension boundary after `yield`.
-extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
+fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
     let consumer = with_runtime_mut(|rt| rt.stream_consumers.remove(&ch));
     let Some(mut consumer) = consumer else {
         host_fault("jit generator receive without a stream consumer");
@@ -699,7 +724,7 @@ extern "C" fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
 /// Blocks until a message arrives or the channel closes — matches AOT
 /// `Channel.receive()` + `??` on `Result` (not `try_receive`).
 /// parity: guard tests/dev.rs::scheduler_spawn_runs_via_jit
-extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
+fn jet_jit_channel_receive_status(ch: i64) -> i64 {
     let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
     let Some(chan) = chan else {
         host_fault("jit channel receive: bad handle");
@@ -713,7 +738,7 @@ extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
+fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
     let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
     let Some(chan) = chan else {
         host_fault("jit channel receive: bad handle");
@@ -730,7 +755,7 @@ extern "C" fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
+fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
     trap_panic("channel closed")
 }
 
@@ -870,11 +895,11 @@ where
     store_task(join, control)
 }
 
-extern "C" fn jet_jit_shield_enter() {
+fn jet_jit_shield_enter() {
     jet_scheduler_shield_enter();
 }
 
-extern "C" fn jet_jit_shield_leave() -> i64 {
+fn jet_jit_shield_leave() -> i64 {
     let exit = jet_scheduler_shield_leave_status();
     if matches!(exit, JetShieldExit::Deadline) {
         jet_codegen::task_group::jet_task_deadline_mark_pending();
@@ -886,27 +911,27 @@ extern "C" fn jet_jit_shield_leave() -> i64 {
     i64::from(!matches!(exit, JetShieldExit::None))
 }
 
-extern "C" fn jet_jit_spawn0(f: SpawnFn0) -> i64 {
+fn jet_jit_spawn0(f: SpawnFn0) -> i64 {
     spawn_with_runtime(move || f())
 }
 
-extern "C" fn jet_jit_spawn1(f: SpawnFn1, c0: i64) -> i64 {
+fn jet_jit_spawn1(f: SpawnFn1, c0: i64) -> i64 {
     spawn_with_runtime(move || f(c0))
 }
 
-extern "C" fn jet_jit_spawn2(f: SpawnFn2, c0: i64, c1: i64) -> i64 {
+fn jet_jit_spawn2(f: SpawnFn2, c0: i64, c1: i64) -> i64 {
     spawn_with_runtime(move || f(c0, c1))
 }
 
-extern "C" fn jet_jit_spawn3(f: SpawnFn3, c0: i64, c1: i64, c2: i64) -> i64 {
+fn jet_jit_spawn3(f: SpawnFn3, c0: i64, c1: i64, c2: i64) -> i64 {
     spawn_with_runtime(move || f(c0, c1, c2))
 }
 
-extern "C" fn jet_jit_spawn4(f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
+fn jet_jit_spawn4(f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
     spawn_with_runtime(move || f(c0, c1, c2, c3))
 }
 
-extern "C" fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
+fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.task_groups.len() as i64;
         rt.task_groups
@@ -915,7 +940,7 @@ extern "C" fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_task_group_acquire(group: i64) -> i64 {
+fn jet_jit_task_group_acquire(group: i64) -> i64 {
     PENDING_TASK_GROUP_PERMIT.with(|pending| *pending.borrow_mut() = None);
     let children = with_runtime_mut(|rt| {
         rt.task_groups
@@ -945,7 +970,7 @@ extern "C" fn jet_jit_task_group_acquire(group: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
+fn jet_jit_task_group_register(group: i64, task: i64) {
     with_runtime_mut(|rt| {
         let children = rt
             .task_groups
@@ -1005,7 +1030,7 @@ fn close_task_group(group: i64) -> i64 {
     JitWaitStatus::Ready as i64
 }
 
-extern "C" fn jet_jit_task_group_close(group: i64) -> i64 {
+fn jet_jit_task_group_close(group: i64) -> i64 {
     close_task_group(group)
 }
 
@@ -1016,14 +1041,14 @@ pub(crate) fn close_active_task_groups() {
     }
 }
 
-extern "C" fn jet_jit_task_cancel(task: i64) {
+fn jet_jit_task_cancel(task: i64) {
     with_runtime_mut(|rt| match rt.task_controls.get(task as usize).cloned() {
         Some(control) => control.cancel(),
         None => rt.set_host_fault("jit task cancel: bad task handle"),
     });
 }
 
-extern "C" fn jet_jit_task_detach(task: i64) {
+fn jet_jit_task_detach(task: i64) {
     // D-DETACH1: drop the join handle; task keeps running. The thin async event
     // host hands this seam a DispatchReport handle rather than a scheduler
     // task, exactly as `jet_jit_task_join` documents, so an out-of-range slot
@@ -1035,35 +1060,35 @@ extern "C" fn jet_jit_task_detach(task: i64) {
     });
 }
 
-extern "C" fn jet_jit_task_pause(task: i64) {
+fn jet_jit_task_pause(task: i64) {
     with_runtime_mut(|rt| match rt.task_controls.get(task as usize).cloned() {
         Some(control) => control.pause(),
         None => rt.set_host_fault("jit task pause: bad task handle"),
     });
 }
 
-extern "C" fn jet_jit_task_resume(task: i64) {
+fn jet_jit_task_resume(task: i64) {
     with_runtime_mut(|rt| match rt.task_controls.get(task as usize).cloned() {
         Some(control) => control.resume(),
         None => rt.set_host_fault("jit task resume: bad task handle"),
     });
 }
 
-extern "C" fn jet_jit_task_yield() -> i64 {
+fn jet_jit_task_yield() -> i64 {
     wait_status(|| {
         jet_scheduler_yield_now();
         0
     })
 }
 
-extern "C" fn jet_jit_task_current_trace() -> i64 {
+fn jet_jit_task_current_trace() -> i64 {
     with_runtime_mut(|rt| {
         let text = jet_scheduler_current_task_trace();
         rt.heap.alloc_string(text)
     })
 }
 
-extern "C" fn jet_jit_task_join(task: i64) -> i64 {
+fn jet_jit_task_join(task: i64) -> i64 {
     // `emit_async(…).join()` is typed as TaskJoin in TIR, but the thin async
     // event host returns a completed DispatchReport handle (1-based index into
     // `dispatch_reports`), not a scheduler task. Treat missing/already-joined
@@ -1107,7 +1132,7 @@ extern "C" fn jet_jit_task_join(task: i64) -> i64 {
 /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: `task.all { … }` returns a Result
 /// handle; the list remains the successful payload and TaskFailure is packed
 /// only at this ABI boundary.
-extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
+fn jet_jit_task_all(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
@@ -1119,7 +1144,7 @@ extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
 }
 
 /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: first successful result or TaskFailure.
-extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
+fn jet_jit_task_race(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
@@ -1128,7 +1153,7 @@ extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
 }
 
 /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: first completed result or TaskFailure.
-extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
+fn jet_jit_task_any(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
         take_task_entries(rt, &ids)
@@ -1139,7 +1164,7 @@ extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
 /// D-CONCSELECT1=A: `g.select().recv(…).after(duration[, v]).wait()`.
 /// `after_list` is a canonical Duration-nanosecond flat list `[ns0, val0, …]`
 /// (even length). The shared Prelude owns the scheduler-ms projection.
-extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
+fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
     let prepared = with_runtime_mut(|rt| {
         let ch_ids = task_ids_from_list(rt, recv_list);
         let after_flat = task_ids_from_list(rt, after_list);
@@ -1176,7 +1201,7 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
 }
 
 /// `tasks.after(duration, value)` — one-shot timer channel that receives `value`.
-extern "C" fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
+fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
     // Sender is stashed in `rt.senders` so `with_runtime_mut` stays `Default`-safe.
     let (ch_id, sender_id) = with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
@@ -1217,7 +1242,7 @@ extern "C" fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
 }
 
 /// `tasks.interval(duration)` — ticking channel sending 1, 2, …
-extern "C" fn jet_jit_interval(duration_ns: i64) -> i64 {
+fn jet_jit_interval(duration_ns: i64) -> i64 {
     let (ch_id, sender_id) = with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
         let ch = JetSchedulerChannel::new();
@@ -1252,14 +1277,14 @@ extern "C" fn jet_jit_interval(duration_ns: i64) -> i64 {
     ch_id
 }
 
-extern "C" fn jet_jit_sleep(nanos: i64) -> i64 {
+fn jet_jit_sleep(nanos: i64) -> i64 {
     wait_status(|| {
         jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos);
         0
     })
 }
 
-extern "C" fn jet_jit_task_timeout(nanos: i64) -> i64 {
+fn jet_jit_task_timeout(nanos: i64) -> i64 {
     jet_codegen::scheduler::jet_task_timeout_duration_ns(nanos);
     0
 }

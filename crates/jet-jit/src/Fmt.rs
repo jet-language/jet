@@ -7,49 +7,49 @@ mod fmt_rt {
     include!("../../jet-codegen/src/Prelude/Core/Fmt.rs");
 }
 
-extern "C" fn jet_jit_fmt_number(value: i64) -> i64 {
+fn jet_jit_fmt_number(value: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_number(value))
 }
 
-extern "C" fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
+fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
 }
 
-extern "C" fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
+fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_percent(value, precision))
 }
 
-extern "C" fn jet_jit_fmt_bytes(value: i64) -> i64 {
+fn jet_jit_fmt_bytes(value: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_bytes(value))
 }
 
-extern "C" fn jet_jit_fmt_duration(ms: i64) -> i64 {
+fn jet_jit_fmt_duration(ms: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_duration(ms))
 }
 
-extern "C" fn jet_jit_fmt_ordinal(value: i64) -> i64 {
+fn jet_jit_fmt_ordinal(value: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_ordinal(value))
 }
 
-extern "C" fn jet_jit_fmt_plural(count: i64, singular: i64, plural: i64) -> i64 {
+fn jet_jit_fmt_plural(count: i64, singular: i64, plural: i64) -> i64 {
     let singular = clone_string(singular);
     let plural = clone_string(plural);
     alloc_string(fmt_rt::jet_fmt_plural(count, &singular, &plural))
 }
 
-extern "C" fn jet_jit_fmt_pad_left(text: i64, width: i64, fill: i64) -> i64 {
+fn jet_jit_fmt_pad_left(text: i64, width: i64, fill: i64) -> i64 {
     let text = clone_string(text);
     let fill = clone_string(fill);
     alloc_string(fmt_rt::jet_fmt_pad_left(&text, width, &fill))
 }
 
-extern "C" fn jet_jit_fmt_pad_right(text: i64, width: i64, fill: i64) -> i64 {
+fn jet_jit_fmt_pad_right(text: i64, width: i64, fill: i64) -> i64 {
     let text = clone_string(text);
     let fill = clone_string(fill);
     alloc_string(fmt_rt::jet_fmt_pad_right(&text, width, &fill))
 }
 
-extern "C" fn jet_jit_fmt_pad_center(text: i64, width: i64, fill: i64) -> i64 {
+fn jet_jit_fmt_pad_center(text: i64, width: i64, fill: i64) -> i64 {
     let text = clone_string(text);
     let fill = clone_string(fill);
     alloc_string(fmt_rt::jet_fmt_pad_center(&text, width, &fill))
