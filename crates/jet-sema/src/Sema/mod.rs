@@ -2293,7 +2293,8 @@ pub use Bundle::{
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
     check_bundle_freestanding_with_gates,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    specialize_function_types,
+    build_entry_signature_is_valid, is_build_entry, specialize_function_types,
+    strip_build_only_entries,
     IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{EffectSummary, SemIndexEffectFacts};

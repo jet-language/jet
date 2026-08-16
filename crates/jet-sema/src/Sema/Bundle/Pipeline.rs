@@ -3104,6 +3104,21 @@ fn check_bundle_opts_for_output_inner(
     diags.extend(super::super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
     bundle.name_ledger = name_ledger.clone();
+    // D-BUILDENTRY1 / I2+I3+I9 (Tower card 2008): checking is finished, so the
+    // build entry has had every diagnostic it is owed. It is not runtime code,
+    // and `BuildContext`/`BuildPlan` have no runtime lowering, so leaving it in
+    // hands codegen a function the typed IR cannot cover — an internal compiler
+    // error raised by `emit_func`, from a program sema just accepted. Project it
+    // out here, once, and every engine downstream sees the same program.
+    //
+    // Two checks keep their build entry. `allow_compiler_api` is the build
+    // session's own check of the selected root, whose caller still holds an
+    // index into the entry module's items and evaluates the entry next; the
+    // Driver removes it after the build runs. `Check` is `jet check`/LSP, which
+    // emits no code and reports `E3501` against the item.
+    if !allow_compiler_api && mode != CompileMode::Check {
+        super::strip_build_only_entries(bundle);
+    }
     (
         diags,
         super::super::Effects::SemIndexEffectFacts {

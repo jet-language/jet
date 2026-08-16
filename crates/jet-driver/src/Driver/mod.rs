@@ -3010,13 +3010,13 @@ fn compile_bundle_path_build_on_compiler_stack(
         bundle.web_partition_enforced = options.web_target;
     }
 
-    // Imported build entries are checked but never run. They are build-only
-    // values and must not leak into runtime codegen (root was removed above).
-    for module in &mut bundle.modules {
-        module
-            .items
-            .retain(|item| !matches!(item, crate::AST::Item::Func(func) if func.name == "build"));
-    }
+    // The selected root has produced its plan and every imported build entry was
+    // checked but never run. Both are build-only values and must not leak into
+    // runtime codegen, so drop them through the one front-end projection
+    // (`Sema::strip_build_only_entries`, D-BUILDENTRY1). The re-check below runs
+    // the same projection, but only when a build was selected and executed; this
+    // call covers the inspect-only and package-check paths too.
+    crate::Sema::strip_build_only_entries(&mut bundle);
 
     // The selected target source closure and generated modules are a fresh
     // program, not syntax checked in isolation. Re-run the complete front end
@@ -3499,18 +3499,13 @@ fn validate_selected_action_outputs(
     Ok(())
 }
 
+/// D-BUILDENTRY1: `E3501`'s contract, held in one place. Entry identity (the
+/// `build` name plus its `BuildContext` parameter) and the typed
+/// `=> BuildPlan ?` clause are graded by the same sema predicates that
+/// `Sema::strip_build_only_entries` uses to keep the entry out of runtime
+/// codegen, so selection, rejection, and removal cannot drift apart (I8).
 fn valid_build_signature(func: &crate::AST::Func) -> bool {
-    if func.params.len() != 1
-        || func.params[0].ty
-            != crate::AST::Type::Named(crate::Syntax::TYPE_BUILD_CONTEXT.to_string())
-    {
-        return false;
-    }
-    matches!(
-        func.return_type.as_ref(),
-        Some(crate::AST::Type::Result { ok, .. })
-            if **ok == crate::AST::Type::Named(crate::Syntax::TYPE_BUILD_PLAN.to_string())
-    )
+    crate::Sema::build_entry_signature_is_valid(func)
 }
 
 fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {

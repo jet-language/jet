@@ -1815,6 +1815,65 @@ pub fn check_bundle_with_effect_facts_for_build(
     )
 }
 
+/// D-BUILDENTRY1: the selected root build entry's function name. Compiler-known
+/// only while the build session runs; never part of the runtime program.
+const BUILD_ENTRY_FN: &str = "build";
+
+/// D-BUILDENTRY1: is this function the programmable-build root entry?
+///
+/// Identity is the name plus the one `BuildContext` parameter. `BuildContext`
+/// is a compiler value with no runtime representation, so a function that takes
+/// one is build-only whatever else its signature says — including a malformed
+/// one, which must still be kept out of runtime codegen while `E3501` explains
+/// it. The return clause is graded separately by
+/// [`build_entry_signature_is_valid`].
+///
+/// The name alone is not enough: an ordinary `fn build(count: Int) => Int` is a
+/// normal runtime function, and dropping it would emit calls to a name that has
+/// no definition.
+pub fn is_build_entry(func: &Func) -> bool {
+    func.name == BUILD_ENTRY_FN
+        && func.params.len() == 1
+        && func.params[0].ty == Type::Named(Syntax::TYPE_BUILD_CONTEXT.to_string())
+}
+
+/// D-BUILDENTRY1: does the build entry carry its one typed contract,
+/// `fn build(b: BuildContext) => BuildPlan ?`? This is what `E3501` reports on.
+/// Build authority and graph handoff are one contract, so a build entry with
+/// any other return clause is selected, rejected, and never emitted.
+pub fn build_entry_signature_is_valid(func: &Func) -> bool {
+    is_build_entry(func)
+        && matches!(
+            func.return_type.as_ref(),
+            Some(Type::Result { ok, .. })
+                if **ok == Type::Named(Syntax::TYPE_BUILD_PLAN.to_string())
+        )
+}
+
+/// D-BUILDENTRY1 / I2 / I3 / I9: project a checked bundle down to the program
+/// the user actually runs by removing every build-only entry.
+///
+/// `fn build` is compiler-host code. It is type-checked like any other
+/// function, and `jet build` evaluates it in the comptime build interpreter,
+/// but it is not runtime code: its `BuildContext` parameter and `BuildPlan`
+/// result are compiler values with no runtime representation. A build entry
+/// left in the program therefore reaches `Codegen::emit_func`, fails the typed
+/// IR coverage gate, and raises an internal compiler error — a compiler bug by
+/// I2, and by I3 a decision the front end owes codegen rather than one codegen
+/// discovers (Tower card 2008).
+///
+/// The removal belongs to the front end, so it happens exactly once for every
+/// consumer: AOT emit, the Cranelift JIT, and the interpreter all receive the
+/// same runtime program instead of each engine having to know that one function
+/// is not theirs (I9).
+pub fn strip_build_only_entries(bundle: &mut ProgramBundle) {
+    for module in &mut bundle.modules {
+        module
+            .items
+            .retain(|item| !matches!(item, Item::Func(func) if is_build_entry(func)));
+    }
+}
+
 pub fn check_bundle_with_effect_facts_incremental(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
