@@ -1651,6 +1651,30 @@ fn task_program_runs_via_jit() {
 /// (`crates/jet-sema/src/Sema/CheckerCore/statements.rs:366-372`), discarding
 /// their declarations. Nothing restores that flag around a lambda body
 /// (`CheckerInfer/calls/lambdas.rs:609`), so the task body's `return` leaked out.
+///
+/// The two claims below were unverified until the fixture above was migrated,
+/// and both were wrong on first run.
+///
+/// 1. `print(all_result[0], all_result[1])` writes TWO lines, not one.
+///    D-VERDICT-1321-1 *(ratified 2026-07-30, amends S9 print arity;
+///    `docs/spec/syntax-decisions.md:6147-6150`)*: `print` "accept[s] one or
+///    more arguments and write[s] each argument on its own line, in order, with
+///    a trailing newline after the last." The shipped corpus prints a
+///    `task.all` result in exactly this spelling — `task_all.jet:16` is
+///    `print(results[0], results[1], results[2])` and its golden
+///    `expected/concurrency/task_all.out` is three lines. So the fixture is
+///    corpus-shaped and the old one-line `"left right"` expectation, written
+///    2026-08-11 (twelve days after the decision) and never once executed, was
+///    the defect. The fixture is NOT reshaped to interpolate a joined line:
+///    that would stop covering variadic `print` over a task-combinator result.
+///
+/// 2. `panic("boom")`, not `panic("child")`. Both strings were `"child"`, so
+///    the child's re-raised panic message was indistinguishable from the
+///    `task { "child" }` result value in any runtime evidence. They are
+///    separate slots — `RICH_PANIC_REASON` (`jet-jit/src/Concurrency.rs`) has
+///    one writer, `jet_jit_rich_panic` (`jit/runtime_host.rs`), which stores a
+///    panic message and never a task result — but the fixture should not make
+///    that take a proof to see.
 #[test]
 fn task_surface_runs_resident_with_string_results_and_typed_failures() {
     if skip_if_cranelift_host_unsupported() {
@@ -1695,7 +1719,7 @@ fn run() {
             .Ok(_) -> { print("wrong cancellation") }
         }
 
-        failed :: task { panic("child") }
+        failed :: task { panic("boom") }
         failed_result :: failed.join()
         if failed_result == {
             .Err(error) -> { print(failure_label(error)) }
@@ -1725,8 +1749,11 @@ fn run() {
     else {
         panic!("resident task surface must run through Cranelift")
     };
-    assert_eq!(stdout, "child\nleft right\nrace\nany\ncancelled\npanicked\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stdout, "child\nleft\nright\nrace\nany\ncancelled\npanicked\n");
+    assert!(
+        stderr.is_empty(),
+        "resident task surface reported to the program's stderr: {stderr:?}"
+    );
     assert_eq!(exit_code, 0);
     assert!(jet_jit::jit_executed_for_test());
     assert!(!jet_jit::deopt_invoked_for_test());
@@ -6188,7 +6215,6 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "tooling/data_bridges",
         "tooling/data_core",
         "tooling/data_hostile",
-        "tooling/data_line",
         "tooling/data_json",
         "tooling/data_pipeline",
         "tooling/data_plot",
@@ -9163,6 +9189,23 @@ fn ledger_cross_check_holds() {
     }
 }
 
+/// #1760: the two serde stems stay green — and each pin claims only what a
+/// ledger can actually prove about that stem.
+///
+/// The run tier is pinned for both: `tests/jit_corpus_gate.txt` records them
+/// `resident_jit:`, and neither may come back to `gaps:` or `run_gaps:`.
+///
+/// Compile coverage is pinned for `serde/serde_generic` alone. `compile_covered:`
+/// is not a wish list — `jit_coverage_audit` compares it to the OBSERVED set in
+/// both directions (#1663), so a row the audit does not observe fails as a
+/// REGRESSION. `serde/encoding_breadth` is observed neither way:
+/// `observe_jit_coverage` skips a stem whose in-process Loader/Sema pass errors,
+/// and this stem is one of those (#1998, the audit's universe hole). Pinning it
+/// "must remain compile-covered" therefore demanded a row that `jit_coverage_audit`
+/// rejects — the pin could only be satisfied by falsifying the ledger it guards.
+/// Dropping that one claim loses no cover: the audit's GREW assertion adds the row
+/// the moment the stem enters the universe, and its REGRESSED assertion pins it
+/// there afterwards.
 #[test]
 fn serde_jit_parity_manifest_pins() {
     let (compile_covered, gaps, run_gaps, _) = parse_jit_gap_manifest_full();
@@ -9186,11 +9229,15 @@ fn serde_jit_parity_manifest_pins() {
             }),
             "{stem} must not return to the run-tier gap ledger"
         );
-        assert!(
-            compile_covered.iter().any(|row| row == stem),
-            "{stem} must remain compile-covered"
-        );
     }
+    // A claim about the observed set, so it is made only for the stem the audit
+    // can see. `serde/encoding_breadth` is outside that universe (#1998).
+    assert!(
+        compile_covered
+            .iter()
+            .any(|row| row == "serde/serde_generic"),
+        "serde/serde_generic must remain compile-covered"
+    );
 }
 
 /// #1509 c4: negative control — the cross-check actually fires.

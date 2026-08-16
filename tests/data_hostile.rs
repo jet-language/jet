@@ -86,8 +86,12 @@ fn flagship_analysis_example_matches_golden_aot() {
 }
 
 #[test]
-fn line_plot_example_matches_golden_aot() {
-    assert_example_matches_golden("data_line");
+fn plot_example_matches_golden_aot() {
+    // Was `data_line`, an example that has NEVER existed in git history: the stem
+    // was introduced by f4d17b661, a checkpoint of an unconsolidated epoch-5
+    // worktree, so this test could not have passed since it was written. The real
+    // example is data_plot.jet (118579b09).
+    assert_example_matches_golden("data_plot");
 }
 
 #[test]
