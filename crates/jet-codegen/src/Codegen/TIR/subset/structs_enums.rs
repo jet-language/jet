@@ -58,6 +58,15 @@ pub(crate) fn core_enum_equal_type(name: &str) -> bool {
             | "DataErrorKind"
             | "DurationUnit"
             | "LocalDate"
+            // D-RANGE-VALUE1=A puts Range in auto_equatable, so sema rewrites
+            // `a == b` on two Ranges into the Equatable.equal method shape. Every
+            // other link already exists: lowering turns an admitted `.equal` into
+            // TExprKind::Binary{Eq}, the interpreter evaluates that node for a
+            // Range lhs through jet_range_equal, and the Cranelift host has
+            // jet_jit_range_equal wired. This predicate was the only gate left
+            // refusing it, which took the whole enclosing function off the
+            // resident tier.
+            | "Range"
     )
 }
 

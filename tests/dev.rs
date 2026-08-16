@@ -3978,13 +3978,17 @@ fn run() {
     let proof = std::env::temp_dir().join("jet_jit_range_value_safety.jet");
     fs::write(&proof, src).unwrap();
     let bundle = checked_bundle_from_path(&proof.to_string_lossy());
+    // Same order as the unboxed block above, for the same reason:
+    // `resident_jit_func_safety_detail` answers `None` ("covered") whenever
+    // `lower_jit_program` yields nothing, so on a lowering failure it reads
+    // green. Compile first so this half also names the real reason.
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     assert_eq!(
         jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
         None,
         "Range values and windows must stay in resident JIT"
     );
-    jet_jit::try_compile_bundle(&bundle)
-        .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     let native = run_cranelift_without_fallback(src, "range_values");
     let expected = "\
 true
