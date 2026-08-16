@@ -807,14 +807,16 @@ fn run() {{
         String::from_utf8_lossy(&release.stderr),
     );
     assert_eq!(default.stdout, release.stdout);
-    let release_stderr = String::from_utf8(release.stderr.clone()).unwrap();
-    let (_, release_program_stderr) = release_stderr
-        .split_once('\n')
-        .filter(|(line, _)| line.starts_with("effects: "))
-        .expect("release lens must report its compile-time effect summary");
+    // No lens prints the D-EFFBUDGET1 effect summary here: it is `jet build`
+    // tool output, not run stderr. `Source/CmdCompile.rs` gates the
+    // `EffectBudget::summary_line` print on `cmd == "build"`, so every `jet run`
+    // lens leaves stderr entirely to the program, and the `.err.out` oracle in
+    // `assert_example_cli_error_tiers_agree` pins that same byte-for-byte
+    // stderr parity across the debug/release/default/interpret lenses.
     assert_eq!(
         String::from_utf8_lossy(&default.stderr),
-        release_program_stderr
+        String::from_utf8_lossy(&release.stderr),
+        "the run lenses must agree on stderr byte for byte"
     );
     assert!(
         default.status.success(),
