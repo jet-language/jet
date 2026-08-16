@@ -631,7 +631,7 @@ fn lower_spawn_function(
             }
         })
         .unwrap_or_else(|| jet_foundation::Names::mangle("jit_spawn_body"));
-    super::tier_cache::note_defined(&export, &ctx);
+    super::tier_cache::note_defined(&export, func_id, &ctx);
     module.clear_context(&mut ctx);
     Ok(())
 }
@@ -1713,7 +1713,7 @@ fn lower_function(
     } else {
         super::types_meta::jit_fn_name(&tir.name)
     };
-    super::tier_cache::note_defined(&export_name, &ctx);
+    super::tier_cache::note_defined(&export_name, func_id, &ctx);
     module.clear_context(&mut ctx);
     Ok(())
 }

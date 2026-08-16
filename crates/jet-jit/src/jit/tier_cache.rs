@@ -25,7 +25,19 @@ use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 const FORMAT: u32 = 3;
 
 thread_local! {
-    static CAPTURE: RefCell<Option<Vec<CapturedFn>>> = const { RefCell::new(None) };
+    static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
+}
+
+/// One in-progress capture: the functions defined so far, and the `FuncId` each
+/// one held, in the same order.
+///
+/// The ids are capture-time bookkeeping for `capture_is_replayable`, never
+/// artifact content, so they stay out of `CapturedFn` and are read by zipping the
+/// two — no positional lookup into either.
+#[derive(Default)]
+struct Capture {
+    func_ids: Vec<u32>,
+    fns: Vec<CapturedFn>,
 }
 
 #[derive(Clone)]
@@ -59,7 +71,7 @@ enum StoredTarget {
 }
 
 pub(crate) fn begin_capture() {
-    CAPTURE.with(|slot| *slot.borrow_mut() = Some(Vec::new()));
+    CAPTURE.with(|slot| *slot.borrow_mut() = Some(Capture::default()));
 }
 
 pub(crate) fn abort_capture() {
@@ -67,11 +79,70 @@ pub(crate) fn abort_capture() {
 }
 
 pub(crate) fn take_capture() -> Option<Vec<CapturedFn>> {
-    let fns = CAPTURE.with(|slot| slot.borrow_mut().take())?;
-    if fns.is_empty() || !fns.iter().any(|f| f.export_name == "__jet_jit_main") {
+    let capture = CAPTURE.with(|slot| slot.borrow_mut().take())?;
+    if capture.fns.is_empty()
+        || !capture
+            .fns
+            .iter()
+            .any(|f| f.export_name == "__jet_jit_main")
+    {
         return None;
     }
-    Some(fns)
+    if !capture_is_replayable(&capture) {
+        return None;
+    }
+    Some(capture.fns)
+}
+
+/// Can `run_cached_module` reproduce the `FuncId` numbering this capture was
+/// compiled against?
+///
+/// A reload declares the host functions first (`new_jit_module`, deterministic
+/// and identical every time), then the captured functions in list order. So the
+/// numbering is reproduced only when
+///
+/// * the captured ids are consecutive from the first one, and
+/// * every relocation names a function (namespace 0) that is either a host
+///   (`index < first`) or one of the captured ones (`index < first + len`).
+///
+/// Any program that DECLARES a function the capture skips fails one of those,
+/// and that is not hypothetical: `lower_generator_body` and
+/// `lower_generator_wrapper` call `define_function` with no `note_defined`, so a
+/// generator leaves a hole in the captured id range and the consumer's call to
+/// the generator is stored as an index the reload never declares. Replaying it
+/// indexed one past the reloaded table and panicked inside
+/// `Module::get_function_decl` — an ICE with exit 101 on the SECOND `jet run` of
+/// any program containing a generator, while every cold run stayed correct.
+///
+/// Refusing the artifact keeps such a program on the cold path: correct, only
+/// slower. Per I2 the guard belongs here, where an inconsistent artifact would
+/// otherwise be written, and never as a clamp at replay — a clamp would turn a
+/// wrong relocation into a wrong call.
+fn capture_is_replayable(capture: &Capture) -> bool {
+    let Some(&first) = capture.func_ids.first() else {
+        return false;
+    };
+    let first = u64::from(first);
+    let limit = first + capture.fns.len() as u64;
+    let mut expected = first;
+    for (&func_id, f) in capture.func_ids.iter().zip(&capture.fns) {
+        if u64::from(func_id) != expected {
+            return false;
+        }
+        expected += 1;
+        let replayable = f.relocs.iter().all(|reloc| match &reloc.target {
+            // Namespace 1 is a data object, and a reload declares no data
+            // objects at all, so a data relocation is equally unreplayable.
+            StoredTarget::User { namespace, index } => {
+                *namespace == 0 && u64::from(*index) < limit
+            }
+            StoredTarget::FuncOffset(_) => true,
+        });
+        if !replayable {
+            return false;
+        }
+    }
+    true
 }
 
 thread_local! {
@@ -132,10 +203,10 @@ pub(crate) fn publish_last_tier_artifact(artifact: Option<Vec<u8>>) {
     LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = artifact);
 }
 
-pub(crate) fn note_defined(export_name: &str, ctx: &Context) {
+pub(crate) fn note_defined(export_name: &str, func_id: FuncId, ctx: &Context) {
     CAPTURE.with(|slot| {
         let mut guard = slot.borrow_mut();
-        let Some(buf) = guard.as_mut() else {
+        let Some(capture) = guard.as_mut() else {
             return;
         };
         let Some(cc) = ctx.compiled_code() else {
@@ -155,7 +226,8 @@ pub(crate) fn note_defined(export_name: &str, ctx: &Context) {
             *guard = None;
             return;
         };
-        buf.push(CapturedFn {
+        capture.func_ids.push(func_id.as_u32());
+        capture.fns.push(CapturedFn {
             export_name: export_name.to_string(),
             sig,
             alignment,
