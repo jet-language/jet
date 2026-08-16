@@ -449,7 +449,17 @@ impl<'a> EvalCtx<'a> {
         stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
-        self.burn()?;
+        // `SourceSpan`/`LineMarker` are lowering bookkeeping, not program work:
+        // `lower_stmts_with_markers` emits a `SourceSpan` before every statement
+        // and, under `debug_linemap`, a `LineMarker` too. Fuel is the program's
+        // evaluation budget (E2202 tells the user their program "ran too many
+        // steps"), so charging for a marker would double every statement's cost
+        // and make that budget depend on how many markers lowering happened to
+        // emit — a `debug_linemap` build would spend three steps where a default
+        // build spends two.
+        if !matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)) {
+            self.burn()?;
+        }
         match stmt {
             TStmt::Contract { contract } => {
                 self.check_contracts(std::slice::from_ref(contract), scope)?;

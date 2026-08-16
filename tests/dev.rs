@@ -2706,6 +2706,25 @@ fn json_coerce_audit_reports_jit_gap_on_default_dev() {
     let stem = "serde/json_coerce";
     let file = example_path(stem);
 
+    // `dev_iteration` returns `Problems` for a front-end rejection and for an
+    // interpreter boundary alike, so the boundary assertion below cannot tell
+    // "the interpreter refused to drop the audit effect" from "the fixture never
+    // type-checked". Separate them here: this stem's whole point is the UNTYPED
+    // D-JSON3 lenient `json.decode(text)` form, so if sema rejects that call the
+    // failure is the stdlib surface, not the interpreter.
+    let front_end: Vec<_> = jet::check_with_path(&file)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(
+        front_end.is_empty(),
+        "`{stem}` must type-check before the interpreter boundary means anything; \
+         untyped `json.decode(text)` is the ratified D-JSON3 lenient form \
+         (`module_items.rs` exports `decode`, `core_fixed_sig_impl` types it as \
+         `Result<Data, JSONError>`, AOT lowers it to `jet_std_json_decode_lenient`): \
+         {front_end:?}"
+    );
+
     match dev_iteration_with_timeout(stem, &file, true) {
         RunOutcome::Problems(diags) => assert!(
             diags.iter().any(|d| d.code == "E2201"),
@@ -6308,11 +6327,43 @@ thread_local! {
     static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+// PROVES: the colour decision honours `NO_COLOR` by PRESENCE. The variable is
+// set here to a single 0xff byte -- present, and not valid Unicode -- and the
+// environment half of the production decision still says "no colour". It also
+// proves the decision reads the raw logical-env entry: the decoding accessor
+// reports the same variable absent, so routing the decision through it would
+// silently re-enable colour (the #1206 review defect).
+//
+// DOES NOT PROVE: that colour is emitted when `NO_COLOR` is absent. rustc's
+// `--test` harness pipes stdout, so the stream half of the decision
+// (`jet_term_stdout_is_terminal`) is false here for an unrelated reason.
+// That is precisely why the environment half is asserted through its own seam
+// and why the composed check below hands `jet_term_style_enabled` a forced
+// `stdout_is_terminal = true`: asserting `jet_style_enabled() == false` alone
+// would pass even if `NO_COLOR` were ignored outright. Terminal-attached
+// behaviour belongs to tests/terminal.rs and the io/terminal_parity ledger.
 #[test]
 fn raw_no_color_is_present_even_when_its_value_is_not_unicode() {
+    // The raw logical-env lookup the colour decision uses sees the variable.
     assert!(jet_env_value_raw("NO_COLOR").is_some());
+    // The decoding accessor calls the very same variable absent.
     assert!(jet_std_env_get(&"NO_COLOR".to_string()).is_none());
+
+    // The env-only seam: no terminal involved, so this cannot go green because
+    // stdout happens to be a pipe.
     assert!(!jet_style_env_enabled());
+
+    // The production decision itself, with only the stream fact substituted.
+    // `jet_style_enabled` is `jet_term_style_enabled(no_color, term_is_dumb,
+    // jet_term_stdout_is_terminal())` over these exact facts, so switching
+    // either read to the decoding accessor flips this assertion.
+    let (no_color, term_is_dumb) = jet_style_env_facts();
+    assert!(no_color, "set-but-non-Unicode NO_COLOR must register as present");
+    assert!(!jet_term_style_enabled(no_color, term_is_dumb, true));
+
+    // End to end through the user-facing surface: no escape codes.
+    let styled = jet_std_io_style(&"red".to_string(), &"plain".to_string());
+    assert_eq!(styled, "plain");
 }
 "#;
             let generated = format!("{}{}", compiled.rust, probe);
@@ -7095,12 +7146,12 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
 @f64_neg_inf :: Float.NEG_INFINITY
 
 fn run() {
-    print(f32_nan)
-    print(f32_inf)
-    print(f32_neg_inf)
-    print(f64_nan)
-    print(f64_inf)
-    print(f64_neg_inf)
+    print(@f32_nan)
+    print(@f32_inf)
+    print(@f32_neg_inf)
+    print(@f64_nan)
+    print(@f64_inf)
+    print(@f64_neg_inf)
 }
 "#;
     let expected = ProgramOutput::ran("NaN\ninf\n-inf\nNaN\ninf\n-inf\n".into(), "".into(), 0);
