@@ -98,9 +98,19 @@ pub fn on_compiler_worker() -> bool {
 /// wraps this with exactly that capture/restore: `jet_driver::run_compiler_work`
 /// and `Sema::check_bundle_opts_for_output_with_context` carry the comptime
 /// ambient hooks, `TIR::lower_jit_program` carries `LAST_JIT_LOWER_FAILURE`
-/// back out, and `jet_jit::on_compiler_stack` carries the trace flags and tier
-/// rows. Each checks [`on_compiler_worker`] before capturing, so the inline
-/// path stays allocation-free.
+/// back out, and `jet_jit::on_compiler_stack` carries the trace flags, the tier
+/// rows and the `core.perf` fidelity signal. Each checks [`on_compiler_worker`]
+/// before capturing, so the inline path stays allocation-free.
+///
+/// A worker's storage lasts one outermost call, so an installing crate owes the
+/// capture/restore not only to state a caller sets up or inspects around the
+/// call, but to any thread-local whose contract is *per session* — state a
+/// later call on the same caller thread is entitled to read. Such state is
+/// lent to the worker and taken back (`jet_jit`'s fidelity signal), or the
+/// session owner installs this boundary once around the whole session so every
+/// call runs inline on one worker (`jet_jit`'s resident module, live heap and
+/// `crate::Persist` store). Making it process-wide instead is not a third
+/// option: that leaks one session into a concurrent unrelated one.
 ///
 /// Values and panics both cross unchanged. The value rides out through
 /// `join`; a panic is captured on the worker with `catch_unwind` and re-raised

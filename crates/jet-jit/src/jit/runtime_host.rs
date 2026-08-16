@@ -1971,12 +1971,36 @@ const JIT_PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // leaking one resident-JIT execution's override into a DIFFERENT one running
 // concurrently on another thread (the actual bug: a process-wide
 // `AtomicU32` let a parallel `cargo test` thread observe another thread's
-// override mid-battery). Thread-local scoping keeps every within-thread
-// restart/hot-swap/relaunch sequence exactly as before while giving each
-// thread — i.e. each independent resident-JIT session — its own signal.
+// override mid-battery). Thread-local scoping keeps every restart/hot-swap/
+// relaunch sequence within one session exactly as before while giving each
+// independent resident-JIT session its own signal.
+//
+// The session is the thread that OWNS the session, and since 17d04068e that
+// is no longer automatically the thread the signal is written on: an outermost
+// `CraneliftBackend::run` hops onto a fresh `jet-compiler` worker per call, so
+// a worker's storage spans one CALL, not one session. The cell below is
+// therefore the owner's, and [`crate::on_compiler_stack`] lends it to the
+// worker for the duration of the hop and takes the worker's value back — see
+// [`perf_fidelity_bits`]. The entries that never hop (`hot_swap`, `restart`,
+// `run_cached_module`) already read and write the owner's cell directly, so
+// every entry agrees on one home.
 thread_local! {
     static JIT_PERF_FIDELITY: std::cell::Cell<u32> =
         const { std::cell::Cell::new(JIT_PERF_DEFAULT_FIDELITY_BITS) };
+}
+
+/// This session's `core.perf` fidelity signal, for the compiler-worker hop.
+///
+/// Read on the session owner before the hop and on the worker once `work` has
+/// returned; [`set_perf_fidelity_bits`] installs it on the other side. Raw
+/// bits rather than `f32` so the relay reproduces exactly what was stored,
+/// with no round-trip through a value the cell does not hold.
+pub(crate) fn perf_fidelity_bits() -> u32 {
+    JIT_PERF_FIDELITY.with(std::cell::Cell::get)
+}
+
+pub(crate) fn set_perf_fidelity_bits(bits: u32) {
+    JIT_PERF_FIDELITY.with(|slot| slot.set(bits));
 }
 
 pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
@@ -3100,7 +3124,7 @@ extern "C" fn jet_jit_result_get_i32(handle: i64) -> i32 {
 }
 
 extern "C" fn jet_jit_perf_fidelity() -> f64 {
-    f32::from_bits(JIT_PERF_FIDELITY.with(std::cell::Cell::get)) as f64
+    f32::from_bits(perf_fidelity_bits()) as f64
 }
 
 extern "C" fn jet_jit_perf_default_fidelity() -> f64 {
@@ -3117,13 +3141,13 @@ extern "C" fn jet_jit_perf_override_fidelity(value: f64) -> i64 {
             let string = rt.heap.alloc_string(message);
             return alloc_jit_result(rt, false, string as u64);
         }
-        JIT_PERF_FIDELITY.with(|c| c.set((value as f32).to_bits()));
+        set_perf_fidelity_bits((value as f32).to_bits());
         alloc_jit_result(rt, true, 0)
     })
 }
 
 extern "C" fn jet_jit_perf_reset_fidelity() {
-    JIT_PERF_FIDELITY.with(|c| c.set(JIT_PERF_DEFAULT_FIDELITY_BITS));
+    set_perf_fidelity_bits(JIT_PERF_DEFAULT_FIDELITY_BITS);
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {

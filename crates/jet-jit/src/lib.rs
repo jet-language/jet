@@ -328,16 +328,29 @@ pub(crate) fn program_args() -> Vec<String> {
 /// * **out** — the JIT/fallback/deopt trace flags, the `--trace-tiers` rows,
 ///   the `struct_new` counter, and the tier-1 cache artifact the run just
 ///   published.
+/// * **in and out** — the `core.perf` fidelity signal
+///   (`runtime_host::perf_fidelity_bits`). Alone in this list it is *session*
+///   state rather than run state: D-FIDELITY-API1=A requires it to survive
+///   `resident_teardown()` and a fresh `JitRuntime`, mirroring the AOT binary's
+///   process-global static, while staying invisible to an unrelated
+///   resident-JIT session on another thread. Its home is the thread that owns
+///   the session — the outermost non-worker caller, the one identity that is
+///   stable across a sequence of calls — and each hop borrows it and hands it
+///   back. Leaving it on the worker made every outermost `run` start from the
+///   default, because the worker is per call; a process-wide atomic is the bug
+///   the thread-local was introduced to fix (see `runtime_host.rs`).
 ///
 /// Everything else this crate keeps in thread-local storage is runtime state
 /// created from the bundle inside the run and consumed inside it (host log
 /// levels, CLI plan, type migrations, redaction, ambient streams, listeners,
-/// watches, deadlines, deopt tables, perf fidelity) — with one exception, the
-/// *resident session* (`RESIDENT_MODULE` / `RESIDENT_RUNTIME` /
+/// watches, deadlines, deopt tables) — with one exception, the *resident
+/// session* (`RESIDENT_MODULE` / `RESIDENT_RUNTIME` /
 /// `jet_foundation::Persist`), which by D-HOTSWAP1 / D-PERSIST1 is scoped to
 /// the thread rather than to a call or a backend value. A session owner that
 /// keeps that state alive across calls therefore installs this boundary once
-/// around the whole session; see [`CraneliftBackend`].
+/// around the whole session; see [`CraneliftBackend`]. Anything added to the
+/// "consumed inside it" list must be checked against that distinction: state a
+/// *later* call reads belongs in a bucket above, not there.
 ///
 /// Panics are re-raised, not reshaped, so the ICE path is unchanged — but the
 /// carried-out state is published first, so a caller that inspects the trace
@@ -349,10 +362,12 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     let (ambient_core_call, ambient_handle) = jet_codegen::Comptime::ambient_hooks();
     let argv = program_args();
     let trace_tiers = tiers::trace_tiers_enabled();
-    let (out, flags, rows, struct_new, artifact) =
+    let fidelity = runtime_host::perf_fidelity_bits();
+    let (out, flags, rows, struct_new, artifact, fidelity_out) =
         jet_foundation::CompilerStack::run_on_compiler_stack(move || {
             jet_codegen::Codegen::TIR::install_comptime_bridge();
             tiers::set_trace_tiers(trace_tiers);
+            runtime_host::set_perf_fidelity_bits(fidelity);
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 jet_codegen::Comptime::with_ambient(ambient_core_call, ambient_handle, || {
                     // Empty means the caller installed none: reinstalling an
@@ -371,12 +386,14 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
                 tiers::take_last_trace(),
                 runtime_host::struct_new_count_for_test(),
                 tier_cache::take_last_tier_artifact(),
+                runtime_host::perf_fidelity_bits(),
             )
         });
     trace::merge_jit_trace_flags_for_test(flags);
     tiers::publish_trace(rows);
     runtime_host::add_struct_new_count_for_test(struct_new);
     tier_cache::publish_last_tier_artifact(artifact);
+    runtime_host::set_perf_fidelity_bits(fidelity_out);
     out.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }
 
