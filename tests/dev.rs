@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 mod common;
@@ -526,7 +526,18 @@ fn typechecked_example_stems() -> Vec<String> {
         .collect()
 }
 
+/// Observe which type-checked examples `try_compile_bundle` accepts, once per
+/// test binary.
+///
+/// `(covered, gaps)` is a pure function of the example corpus and the compiler,
+/// and producing it compiles the whole corpus (~80s in CI). Both ratchet entry
+/// points want the same answer, so pay for it once.
 fn collect_jit_coverage() -> (Vec<String>, Vec<String>) {
+    static COVERAGE: LazyLock<(Vec<String>, Vec<String>)> = LazyLock::new(observe_jit_coverage);
+    (*COVERAGE).clone()
+}
+
+fn observe_jit_coverage() -> (Vec<String>, Vec<String>) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut covered = Vec::new();
     let mut gaps = Vec::new();
@@ -8159,8 +8170,18 @@ fn resident_jit_safe_string_method_chain() {
     );
 }
 
-/// Audit which type-checked examples compile through the JIT lowerer. The committed manifest is
-/// a ratchet baseline: any coverage movement is deliberate and reviewed.
+/// The one compile-coverage ratchet (#125 / #778, hole closed by #1663).
+///
+/// Audits which type-checked examples compile through the JIT lowerer against
+/// `tests/jit_gaps.txt`, directionally: `compile_covered:` may only grow, `gaps:`
+/// and `run_gaps:` may only shrink. Moving the ratchet takes two edits in one
+/// diff — the rows in the ledger, and `COMPILE_COVERED_FLOOR` below, which is
+/// pinned here precisely because it must live outside the file it guards.
+///
+/// This is the only copy of that law. `jit_try_compile_manifest_matches` used to
+/// assert the same two sets from a second hand-maintained comparison, which is
+/// how the ledger was falsified three times: green one copy, never learn the
+/// other exists.
 #[test]
 fn jit_coverage_audit() {
     with_jit_test_scope(jit_coverage_audit_inner);
@@ -8405,25 +8426,17 @@ fn cranelift_three_way_differential_battery_inner() {
     assert!(ran >= 9, "expected battery to grow beyond the M3 seed set");
 }
 
-/// Gate: the compile gate is the JIT coverage source of truth. A checked
-/// example is either fully lowerable/compilable or has a ratcheted manifest
-/// reason.
+/// The CI entry point for `jit_coverage_audit` — not a second law.
+///
+/// `tools/ci/jit-aot-parity.sh` runs this exact name to produce `RATCHET_STATUS`,
+/// and `cargo test -- --exact <missing name>` runs zero tests and exits 0, so
+/// deleting the name would report the ratchet green forever. It therefore runs
+/// `jit_coverage_audit_inner` rather than repeating its assertions. Delete this
+/// entry point in the same diff that repoints the CI script at
+/// `jit_coverage_audit`.
 #[test]
 fn jit_try_compile_manifest_matches() {
-    with_jit_test_scope(jit_try_compile_manifest_matches_inner);
-}
-
-fn jit_try_compile_manifest_matches_inner() {
-    let (covered, gaps) = collect_jit_coverage();
-    let (expected_covered, expected_gaps, _) = parse_jit_gap_manifest();
-    assert_eq!(
-        covered, expected_covered,
-        "JIT compile-covered set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
-    );
-    assert_eq!(
-        gaps, expected_gaps,
-        "JIT compile-gap set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
-    );
+    with_jit_test_scope(jit_coverage_audit_inner);
 }
 
 // ── c727: differential example-corpus gate (D-LENS-RUN1 / #688 C1) ─────────
