@@ -134,7 +134,7 @@ impl JetBitSet {
         self.bits.remove(bit);
     }
     fn contains(&self, bit: &i64) -> bool {
-        self.bits.contains(bit)
+        jet_bits_has_kernel(&self.bits, *bit)
     }
     fn count(&self) -> i64 {
         self.bits.len() as i64
@@ -155,6 +155,13 @@ impl JetBitSet {
 
 fn jet_bits_copy(bits: &JetBitSet) -> JetBitSet {
     bits.clone()
+}
+
+/// One `Bits` membership definition for every execution tier: AOT reaches it
+/// through `JetBitSet::contains`, and the Cranelift host reaches it directly on
+/// the resident bit set, so neither tier re-encodes the test (I9).
+fn jet_bits_has_kernel(bits: &std::collections::BTreeSet<i64>, bit: i64) -> bool {
+    bits.contains(&bit)
 }
 
 impl JetShow for JetBitSet {

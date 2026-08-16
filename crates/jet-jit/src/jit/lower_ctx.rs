@@ -20435,6 +20435,11 @@ impl LowerCtx<'_, '_> {
                         let needle = self.lower_expr(&args[0])?;
                         return Ok(self.call_host(self.host.coll.sorted_set_has, &[recv_val, needle]));
                     }
+                    // Bits.has(bit) — `has` on the bit set lowers to Contains too.
+                    if matches!(&recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BITS) {
+                        let needle = self.lower_expr(&args[0])?;
+                        return Ok(self.call_host(self.host.coll.bit_set_has, &[recv_val, needle]));
+                    }
                     if matches!(&recv_ty, Type::List(inner) if **inner == Type::String) {
                         let needle = self.lower_expr(&args[0])?;
                         return Ok(self.call_host(self.host.coll.list_contains_str, &[recv_val, needle]));
@@ -28850,9 +28855,13 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
             .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
+        // Paired with the `Each`/`EachMut`/`EachRef` element filter in
+        // `resident_safe_closure_method`: `list_closure_each` walks i64 element
+        // handles, so a `[Shape]` row rides the same path as a struct row and
+        // the callback dispatches dynamically through `lower_trait_object_method`.
         if !matches!(
             &elem_ty,
-            Type::Int | Type::String | Type::Named(_)
+            Type::Int | Type::String | Type::Named(_) | Type::TraitObject(_)
         ) {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }

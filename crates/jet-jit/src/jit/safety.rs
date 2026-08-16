@@ -520,6 +520,15 @@ pub(crate) fn jit_closure_elem_type_for(ty: &Type) -> Option<Type> {
         {
             Some(args[0].clone())
         }
+        // A `[Shape]` element is one i64 handle like every other list element —
+        // `jit_list_record_type` already treats it as a record row, and dynamic
+        // dispatch inside the callback lowers through `lower_trait_object_method`.
+        // Only the arms that name `TraitObject` in their element filter admit it.
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if matches!(inner.as_ref(), Type::TraitObject(traits) if !traits.is_empty()) =>
+        {
+            Some(inner.as_ref().clone())
+        }
         _ => None,
     })
 }
@@ -2827,8 +2836,14 @@ fn resident_safe_closure_method(
                 && resident_safe_para_fold_lambdas(args, callees)
         }
         TIR::TClosureOp::Each | TIR::TClosureOp::EachMut | TIR::TClosureOp::EachRef => {
+            // `TraitObject` pairs with the same element filter in
+            // `LowerCtx::lower_iter_each`: the walk hands the callback one i64
+            // element handle, which is exactly a trait object's ABI.
             jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
-                matches!(elem, Type::Int | Type::String | Type::Named(_))
+                matches!(
+                    elem,
+                    Type::Int | Type::String | Type::Named(_) | Type::TraitObject(_)
+                )
             }) && resident_safe_each_lambda(args, callees)
         }
         TIR::TClosureOp::FilterMap => {
@@ -3618,6 +3633,15 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Contains
             if matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+        {
+            args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        // `Bits.has(bit)` — `lower_builtin_method_dispatch` routes this receiver
+        // to the shared `bit_set_has` membership kernel.
+        TBuiltinOp::Contains
+            if matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_BITS) =>
         {
             args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
