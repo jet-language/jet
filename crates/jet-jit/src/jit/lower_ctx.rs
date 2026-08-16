@@ -19790,7 +19790,7 @@ impl LowerCtx<'_, '_> {
     /// it bare (optionally with their own `: reason` suffix); the single
     /// boundary `lower_builtin_method` names the op and the receiver type, so
     /// no arm has to repeat that and no two arms can word it differently.
-    const BUILTIN_UNSUPPORTED: &str = "jit builtin method unsupported";
+    const BUILTIN_UNSUPPORTED: &'static str = "jit builtin method unsupported";
 
     /// Engine boundary for `TExprKind::BuiltinMethod`. A rejection here is a
     /// silent interpreter deopt at run time, so the text has to name WHICH
@@ -27504,7 +27504,7 @@ impl LowerCtx<'_, '_> {
     /// return it bare (optionally with their own `: reason` suffix) because a
     /// helper deep in the iterator pipeline does not carry the op; the single
     /// boundary `lower_closure_method` names the op and the receiver type.
-    const CLOSURE_UNSUPPORTED: &str = "jit closure method unsupported";
+    const CLOSURE_UNSUPPORTED: &'static str = "jit closure method unsupported";
 
     /// Engine boundary for `TExprKind::ClosureMethod`. A rejection here is a
     /// silent interpreter deopt at run time, so the text has to name WHICH
