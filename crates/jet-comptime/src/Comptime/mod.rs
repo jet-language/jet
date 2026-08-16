@@ -34,7 +34,10 @@ pub mod ServicesLite;
 pub mod AppLite;
 pub mod AuthLite;
 pub mod SyncLite;
-mod DataPipeline;
+/// I8/I9: the one `core.data` table/series/schema pipeline kernel. Public so
+/// the canonical TIR evaluator marshals into it instead of owning a second
+/// table construction (card #2015).
+pub mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
 pub mod EmailAdapter;

@@ -129,42 +129,141 @@ fn ct_value_type_name(v: &CtValue) -> String {
     }
 }
 
-impl<'a> Interp<'a> {
-    fn data_schema_columns_for_type(
-        &self,
-        elem_ty: &Type,
-        expand_struct: bool,
-    ) -> Option<Vec<CtValue>> {
-        if !expand_struct {
-            return Some(vec![data_column("value", &elem_ty.name())]);
-        }
-        let struct_name = elem_ty.base_name()?;
-        let def = self.structs.get(struct_name)?;
-        let args = match elem_ty {
-            Type::Apply { args, .. } => args.as_slice(),
-            Type::Named(_) => &[],
-            _ => return None,
-        };
-        if def.type_params.len() != args.len() {
-            return None;
-        }
-        let subst: HashMap<String, Type> = def
-            .type_params
-            .iter()
-            .zip(args)
-            .map(|(param, arg)| (param.name.clone(), arg.clone()))
-            .collect();
-        Some(
-            def.fields
-                .iter()
-                .map(|field| {
-                    let field_ty = crate::Generics::substitute_type(&field.ty, &subst);
-                    data_column(&field.name, &field_ty.name())
-                })
-                .collect(),
-        )
-    }
+/// One declared row shape, for schema derivation: a struct's generic parameter
+/// names in source order, then its `(field, declared type)` list in source
+/// order.
+///
+/// The AST comptime interpreter reads `StructDef`s; the canonical TIR
+/// evaluator reads sema's registered field/type tables. Both hand the same
+/// facts to the one kernel below, so neither tier owns a schema of its own.
+pub type SchemaRow<'f> = &'f dyn Fn(&str) -> Option<(Vec<String>, Vec<(String, Type)>)>;
 
+/// I8/I9: the one `core.data.table` construction. Mirrors the Prelude's
+/// `jet_data_table` (`Prelude/CoreLib/Top/EncodingTraits.rs`) — rows verbatim,
+/// no missing cells, a one-step plan — plus the `elem_type` witness the erased
+/// `CtValue` carrier needs where the Rust helper carries `T` on the type.
+pub fn table_value(
+    rows: &CtValue,
+    arg0_ty: Option<&Type>,
+    call_ret: Option<&Type>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let rows = expect_list(rows, "table", span)?.clone();
+    let elem_type = list_elem_type_name(arg0_ty, call_ret, &rows);
+    Ok(ct_struct(
+        "Table",
+        vec![
+            ("rows", CtValue::List(rows)),
+            ("missing", CtValue::Int(0)),
+            ("plan", CtValue::List(vec![CtValue::Str("table".to_string())])),
+            ("elem_type", CtValue::Str(elem_type)),
+        ],
+    ))
+}
+
+/// I8/I9: the one `core.data.rows` projection — `jet_data_rows`'s
+/// `table.rows.clone()`.
+pub fn rows_value(table: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let (rows, ..) = expect_struct(table, "Table", "rows", span)?;
+    Ok(CtValue::List(rows.clone()))
+}
+
+/// Type-driven schema columns — the derivation AOT emits from
+/// `emit_data_schema_columns`. A Series is one `value` column; a Named or
+/// applied row struct expands into its declared fields with the call-site type
+/// arguments substituted in.
+pub fn schema_columns_for_type(
+    elem_ty: &Type,
+    expand_struct: bool,
+    row: SchemaRow<'_>,
+) -> Option<Vec<CtValue>> {
+    if !expand_struct {
+        return Some(vec![data_column("value", &elem_ty.name())]);
+    }
+    let struct_name = elem_ty.base_name()?;
+    let (type_params, fields) = row(struct_name)?;
+    let args = match elem_ty {
+        Type::Apply { args, .. } => args.as_slice(),
+        Type::Named(_) => &[],
+        _ => return None,
+    };
+    if type_params.len() != args.len() {
+        return None;
+    }
+    let subst: HashMap<String, Type> =
+        type_params.into_iter().zip(args.iter().cloned()).collect();
+    Some(
+        fields
+            .iter()
+            .map(|(name, field_ty)| {
+                let field_ty = crate::Generics::substitute_type(field_ty, &subst);
+                data_column(name, &field_ty.name())
+            })
+            .collect(),
+    )
+}
+
+/// I8/I9: the one `core.data.schema` kernel. The call-site row type decides the
+/// columns whenever sema resolved it — that is the only answer an empty table
+/// can give, and it is what AOT emits. A sample row is the fallback for erased
+/// receivers.
+pub fn schema_value(
+    recv: &CtValue,
+    arg0_ty: Option<&Type>,
+    row: SchemaRow<'_>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let expand = match recv {
+        CtValue::Struct { type_name, .. } if type_name == "Series" => false,
+        _ => arg0_ty.map(data_schema_expand_struct).unwrap_or(true),
+    };
+    let sample = match recv {
+        CtValue::List(xs) => xs.first(),
+        CtValue::Struct { type_name, .. } if type_name == "Table" || type_name == "LazyFrame" => {
+            // Schema is the row model, not deferred filter results — read the
+            // stored source rows without materializing lazy ops.
+            expect_struct(recv, type_name, "schema", span)?.0.first()
+        }
+        CtValue::Struct { type_name, .. } if type_name == "Series" => {
+            expect_struct(recv, "Series", "schema", span)?.0.first()
+        }
+        _ => {
+            return Err(unsupported(
+                "`data.schema()` needs a typed table or series",
+                span,
+            ));
+        }
+    };
+    let columns = match arg0_ty
+        .and_then(data_schema_elem_ty)
+        .and_then(|elem| schema_columns_for_type(elem, expand, row))
+    {
+        Some(columns) => columns,
+        None => match sample {
+            Some(value) if !expand => {
+                vec![data_column("value", &ct_value_type_name(value))]
+            }
+            Some(CtValue::Struct { fields, .. }) => fields
+                .iter()
+                .map(|(name, value)| data_column(name, &ct_value_type_name(value)))
+                .collect(),
+            Some(value) => vec![data_column("value", &ct_value_type_name(value))],
+            None => match recv {
+                CtValue::Struct { type_name, .. }
+                    if matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame") =>
+                {
+                    container_elem_type_name(recv, type_name)
+                        .map(|name| vec![data_column("value", &name)])
+                        .unwrap_or_default()
+                }
+                _ => Vec::new(),
+            },
+        },
+    };
+    Ok(CtValue::List(columns))
+}
+
+impl<'a> Interp<'a> {
     fn materialize_lazy(&mut self, frame: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
         let (rows, _, _) = expect_struct(frame, "LazyFrame", "collect", span)?;
         let mut rows = rows.clone();
@@ -269,23 +368,8 @@ impl<'a> Interp<'a> {
                     _ => Err(unsupported("`data.count()` needs a typed table or series", span)),
                 }
             }
-            "table" => {
-                let rows = expect_list(&argv[0], "table", span)?.clone();
-                let elem_type = list_elem_type_name(arg0_ty, call_ret, &rows);
-                Ok(ct_struct(
-                    "Table",
-                    vec![
-                        ("rows", CtValue::List(rows)),
-                        ("missing", CtValue::Int(0)),
-                        ("plan", CtValue::List(vec![CtValue::Str("table".to_string())])),
-                        ("elem_type", CtValue::Str(elem_type)),
-                    ],
-                ))
-            }
-            "rows" => {
-                let (rows, ..) = expect_struct(&argv[0], "Table", "rows", span)?;
-                Ok(CtValue::List(rows.clone()))
-            }
+            "table" => table_value(&argv[0], arg0_ty, call_ret, span),
+            "rows" => rows_value(&argv[0], span),
             "series" => {
                 let values = expect_list(&argv[0], "series", span)?.clone();
                 let elem_type = list_elem_type_name(arg0_ty, call_ret, &values);
@@ -306,57 +390,21 @@ impl<'a> Interp<'a> {
                 let recv = argv.first().ok_or_else(|| {
                     unsupported("`data.schema()`: missing argument", span)
                 })?;
-                let expand = match recv {
-                    CtValue::Struct { type_name, .. } if type_name == "Series" => false,
-                    _ => arg0_ty.map(data_schema_expand_struct).unwrap_or(true),
-                };
-                let sample = match recv {
-                    CtValue::List(xs) => xs.first(),
-                    CtValue::Struct { type_name, .. }
-                        if type_name == "Table" || type_name == "LazyFrame" =>
-                    {
-                        // Schema is the row model, not deferred filter results — read
-                        // the stored source rows without materializing lazy ops.
-                        expect_struct(recv, type_name, "schema", span)?.0.first()
-                    }
-                    CtValue::Struct { type_name, .. } if type_name == "Series" => {
-                        expect_struct(recv, "Series", "schema", span)?.0.first()
-                    }
-                    _ => {
-                        return Err(unsupported(
-                            "`data.schema()` needs a typed table or series",
-                            span,
-                        ));
-                    }
-                };
-                let from_arg = arg0_ty.and_then(data_schema_elem_ty);
-                let columns = if let Some(columns) = from_arg
-                    .and_then(|elem| self.data_schema_columns_for_type(elem, expand))
-                {
-                    columns
-                } else {
-                    match sample {
-                        Some(value) if !expand => {
-                            vec![data_column("value", &ct_value_type_name(value))]
-                        }
-                        Some(CtValue::Struct { fields, .. }) => fields
+                let structs = self.structs;
+                let row: SchemaRow<'_> = &|name: &str| {
+                    let def = structs.get(name)?;
+                    Some((
+                        def.type_params
                             .iter()
-                            .map(|(name, value)| data_column(name, &ct_value_type_name(value)))
-                            .collect(),
-                        Some(value) => vec![data_column("value", &ct_value_type_name(value))],
-                        None => match recv {
-                            CtValue::Struct { type_name, .. }
-                                if matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame") =>
-                            {
-                                container_elem_type_name(recv, type_name)
-                                    .map(|name| vec![data_column("value", &name)])
-                                    .unwrap_or_default()
-                            }
-                            _ => Vec::new(),
-                        },
-                    }
+                            .map(|param| param.name.clone())
+                            .collect::<Vec<String>>(),
+                        def.fields
+                            .iter()
+                            .map(|field| (field.name.clone(), field.ty.clone()))
+                            .collect::<Vec<(String, Type)>>(),
+                    ))
                 };
-                Ok(CtValue::List(columns))
+                schema_value(recv, arg0_ty, row, span)
             }
             "missing_count" => {
                 let (values, missing, _) = expect_struct(&argv[0], "Series", "missing_count", span)?;
