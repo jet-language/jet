@@ -2808,7 +2808,13 @@ fn resident_safe_closure_method(
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
-        TIR::TClosureOp::ParaPartition { .. } => {
+        // `partition` and `para_partition` are one operation with two spellings:
+        // both split into the same `(false_, true_)` tuple struct, in source
+        // order, over the same field order (`resolve_closure_op` builds both
+        // names from `[("false_", [T]), ("true_", [T])]`). The JIT lowers both
+        // serially through `LowerCtx::lower_partition`, so they answer the same
+        // predicate here.
+        TIR::TClosureOp::Partition { .. } | TIR::TClosureOp::ParaPartition { .. } => {
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
