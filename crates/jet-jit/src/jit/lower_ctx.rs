@@ -1393,8 +1393,18 @@ impl LowerCtx<'_, '_> {
                 "byte_count" | "scalar_count" | "display_width" if args.len() == 1 => {
                     Some(Type::Int)
                 }
-                // Policy overload returns Result<Int, TextError>.
-                "display_width" if args.len() == 2 => None,
+                // D-TEXTWIDTH1=B: the policy overload can reject a control
+                // character, so its return type is `Int ? TextError`. State the
+                // whole type here — this is the one place a Unit-stamped Core
+                // call's real return type lives, and answering `None` forced a
+                // second half-row elsewhere that named only the ok side.
+                // AOT selects the policy helper on `args.len() >= 2`; use the
+                // same guard so the two tiers cannot disagree about which
+                // overload a call is.
+                "display_width" if args.len() >= 2 => Some(Type::Result {
+                    ok: Box::new(Type::Int),
+                    err: Box::new(Type::Named("TextError".to_string())),
+                }),
                 "caseless_eq" | "is_alphabetic" | "is_numeric" | "starts_any" => {
                     Some(Type::Bool)
                 }
@@ -1458,19 +1468,22 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// The ok type of a `??` / `?` operand whose TIR node carries no `Result`
+    /// annotation.
+    ///
+    /// `recover_core_return_ty` is the one place a Unit-stamped Core call's real
+    /// return type lives, so read the whole type from it and take the ok side.
+    /// The previous form kept a second row naming only `display_width`'s ok
+    /// type, while the table above answered `None` for the very same call — two
+    /// half-facts about one call, disagreeing on whether it is fallible at all.
     fn result_ok_ty_recover(value: &TExpr) -> Option<Type> {
         if let Some(ty) = Self::datatree_handle_ok_ty(value) {
             return Some(ty);
         }
-        if let TExprKind::CoreCall {
-            module, method, args, ..
-        } = &value.kind
-        {
-            if module == "core.text" && method == "display_width" && args.len() == 2 {
-                return Some(Type::Int);
-            }
+        match Self::recover_core_return_ty(value) {
+            Some(Type::Result { ok, .. }) => Some(*ok),
+            _ => None,
         }
-        None
     }
 
     /// D-FAIL-CARRIER1=A: `outcome.partial()` lowers to `THostCall::
@@ -2665,11 +2678,25 @@ impl LowerCtx<'_, '_> {
     }
 
     /// Erase `#Numeric` / unit-family distinct wrappers to Int/Float for arith,
-    /// print, and string interp — values already live as the base ABI.
+    /// print, and string interp — values already live as the base ABI. A Core
+    /// type spelled through its import alias (`encoding.EncodingError`) is
+    /// normalized to its declared Prelude name here as well: the print, show
+    /// and interpolation selectors below all name Core types the way the
+    /// Prelude declares them, so the alias would otherwise miss every one of
+    /// them and reach the record-layout fallback with a key no table holds.
     fn erase_distinct_ty(&self, ty: &Type) -> Type {
         let mut ty = ty
             .quantity_parts()
             .map_or_else(|| ty.clone(), |(base, _)| base.clone());
+        let alias_leaf = match &ty {
+            Type::Named(name) if !self.meta.user_record_or_enum(name) => {
+                super::types_meta::core_alias_leaf(name).map(str::to_string)
+            }
+            _ => None,
+        };
+        if let Some(leaf) = alias_leaf {
+            ty = Type::Named(leaf);
+        }
         while let Type::Named(name) = &ty {
             match self.meta.distinct_base(name) {
                 Some(base) => ty = base.clone(),
@@ -13465,6 +13492,27 @@ impl LowerCtx<'_, '_> {
                     if module == "core.term" && method == "print" && args.len() == 1 {
                         return in_own_frame(|| -> Result<Value, String> {
                             self.emit_print(&args[0])?;
+                            return Ok(self.b.ins().iconst(types::I8, 0));
+                        });
+                    }
+                    // `core.term.eprint` cannot be a `CoreCallRecord` row: the
+                    // print family is `is_polymorphic_core_special` — variadic in
+                    // arity and total over value types — while a row carries one
+                    // Prelude symbol and a fixed by-reference mask. So the
+                    // registry projection that resolves every recorded row's host
+                    // has nothing to project, and this family's one mechanism is
+                    // the print emitter instead. AOT emits `eprint(x)` as
+                    // `jet_term_write_stderr_line(&((x).jet_show()), false)`:
+                    // render through the shared JetShow route, then pick the
+                    // stream. TIR joins a multi-argument `eprint` into one value
+                    // before lowering, so one argument is the whole surface.
+                    if module == "core.term" && method == "eprint" && args.len() == 1 {
+                        return in_own_frame(|| -> Result<Value, String> {
+                            let text = self.lower_jet_show(&args[0])?;
+                            let eprint_ref = self
+                                .module
+                                .declare_func_in_func(self.host.eprint_str, self.b.func);
+                            self.b.ins().call(eprint_ref, &[text]);
                             return Ok(self.b.ins().iconst(types::I8, 0));
                         });
                     }

@@ -626,6 +626,16 @@ pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// `eprint(x)`'s line framing. AOT emits the call as
+/// `jet_term_write_stderr_line(&((x).jet_show()), false)`; that Prelude entry is
+/// `jet_term_print_frame` + `jet_term_write_stderr`, which is exactly what the
+/// stdout twin above marshals. Keep the framing in the one Prelude kernel and
+/// only pick the stream here (I9).
+fn write_jit_stderr_line(text: &str, flush: bool) -> Result<(), String> {
+    let frame = crate::IO::term_prelude::jet_term_print_frame(text);
+    write_jit_stderr(&frame, flush)
+}
+
 fn with_runtime_trap<F: FnOnce(&mut JitRuntime)>(f: F) {
     Concurrency::with_runtime_mut(|rt| {
         if let Err(payload) = catch_unwind(AssertUnwindSafe(|| f(rt))) {
@@ -999,6 +1009,16 @@ fn jet_jit_print_str(id: i64) {
     let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id));
     if let Some(text) = text {
         let _ = write_jit_stdout_line(&text, false);
+    }
+}
+
+/// `core.term.eprint`'s marshalling half: the rendered line, on stderr. The
+/// rendering is `lower_jet_show`, the same JetShow route AOT's
+/// `(x).jet_show()` takes, so no engine re-encodes a value's text.
+fn jet_jit_eprint_str(id: i64) {
+    let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id));
+    if let Some(text) = text {
+        let _ = write_jit_stderr_line(&text, false);
     }
 }
 
@@ -3906,6 +3926,7 @@ host_fns! {
     print_bool: "jet_jit_print_bool" => jet_jit_print_bool: sig_i8;
     print_char: "jet_jit_print_char" => jet_jit_print_char: sig_i32;
     print_str: "jet_jit_print_str" => jet_jit_print_str: sig_i64;
+    eprint_str: "jet_jit_eprint_str" => jet_jit_eprint_str: sig_i64;
     str_begin: "jet_jit_str_begin" => jet_jit_str_begin: sig_str_begin;
     str_push_lit: "jet_jit_str_push_lit" => jet_jit_str_push_lit: sig_str_push_lit;
     str_push_i64: "jet_jit_str_push_i64" => jet_jit_str_push_i64: sig_str_push_i64;

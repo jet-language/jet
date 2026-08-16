@@ -61,11 +61,12 @@ fn enum_variant_position<'a>(
 }
 
 pub(crate) fn prelude_enum_variant_index(enum_name: &str, variant: &str) -> Option<i64> {
-    let variants = PRELUDE_ENUM_VARIANTS.get(enum_name)?;
+    let variants = PRELUDE_ENUM_VARIANTS.get(core_prelude_key(enum_name))?;
     enum_variant_position(variants.iter(), variant)
 }
 
 pub(crate) fn prelude_enum_variant_at(enum_name: &str, index: i64) -> Option<&'static str> {
+    let enum_name = core_prelude_key(enum_name);
     let (_, variants) = prelude_enum_meta::all()
         .iter()
         .find(|(name, _)| *name == enum_name)?;
@@ -108,7 +109,7 @@ pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool>
             .and_then(|flags| flags.get(idx).copied())
     });
     user_metadata.or_else(|| {
-        jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name)
+        jet_foundation::StructuralDebug::jet_debug_field_metadata(core_prelude_key(type_name))
             .and_then(|fields| fields.get(idx).map(|(_, redacted)| *redacted))
     })
 }
@@ -1003,6 +1004,13 @@ impl<'a> JitMeta<'a> {
         self.distinct_ranges.get(name).copied()
     }
 
+    /// Whether the TIR program itself declares this name as a record or enum.
+    /// A user type owns its spelling; only a name with no user row may be
+    /// resolved onto a Prelude row through `core_alias_leaf`.
+    pub(crate) fn user_record_or_enum(&self, name: &str) -> bool {
+        self.struct_fields.contains_key(name) || self.enum_variants.contains_key(name)
+    }
+
     pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
         if let Some(fields) = self.struct_fields.get(type_name) {
             let mangled = mangle(field);
@@ -1105,6 +1113,13 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn is_enum(&self, name: &str) -> bool {
+        // A user enum owns its own spelling; a Core enum reached through an
+        // import alias answers under its declared Prelude name.
+        let name = if self.enum_variants.contains_key(name) {
+            name
+        } else {
+            core_prelude_key(name)
+        };
         matches!(
             name,
             "DataTree"
@@ -1594,15 +1609,46 @@ fn core_struct_shape(type_name: &str, fields: &[&str]) -> CoreStructShape {
         names: fields.iter().map(|field| (*field).to_string()).collect(),
         types: fields
             .iter()
-            .map(|field| core_struct_field_type(type_name, field))
+            // Declared name, straight from the table being built: resolving an
+            // alias here would read `CORE_STRUCTS` while it is initializing.
+            .map(|field| core_struct_field_type_declared(type_name, field))
             .collect::<Option<Vec<Type>>>(),
     }
+}
+
+/// The Prelude row key for a TIR type name.
+///
+/// A program reaches a Core type through the alias it imported the module
+/// under, and TIR keeps that spelling: `use core.encoding as encoding` makes
+/// `keep_error`'s return type `Named("encoding.EncodingError")`. Every Prelude
+/// table — the struct rows below, the enum rows, the redaction metadata, and
+/// the show selectors that name a Core type — is keyed on the DECLARED leaf,
+/// because that is the name the Prelude declares. AOT resolves the same two
+/// spellings onto one Rust path (`Cx::core_qualified_rust_type_name` beside
+/// `core_rust_type_name`); this is the resident tier's half of that fact.
+///
+/// Resolve it exactly once, here, and let every Core view read this. A
+/// per-caller leaf fallback is how the four struct-layout copies drifted
+/// apart (card 1979): one view resolved a name the next one missed.
+fn core_prelude_key(type_name: &str) -> &str {
+    core_alias_leaf(type_name).unwrap_or(type_name)
+}
+
+/// The leaf of an alias-qualified name, but only when the leaf really names a
+/// Prelude row. A dotted user type keeps its own spelling: answering the leaf
+/// for it would hand a same-named Core layout to an unrelated record.
+pub(crate) fn core_alias_leaf(type_name: &str) -> Option<&str> {
+    let (_, leaf) = type_name.rsplit_once('.')?;
+    let known = CORE_STRUCTS.contains_key(leaf)
+        || PRELUDE_ENUM_VARIANTS.contains_key(leaf)
+        || jet_foundation::StructuralDebug::jet_debug_field_metadata(leaf).is_some();
+    known.then_some(leaf)
 }
 
 /// Declaration-ordered field names of a Prelude struct.
 fn core_struct_field_names(type_name: &str) -> Option<&'static [String]> {
     CORE_STRUCTS
-        .get(type_name)
+        .get(core_prelude_key(type_name))
         .map(|shape| shape.names.as_slice())
 }
 
@@ -1613,7 +1659,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 }
 
 fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [Type])> {
-    let shape = CORE_STRUCTS.get(type_name)?;
+    let shape = CORE_STRUCTS.get(core_prelude_key(type_name))?;
     Some((shape.names.as_slice(), shape.types.as_ref()?.as_slice()))
 }
 
@@ -1633,6 +1679,11 @@ fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [T
 /// each because of a stated structural reason, never because a row was easier
 /// to copy.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
+    core_struct_field_type_declared(core_prelude_key(type_name), field)
+}
+
+/// The same rows, keyed strictly on the DECLARED Prelude name.
+fn core_struct_field_type_declared(type_name: &str, field: &str) -> Option<Type> {
     // The one declaring table (jet-sema CheckerCoreLib/core_types.rs). A user
     // struct never reaches this function: every caller resolves its own
     // `struct_field_ty` first.
