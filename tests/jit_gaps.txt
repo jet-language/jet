@@ -13,12 +13,19 @@
 # fails on any such stem that is not listed here, so a new run-tier parity
 # failure cannot hide between the two ledgers.
 #
-# Shrink-only ratchet (D-LENS-RUN2 / #778): gaps and run_gaps may only shrink;
-# silent growth fails CI. Movement is intentional only; update this file in the
-# same diff.
+# Directional ratchet (D-LENS-RUN2 / #778, hole closed by #1663). Each section
+# moves one way only, and the audit names the direction it rejects:
+#   compile_covered may only GROW. Its row count is pinned by
+#     COMPILE_COVERED_FLOOR in tests/dev.rs::jit_coverage_audit, so a hand-edit
+#     cannot delete a covered stem to green the audit. A stem that stops being
+#     covered is a REGRESSION: fix it or file it, never drop the row.
+#   gaps and run_gaps may only SHRINK. A new compile gap is a lowering bug to
+#     fix (AGENTS.md I9), not a row to park here.
+# Movement is intentional only; update this file, and the floor, in one diff.
 
 compile_covered:
   basics/bare_lambda_param
+  basics/body_rules
   basics/branches
   basics/callbacks
   basics/closures
@@ -38,6 +45,7 @@ compile_covered:
   basics/interp_debug_label
   basics/labeled_loops
   basics/loop_forms
+  basics/loop_values
   basics/method_chain
   basics/multiline_string
   basics/named_args
@@ -46,14 +54,16 @@ compile_covered:
   basics/print_lines
   basics/printable
   basics/range_step
+  basics/script_run
   basics/tuples
   basics/value_dispatch
+  basics/value_loop_search
   basics/values
   basics/variadics_spread
+  callable/callable_policies
   cli/positionals
   cli/subcommands
-  cli/typed_entry_args
-  collections/queue
+  collections/dynamic-array-view
   collections/filter_map
   collections/fixed_arrays
   collections/fn_dispatch_map
@@ -61,26 +71,33 @@ compile_covered:
   collections/iter_hook
   collections/lazy_iter
   collections/list_bounds
+  collections/list_remove_bounds
   collections/lists
-  collections/list_surface
   collections/map_key
   collections/map_merge
   collections/map_surface
   collections/member_spread
+  collections/pop_table
+  collections/queue
   collections/set
   collections/sketch
   collections/struct_list_mutation
   collections/wordcount
   collections/zip_family
+  comptime/build_fact_precedence
+  comptime/build_stamp
   comptime/comptime_block
   comptime/comptime_core
   comptime/comptime_if
   comptime/comptime_parse
   comptime/comptime_table
   comptime/comptime_tiers
+  comptime/computed_constants
+  comptime/distinct_reflect
   comptime/doctests
   comptime/embed
   comptime/embed_bytes
+  comptime/fact_plane
   comptime/find
   comptime/find_empty
   comptime/layout_facts
@@ -91,26 +108,26 @@ compile_covered:
   concurrency/completion_order
   concurrency/deadline_context
   concurrency/detached_task
+  concurrency/freeze_capture
   concurrency/loop_task_handles
   concurrency/parallel_iter
-  concurrency/parallel_scan
-  concurrency/parallel_scan_expert
-  concurrency/pipeline
-  concurrency/protocol
   concurrency/race_cancel
   concurrency/scheduler_spawn
   concurrency/scoped_borrow_bands
   concurrency/select_channel
+  concurrency/select_generic
   concurrency/shield_commit
+  concurrency/task_all
   concurrency/task_controls
+  concurrency/task_group
   concurrency/task_group_helpers
+  concurrency/task_group_parameter
   concurrency/task_runtime_audit
-  concurrency/taskgroup
-  concurrency/taskgroup_parameter
+  concurrency/task_state_duty
   concurrency/tasks
-  concurrency/tasks_join_all
   contracts/inline_contracts
   contracts/pre_post
+  crypto/auth_sessions
   crypto/auth_tokens
   crypto/crypto_envelope
   crypto/crypto_migration
@@ -120,18 +137,18 @@ compile_covered:
   crypto/random_api_split
   crypto/typed_crypto
   crypto/vault_key_wrap
-  crypto/vault_keys
-  crypto/vault_secret
+  devloop/bench_override
+  devloop/job_runner
   devloop/persist
   devloop/schedule_every
-  devloop/job_runner
+  devloop/test_override
   effects/all_sigils
   effects/asset_pipeline
+  effects/audited_gate_ladder
   effects/capability_sigils
   effects/determinism
   effects/effect_caps
   effects/effect_declarations
-  effects/effect_grant
   effects/effect_higher_order
   effects/effect_levers
   effects/effect_prohibition
@@ -149,6 +166,11 @@ compile_covered:
   effects/single_use
   effects/single_use_discard
   effects/smart_context
+  effects/taint
+  errors/ambient_err
+  errors/default_err_edge
+  errors/default_err_value
+  errors/default_error_conversion
   errors/discard_fallible
   errors/env_divisor_trap
   errors/error_context
@@ -159,9 +181,14 @@ compile_covered:
   errors/panic
   errors/qq_control
   errors/rollback_trait
+  errors/stack_overflow
+  errors/todo_stop
   errors/transact
   errors/typed_error_families
   errors/u8_divide_zero
+  functions/lambda_bare_params
+  functions/lambda_inference
+  functions/returned_function_call
   functions/root_calls
   functions/variadic_method
   game/core_game_headless
@@ -174,32 +201,33 @@ compile_covered:
   io/cli_args
   io/compress_gzip
   io/compress_zstd
+  io/db
   io/db_checked_sql
+  io/db_policy
   io/dir_entry
   io/env_overlay
   io/files
-  io/files_depth
   io/io_surface
   io/log
   io/log_fatal
   io/log_human
-  io/log_job
-  io/log_structured
   io/no_prelude
-  io/process_builder
+  io/os_facts
+  io/os_process_control
+  io/os_stop_cleanup
+  io/process_exit_cleanup
   io/progress
   io/scope_guard
   io/stdin_filter
   io/stream
   io/terminal
-  io/watcher
+  io/terminal_parity
   lowlevel/cross
   lowlevel/ffi
   lowlevel/freestanding
   lowlevel/inline_asm
   lowlevel/inline_c
   lowlevel/layout_c
-  lowlevel/layout_columnar
   lowlevel/linalg_simd
   lowlevel/lowlevel
   lowlevel/mmio_board_write
@@ -225,31 +253,34 @@ compile_covered:
   memory/arena
   memory/arena_parse
   memory/arena_regions
+  memory/computed_field
   memory/copy_verb
-  memory/expiring_secret
+  memory/entity_tree
+  memory/entity_world
   memory/gc_cyclic
   memory/local_cache
   memory/no_alloc_policy
   memory/owner_backed_views
   memory/ownership
   memory/parameter_modes
-  memory/pin
+  memory/place_windows
+  memory/pool_stale_id
   memory/rawptr
   memory/ref_field
   memory/resource_close
+  memory/returned_views
   memory/shared_config
+  memory/shared_transact
   memory/shared_weak_cycle
   memory/string_view
+  memory/try_allocation
   memory/uninit
   memory/uninit_buffer
+  memory/unsafe_sentries_source_off
   memory/view_from_callback
   memory/view_from_param
   memory/view_from_slots
   memory/view_from_trait
-  modules/inline_module
-  modules/library
-  modules/module_inline_sibling
-  modules/pub_file
   net/browser_agent
   net/browser_artifacts
   net/browser_bidi_profiles
@@ -260,51 +291,31 @@ compile_covered:
   net/browser_matrix
   net/browser_network
   net/browser_privacy
-  net/dns_lookup
-  net/http_client
-  net/http_get
-  net/http_rest_service
-  net/http_routes
   net/http_server
-  net/http_server_lifecycle
-  net/http_server_limits
-  net/http_server_middleware
-  net/http_server_tasks
-  net/http_server_trailers
-  net/http_web_defaults
-  net/socket_echo
   net/url_mime
-  net/ws_echo
   operators/chained_comparison
+  operators/spaceship
   operators/user_defined
   parsing/binary-reader
   parsing/binary_pattern
   parsing/parse_interpolation
   parsing/text-cursor
+  patterns/refutable_test_bind
   patterns/struct_destructure
+  reflection/derive_loop
+  reflection/fact_reads
+  reflection/reflect-value
+  reflection/user_rule_body
   safety/sh_typed_text
   safety/typed_sql
+  script_mode/implicit_run
+  serde/codable_default
   serde/csv
-  serde/csv_typed
-  serde/datatree_accessors
-  serde/decode_traced
-  serde/encoding
   serde/encoding_base
-  serde/encoding_breadth
-  serde/encoding_cbor_stream
-  serde/encoding_csv_stream
-  serde/encoding_json_stream
-  serde/encoding_jsonl_stream
-  serde/encoding_stream_types
-  serde/encoding_xml_projection
-  serde/encoding_xml_stream
-  serde/json
-  serde/json_coerce
-  serde/json_typed
+  serde/hand_codec
   serde/serde_generic
-  serde/toml
+  serde/user_derive
   serde/validate
-  serde/yaml
   streams/generators
   syntax/maturity_tags
   syntax/trailing_block
@@ -312,7 +323,6 @@ compile_covered:
   text/dates
   text/datetime
   text/decimal
-  text/duration_facts
   text/duration_ns
   text/hex_base64
   text/human_format
@@ -323,22 +333,31 @@ compile_covered:
   text/strings
   text/time_calendar
   text/unicode_text
-  text/unicode_text_audit
   text/uuid
+  tooling/app_live
   tooling/bench
+  tooling/branch_dispatch_bench
   tooling/canvas_blueprint_demo
+  tooling/compute_autodiff
+  tooling/compute_device
   tooling/compute_kernel
+  tooling/compute_linalg
+  tooling/compute_ml
+  tooling/compute_ndarray
+  tooling/compute_simd
+  tooling/compute_tensor
+  tooling/compute_views
   tooling/data_analysis
   tooling/data_bridges
   tooling/data_core
   tooling/data_hostile
   tooling/data_json
   tooling/data_pipeline
-  tooling/data_plot
   tooling/data_schema
   tooling/data_stream_bounds
   tooling/debug
-  tooling/debug_native
+  tooling/declared_text_block
+  tooling/declared_text_head
   tooling/dsl_blocks
   tooling/fidelity
   tooling/fuzz_demo
@@ -349,9 +368,13 @@ compile_covered:
   tooling/para_map_crossover_bench
   tooling/property_tests
   tooling/provenance_track
+  tooling/service_authority
+  tooling/service_tree
   tooling/solve_puzzle
   tooling/statement_attributes
+  tooling/sync_crdt
   tooling/test_members
+  tooling/testing_helpers
   tooling/tests
   tooling/todo_hole
   types/affine_unit_types
@@ -360,18 +383,25 @@ compile_covered:
   types/capability_bundles
   types/computed_field
   types/dimensional_quantities
+  types/dimensional_quantities_mass
   types/display_debug
-  types/distinct_types
   types/dot_construction
+  types/enum_dot
+  types/enum_dot_patterns
+  types/enums
   types/external_methods
   types/generic_constructor_inference
   types/generic_types
   types/inferred_new
+  types/measurement
+  types/multi_head_functions
+  types/nested_enum_groups
   types/no_any_alternatives
   types/option
   types/option_combinators
   types/optional_result_variants
   types/patchable
+  types/range_types
   types/recursive_enum
   types/refinements
   types/renderable-varargs
@@ -383,22 +413,21 @@ compile_covered:
   types/typestate
   types/unit_family
   types/value_tag_type
-  ui/events
   ui/layout_basic
   ui/loadable
   ui/reactive
   ui/reactive_scope
   ui/ui_a11y
+  ui/ui_component_kit
   ui/ui_motion
-  ui/ui_native_linux
   ui/ui_null_backend
   ui/ui_tui_reactive
   ui/ui_typed_style
   ui/ui_view_tree
   web/app_hello
-  web/ui_showcase
-  web/ui_web_click
+  web/app_typed_args
   web/ui_web_reactive
+  web/web_app
   web/web_compute
   web/web_hello
   web/web_wasm_callback

@@ -8189,9 +8189,15 @@ fn jit_coverage_audit_inner() {
              # fails on any such stem that is not listed here, so a new run-tier parity\n\
              # failure cannot hide between the two ledgers.\n\
              #\n\
-             # Shrink-only ratchet (D-LENS-RUN2 / #778): gaps and run_gaps may only shrink;\n\
-             # silent growth fails CI. Movement is intentional only; update this file in the\n\
-             # same diff.\n\
+             # Directional ratchet (D-LENS-RUN2 / #778, hole closed by #1663). Each section\n\
+             # moves one way only, and the audit names the direction it rejects:\n\
+             #   compile_covered may only GROW. Its row count is pinned by\n\
+             #     COMPILE_COVERED_FLOOR in tests/dev.rs::jit_coverage_audit, so a hand-edit\n\
+             #     cannot delete a covered stem to green the audit. A stem that stops being\n\
+             #     covered is a REGRESSION: fix it or file it, never drop the row.\n\
+             #   gaps and run_gaps may only SHRINK. A new compile gap is a lowering bug to\n\
+             #     fix (AGENTS.md I9), not a row to park here.\n\
+             # Movement is intentional only; update this file, and the floor, in one diff.\n\
              \n\
              compile_covered:\n",
         );
@@ -8231,14 +8237,88 @@ fn jit_coverage_audit_inner() {
         eprintln!("  {g}");
     }
     print_jit_op_report();
-    assert_eq!(
-        covered, expected_covered,
-        "JIT covered set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
+    // #1663: this ledger has been hand-falsified three times, in both
+    // directions, because one blob equality could not say which way a set
+    // moved. Compare each section directionally and name the direction that
+    // failed, so the fix a row demands is the fix the message asks for.
+    let regressed = rows_missing_from(&expected_covered, &covered);
+    let regressed_count = regressed.len();
+    assert!(
+        regressed.is_empty(),
+        "JIT compile coverage REGRESSED: {regressed_count} stem(s) recorded in \
+         tests/jit_gaps.txt `compile_covered:` no longer compile: {regressed:?}. A stem \
+         leaving the covered set is a regression to fix or file under the owning card — \
+         never delete the row to green this audit."
     );
-    assert_eq!(
-        gaps, expected_gaps,
-        "JIT gap set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
+    let unrecorded = rows_missing_from(&covered, &expected_covered);
+    let unrecorded_count = unrecorded.len();
+    let observed_count = covered.len();
+    assert!(
+        unrecorded.is_empty(),
+        "JIT compile coverage GREW: {unrecorded_count} stem(s) compile but are missing from \
+         tests/jit_gaps.txt `compile_covered:`: {unrecorded:?}. A gain is a ratchet move: add \
+         the rows and set COMPILE_COVERED_FLOOR to {observed_count} in the same diff."
     );
+
+    // #1663: only `gaps:`/`run_gaps:` were shrink-only, so deleting a
+    // `compile_covered:` row was invisible — the ledger was its own baseline,
+    // and the cheapest way to green a shrinking observed set was to drop the
+    // row (aec11ad74 dropped `types/unit_literals` while it was a live gap).
+    // Pin the row count outside the file: a deletion now has to lower a
+    // reviewed constant, exactly like RUN_GAPS_CEILING.
+    const COMPILE_COVERED_FLOOR: usize = 414;
+    let recorded_count = expected_covered.len();
+    assert_eq!(
+        recorded_count, COMPILE_COVERED_FLOOR,
+        "tests/jit_gaps.txt `compile_covered:` holds {recorded_count} rows but the ratchet floor \
+         is {COMPILE_COVERED_FLOOR}. Raise the floor in the same diff as a coverage gain; a \
+         count that FELL means covered stems were deleted, which is a regression, not an edit"
+    );
+    let mut unique_covered = expected_covered.clone();
+    unique_covered.dedup();
+    assert_eq!(
+        unique_covered.len(),
+        recorded_count,
+        "tests/jit_gaps.txt `compile_covered:` repeats a stem; duplicate rows pad the floor \
+         and hide a deletion"
+    );
+
+    let unrecorded_gaps = rows_missing_from(&gaps, &expected_gaps);
+    let unrecorded_gaps_count = unrecorded_gaps.len();
+    assert!(
+        unrecorded_gaps.is_empty(),
+        "{unrecorded_gaps_count} JIT compile gap(s) are not recorded in tests/jit_gaps.txt \
+         `gaps:`: {unrecorded_gaps:?}. gaps may only shrink: an unsupported construct is a \
+         lowering bug to fix (AGENTS.md I9), never a row to park here."
+    );
+    let stale_gaps = rows_missing_from(&expected_gaps, &gaps);
+    let stale_gaps_count = stale_gaps.len();
+    assert!(
+        stale_gaps.is_empty(),
+        "{stale_gaps_count} row(s) in tests/jit_gaps.txt `gaps:` no longer reproduce: \
+         {stale_gaps:?}. The reason text is part of the row — delete a fixed row, or update \
+         it when the first reason changed."
+    );
+
+    // Shrink-only ratchet (D-LENS-RUN2), mirroring RUN_GAPS_CEILING: every row
+    // is a live I9 parity failure, so the count may fall and never rise.
+    const GAPS_CEILING: usize = 0;
+    let recorded_gaps = expected_gaps.len();
+    assert!(
+        recorded_gaps <= GAPS_CEILING,
+        "tests/jit_gaps.txt `gaps:` grew to {recorded_gaps} rows (ceiling {GAPS_CEILING}); \
+         compile gaps may only shrink"
+    );
+}
+
+/// Rows of `left` that `right` does not contain, for the #1663 directional
+/// ratchet. Both sides arrive sorted, so this reads as a set difference and
+/// keeps the audit's failure message pointed at one direction of drift.
+fn rows_missing_from(left: &[String], right: &[String]) -> Vec<String> {
+    left.iter()
+        .filter(|row| !right.contains(row))
+        .cloned()
+        .collect()
 }
 
 /// Stems of type-checked examples the resident JIT can run end-to-end.
