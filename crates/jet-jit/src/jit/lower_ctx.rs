@@ -1068,6 +1068,17 @@ impl LowerCtx<'_, '_> {
         self.call_host(self.host.result_new_i64, &[ok, payload])
     }
 
+    /// Every resident list is one I64 arena handle — `task.all` stores its ok
+    /// payload with `store_i64_list`, and `init_clif_ty` already answers a
+    /// `let` of list type the same way. `clif_ty`'s list rows are keyed on the
+    /// ELEMENT type, so `[Unit]` has no row even though the carrier width was
+    /// never in question. A carrier read needs the width, not the element, so
+    /// answer it here instead of widening the element table for every other
+    /// list surface in the JIT.
+    fn list_handle_carrier(ty: &Type) -> Option<types::Type> {
+        matches!(ty, Type::List(_) | Type::FixedList { .. }).then_some(types::I64)
+    }
+
     fn result_payload(&mut self, handle: Value, ty: &Type) -> Result<Value, String> {
         if matches!(ty, Type::Named(n) if n == "Unit")
             || matches!(ty, Type::Tuple(items) if items.is_empty())
@@ -1078,7 +1089,7 @@ impl LowerCtx<'_, '_> {
             Type::Named(name) => self.meta.distinct_base(name).unwrap_or(ty),
             _ => ty,
         };
-        let host_id = match clif_ty(erased) {
+        let host_id = match clif_ty(erased).or_else(|| Self::list_handle_carrier(erased)) {
             Some(clif) if clif == types::F64 => self.host.result_get_f64,
             Some(clif) if clif == types::I8 => self.host.result_get_i8,
             Some(clif) if clif == types::I32 => self.host.result_get_i32,
@@ -1403,6 +1414,23 @@ impl LowerCtx<'_, '_> {
             }
         }
         None
+    }
+
+    /// D-FAIL-CARRIER1=A: `outcome.partial()` lowers to `THostCall::
+    /// CarrierFact { notes: false }`, whose host answers the packed Option
+    /// carrier (`0` = absent, `payload + 1` = present) — the same encoding
+    /// `list_get_opt` returns. Presence is a property of the node, so read it
+    /// from the node rather than from a type annotation TIR may have left as
+    /// the bare payload type.
+    fn is_carrier_partial(value: &TExpr) -> bool {
+        matches!(
+            &value.kind,
+            TExprKind::HostCall(host)
+                if matches!(
+                    host.as_ref(),
+                    THostCall::CarrierFact { notes: false, .. }
+                )
+        )
     }
 
     fn unpack_enum_heap_payload_at(
@@ -9037,6 +9065,12 @@ impl LowerCtx<'_, '_> {
             }
             Type::Named(name) if name == "ServiceUpgradeReceipt" => {
                 Ok(self.call_host(self.host.service_show, &[value]))
+            }
+            // The resident carrier is the raw nanosecond i64; the rendering
+            // itself belongs to the shared Prelude kernel AOT's
+            // `impl JetShow for Duration` calls.
+            Type::Named(name) if name == jet_foundation::Syntax::DURATION_TYPE => {
+                Ok(self.call_host(self.host.duration_show, &[value]))
             }
             Type::Named(name)
                 if matches!(
@@ -17067,7 +17101,9 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::OrFallback { value, fallback } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    if matches!(value.ty, Type::Option(_)) {
+                    if matches!(value.ty, Type::Option(_))
+                        || Self::is_carrier_partial(value)
+                    {
                         return in_own_frame(|| -> Result<Value, String> {
                             let status = self.lower_list_get_opt_status(value)?;
                             let ok_block = self.b.create_block();
@@ -17076,7 +17112,12 @@ impl LowerCtx<'_, '_> {
                             let is_result_option = self.uses_result_option_abi(value);
                             let inner = match &value.ty {
                                 Type::Option(inner) => inner.as_ref(),
-                                _ => unreachable!("Option branch checked above"),
+                                // D-FAIL-CARRIER1=A: `outcome.partial()` answers
+                                // presence over the ok payload. When TIR leaves
+                                // the node typed as that payload rather than
+                                // `T?`, the node itself is the presence fact and
+                                // its own type is the payload type.
+                                payload => payload,
                             };
                             // The option carrier is packed as I64, but `??` produces
                             // the payload type. In particular Option<Float> must
@@ -17113,7 +17154,9 @@ impl LowerCtx<'_, '_> {
                                 }
                             } else if matches!(&value.kind, TExprKind::OverflowOpt { .. }) {
                                 self.call_host(self.host.result_get_i64, &[status])
-                            } else if let Type::Option(inner) = &value.ty {
+                            } else if matches!(&value.ty, Type::Option(_))
+                                || Self::is_carrier_partial(value)
+                            {
                                 self.unpack_option_payload(status, inner)?
                             } else if let Some(Type::Option(inner)) =
                                 Self::recover_core_return_ty(value)
@@ -17231,6 +17274,8 @@ impl LowerCtx<'_, '_> {
                             .or_else(|| clif_ty(&ok_ty))
                             .or_else(|| self.meta.clif_ty(&expr.ty))
                             .or_else(|| clif_ty(&expr.ty))
+                            .or_else(|| Self::list_handle_carrier(&ok_ty))
+                            .or_else(|| Self::list_handle_carrier(&expr.ty))
                             .ok_or_else(|| {
                                 format!("jit result ?? type unsupported: ok={ok_ty:?} expr={:?}", expr.ty)
                             })?
@@ -19628,8 +19673,10 @@ impl LowerCtx<'_, '_> {
             let key = self.lower_expr(&args[0])?;
             return Ok(self.call_host(self.host.coll.map_get_opt, &[map, key]));
         }
-        // Already-carried Option ABI; IntN uses the result arena.
-        if matches!(&value.ty, Type::Option(_)) {
+        // Already-carried Option ABI; IntN uses the result arena. A carrier
+        // `partial()` answers the same packed carrier from its host, so the
+        // node qualifies even when TIR typed it as the bare ok payload.
+        if matches!(&value.ty, Type::Option(_)) || Self::is_carrier_partial(value) {
             return self.lower_expr(value);
         }
         Err("jit list get_opt status unsupported".to_string())
@@ -27009,8 +27056,19 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(print_ref, &[s]);
                         return Ok(());
                     }
+                    // AOT emits `print(x)` as `(x).jet_show()`, so the JIT's
+                    // own JetShow marshaller — the one that already renders
+                    // collections, options and `{hole}` interpolation — is the
+                    // matching route, not another per-type rung above it. A
+                    // shape it genuinely cannot render still refuses to
+                    // compile, from its own message.
                     _ => {
-                        return Err(format!("jit print type unsupported: {print_ty:?}"));
+                        let text = self.lower_jet_show_value(val, &print_ty, false)?;
+                        let print_ref = self
+                            .module
+                            .declare_func_in_func(self.host.print_str, self.b.func);
+                        self.b.ins().call(print_ref, &[text]);
+                        return Ok(());
                     }
                 };
                 let host_ref = self.module.declare_func_in_func(host_id, self.b.func);

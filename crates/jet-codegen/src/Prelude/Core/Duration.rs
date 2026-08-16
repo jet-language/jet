@@ -47,3 +47,11 @@ pub(crate) fn jet_duration_kernel_sub(left: i64, right: i64) -> i64 {
 pub(crate) fn jet_duration_kernel_difference(left: i64, right: i64) -> i64 {
     left.saturating_sub(right)
 }
+
+/// D-TYPE2-TIME1=A: the one `JetShow` rendering of the canonical nanosecond
+/// carrier. AOT's `impl JetShow for Duration`, the Cranelift host and the
+/// evaluator all marshal the carrier and call this; no engine re-encodes the
+/// `ns` suffix.
+pub(crate) fn jet_duration_kernel_show(value: i64) -> String {
+    format!("{value}ns")
+}
