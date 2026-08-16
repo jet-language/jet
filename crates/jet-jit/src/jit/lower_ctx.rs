@@ -18605,10 +18605,20 @@ impl LowerCtx<'_, '_> {
                         0,
                     ));
                     self.b.ins().stack_store(value, slot, 0);
-                    Ok(self
-                        .b
-                        .ins()
-                        .stack_addr(self.module.target_config().pointer_type(), slot, 0))
+                    // Card #1985: this temporary's slot is a real machine
+                    // address in this frame, exactly like the bare-local
+                    // branch above, so the provenance set has to record it.
+                    // Omitting it made `Deref` / `volatile_*` refuse a pointer
+                    // the JIT itself minted from its own stack slot, and the
+                    // refusal read as an unsupported construct. The guards are
+                    // unchanged: they still admit only addresses recorded here.
+                    let pointer = self.b.ins().stack_addr(
+                        self.module.target_config().pointer_type(),
+                        slot,
+                        0,
+                    );
+                    self.real_address_values.insert(pointer);
+                    Ok(pointer)
                 })
             }
             TExprKind::Deref(inner) => {
@@ -27396,10 +27406,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -27593,10 +27600,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(step, &[]);
                 self.b.switch_to_block(step);
                 self.b.seal_block(step);
-                let idx = self.b.use_var(idx_var);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let next = self.b.ins().iadd(idx, one);
-                self.b.def_var(idx_var, next);
+                self.advance_index_var(idx_var);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(exit);
                 self.b.seal_block(header);
@@ -27657,10 +27661,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(exit, &[]);
                 self.b.switch_to_block(step);
                 self.b.seal_block(step);
-                let idx = self.b.use_var(idx_var);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let next = self.b.ins().iadd(idx, one);
-                self.b.def_var(idx_var, next);
+                self.advance_index_var(idx_var);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(exit);
                 self.b.seal_block(header);
@@ -27732,10 +27733,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(step, &[]);
                 self.b.switch_to_block(step);
                 self.b.seal_block(step);
-                let idx = self.b.use_var(idx_var);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let next = self.b.ins().iadd(idx, one);
-                self.b.def_var(idx_var, next);
+                self.advance_index_var(idx_var);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(exit);
                 self.b.seal_block(header);
@@ -27784,10 +27782,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(step, &[]);
                 self.b.switch_to_block(step);
                 self.b.seal_block(step);
-                let idx = self.b.use_var(idx_var);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let next = self.b.ins().iadd(idx, one);
-                self.b.def_var(idx_var, next);
+                self.advance_index_var(idx_var);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(exit);
                 self.b.seal_block(header);
@@ -27838,10 +27833,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(step, &[]);
                 self.b.switch_to_block(step);
                 self.b.seal_block(step);
-                let idx = self.b.use_var(idx_var);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let next = self.b.ins().iadd(idx, one);
-                self.b.def_var(idx_var, next);
+                self.advance_index_var(idx_var);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(exit);
                 self.b.seal_block(header);
@@ -27930,10 +27922,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -28011,15 +28000,37 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
         self.b.seal_block(header);
         self.b.seal_block(exit);
         Ok(self.b.use_var(result_var))
+    }
+
+    /// Advance a loop-index `Variable` by one, minting the `1` in the block
+    /// that consumes it.
+    ///
+    /// Card #1993: a Cranelift `Value` may only be read in blocks its defining
+    /// block dominates. `lower_iter_chunk_while` built its `1` inside the
+    /// `existing` arm and consumed it in the shared `step` latch, which
+    /// `existing` does not dominate (the `first` arm reaches `step` without
+    /// passing through `existing`), so Cranelift's own verifier rejected CLIF
+    /// this compiler emitted — a lowering bug of the class I2 names, never an
+    /// unsupported construct.
+    ///
+    /// The rule the iterator/adapter loops below follow: a value that crosses a
+    /// block boundary travels through a Cranelift `Variable`, because `use_var`
+    /// inserts whatever block parameters SSA needs; a raw `Value` stays inside
+    /// the block that defined it. Here the loop index is the `Variable` and the
+    /// constant is block-local, so no adapter latch names either one and the
+    /// next adapter cannot reintroduce the shape.
+    fn advance_index_var(&mut self, idx_var: Variable) {
+        let current = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(current, one);
+        self.b.def_var(idx_var, next);
     }
 
     fn lower_iter_chunk_while(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
@@ -28118,9 +28129,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -28245,10 +28254,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -29392,10 +29398,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -29472,10 +29475,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -29591,16 +29591,12 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(inner_step);
         self.b.seal_block(inner_step);
-        let inner = self.b.use_var(inner_var);
-        let next = self.b.ins().iadd(inner, one);
-        self.b.def_var(inner_var, next);
+        self.advance_index_var(inner_var);
         self.b.ins().jump(inner_header, &[]);
 
         self.b.switch_to_block(outer_step);
         self.b.seal_block(outer_step);
-        let outer = self.b.use_var(outer_var);
-        let next = self.b.ins().iadd(outer, one);
-        self.b.def_var(outer_var, next);
+        self.advance_index_var(outer_var);
         self.b.ins().jump(outer_header, &[]);
 
         self.b.switch_to_block(exit);
@@ -29675,10 +29671,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit_ok);
@@ -29808,10 +29801,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -29889,10 +29879,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -29974,10 +29961,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -30066,10 +30050,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -30152,10 +30133,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -30262,10 +30240,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
@@ -30397,10 +30372,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(inner_step);
         self.b.seal_block(inner_step);
-        let j = self.b.use_var(j_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let jn = self.b.ins().iadd(j, one);
-        self.b.def_var(j_var, jn);
+        self.advance_index_var(j_var);
         self.b.ins().jump(inner_header, &[]);
 
         self.b.switch_to_block(inner_exit);
@@ -30410,10 +30382,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);
-        let idx = self.b.use_var(idx_var);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let next = self.b.ins().iadd(idx, one);
-        self.b.def_var(idx_var, next);
+        self.advance_index_var(idx_var);
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(exit);
