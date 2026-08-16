@@ -416,6 +416,15 @@ mod collection_semantics {
         jet_bits_copy(&JetBitSet { bits: values.clone() }).bits
     }
 
+    /// `Bits.has` — the same membership kernel `JetBitSet::contains` calls in
+    /// AOT, read straight off the resident set (no copy on a lookup).
+    pub(super) fn bit_set_has(
+        values: &std::collections::BTreeSet<i64>,
+        bit: i64,
+    ) -> bool {
+        jet_bits_has_kernel(values, bit)
+    }
+
     pub(super) fn map_first_key_i64(entries: Vec<(String, i64)>) -> Option<String> {
         jet_map_first_key_kernel(&map_from_pairs(entries)).ok()
     }
@@ -4122,6 +4131,16 @@ fn jet_jit_bit_set_remove(handle: i64, value: i64) {
     });
 }
 
+fn jet_jit_bit_set_has(handle: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.bit_sets
+                .get((handle as usize).wrapping_sub(1))
+                .is_some_and(|set| collection_semantics::bit_set_has(set, value)),
+        )
+    })
+}
+
 fn jet_jit_bit_set_to_list(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let values = rt
@@ -5057,6 +5076,7 @@ host_fns! {
     lru_keys: "jet_jit_lru_keys" => jet_jit_lru_keys: sig_len;
     bit_set_new: "jet_jit_bit_set_new" => jet_jit_bit_set_new: sig_new;
     bit_set_add: "jet_jit_bit_set_add" => jet_jit_bit_set_add: sig_list_eq;
+    bit_set_has: "jet_jit_bit_set_has" => jet_jit_bit_set_has: sig_list_eq;
     bit_set_remove: "jet_jit_bit_set_remove" => jet_jit_bit_set_remove: sig_push;
     bit_set_to_list: "jet_jit_bit_set_to_list" => jet_jit_bit_set_to_list: sig_len;
     bit_set_copy: "jet_jit_bit_set_copy" => jet_jit_bit_set_copy: sig_len;
