@@ -11,6 +11,13 @@ use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{HashMap, HashSet};
 
 struct Boundary {
+    /// A NOUN PHRASE naming the construct, and nothing else: it is rendered
+    /// as the object of "it uses …" by `dev_boundary_diagnostic` (E2201) and
+    /// `debug_boundary_scan` (E2203), which own the whole sentence. A feature
+    /// that carries its own clause splices two sentences together — that is
+    /// exactly the E2201 garble this contract exists to prevent — so never
+    /// append a reason, a "which …" tail, or a trailing "yet" here. The
+    /// wrapper never parses this string back apart.
     feature: String,
     span: Option<Span>,
 }
@@ -19,21 +26,58 @@ pub fn dev_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
     boundary_scan(bundle, false).map(|boundary| dev_boundary_diagnostic(boundary.feature, boundary.span))
 }
 
+/// Why/fix for every `jet dev` boundary report. `why` already carries the
+/// "that interpreter doesn't cover every feature" explanation, so no producer
+/// restates it in the sentence.
+const DEV_BOUNDARY_WHY: &str = "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build";
+const DEV_BOUNDARY_FIX: &str = "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live";
+
+/// Render the dev-loop boundary around one construct. `feature` is a noun
+/// phrase (see `Boundary::feature`) and this function owns the sentence.
 pub fn dev_boundary_diagnostic(feature: impl Into<String>, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E2201",
-        format!("`jet dev` can't interpret this program yet — it {}", feature.into()),
-        "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build".to_string(),
-        "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live".to_string(),
+        format!("`jet dev` can't interpret this program yet — it uses {}", feature.into()),
+        DEV_BOUNDARY_WHY.to_string(),
+        DEV_BOUNDARY_FIX.to_string(),
         span,
     )
+}
+
+/// The same boundary for the shared evaluator's own mid-run refusal (E0956),
+/// which stops during execution instead of at the AST pre-scan.
+///
+/// `construct` is the noun phrase the raise site named, taken from the
+/// diagnostic's structured construct — never from E0956's rendered prose,
+/// which is a sentence and splices into an ungrammatical report. A
+/// hand-written E0956 that carries no structured construct has no noun phrase
+/// to place, so its own sentence is quoted whole after a colon rather than
+/// forced into "it uses …"; either way the dev loop replaces the
+/// comptime-voiced why/fix, which is the point of this rewrap.
+pub fn dev_boundary_for_refusal(
+    construct: Option<&str>,
+    refusal: &str,
+    span: Option<Span>,
+) -> Diagnostic {
+    match construct {
+        Some(construct) => dev_boundary_diagnostic(format!("`{construct}`"), span),
+        None => Diagnostic::error(
+            "E2201",
+            format!(
+                "`jet dev` can't interpret this program yet — the interpreter stopped here: {refusal}"
+            ),
+            DEV_BOUNDARY_WHY.to_string(),
+            DEV_BOUNDARY_FIX.to_string(),
+            span,
+        ),
+    }
 }
 
 pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
     boundary_scan(bundle, true).map(|boundary| {
         Diagnostic::error(
             "E2203",
-            format!("`jet debug` can't step through this program yet — it {}", boundary.feature),
+            format!("`jet debug` can't step through this program yet — it uses {}", boundary.feature),
             "`jet debug` steps your program in the same interpreter `jet dev` uses; this feature touches threads, foreign code, raw memory, or the outside world, which the source-level stepper doesn't cover yet".to_string(),
             "run `jet build` then the binary, or `jet run <file>` to compile and run it; remove the unsupported feature to step the rest, or wait for the native-debugger milestone (D-DBG3 step 2)".to_string(),
             boundary.span,
@@ -80,7 +124,7 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
         for item in &module.items {
             match item {
                 Item::ExternRust(block) => return Some(Boundary {
-                    feature: "calls into Rust code through `extern rust`".to_string(),
+                    feature: "Rust code called through `extern rust`".to_string(),
                     span: Some(block.span),
                 }),
                 // An empty synthetic C module is only the resolution target for
@@ -88,19 +132,19 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                 // Keep the import runnable on tier 0, while real C surfaces
                 // retain the native-only boundary.
                 Item::CModule(module) if !module.functions.is_empty() => return Some(Boundary {
-                    feature: "calls into a C library".to_string(),
+                    feature: "a C library".to_string(),
                     span: Some(module.span),
                 }),
                 Item::Func(function) => {
                     if function.is_unsafe {
                         return Some(Boundary {
-                            feature: "uses an `#Unsafe` function".to_string(),
+                            feature: "an `#Unsafe` function".to_string(),
                             span: Some(function.name_span),
                         });
                     }
                     if function.name == "run" && !function.params.is_empty() && !has_typed_cli {
                         return Some(Boundary {
-                            feature: "uses a typed CLI entry signature (`fn run(args: T)`)".to_string(),
+                            feature: "a typed CLI entry signature (`fn run(args: T)`)".to_string(),
                             span: Some(function.name_span),
                         });
                     }
@@ -128,8 +172,8 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
 
 fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str> {
     match name {
-        "core.mem" => Some("uses the low-level `core.mem` tier"),
-        "core.files" if debug_impure => Some("reads or writes files"),
+        "core.mem" => Some("the low-level `core.mem` tier"),
+        "core.files" if debug_impure => Some("a file read or write"),
         "core.sys" | "core.process" if debug_impure => process_module_feature(name),
         // `core.time` / `core.math.random` are allowed: deterministic `Clock`/`Rng`
         // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
@@ -140,8 +184,8 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
 
 fn process_module_feature(name: &str) -> Option<&'static str> {
     match name {
-        "core.sys" => Some("reads the environment"),
-        "core.process" => Some("runs another process or exits early"),
+        "core.sys" => Some("an environment read"),
+        "core.process" => Some("a process launch or an early exit"),
         _ => None,
     }
 }
@@ -289,8 +333,7 @@ fn expr_mut_arg(
     ) -> Option<Boundary> {
         if matches!(arg.convention, AccessConvention::Write) && matches!(arg.expr, Expr::Ident(..)) {
             return Some(Boundary {
-                feature: "passes a `&` argument to a function (writeback isn't interpreted yet)"
-                    .to_string(),
+                feature: "a `&` writeback argument passed to a function".to_string(),
                 span: Some(arg.span),
             });
         }

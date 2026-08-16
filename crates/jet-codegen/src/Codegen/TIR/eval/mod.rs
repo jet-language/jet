@@ -212,6 +212,18 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
 
 pub use exprs::{stable_memo_field_slot, stable_place_address, tir_place_address_key};
 
+/// The evaluator's one refusal for a construct it cannot run (E0956).
+///
+/// `what` is a NOUN PHRASE naming the construct — "raw pointer address",
+/// "task receiver", "view-mut path" — and nothing else. The registered row
+/// renders it as `` `{what}` isn't supported by the current evaluator yet ``,
+/// and `jet dev` re-uses the same phrase inside its own boundary sentence
+/// ("it uses `raw pointer address`", E2201 via
+/// `jet_driver::InterpreterBoundary::dev_boundary_for_construct`). A `what`
+/// that carries its own clause therefore renders twice as a spliced,
+/// ungrammatical sentence: never write "X isn't supported", "X expects a
+/// String", or any trailing "yet" here. The construct also travels
+/// structurally on the diagnostic, so no consumer parses this prose back.
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }

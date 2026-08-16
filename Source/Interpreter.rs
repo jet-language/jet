@@ -377,32 +377,30 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
 /// trying to run this at runtime via `jet dev`. Rewrap as the dev-loop's own
 /// E2201 boundary diagnostic instead, preserving what construct tripped it.
 fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
-    let detail = match d.code.as_str() {
-        "E0956" => d
-            .what
-            .strip_suffix(" can't run at compile time yet")
-            .unwrap_or(&d.what)
-            .replace(" at compile time", ""),
-        "E3401" => {
-            "code that touches the outside world (network, filesystem, or environment)".to_string()
-        }
-        // Live sockets / Tier-2 ambient I/O: same rewriter as E0956 — keep the
-        // call site, drop the comptime-only framing (#1247 three-way battery).
-        "E3412" => d
-            .what
-            .strip_suffix(" is not available at comptime")
-            .unwrap_or(&d.what)
-            .to_string(),
-        "E3410" => d
-            .what
-            .split(" is a Tier-2")
-            .next()
-            .unwrap_or(&d.what)
-            .to_string(),
+    // Read the CONSTRUCT, never the sentence. Every one of these rows renders the
+    // construct as its first backtick-quoted slot, so lifting that slot survives a
+    // reword of the surrounding prose. A suffix strip does not: 071ef45dd reworded
+    // E0956 from "… can't run at compile time yet" to "… isn't supported by the
+    // current evaluator yet", migrated four consumers, and skipped this one -- so the
+    // strip silently stopped matching and the whole clause got spliced into
+    // "it uses <sentence>, which isn't covered …", three "yet"s in one report.
+    let quoted = |what: &str| -> Option<String> {
+        let rest = what.split_once('`')?.1;
+        let (inner, _) = rest.split_once('`')?;
+        (!inner.is_empty()).then(|| inner.to_string())
+    };
+    let construct = match d.code.as_str() {
+        "E0956" | "E3412" | "E3410" => quoted(&d.what),
+        // E3401 names no single construct: it refuses a whole capability class, so
+        // the noun phrase is ours to supply rather than lift.
+        "E3401" => Some(
+            "code that touches the outside world (network, filesystem, or environment)".to_string(),
+        ),
         _ => return d,
     };
-    jet_driver::InterpreterBoundary::dev_boundary_diagnostic(
-        format!("uses {detail}, which isn't covered by the dev interpreter yet"),
+    jet_driver::InterpreterBoundary::dev_boundary_for_refusal(
+        construct.as_deref(),
+        &d.what,
         d.span,
     )
 }

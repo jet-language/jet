@@ -1614,6 +1614,43 @@ fn task_program_runs_via_jit() {
 
 /// #1685: the canonical task surface stays resident when its result is a
 /// non-`Int` handle, and child failures remain typed at the JIT boundary.
+///
+/// D-FAIL-EXIT1=A — fallible entry and one exit law *(ratified 2026-08-06,
+/// card #1533)*: "`fn run()` is fallible by default." Entry `fn run` is
+/// therefore stamped `Unit ? Err`, and a `return` inside a `task { … }` body
+/// belongs to the *enclosing* function — `examples/features/net/http_get.jet`
+/// relies on exactly that, where `?? return` inside `task { … }` leaves `run`.
+/// So `task { return "child" }` handed a `String` back from `run`: E0113 from
+/// the moment D-FAIL-EXIT1 landed, and this fixture (added 2026-08-11,
+/// 5e40d7454) was never migrated. `return` is not how a task body yields a
+/// value:
+///
+/// * A ONE-EXPRESSION brace body folds to `LambdaBody::Expr` — "`task { e }`
+///   and `task e` become the same body"
+///   (`crates/jet-parser/src/Parser/Expressions/primary.rs:768-795`). Any
+///   expression is fine there, so `task { "child" }` is accepted.
+/// * A MULTI-STATEMENT brace body takes the `block_stmts` path
+///   (primary.rs:796-802) and has NO tail-value form: the parser never sets
+///   `callable_tail_block_depth` for it, so the tail carve-out at
+///   `Parser/Statements/control.rs:2547-2550` cannot fire, and a bare
+///   expression statement is admitted only when it is `Expr::Call`, `Field`,
+///   `MethodCall`, `ComptimeName`, `Try`, `OrFallback`, or `IncDec`
+///   (control.rs:2528-2537). `concurrency/freeze_capture.jet:13` and
+///   `scoped_borrow_bands.jet:35` only look like tail values because
+///   `Expr::Field` is in that set. A bare literal is not, and a `Str` token
+///   never even reaches that match (control.rs:2585) — hence E0003. No shipped
+///   example gives a task a literal result, so the form is unexercised.
+///
+/// So a delayed String result uses the corpus shape: a named helper called from
+/// the folded one-expression body, exactly as `concurrency/race_cancel.jet:13`
+/// and `all_failfast.jet:30-33` spell their slow children.
+///
+/// The `return` also drove the E0107 cascade over every later binding in the
+/// `task.group` block: `check_stmt` marks the block unreachable after a
+/// `Stmt::Return` and then rolls `self.flow` back for each following statement
+/// (`crates/jet-sema/src/Sema/CheckerCore/statements.rs:366-372`), discarding
+/// their declarations. Nothing restores that flag around a lambda body
+/// (`CheckerInfer/calls/lambdas.rs:609`), so the task body's `return` leaked out.
 #[test]
 fn task_surface_runs_resident_with_string_results_and_typed_failures() {
     if skip_if_cranelift_host_unsupported() {
@@ -1627,6 +1664,11 @@ fn slow_text() => String {
     return "slow"
 }
 
+fn late_text() => String {
+    time.sleep(1000ms)
+    return "late"
+}
+
 fn failure_label(error: TaskFailure) => String {
     if error == {
         .Cancelled -> { return "cancelled" }
@@ -1637,7 +1679,7 @@ fn failure_label(error: TaskFailure) => String {
 
 fn run() {
     task.group workers {
-        child :: task { return "child" }
+        child :: task { "child" }
         print(child.join() ?? "child-fallback")
 
         all_result :: task.all { "left", "right" } ?? []
@@ -1645,10 +1687,7 @@ fn run() {
         print((task.race { slow_text(), "race" }) ?? "race-fallback")
         print((task.any { slow_text(), "any" }) ?? "any-fallback")
 
-        cancelled :: task {
-            time.sleep(1000ms)
-            return "late"
-        }
+        cancelled :: task late_text()
         cancelled.cancel()
         cancelled_result :: cancelled.join()
         if cancelled_result == {
@@ -1837,6 +1876,18 @@ fn strict_jit_traces_execution_without_fallback() {
     );
 }
 
+/// D-ONELINE-BODY1=B — one body rule *(ratified 2026-08-13, cards #1453 and
+/// #1454)*: "An effect-only `if` or `loop` may put `->` before one adjacent
+/// statement; braces are required for multiple statements and scoped marker
+/// blocks." This fixture predates that (added 2026-07-27, f71f39648) and wrote
+/// brace-less, arrow-less `if cond stmt`, which is E0372.
+///
+/// D-LOOP-HEADER3=D — one three-slot header meaning *(ratified 2026-07-31,
+/// card #1325)*: "slots are binding; source; step rule … The C-style counter
+/// form retires with a teaching diagnostic." `counted_init_exit` used
+/// `loop i := init; cond; step {}`, which is E0373 (semicolons, D-LOOP-COMMA1=A)
+/// plus E0376; E0376's own fix names the replacement kept here: "keep
+/// `loop name := value, condition { … }` for mutable state."
 #[test]
 fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
     if skip_if_cranelift_host_unsupported() {
@@ -1850,7 +1901,7 @@ fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
         r#"fn find(xs: [Int]) => Int {
     found :: loop {
         loop x, xs {
-            if x > 2 break(found, x)
+            if x > 2 -> break(found, x)
         }
         break -1
     }
@@ -1909,7 +1960,9 @@ fn counted_init_exit() => Int {
         loop i := (loop {
             break(result, 14)
             break 0
-        }); i < 1; i++ {}
+        }), i < 1 {
+            i += 1
+        }
         break 0
     }
     result
@@ -1944,8 +1997,8 @@ fn run() {
     doubled :: loop x, xs -> x * 2
     outer :: loop x, xs {
         ignored :: loop {
-            if x == 1 next(outer)
-            if x == 2 break(outer)
+            if x == 1 -> next(outer)
+            if x == 2 -> break(outer)
             break 0
         }
         print(ignored)
@@ -11022,6 +11075,24 @@ fn ul6_run_watch_and_dev_share_engine() {
 }
 
 /// #778 C1–C3: per-function tiers, cross-tier host-shim calls, and --trace-tiers.
+///
+/// The fixture needs one function the planner keeps native AND one it binds to
+/// the canonical TIR interpreter; a program that is native end to end cannot
+/// demonstrate per-function selection at all. This test used to get its split
+/// from `[a, b] :: doubled`, which the resident subset did not cover. Commit
+/// 3211b6944 ("fix(#729): JIT list destructure + is_empty") lowered list
+/// destructure natively (`crates/jet-jit/src/jit/safety.rs`
+/// `resident_safe_stmt`'s `TStmt::ListDestructure` arm, plus the matching
+/// `lower_ctx.rs` lowering), so that split closed for the right reason and the
+/// old "gap must be interpreter-bound" assertion went stale in the GOOD
+/// direction. Reintroducing a lowering gap to keep it would be an I9 violation,
+/// so the split now comes from the one that is architectural rather than a
+/// missing lowering: D-MEMO1=A keeps the memo store in the Prelude and makes the
+/// resident engine an adapter, so a `#Memo` function crosses the deopt boundary
+/// by design (`crates/jet-jit/src/jit/tiers.rs` `plan_tiers`, and the
+/// `DEOPT_MEMOS` carrier in `crates/jet-jit/src/jit/deopt.rs` that exists only
+/// to serve this cross-tier call). `native_sum` keeps the destructure so the
+/// closed #729 gap stays pinned as native coverage instead of being deleted.
 #[test]
 fn tiered_run_selects_per_function_tiers_and_cross_calls() {
     if skip_if_cranelift_host_unsupported() {
@@ -11032,18 +11103,21 @@ fn tiered_run_selects_per_function_tiers_and_cross_calls() {
     let file = dir.join("mixed.jet");
     fs::write(
         &file,
-        r#"fn add1(n: Int) => Int {
+        r#"#Memo fn cached(n: Int) =[]=> Int :: n * 2
+
+fn add1(n: Int) => Int {
     return n + 1
 }
 
-fn gap() => Int {
+fn native_sum() => Int {
     doubled :: [add1(40), add1(1)]
     [a, b] :: doubled
     return a + b
 }
 
 fn run() {
-    print(gap())
+    print(native_sum())
+    print(cached(21) + add1(0))
 }
 "#,
     )
@@ -11051,18 +11125,37 @@ fn run() {
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
     let plan = jet_jit::plan_bundle_tiers(&bundle);
+    for name in ["run", "add1", "native_sum"] {
+        assert!(
+            plan.native.contains(name),
+            "`{name}` must select the native tier; native={:?} deopt={:?} whole={}",
+            plan.native,
+            plan.deopt,
+            plan.whole_interp
+        );
+    }
     assert!(
-        plan.native.contains("add1") || plan.native.contains("run"),
-        "expected at least one native function; native={:?} deopt={:?} whole={}",
+        !plan.whole_interp,
+        "a per-function split must not collapse into whole-program interpretation; \
+         native={:?} deopt={:?}",
         plan.native,
-        plan.deopt,
-        plan.whole_interp
+        plan.deopt
+    );
+    let interp_bound: Vec<&str> = plan.deopt.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        interp_bound,
+        ["cached"],
+        "only the memoized function is interpreter-bound; native={:?} deopt={:?}",
+        plan.native,
+        plan.deopt
     );
     assert!(
-        plan.deopt.iter().any(|(n, _)| n == "gap") || plan.whole_interp,
-        "gap (or whole program) must be interpreter-bound; deopt={:?} whole={}",
-        plan.deopt,
-        plan.whole_interp
+        plan.deopt
+            .iter()
+            .any(|(_, reason)| reason.contains("canonical Prelude cache")),
+        "the deopt must name D-MEMO1=A's shared Prelude cache, not an incidental \
+         lowering gap; deopt={:?}",
+        plan.deopt
     );
 
     jet_jit::reset_jit_trace_for_test();
@@ -11073,10 +11166,20 @@ fn run() {
         RunOutcome::Problems(ds) => panic!("mixed/deopt program must run: {ds:?}"),
     };
     jet_jit::set_trace_tiers(false);
-    assert_eq!(stdout.trim(), "43", "mixed-tier deopt should print 43, got {stdout:?}");
+    assert_eq!(
+        stdout.trim(),
+        "43\n43",
+        "mixed-tier run should print the native sum then the cross-tier sum, got {stdout:?}"
+    );
+    // Both tiers must actually have executed: the native entry, and the host
+    // shim that re-entered the canonical interpreter for `cached`.
     assert!(
-        jet_jit::deopt_invoked_for_test() || jet_jit::jit_executed_for_test(),
-        "mixed/deopt path must record tier execution"
+        jet_jit::jit_executed_for_test(),
+        "the native tier must have run"
+    );
+    assert!(
+        jet_jit::deopt_invoked_for_test(),
+        "the cross-tier host shim must have entered the interpreter"
     );
     let trace = jet_jit::take_last_trace();
     assert!(!trace.is_empty(), "trace-tiers must record rows");
@@ -11087,8 +11190,16 @@ fn run() {
     assert!(
         trace
             .iter()
-            .any(|row| matches!(row.tier, jet_jit::Tier::Interp) || !row.reason.is_empty()),
-        "trace must name interp tier or reason: {trace:?}"
+            .any(|row| matches!(row.tier, jet_jit::Tier::Native) && row.function == "run"),
+        "trace must record the native entry: {trace:?}"
+    );
+    assert!(
+        trace.iter().any(|row| {
+            matches!(row.tier, jet_jit::Tier::Interp)
+                && row.function == "cached"
+                && !row.reason.is_empty()
+        }),
+        "trace must name the interpreter-bound function and its reason: {trace:?}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
