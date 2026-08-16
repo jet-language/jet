@@ -182,6 +182,39 @@ impl ProgramOutput {
     }
 }
 
+/// The oracle binary path for one `compiled_binary_output` invocation.
+///
+/// A generated CLI's usage banner names argv[0], on purpose: it flows from the
+/// one renderer at `Prelude/CoreLib/Top/Args.rs::JetArgsSpec::help` through
+/// `Prelude/Job.rs::jet_args_source_program_name`, which takes the basename and
+/// strips a trailing `.jet`. The resident JIT and the interpreter are handed
+/// the source path (`positionals.jet` -> `positionals`), and a real `jet build`
+/// names the binary after the source stem — `tests/cli_parts/surface.rs::
+/// derived_help_uses_program_basename_for_compiled_and_jet_run_paths` pins
+/// `build/typed` -> `Usage: typed` — so a user's tiers always agree. Only this
+/// oracle disagreed, because it built `jet_<tag>_<i>` and that harness-specific
+/// name leaked into argv[0].
+///
+/// So give the oracle the real program name instead of teaching a comparison to
+/// scrub it: `tests/golden.rs` already has to rewrite `Usage: <binary>` back to
+/// the source stem for exactly this reason, and a second copy of that
+/// workaround would spread it. `jet_<tag>_<i>` becomes the containing
+/// directory, preserving the per-invocation uniqueness the old file name
+/// carried. A caller that needs the built program's identity (argv[0] for a
+/// re-exec) asks here rather than restating the layout.
+fn compiled_binary_path(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    file: &str,
+) -> std::path::PathBuf {
+    let program_name = std::path::Path::new(file)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .expect("oracle source name is utf8");
+    dir.join(format!("jet_{tag}_{i}_bin")).join(program_name)
+}
+
 fn compiled_binary_output(
     dir: &std::path::Path,
     tag: &str,
@@ -210,8 +243,8 @@ fn compiled_binary_output_with_stdin(
         ),
     };
     let rs = dir.join(format!("jet_{tag}_{}.rs", i));
-    let bin = dir.join(format!("jet_{tag}_{}", i));
-    fs::create_dir_all(dir).unwrap();
+    let bin = compiled_binary_path(dir, tag, i, file);
+    fs::create_dir_all(bin.parent().expect("oracle binary has a parent")).unwrap();
     let mut rustc_cmd = Command::new("rustc");
     // Match default optimized AOT behavior. Cache only the runtime dependency;
     // every oracle still compiles and links its generated user program.
@@ -1685,7 +1718,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     // Strict JIT no longer AOT-fallbacks all_failfast; parallel AOT runs keep
     // the typed-failure panic-hook regression signal.
 
-    let binary = Arc::new(dir.join("jet_scheduler_panic_hook_0"));
+    let binary = Arc::new(compiled_binary_path(&dir, "scheduler_panic_hook", 0, file));
     let failures = Arc::new(Mutex::new(Vec::new()));
     let mut workers = Vec::new();
     for worker in 0..8 {
@@ -4458,7 +4491,16 @@ fn run() { print(three.get()); print(same.get()) }
     let bundle = checked_bundle_from_path(file.to_str().unwrap());
     let tir = jet::Codegen::TIR::lower_jit_program(&bundle).expect("generic instance lowers to JIT TIR");
     assert_eq!(tir.instance_provenance.len(), 1, "equivalent aliases share one canonical instance");
-    assert_eq!(tir.funcs.iter().filter(|f| f.name == "three__get").count(), 1);
+    // architecture.md R6 / ratified D-NAME-TREE1 (docs/spec/architecture.md:554-559):
+    // "User identifiers are emitted as `__jet_<name>` … all Rust-name projections
+    // use its canonical mangle functions." An inline-module member goes through
+    // `Names::member_name` (crates/jet-codegen/src/Codegen/TIR/mod.rs:1679,1683),
+    // i.e. `generated_path("three.get")` → `__jet_three__get`; AOT emits the same
+    // symbol from `Codegen/Imports.rs::emit_program_items`. Ask the naming law for
+    // the name rather than restating a spelling — 8044b2e69 (#1801) already moved
+    // it once from the old `{module}__{fn}` form and left this literal behind.
+    let member = jet_foundation::Names::member_name("three", "get");
+    assert_eq!(tir.funcs.iter().filter(|f| f.name == member).count(), 1);
 }
 
 #[test]
@@ -6574,7 +6616,7 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let aot = compiled_binary_output(&dir, "jit_1219", 0, stem, file);
-    let aot_bin = dir.join("jet_jit_1219_0");
+    let aot_bin = compiled_binary_path(&dir, "jit_1219", 0, file);
 
     // Watcher re-execs `os.executable() --watch-child`. Under resident JIT,
     // point argv[0] at the AOT binary so the child is the same program identity
