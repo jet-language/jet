@@ -829,3 +829,115 @@ fn run() {{
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Card #1993 — the iterator adapters emitted CLIF that Cranelift's own
+/// verifier rejected.
+///
+/// `lower_iter_chunk_while` minted its increment `1` inside the `existing` arm
+/// and read it back in the shared `step` latch. The `first` arm reaches `step`
+/// without passing through `existing`, so the constant's definition does not
+/// dominate its use and Cranelift answered
+/// `uses value v… from non-dominating inst…`. That is a lowering bug of the
+/// class I2 names, never an unsupported construct.
+///
+/// No output-only check can see it: the compile failure makes default
+/// `jet run` interpret the whole program, and the interpreter prints the right
+/// answer. So this proves three things together — the resident tier COMPILES
+/// the bundle (the verifier runs inside `try_compile_bundle`), it EXECUTES
+/// native code with no deopt and no fallback, and AOT, default `jet run`, and
+/// the forced interpreter all produce the same bytes.
+#[test]
+fn iter_adapter_latches_emit_dominating_clif() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_iter_adapter_dominance");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("adapters.jet");
+    fs::write(
+        &file,
+        r#"fn run() {
+    jagged :: [1, 2, 3, 5, 6, 9, 10, 12]
+    print(jagged.chunk_while((a: Int, b: Int) => (b == a + 1)).to_list())
+    parities :: [2, 4, 6, 1, 3, 8, 10]
+    print(parities.dedup_by((n: Int) => (n % 2)).to_list())
+    print(jagged.is_sorted_by((n: Int) => n))
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("adapter fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "adapter fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "adapter fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
+        panic!("adapter fixture must compile in the resident JIT: {error}")
+    });
+
+    // The `chunk_while` grouping, the `dedup_by` keys, and the `is_sorted_by`
+    // verdict are the same facts `examples/features/collections/iter_adapters`
+    // records, so this literal is the shared observable, not a tier's opinion.
+    let expected = "[[1, 2, 3], [5, 6], [9, 10], [12]]\n[2, 1, 8]\ntrue\n".to_string();
+
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT adapter fixture failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&aot.stdout),
+        expected,
+        "AOT adapter observable drifted"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default resident JIT rejected the adapter fixture: {diags:?}")
+        }
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "the adapter fixture must execute native resident JIT code, not a silent deopt"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "the adapter fixture must not deopt or fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected the adapter fixture: {diags:?}")
+        }
+    };
+
+    let reference = (expected, String::new(), 0);
+    assert_eq!(resident, reference, "resident JIT adapter observable drifted");
+    assert_eq!(interpreted, reference, "interpreter adapter observable drifted");
+
+    let _ = fs::remove_dir_all(&dir);
+}
