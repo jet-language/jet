@@ -294,7 +294,19 @@ pub(crate) fn lower_one_call_arg(
             if fixed_list_elem_compatible(arg_elem, param_elem)
     );
     // D-SG9: call-site `[U8].{…}` / contextual list args need IntN suffixes.
+    //
+    // D-GENERIC-CALL1=A: a generic callee's `[T]` must NOT be stamped onto the
+    // argument. The retag would overwrite the argument's real type with the
+    // callee's binder, and every consumer of the lowered argument type then
+    // reads a type variable instead of the actual: `call_return_type_with_args`
+    // binds `T := T` and hands engines an unsubstituted `T?`, and
+    // `specialize_generic_free_functions` records the same binder as the
+    // monomorphisation shape, so no instantiation ever happens. The retag's
+    // jobs (IntN suffixes, trait-object element injection, one-element typed
+    // head collapse) all need a concrete element type, so nothing is lost.
     let value = match (&conv, value) {
+        (Some((_, want @ Type::List(_))), v)
+            if !crate::Generics::free_type_params(want).is_empty() => v,
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {
             super::preserve_typed_list_shape(v, want, cx)
         }
