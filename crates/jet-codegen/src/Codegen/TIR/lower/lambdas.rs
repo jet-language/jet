@@ -27,6 +27,7 @@ use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::with_lambda_body_expr_cache;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -354,7 +355,9 @@ fn lower_lambda_expecting_with_host_borrow(
     // an immediate edit. This mirrors sema zeroing `txn_depth` for lambda bodies
     // (the same D-TXN2 reason E0746 doesn't fire inside `on_commit`).
     let prev_in_stm = cx.in_stm_transact.replace(false);
-    let (body, executable) = match &lam.body {
+    // The clone pack rebound each capture above, so this body resolves names
+    // against `lam_env`, not the caller's env. Lower it on its own memo.
+    let (body, executable) = with_lambda_body_expr_cache(|| match &lam.body {
         LambdaBody::Expr(e) => {
             prepare_interrupt_callback_local_expr(e, cx, &mut lam_env);
             // An expression-bodied lambda returns an owned value, just like an
@@ -378,7 +381,7 @@ fn lower_lambda_expecting_with_host_borrow(
                 (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
             }
         }
-    };
+    });
     cx.in_stm_transact.set(prev_in_stm);
     TLambda {
         prep,
@@ -548,7 +551,9 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
             LambdaBody::Block(stmts) => prepare_interrupt_callback_locals(stmts, cx, &mut lam_env),
         }
     }
-    let body = match &lam.body {
+    // The spawn pack keeps every capture on its source slot, so this body must
+    // NOT reuse a value the clone pack memoized under `__jet___cap_<n>`.
+    let body = with_lambda_body_expr_cache(|| match &lam.body {
         LambdaBody::Expr(e) => TJitSpawnBody::Expr(Box::new(lower_expr(e, cx, &mut lam_env))),
         LambdaBody::Block(stmts) => {
             if let Some(shared) = shared_body.as_ref() {
@@ -577,7 +582,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
                 }
             }
         }
-    };
+    });
 
     TJitSpawnLambda {
         params: lam
@@ -679,16 +684,20 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
             format!("{}{}", mangle(&p.name), ty)
         })
         .collect();
-    // Rendering the AOT closure lowers its body a second time. Nested task
-    // combinators collect their JIT spawn lambdas while lowering, so keep
-    // that bookkeeping pass-only; otherwise nested AOT rendering duplicates
-    // the resident-JIT lambda table.
+    // Rendering the AOT closure lowers its body a second time, under this
+    // render env's `__jet___cap_*` rebindings. Nested task combinators collect
+    // their JIT spawn lambdas while lowering, so keep that bookkeeping
+    // pass-only — table AND site map, or a later pass would dedup onto an
+    // index whose entry was just discarded. The memo is scoped for the same
+    // reason: this env is not the env the executable pass uses.
     let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
-    let body = match &lam.body {
+    let saved_spawn_sites = cx.jit_spawn_sites.borrow().clone();
+    let body = with_lambda_body_expr_cache(|| match &lam.body {
         LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
         LambdaBody::Block(stmts) => render_spawn_block_body(stmts, cx, &mut lam_env),
-    };
+    });
     *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
+    *cx.jit_spawn_sites.borrow_mut() = saved_spawn_sites;
     let closure = format!("move |{}| {}", params.join(", "), body);
     if prep.is_empty() {
         closure

@@ -4427,19 +4427,35 @@ pub enum TCoreClosureKind {
     },
     /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
     /// `executable` is AOT-ignored; Cranelift JIT compiles it (captures via spawn-lambda table).
+    ///
+    /// `site` is this callback's index in the JIT spawn-lambda table, exactly the
+    /// fact `Spawn` above carries. Lowering owns it: a lambda body is lowered
+    /// once per pass (the AOT closure text, `executable`, and the JIT spawn
+    /// body), so the index cannot be re-derived from traversal order without
+    /// drifting. Every engine reads this number; none recomputes it.
     ReactiveDerived {
         closure: String,
         executable: Box<TLambda>,
+        site: usize,
     },
     /// D-EFFECT-LIFECYCLE1=A: `reactive.effect(<lambda>)` returns a lifecycle handle.
-    ReactiveEffect { closure: String, executable: Box<TLambda> },
+    ReactiveEffect {
+        closure: String,
+        executable: Box<TLambda>,
+        site: usize,
+    },
     /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
-    UiReactiveRender { closure: String, executable: Box<TLambda> },
+    UiReactiveRender {
+        closure: String,
+        executable: Box<TLambda>,
+        site: usize,
+    },
     /// D-WEB-CLICK-PORT1=D: `ui.button(label, on_click: <lambda>)`.
     UiButtonOnClick {
         label: Box<TExpr>,
         closure: String,
         executable: Box<TLambda>,
+        site: usize,
     },
 }
 

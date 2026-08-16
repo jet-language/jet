@@ -6658,7 +6658,11 @@ impl LowerCtx<'_, '_> {
             TStmt::Reactive { executable, .. } => {
                 in_own_frame(|| -> Result<(), String> {
                     let _ = executable;
+                    // `#Reactive` has no site on its TIR node yet, so its table
+                    // index still comes from the traversal cursor.
+                    let site = *self.spawn_site;
                     let _ = self.lower_reactive_cb_call(
+                        site,
                         self.host.reactive.effect_rooted,
                         false,
                         "reactive stmt",
@@ -17152,25 +17156,28 @@ impl LowerCtx<'_, '_> {
                     frame.on_rollback.push((id, env));
                     Ok(self.b.ins().iconst(types::I64, 0))
                 }
-                TCoreClosureKind::ReactiveDerived { .. } => self.lower_reactive_cb_call(
+                TCoreClosureKind::ReactiveDerived { site, .. } => self.lower_reactive_cb_call(
+                    *site,
                     self.host.reactive.derived,
                     true,
                     "reactive derived",
                 ),
-                TCoreClosureKind::ReactiveEffect { .. } => self.lower_reactive_cb_call(
+                TCoreClosureKind::ReactiveEffect { site, .. } => self.lower_reactive_cb_call(
+                    *site,
                     self.host.reactive.effect,
                     true,
                     "reactive effect",
                 ),
-                TCoreClosureKind::UiReactiveRender { .. } => self.lower_reactive_cb_call(
+                TCoreClosureKind::UiReactiveRender { site, .. } => self.lower_reactive_cb_call(
+                    *site,
                     self.host.ui.reactive_render,
                     false,
                     "ui reactive render",
                 ),
-                TCoreClosureKind::UiButtonOnClick { label, .. } => {
+                TCoreClosureKind::UiButtonOnClick { label, site, .. } => {
                     let label_v = self.lower_expr(label)?;
                     let (spawn_ptr, n_caps, caps) =
-                        self.lower_spawn_site_cb("ui button on_click")?;
+                        self.lower_spawn_site_cb_at(*site, "ui button on_click")?;
                     let host = self
                         .module
                         .declare_func_in_func(self.host.ui.button_on_click, self.b.func);
@@ -23174,8 +23181,23 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.ins().iconst(types::I8, 0))
     }
 
+    /// A callback whose table index is still derived from traversal order.
+    /// `game on_frame`, `event on/once/on_priority`, `watch`, and the gtk
+    /// `on_click` handle method have no site on their TIR node yet.
     fn lower_spawn_site_cb(&mut self, what: &str) -> Result<(Value, Value, [Value; 4]), String> {
         let site = *self.spawn_site;
+        self.lower_spawn_site_cb_at(site, what)
+    }
+
+    /// A callback whose table index TIR already assigned (`Spawn`, the reactive
+    /// kinds, `ui.button`). Read that number; never recompute it. The cursor
+    /// still advances, because `count_spawn_sites` counts this site too and the
+    /// cursor-derived callbacks after it must stay aligned with that walk.
+    fn lower_spawn_site_cb_at(
+        &mut self,
+        site: usize,
+        what: &str,
+    ) -> Result<(Value, Value, [Value; 4]), String> {
         *self.spawn_site += 1;
         let lam = self
             .spawn_lambdas
@@ -23222,11 +23244,12 @@ impl LowerCtx<'_, '_> {
 
     fn lower_reactive_cb_call(
         &mut self,
+        site: usize,
         host_id: FuncId,
         returns: bool,
         what: &str,
     ) -> Result<Value, String> {
-        let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb(what)?;
+        let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb_at(site, what)?;
         let host = self.module.declare_func_in_func(host_id, self.b.func);
         let call = self
             .b

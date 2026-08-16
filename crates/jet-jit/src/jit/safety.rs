@@ -5006,7 +5006,11 @@ pub(crate) fn first_spawn_site(lambda: &TJitSpawnLambda) -> Option<usize> {
     fn find_expr(node: &TExpr) -> Option<usize> {
         match &node.kind {
             TExprKind::CoreClosureCall {
-                kind: TCoreClosureKind::Spawn { site, .. },
+                kind: TCoreClosureKind::Spawn { site, .. }
+                    | TCoreClosureKind::ReactiveDerived { site, .. }
+                    | TCoreClosureKind::ReactiveEffect { site, .. }
+                    | TCoreClosureKind::UiReactiveRender { site, .. }
+                    | TCoreClosureKind::UiButtonOnClick { site, .. },
             } => Some(*site),
             TExprKind::Print(inner)
             | TExprKind::Unary { operand: inner, .. }
