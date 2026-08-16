@@ -2,14 +2,21 @@
 // JSON goes through Jet's one RFC 8259 parser; Ed25519 goes through the vetted
 // crypto bridge. No token-controlled algorithm or purpose is ever dispatched.
 
+// D-FAIL-CARRIER1=A: sema declares `Claims.subject`/`.issuer` an
+// `Option<Text>` and `.not_before`/`.issued_at` an `Option<Int>`
+// (jet-sema CheckerCoreLib/core_types.rs), and all four are readable core
+// fields (Codegen/TIR/lower/fields.rs). The one Rust spelling of a Jet `T?`
+// is `JetOutcome<T, JetAbsent>`, so a raw `Option` here would hand rustc a
+// `.Val`/`.None` match whose arms are `Ok`/`Err` — an I2 internal compiler
+// error, the same one `ProcessResult.signal` produced.
 #[derive(Debug, Clone)]
 pub struct JetAuthClaims {
-    pub subject: Option<String>,
+    pub subject: JetOutcome<String, JetAbsent>,
     pub audience: String,
-    pub issuer: Option<String>,
+    pub issuer: JetOutcome<String, JetAbsent>,
     pub expires_at: i64,
-    pub not_before: Option<i64>,
-    pub issued_at: Option<i64>,
+    pub not_before: JetOutcome<i64, JetAbsent>,
+    pub issued_at: JetOutcome<i64, JetAbsent>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,7 +27,9 @@ pub enum JetAuthError {
     WeakKey,
     MissingClaim(String),
     WrongAudience { expected: String, actual: String },
-    WrongIssuer { expected: String, actual: Option<String> },
+    // Sema declares `AuthError.WrongIssuer.actual` an `Option<Text>`
+    // (core_types.rs), so the payload is the carrier, not a Rust `Option`.
+    WrongIssuer { expected: String, actual: JetOutcome<String, JetAbsent> },
     TokenExpired,
     DecodeError(String),
     TokenNotYetValid,
@@ -494,7 +503,8 @@ fn jet_auth_claims_at(
     if let Some(expected) = issuer {
         if actual_issuer.as_deref() != Some(expected) {
             return Err(JetAuthError::WrongIssuer {
-                expected: expected.to_string(), actual: actual_issuer,
+                expected: expected.to_string(),
+                actual: jet_outcome_of(actual_issuer),
             });
         }
     }
@@ -508,13 +518,15 @@ fn jet_auth_claims_at(
             return Err(JetAuthError::TokenNotYetValid);
         }
     }
+    // Decoding keeps Rust plumbing (`Option`) so every claim reads the same;
+    // the carrier starts here, once, exactly like `IOContext::new`.
     Ok(JetAuthClaims {
-        subject,
+        subject: jet_outcome_of(subject),
         audience: expected_audience,
-        issuer: actual_issuer,
+        issuer: jet_outcome_of(actual_issuer),
         expires_at,
-        not_before,
-        issued_at,
+        not_before: jet_outcome_of(not_before),
+        issued_at: jet_outcome_of(issued_at),
     })
 }
 
@@ -685,12 +697,12 @@ mod auth_tests {
         ));
         let claims = jet_auth_claims_at(not_before, "gateway", None, skew, threshold)
             .expect("not-before boundary should be accepted");
-        assert_eq!(claims.not_before, Some(20));
-        assert_eq!(claims.issued_at, Some(i64::MIN));
+        assert_eq!(claims.not_before, Ok(20));
+        assert_eq!(claims.issued_at, Ok(i64::MIN));
 
         let maximum = br#"{"aud":"gateway","exp":30,"iat":9223372036854775807}"#;
         let claims = jet_auth_claims_at(maximum, "gateway", None, 0, 0)
             .expect("maximum issued-at should remain representable");
-        assert_eq!(claims.issued_at, Some(i64::MAX));
+        assert_eq!(claims.issued_at, Ok(i64::MAX));
     }
 }

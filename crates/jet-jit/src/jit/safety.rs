@@ -222,8 +222,9 @@ fn resident_safe_compute_call(
 pub(crate) fn is_packed_process_signal(expr: &TExpr) -> bool {
     // Sema inserts `Expr::Copy` for this non-scalar field when it is used as
     // an owning pattern subject. TIR represents that copy as `Clone`; it is a
-    // bitwise copy because the field's erased TIR type is Int. Keep the
-    // unwrap exact so no other cloned field becomes a packed Option carrier.
+    // bitwise copy because `lower_clone` copies a packed `Option` word
+    // (`Type::Option(_)` row). Keep the unwrap exact so no other cloned field
+    // becomes a packed Option carrier.
     let field = match &expr.kind {
         TExprKind::Clone(inner) => inner,
         _ => expr,
@@ -1002,13 +1003,13 @@ fn resident_safe_expr_work_item<'a>(
             rhs,
             ..
         } => {
-            // `ProcessResult.signal` is a PACKED `Option<Int>` (0 = absent,
-            // else payload + 1) whose TIR type is erased to Int, so a plain
-            // machine compare reads the packed word and answers wrongly. The
-            // resident lowering covers exactly the both-sides Eq/Ne shape, so
-            // gate on the field shape rather than on the reported type — the
-            // same law `resident_safe_expr_recursive` states, which this arm
-            // shadows.
+            // `ProcessResult.signal` is a PACKED `Option<Int>` in the JIT
+            // record (0 = absent, else payload + 1 — `Process.rs`
+            // `alloc_process_result`), so a plain machine compare reads the
+            // packed word and answers wrongly. The resident lowering covers
+            // exactly the both-sides Eq/Ne shape, so gate on the field shape
+            // rather than on the reported type — the same law
+            // `resident_safe_expr_recursive` states, which this arm shadows.
             let packed_signal = is_packed_process_signal(lhs) || is_packed_process_signal(rhs);
             let gate = (if matches!(op, BinOp::And | BinOp::Or) {
                 matches!(&lhs.ty, Type::Bool) && matches!(&rhs.ty, Type::Bool)
@@ -2105,10 +2106,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && resident_safe_expr(rhs, callees);
             }
             // ProcessResult.signal is the one packed Option<Int> comparison
-            // resident lowering supports. TIR may erase this CORE field to
-            // Int, so key the admission on the exact field shape, not its
-            // reported type. Other Option producers use mixed packed/result-
-            // arena carriers, so do not admit them here.
+            // resident lowering supports; the JIT record holds the packed word
+            // (`Process.rs` `alloc_process_result`). Key the admission on the
+            // exact field shape, not its reported type. Other Option producers
+            // use mixed packed/result-arena carriers, so do not admit them here.
             if is_packed_process_signal(lhs) || is_packed_process_signal(rhs) {
                 return matches!(op, BinOp::Eq | BinOp::Ne)
                     && is_packed_process_signal(lhs)

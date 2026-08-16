@@ -237,7 +237,9 @@ pub(crate) mod process_prelude {
             pub output: String,
             pub errors: String,
             pub success: bool,
-            pub signal: Option<i64>,
+            // Mirrors the Prelude declaration (JetStd/Open.rs): the one
+            // optional carrier, never a raw Rust `Option`.
+            pub signal: JetOutcome<i64, JetAbsent>,
             pub timed_out: bool,
         }
 
@@ -894,10 +896,10 @@ fn process_result_value(result: process_prelude::ProcessResult) -> CtValue {
             ("success".to_string(), CtValue::Bool(result.success)),
             (
                 "signal".to_string(),
-                result
-                    .signal
-                    .map(|signal| CtValue::Present(Box::new(CtValue::Int(signal))))
-                    .unwrap_or_else(|| CtValue::absent(Type::Int)),
+                match result.signal {
+                    Ok(signal) => CtValue::Present(Box::new(CtValue::Int(signal))),
+                    Err(_) => CtValue::absent(Type::Int),
+                },
             ),
             ("timed_out".to_string(), CtValue::Bool(result.timed_out)),
         ],
@@ -1995,31 +1997,33 @@ fn auth_claims_value(claims: Crypto::runtime::JetAuthClaims) -> CtValue {
         fields: vec![
             (
                 "subject".to_string(),
-                subject
-                    .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-                    .unwrap_or_else(|| CtValue::absent(Type::String)),
+                match subject {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                    Err(_) => CtValue::absent(Type::String),
+                },
             ),
             ("audience".to_string(), CtValue::Str(audience)),
             (
                 "issuer".to_string(),
-                issuer
-                    .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-                    .unwrap_or_else(|| CtValue::absent(Type::String)),
+                match issuer {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                    Err(_) => CtValue::absent(Type::String),
+                },
             ),
             ("expires_at".to_string(), CtValue::Int(expires_at)),
             (
                 "not_before".to_string(),
-                not_before
-                    .map(CtValue::Int)
-                    .map(|value| CtValue::Present(Box::new(value)))
-                    .unwrap_or_else(|| CtValue::absent(Type::Int)),
+                match not_before {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+                    Err(_) => CtValue::absent(Type::Int),
+                },
             ),
             (
                 "issued_at".to_string(),
-                issued_at
-                    .map(CtValue::Int)
-                    .map(|value| CtValue::Present(Box::new(value)))
-                    .unwrap_or_else(|| CtValue::absent(Type::Int)),
+                match issued_at {
+                    Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+                    Err(_) => CtValue::absent(Type::Int),
+                },
             ),
         ],
     }
@@ -2051,9 +2055,10 @@ fn auth_error_value(error: Crypto::runtime::JetAuthError) -> CtValue {
                 (Some("expected".to_string()), CtValue::Str(expected)),
                 (
                     Some("actual".to_string()),
-                    actual
-                        .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
-                        .unwrap_or_else(|| CtValue::absent(Type::String)),
+                    match actual {
+                        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                        Err(_) => CtValue::absent(Type::String),
+                    },
                 ),
             ],
         ),
