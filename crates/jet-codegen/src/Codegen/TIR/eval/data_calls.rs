@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, HashMap};
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::Builtins::as_bool;
-use crate::Comptime::{apply_core_call, apply_data_line_call, CtReport, CtValue};
+use crate::Comptime::{
+    apply_core_call, apply_data_line_call, CtReport, CtValue, DataPipeline,
+};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
 
@@ -402,12 +404,46 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::Int(missing))
             }
-            "table" | "rows" | "schema" | "lazy" | "plan" | "lazy_filter"
-            | "lazy_sort_by" | "collect" | "sort_by" | "inner_join" | "left_join"
-            | "describe" | "csv_reader" | "json_reader" => Err(unsupported(
-                &format!("`core.data.{method}()` at comptime (impure tier)"),
-                span,
-            )),
+            // I8/I9: `table`/`rows`/`schema` marshal into the one shared
+            // `core.data` pipeline kernel, which mirrors the Prelude's
+            // `jet_data_table` / `jet_data_rows` and the type-driven columns
+            // AOT emits from `emit_data_schema_columns`. This tier owns no
+            // table construction and no second schema derivation.
+            "table" => {
+                let rows = self.eval_expr(&args[0], scope)?;
+                DataPipeline::table_value(
+                    &rows,
+                    args.first().map(|arg| &arg.ty),
+                    Some(call_ty),
+                    span,
+                )
+            }
+            "rows" => {
+                let table = self.eval_expr(&args[0], scope)?;
+                DataPipeline::rows_value(&table, span)
+            }
+            "schema" => {
+                let recv = self.eval_expr(&args[0], scope)?;
+                // Sema's registered field/type tables are the same rows AOT
+                // lowering reads, so an empty table still answers from its
+                // declared row type instead of guessing from a missing sample.
+                let field_types = &self.struct_field_types;
+                let type_params = &self.struct_type_params;
+                let row: DataPipeline::SchemaRow<'_> = &|name: &str| {
+                    Some((
+                        type_params.get(name).cloned().unwrap_or_default(),
+                        field_types.get(name)?.clone(),
+                    ))
+                };
+                DataPipeline::schema_value(&recv, args.first().map(|arg| &arg.ty), row, span)
+            }
+            "lazy" | "plan" | "lazy_filter" | "lazy_sort_by" | "collect" | "sort_by"
+            | "inner_join" | "left_join" | "describe" | "csv_reader" | "json_reader" => {
+                Err(unsupported(
+                    &format!("`core.data.{method}()` at comptime (impure tier)"),
+                    span,
+                ))
+            }
             _ => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
