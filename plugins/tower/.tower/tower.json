@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2024,
-    "rev": 37908,
+    "rev": 37920,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -131764,7 +131764,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Find why task.all resolves to a failure under the pure interpreter when AOT completes it. Per I9 the join/outcome semantics belong to the Prelude and the interpreter ambient is a marshalling adapter: if the ambient re-derives any part of task.all's completion or outcome, that is the defect. Do not weaken the example, do not replace the ?? panic( arm, and do not record this as a tier classification.\n\nRelated context: this epoch already found time.sleep not being a wait point (which made #Shield a semantic no-op) and a task's panic discarding the program's own message. Check whether either mechanism is implicated before looking wider.",
       "blockedBy": [],
@@ -131774,47 +131774,47 @@
         {
           "n": 1,
           "text": "The root cause of the interpreter-side task.all failure is named at file:line, and it is a single mechanism rather than a per-stem patch",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:11.534Z"
+          "evidence": "Root cause named and it is one mechanism, not a per-stem patch. `left :: &particles[0]` is claimed by the split-view planner (TIR/lower/statements.rs:1473-1526 split_view_candidate, unioned at :1593-1637) so it lowers as TStmt::SplitViews and binds a __JetViewMut place region keyed by the OWNER LOCAL NAME (eval/stmts.rs:1936). eval_spawn clones captures into a fresh map for a child on its own thread, so the child scope holds `left` but never `particles`, and view_mut_owner_value / load_view_mut_owner_list did scope.get(\"particles\") == None and returned unsupported(\"view-mut owner\"). That Err became EvalTaskSelectError::Child, task_failure_value, CtValue::failed, and the example's own reporting arm. The representation was the defect: a write window keyed by a scope-local NAME cannot cross a thread.",
+          "at": "2026-08-16T17:13:48.461Z"
         },
         {
           "n": 2,
           "text": "concurrency/scoped_borrow_bands produces byte-identical stdout, stderr and exit code on AOT, default jet run, and the pure interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:12.376Z"
+          "evidence": "Verified by orchestrator at 9164f7e13+bd-w3 merge in .claude/worktrees/builder: cargo test --test run_interpret = ok, 7 passed / 0 failed. scoped_borrow_bands_agrees_on_every_tier passes, asserting byte-identical stdout, stderr and exit code on AOT, default jet run and the pure interpreter.",
+          "at": "2026-08-16T17:13:48.896Z"
         },
         {
           "n": 3,
           "text": "Any task.all completion or outcome logic re-encoded in the interpreter ambient is deleted and replaced by a call to the same Prelude symbol AOT uses (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:13.147Z"
+          "evidence": "Nothing was re-encoded: task.all already routed through the shared selector crate::task_group::jet_task_select (eval/mod.rs:1347), the same selector behind AOT's jet_std::jet_task_all, so no ambient copy existed to delete. The fix EXTENDED the one existing place-loan mechanism (I8) to __JetViewMut regions rather than adding a second: a shared Arc<Mutex<CtValue>> slot in place_loan_slots, a loaned handle carrying no owner local, and close_place_loans flushing into the owner place when the group joins. D-TASKBORROW1's \"owner sees every write once the block ends\" holds on BOTH paths - close_taskgroup (eval/mod.rs:2663-2671) computes the flush eagerly and returns joined.and(closed), so the cancelled path flushes too because its children are already drained.",
+          "at": "2026-08-16T17:13:49.321Z"
         },
         {
           "n": 4,
           "text": "A cross-tier differential test covers the case and asserts the tier actually compiled the function, so a silent deopt cannot supply a passing answer",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:14.205Z"
+          "evidence": "The differential asserts the tier, and that assertion earned its keep twice. First it rejected the initial fix: output matched but the test reported 'default jet run reported no tier for run'. That was traced to a genuine second defect - a warm run-cache hit replayed captured tier-1 machine code and never called record_trace (tier_cache.rs:696), while every COLD route does record a `run` row (api_debug.rs:78/98, deopt.rs:373 with gap.rs:22-39 naming it), so an empty trace was only ever possible on a warm replay. Fixed by carrying the tier roster in the artifact (FORMAT 4->5, published at resident.rs:519-524, recorded at tier_cache.rs:744-762) - the same argument that already makes the artifact carry the entry error rail, since a warm run has no TIR program to ask. An output-only check would have called this stem fixed and shipped a silent reporting hole.",
+          "at": "2026-08-16T17:13:49.752Z"
         },
         {
           "n": 5,
           "text": "No stem is parked in a gap ledger and no skip guard is added",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:14.908Z"
+          "evidence": "No stem was parked in a gap ledger and no skip guard was added.",
+          "at": "2026-08-16T17:13:50.183Z"
         }
       ],
       "refs": [],
@@ -131822,8 +131822,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:37:02.417Z",
-      "updated": "2026-08-16T12:37:14.909Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T17:13:50.785Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T17:13:50.785Z"
     },
     {
       "id": "c0m4rfbe",
@@ -131834,7 +131835,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Find why data.json<Ticket> decode fails under the pure interpreter while AOT decodes the same text. Per I9 the decode is Prelude/CoreLib semantics and the interpreter ambient marshals only; a re-implemented or partially-implemented decode in the ambient is the defect. Generic type argument handling is the first suspect, since the failing call is data.json<Ticket> with a user struct and the sibling generic surface prints generic:value:Int.\n\nDo not weaken the example and do not change the golden.",
       "blockedBy": [],
@@ -131844,47 +131845,47 @@
         {
           "n": 1,
           "text": "The root cause of the interpreter-side decode failure is named at file:line",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:15.500Z"
+          "evidence": "Root cause named: TIR/eval/data_calls.rs:553-558 decode_json_rows was a STUB that discarded every argument and unconditionally returned err(decode_error(\"data.json on the JIT interpreter path is not wired yet\")). The generic type argument was never lost - list_elem already recovered Ticket; the interpreter simply had no decoder. Its csv sibling at :506-551 was the second half of the same defect: a full re-implementation with a hand-written cell-type ladder (parse_cell, :71-108) parallel to the shared decode.",
+          "at": "2026-08-16T17:13:51.225Z"
         },
         {
           "n": 2,
           "text": "tooling/data_json produces byte-identical stdout, stderr and exit code on AOT, default jet run, and the pure interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:16.553Z"
+          "evidence": "Verified by orchestrator at 9164f7e13+bd-w3 merge in .claude/worktrees/builder: cargo test --test run_interpret = ok, 7 passed / 0 failed. data_json_agrees_on_every_tier passes, asserting byte-identical stdout, stderr and exit code on AOT, default jet run and the pure interpreter.",
+          "at": "2026-08-16T17:13:51.672Z"
         },
         {
           "n": 3,
           "text": "The interpreter reaches the same Prelude decode symbol AOT embeds; any re-implemented decode path in the ambient is deleted (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:17.682Z"
+          "evidence": "The interpreter now reaches the shared symbols and the duplicates are deleted. Getting there took removing three separate blockers found in sequence, each surfaced only by re-running: (1) the decode stub and the duplicate csv ladder; (2) a spurious L0502 float-comparison warning that made AOT alone write to stderr - it fired on the COMPILER-GENERATED auto-derive Equatable.equal body, which Sema/Registration/Derives.rs:93-102 builds at the struct's name_span, so any struct with a Float field warned at its own declaration (the enum arm at :436-442 had the same defect, and a committed snapshot tests/ui_lint/float_money.warn had BLESSED the wrong behaviour); (3) core.data.table/rows/schema sat in a blanket unsupported arm at eval/data_calls.rs:407 while the kernel answering them existed only as a private method on the AST comptime interpreter. That kernel was extracted to Comptime/DataPipeline.rs (table_value:145, rows_value:166, schema_columns_for_type:175, schema_value:210) and both interpreters now delegate to it - the AST interpreter's own copy was deleted, so this closed by removing a duplicate rather than adding a third path.",
+          "at": "2026-08-16T17:13:52.104Z"
         },
         {
           "n": 4,
           "text": "A cross-tier differential test covers a typed generic decode and asserts the tier actually compiled the function",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:18.415Z"
+          "evidence": "A cross-tier differential covers a typed generic decode: the example's golden requires the type-driven schema path specifically, since [Empty].{} must yield 0 columns and [Box<Int>].{} must yield value:Int after substituting T->Int, which is why the schema lookup reads sema's registered field/type tables rather than sampling a row.",
+          "at": "2026-08-16T17:13:52.517Z"
         },
         {
           "n": 5,
           "text": "No stem is parked in a gap ledger and no skip guard is added",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:19.308Z"
+          "evidence": "No stem was parked in a gap ledger and no skip guard was added. Boundary admission was checked and proven NOT required rather than assumed: the failure was a runtime E2201 at data_json.jet:21, which proves dispatch already reached eval_core_data_call, the registry row core.data.table -> jet_data_table is CoreCallCoverage::ALL, and the JIT boundary already admitted table|rows|schema at safety.rs:1449.",
+          "at": "2026-08-16T17:13:52.947Z"
         }
       ],
       "refs": [],
@@ -131892,8 +131893,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:37:02.849Z",
-      "updated": "2026-08-16T12:37:19.308Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T17:13:53.552Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T17:13:53.551Z"
     },
     {
       "id": "c0sujl09",
@@ -175984,6 +175986,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T17:13:53.552Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0m4rfbe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T17:13:52.947Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m4rfbe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-16T17:13:52.518Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m4rfbe",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T17:13:52.104Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m4rfbe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T17:13:51.672Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m4rfbe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T17:13:51.226Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m4rfbe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T17:13:50.785Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0f02mn4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T17:13:50.183Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0f02mn4",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-16T17:13:49.753Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0f02mn4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T17:13:49.321Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0f02mn4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T17:13:48.897Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0f02mn4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T17:13:48.464Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0f02mn4",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-16T16:28:18.507Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -179398,90 +179484,6 @@
       "action": "card.criteria-meet",
       "ref": "c0wo4jnm",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-15T14:38:36.227Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T14:38:18.005Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0rqe5rb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T14:38:16.749Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0o54nhr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T14:38:15.846Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T14:38:15.414Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0rqe5rb",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T14:38:15.003Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#15"
-    },
-    {
-      "at": "2026-08-15T14:38:14.579Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#13"
-    },
-    {
-      "at": "2026-08-15T14:38:14.164Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T14:38:13.740Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T14:38:13.312Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o54nhr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T14:37:41.187Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0dfczcq",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T14:37:40.615Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dfczcq",
-      "note": "#6"
     }
   ],
   "nextNum": 368,
