@@ -506,6 +506,31 @@ fn check_func_body_incremental(
     diagnostics
 }
 
+/// I4: a diagnostic is a product, and a lint is advice addressed to whoever
+/// wrote the code. A compiler-generated derive body has no author and no
+/// user-typeable span — every statement in it carries the owning declaration's
+/// name span (`Registration/Derives.rs` builds `self.f == rhs.f` at
+/// `s.name_span`), so a lint from that body names a construct the user never
+/// wrote at a line that cannot contain the defect. `L0502` did exactly that for
+/// any struct or enum with a `Float` field, because the package auto-derive
+/// default gives every type an `Equatable.equal` body.
+///
+/// `TraitImplBlock::compiler_generated` is the parser-unforgeable provenance
+/// (a source `impl T.Trait` is always `false`; jet-foundation `AST/items.rs`),
+/// and it is the only fact consulted here — no second gate, table, or lint
+/// exemption list (I8). Errors are untouched: a generated body that fails to
+/// type-check is still an internal compiler fault, not a silent pass.
+fn author_facing_diagnostics(
+    compiler_generated: bool,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Vec<Diagnostic> {
+    if compiler_generated {
+        diagnostics
+            .retain(|d| matches!(d.severity, crate::Diagnostics::Severity::Error));
+    }
+    diagnostics
+}
+
 pub(crate) fn check_module_bodies(
     module: &mut crate::AST::LoadedModule,
     module_idx: usize,
@@ -825,31 +850,34 @@ pub(crate) fn check_module_bodies(
                         } else {
                             own_params.clone()
                         };
-                        diags.extend(check_func_body_incremental(
-                            format!(
-                                "{module_key}::struct:{}::trait:{}::method:{}",
-                                s.name, block.trait_name, m.name
+                        diags.extend(author_facing_diagnostics(
+                            block.compiler_generated,
+                            check_func_body_incremental(
+                                format!(
+                                    "{module_key}::struct:{}::trait:{}::method:{}",
+                                    s.name, block.trait_name, m.name
+                                ),
+                                m,
+                                module_idx,
+                                states,
+                                effect_facts,
+                                Some(&s.name),
+                                &ct_funcs,
+                                &ct_externs,
+                                &ct_base_dir,
+                                &ct_globals,
+                                freestanding,
+                                gates,
+                                summaries,
+                                embed_inputs_out,
+                                global_addr_taken,
+                                no_alloc,
+                                no_prelude,
+                                name_ledger,
+                                pending_diagnostics_out,
+                                incremental.as_deref_mut(),
+                                cache_allowed,
                             ),
-                            m,
-                            module_idx,
-                            states,
-                            effect_facts,
-                            Some(&s.name),
-                            &ct_funcs,
-                            &ct_externs,
-                            &ct_base_dir,
-                            &ct_globals,
-                            freestanding,
-                            gates,
-                            summaries,
-                            embed_inputs_out,
-                            global_addr_taken,
-                            no_alloc,
-                            no_prelude,
-                            name_ledger,
-                            pending_diagnostics_out,
-                            incremental.as_deref_mut(),
-                            cache_allowed,
                         ));
                         // Generated serde methods temporarily carry inherited,
                         // inferred bounds solely for sema. Their Rust generics
@@ -901,31 +929,34 @@ pub(crate) fn check_module_bodies(
                         } else {
                             own_params.clone()
                         };
-                        diags.extend(check_func_body_incremental(
-                            format!(
-                                "{module_key}::enum:{}::trait:{}::method:{}",
-                                e.name, block.trait_name, m.name
+                        diags.extend(author_facing_diagnostics(
+                            block.compiler_generated,
+                            check_func_body_incremental(
+                                format!(
+                                    "{module_key}::enum:{}::trait:{}::method:{}",
+                                    e.name, block.trait_name, m.name
+                                ),
+                                m,
+                                module_idx,
+                                states,
+                                effect_facts,
+                                Some(&e.name),
+                                &ct_funcs,
+                                &ct_externs,
+                                &ct_base_dir,
+                                &ct_globals,
+                                freestanding,
+                                gates,
+                                summaries,
+                                embed_inputs_out,
+                                global_addr_taken,
+                                no_alloc,
+                                no_prelude,
+                                name_ledger,
+                                pending_diagnostics_out,
+                                incremental.as_deref_mut(),
+                                cache_allowed,
                             ),
-                            m,
-                            module_idx,
-                            states,
-                            effect_facts,
-                            Some(&e.name),
-                            &ct_funcs,
-                            &ct_externs,
-                            &ct_base_dir,
-                            &ct_globals,
-                            freestanding,
-                            gates,
-                            summaries,
-                            embed_inputs_out,
-                            global_addr_taken,
-                            no_alloc,
-                            no_prelude,
-                            name_ledger,
-                            pending_diagnostics_out,
-                            incremental.as_deref_mut(),
-                            cache_allowed,
                         ));
                         m.type_params = if matches!(
                             block.trait_name.as_str(),
