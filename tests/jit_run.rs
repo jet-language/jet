@@ -255,7 +255,7 @@ fn run() {
     );
     assert!(
         !jet_jit::fallback_invoked_for_test(),
-        "a missing host entry deopts to tier 0, which then raises E0956"
+        "a missing residency entry deopts to tier 0, which prints the same bytes from the wrong tier"
     );
 
     let _ = fs::remove_dir_all(&dir);
@@ -623,7 +623,7 @@ fn args_parse_or_exit_runs_resident_for_return_help_and_usage_error() {
     fs::write(
         &file,
         r#"use core.args as args
-use core.term as io
+use core.process as process
 
 fn run() {
     spec :: args.spec()
@@ -789,9 +789,12 @@ fn run() {{
     )
     .unwrap();
 
-    // Default `jet run` cannot deopt this program: tier 0 rejects
-    // `process.cmd` with E0956. Removing any cwd/env/env_remove residency or
-    // dispatch entry therefore makes this command fail.
+    // Both lenses must agree byte for byte. This check is a LENS differential,
+    // not a residency proof: tier 0 now runs `process.cmd` itself (the
+    // interpreter boundary marshals the whole ProcessSpec surface), so a lost
+    // cwd/env/env_remove residency entry would deopt silently and still print
+    // the right bytes here. `zero_arg_process_spec_builders_run_resident` owns
+    // the residency assertion for that family.
     let default = run_jet(&file, false);
     let release = run_jet(&file, true);
     assert_eq!(

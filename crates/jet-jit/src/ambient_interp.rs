@@ -648,6 +648,34 @@ fn process_terminal_mode_value(mode: &process_prelude::TerminalMode) -> CtValue 
     }
 }
 
+/// D-PROCESS-SESSION2=D: the one interpreter-side `TerminalSize` reader. Both
+/// `.terminal(policy)` and `TerminalSession.resize(size)` marshal through it,
+/// so neither surface can drift from the other or from the Cranelift host's
+/// `terminal_size_from_handle` (I8: one reader per shape).
+fn process_terminal_size(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<process_prelude::TerminalSize, Diagnostic> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return Err(unsupported(what, span));
+    };
+    if type_name != "TerminalSize" {
+        return Err(unsupported(what, span));
+    }
+    let cols = process_int(
+        process_field(value, "cols").ok_or_else(|| unsupported(what, span))?,
+        what,
+        span,
+    )?;
+    let rows = process_int(
+        process_field(value, "rows").ok_or_else(|| unsupported(what, span))?,
+        what,
+        span,
+    )?;
+    Ok(process_prelude::TerminalSize { cols, rows })
+}
+
 fn process_terminal_policy(
     value: &CtValue,
     what: &str,
@@ -659,20 +687,8 @@ fn process_terminal_policy(
     if type_name != "TerminalPolicy" {
         return Err(unsupported(what, span));
     }
-    let size = process_field(value, "size").ok_or_else(|| unsupported(what, span))?;
-    let CtValue::Struct { type_name, .. } = size else {
-        return Err(unsupported(what, span));
-    };
-    if type_name != "TerminalSize" {
-        return Err(unsupported(what, span));
-    }
-    let cols = process_int(
-        process_field(size, "cols").ok_or_else(|| unsupported(what, span))?,
-        what,
-        span,
-    )?;
-    let rows = process_int(
-        process_field(size, "rows").ok_or_else(|| unsupported(what, span))?,
+    let size = process_terminal_size(
+        process_field(value, "size").ok_or_else(|| unsupported(what, span))?,
         what,
         span,
     )?;
@@ -681,10 +697,7 @@ fn process_terminal_policy(
         what,
         span,
     )?;
-    Ok(process_prelude::TerminalPolicy {
-        size: process_prelude::TerminalSize { cols, rows },
-        mode,
-    })
+    Ok(process_prelude::TerminalPolicy { size, mode })
 }
 
 fn process_terminal_policy_value(policy: &process_prelude::TerminalPolicy) -> CtValue {
@@ -967,16 +980,43 @@ thread_local! {
     static INTERP_PROCESS_CHILDREN: RefCell<Vec<process_prelude::ProcessChild>> = RefCell::new(Vec::new());
 }
 
+/// I9: `ProcessChild.terminal` is a FIELD, so the interpreter must carry it on
+/// the CtValue the same way the Cranelift host answers
+/// `jet_jit_process_child_terminal` — otherwise the whole expert terminal model
+/// reaches the shared evaluator's "field terminal" refusal (E0956) after a
+/// deopt while AOT and tier 1 both run it. Sema types the field `?TerminalSession`
+/// (CheckerCoreLib/core_types.rs), so present maps to `Present` and absent to a
+/// clean stop.
+///
+/// The session handle IS the child handle, exactly as in `Process.rs`
+/// (`jet_jit_process_child_terminal` returns its own receiver): one identity for
+/// the session in both engines, and no second handle table to keep in step.
 fn process_child_value(child: process_prelude::ProcessChild) -> CtValue {
+    let has_terminal = child.terminal.is_ok();
     let handle = INTERP_PROCESS_CHILDREN.with(|children| {
         let mut children = children.borrow_mut();
         let handle = children.len() as i64;
         children.push(child);
         handle
     });
+    let terminal = if has_terminal {
+        CtValue::Present(Box::new(terminal_session_value(handle)))
+    } else {
+        CtValue::absent(Type::Named("TerminalSession".to_string()))
+    };
     CtValue::Struct {
         type_name: "ProcessChild".to_string(),
-        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+        fields: vec![
+            ("handle".to_string(), CtValue::Int(handle)),
+            ("terminal".to_string(), terminal),
+        ],
+    }
+}
+
+fn terminal_session_value(child: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: "TerminalSession".to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(child))],
     }
 }
 
@@ -1105,6 +1145,51 @@ fn ambient_process_child_handle(
         _ => unreachable!(),
     };
     Some(result)
+}
+
+/// I9: `TerminalSession.resize(size)` — the interpreter marshalling adapter for
+/// `THandleOp::TerminalSessionResize`. It calls the same shared Prelude kernel
+/// (`process_prelude::terminal_session_resize`) that AOT emits and that
+/// `Process.rs::jet_jit_terminal_session_resize` calls, including the same
+/// no-terminal `IOError`, so all three tiers report one text. Without this arm
+/// the shared evaluator answers "handle TerminalSessionResize" (E0956) and
+/// the expert terminal model runs only under AOT and tier 1.
+fn ambient_terminal_session_handle(
+    op: &str,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if op != "TerminalSessionResize" {
+        return None;
+    }
+    Some((|| {
+        let CtValue::Struct { type_name, .. } = &*recv else {
+            return Err(unsupported("TerminalSession receiver", span));
+        };
+        if type_name != "TerminalSession" {
+            return Err(unsupported("TerminalSession receiver", span));
+        }
+        let size = process_terminal_size(
+            args.first()
+                .ok_or_else(|| unsupported("TerminalSession.resize size", span))?,
+            "TerminalSession.resize size",
+            span,
+        )?;
+        with_process_child(recv, |child| match child.terminal.as_ref().ok() {
+            Some(session) => process_unit_outcome(process_prelude::terminal_session_resize(
+                session, &size,
+            )),
+            None => CtValue::failed(Box::new(process_io_error(
+                process_prelude::IOError::other(
+                    process_prelude::IOOperation::Resolve,
+                    Some("process terminal".to_string()),
+                    "this child has no terminal session",
+                ),
+            ))),
+        })
+        .ok_or_else(|| unsupported("TerminalSession receiver", span))
+    })())
 }
 
 fn crypto_err(msg: impl Into<String>) -> CtValue {
@@ -3767,6 +3852,9 @@ pub fn ambient_handle(
         return Some(result);
     }
     if let Some(result) = ambient_process_child_handle(op, recv, args, span) {
+        return Some(result);
+    }
+    if let Some(result) = ambient_terminal_session_handle(op, recv, args, span) {
         return Some(result);
     }
     if let Some(result) = ambient_net_handle(op, recv, args, span) {
