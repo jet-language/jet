@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2012,
-    "rev": 37796,
+    "nextNum": 2020,
+    "rev": 37861,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -130687,7 +130687,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Establish why each of the 43 fails Loader/Sema in-process when the same examples are expected to build in the corpus. Two candidates, and the split matters: (a) they genuinely need a package/manifest context the in-process harness does not construct, in which case the harness must construct it or the audit must declare them out of universe EXPLICITLY rather than by silent omission; (b) they fail for a real frontend defect, in which case each is a bug and the audit was hiding it. Do not close this by adding a skip list -- an explicit out-of-universe declaration must name the reason per stem and be counted, so the number can only shrink. Then pin the universe size the same way COMPILE_COVERED_FLOOR pins coverage, so a stem cannot fall out of the universe silently. blockedBy: none",
       "blockedBy": [],
@@ -130708,38 +130708,38 @@
         {
           "n": 1,
           "text": "Each of the 43 stems is classified as genuinely out-of-universe with a named reason, or as a frontend defect with a card",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:20:54.044Z"
+          "evidence": "Both silent-drop sites are gone. tests/dev.rs:665-673 replaces Err(_) => continue on Loader failure and :680-686 replaces the Sema-error continue; each now returns JitCompileVerdict::OutOfUniverse with a named reason string of the form loader|sema: CODE: message. The loop body is a match on an exhaustive three-variant enum, so totality is structural rather than a convention - no continue remains in the walk. observe_jit_coverage asserts covered + gaps + out_of_universe == corpus. Measured at c2eb365be: 53 stems classified out-of-universe, each carrying its real diagnostic (28x E2402 no declared NetError->Err conversion, 7x loader E0606 project module declared more than once, 5x E0405, 3x E0113, and 10 singletons). Follow-up card minted for that population so the number can only shrink.",
+          "at": "2026-08-16T12:53:15.300Z"
         },
         {
           "n": 2,
           "text": "The audit's universe size is pinned outside tests/jit_gaps.txt so a stem cannot silently leave it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:20:54.492Z"
+          "evidence": "Universe pinned outside tests/jit_gaps.txt: EXAMPLE_CORPUS_FLOOR = 496 at tests/dev.rs:615 and OUT_OF_UNIVERSE_CEILING at :625, both at module scope and both asserted by the audit and by cranelift_three_way_differential_battery. A ceiling on out-of-universe is the load-bearing half: stems the oracle is blind to cannot grow silently.",
+          "at": "2026-08-16T12:53:15.717Z"
         },
         {
           "n": 3,
           "text": "gaps: 0 is only reportable when the universe is complete, or the report states the universe it is scoped to",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:20:55.286Z"
+          "evidence": "Verified by orchestrator run at c2eb365be, cargo test --test dev -- jit_coverage_audit --exact --nocapture. The audit now prints its denominator before judging: 'jit compile-coverage universe: 496 example stem(s) = 415 compile-covered + 28 compile gap(s) + 53 outside this oracle' and explicitly 'the 28 gap row(s) are scoped to the 443 stem(s) this oracle could judge, NOT to the 496-stem corpus'. So a gaps count can no longer be read as a corpus-wide claim. The audit is currently RED on those 28 gaps, which is correct: per I9 they are lowering bugs to fix, not rows to add.",
+          "at": "2026-08-16T12:53:16.159Z"
         },
         {
           "n": 4,
           "text": "No skip list is introduced that lets a stem vanish without a counted reason",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:20:56.440Z"
+          "evidence": "No skip list exists. Every out-of-universe stem carries a counted, named reason derived from its own diagnostic, and the population is bounded by OUT_OF_UNIVERSE_CEILING, so a stem cannot vanish without a reason and the count can only shrink.",
+          "at": "2026-08-16T12:53:16.934Z"
         }
       ],
       "refs": [],
@@ -130752,8 +130752,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T00:20:52.947Z",
-      "updated": "2026-08-16T03:48:34.076Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T12:53:18.674Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T12:53:18.674Z"
     },
     {
       "id": "c08gsdcg",
@@ -131113,7 +131114,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
       "plan": "Rename the five bare declarations to fragment-unique names following the existing convention. Purely mechanical: these are unit tests inside embedded fragments and nothing outside a fragment names its own test module.\n\nThen make the convention enforceable rather than aspirational: a test that scans PRELUDE_PARTS for a crate-root `mod tests` and fails, so a sixth cannot appear. Without that this recurs -- two of the five arrived AFTER the convention was already established by the four that follow it.\n\nWhile there, decide whether a raw `rustc --test` build of generated Rust should be supported at all. If it is genuinely unsupported, the harness should fail fast with a clear message rather than surfacing as E0428 from the middle of a 10,000-line generated file. blockedBy: none",
       "blockedBy": [],
@@ -131123,29 +131124,29 @@
         {
           "n": 1,
           "text": "No two Prelude fragments declare the same crate-root module name",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T02:25:24.406Z"
+          "evidence": "Six bare `mod tests` declarations renamed to fragment-unique names following the four existing exemplars (SharedProtocol shared_protocol_tests, TypedText typed_boundary_tests, Auth auth_tests, Scheduler interrupt_boundary_tests): NumericWiden.rs:45 -> numeric_widen_tests, Core/Progress.rs:71 -> progress_render_tests, TaskGroup.rs:491 -> task_group_tests, TestReport.rs:146 -> test_report_tests, Ui.rs:919 -> ui_backend_tests, and a SIXTH the card did not know about, crates/jet-foundation/src/StructuralDebug.rs:199 -> structural_debug_tests. StructuralDebug is UNCONDITIONAL in PRELUDE_PARTS (Codegen/mod.rs:205), so every generated program carried THREE colliding declarations, not the two the card estimated. Scope note for honesty: the guard added below enforces the `mod tests` collision that was actually occurring, not general uniqueness of every crate-root module name.",
+          "at": "2026-08-16T12:57:31.852Z"
         },
         {
           "n": 2,
           "text": "A test scans PRELUDE_PARTS and fails if a fragment declares a bare `mod tests`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T02:25:24.837Z"
+          "evidence": "crates/jet-codegen/src/Codegen/mod.rs:3023-3102 fn prelude_fragments_never_declare_a_crate_root_mod_tests. Two halves: a recursive sweep of crates/jet-codegen/src/Prelude/** plus the jet-foundation fragments spliced into the same flat crate, reporting every offending path with the convention and its exemplars; and a scan of the PRELUDE_PARTS bytes themselves so a part present in every generated program fails by index. Detection is column-zero `mod tests` / `pub mod tests` / `pub(crate) mod tests` followed by `{` or `;`, so nested modules are correctly ignored. VERIFIED GREEN by the orchestrator at 3360a6bb0: cargo test -p jet-codegen --lib -- Codegen::tests::prelude_fragments_never_declare_a_crate_root_mod_tests --exact = ok, 1 passed. (First attempt filtered without the module path and reported '0 tests, ok' - a false green that was caught and re-run with the full path.)",
+          "at": "2026-08-16T12:57:32.282Z"
         },
         {
           "n": 3,
           "text": "A raw rustc --test build of generated Rust either works or fails with a clear message naming the reason",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T02:25:25.252Z"
+          "evidence": "Decision recorded: a raw `rustc --test` build of generated Rust is NOT SUPPORTED. Reason: it synthesizes a harness from the COMPILER's private Prelude fragment unit tests inside a user program - not the program's tests, not shipped - and it forces the inline single-crate form, so it does not even exercise the shipped cached-runtime shape. `jet test` builds its own harness (TEST_PRELUDE / jet_test_print) and is the supported path. tests/common/mod.rs:189-208 now FAILS FAST with a named reason instead of surfacing as E0428 from the middle of a 10,000-line generated file, and the old rust_test_harness inline special case is dropped; has_rust_ffi remains the only inline trigger. Verified no current caller regresses: tests/ownership.rs:526 passes --test to a hand-written Rust harness through a raw Command, not to generated output; tests/corelib_parts/net.rs:1732 passes --cfg test, not --test.",
+          "at": "2026-08-16T12:57:32.710Z"
         }
       ],
       "refs": [],
@@ -131157,8 +131158,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T02:25:23.969Z",
-      "updated": "2026-08-16T02:25:25.253Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T12:57:33.330Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T12:57:33.330Z"
     },
     {
       "id": "c01j4gal",
@@ -131488,7 +131490,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Add a test that runs the same program twice through `jet run` and asserts the second run matches the first byte-for-byte, including exit code, on a stem whose artifact is known to round-trip AND one whose function set differs (streams/generators, once its asymmetry is fixed). The assertion is store-then-replay equivalence, which is the actual contract of the cache.\n\nThen decide the scope deliberately: a single stem proves the mechanism, but the asymmetry above shows the bug is stem-shape dependent, so a small matrix across function-set shapes is what would actually have caught it. Say which you chose.\n\nAlso make the cache location discoverable from the test, since it lives outside the tree at ~/.cache/jet/run -- a test that cannot clear it cannot control its own preconditions, and a warm artifact leaking between tests would be worse than no test. blockedBy: none",
       "blockedBy": [],
@@ -131504,38 +131506,38 @@
         {
           "n": 1,
           "text": "A test runs the same program twice through jet run and asserts run2 matches run1 byte-for-byte including exit code",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T04:40:41.294Z"
+          "evidence": "tests/run_cache.rs:345-432, fn example_stems_replay_identically_on_a_second_run: runs each row twice through jet run and asserts run2 == run1 on stdout, stderr AND exit code (:398-409). Verified green by the orchestrator at c2eb365be: cargo test --test run_cache = ok, 12 passed / 0 failed.",
+          "at": "2026-08-16T12:53:19.563Z"
         },
         {
           "n": 2,
           "text": "The test controls its own cache precondition rather than inheriting whatever is on the machine",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T04:40:41.722Z"
+          "evidence": "The test controls its own precondition rather than inheriting the machine: cache dir comes from common::unique_tmp, JET_RUN_CACHE_DIR is set, and tests/run_cache.rs:359-372 asserts jet::RunCache::cache_root() == that dir BEFORE any run, so the redirect is proven in force rather than assumed. Source/RunCache.rs:75-79 makes cache_root public and documents that the default lives outside the tree at ~/.cache/jet/run. Each row also gets its own subdirectory (:392-393) so no artifact leaks between rows.",
+          "at": "2026-08-16T12:53:20.508Z"
         },
         {
           "n": 3,
           "text": "The matrix covers more than one function-set shape, or the single-stem choice is justified",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T04:40:42.159Z"
+          "evidence": "Matrix covers three distinct function-set shapes, not one: streams/generators (generator), cli/typed_entry_args (CLI adapter), errors/default_err_edge (non-zero exit). tests/run_cache.rs:390 asserts each row is an existing file so a renamed example fails as not-a-file instead of silently degrading - the corpus trap where a nonexistent stem is indistinguishable from a failing one.",
+          "at": "2026-08-16T12:53:21.687Z"
         },
         {
           "n": 4,
           "text": "streams/generators specifically passes a warm second run once the capture/reload asymmetry is fixed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T04:40:42.572Z"
+          "evidence": "streams/generators passes a warm second run: it is row 1 of the green test above. The capture/reload asymmetry (stored relocation UserExternalName one past the re-declared function set, index out of bounds len 1685 index 1685 from get_function_decl) was checked at c14e1ec2f and found ALREADY FIXED by 49f1a7bd7 (card #1981); no further change was needed for it and none was made.",
+          "at": "2026-08-16T12:53:22.114Z"
         }
       ],
       "refs": [],
@@ -131548,8 +131550,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T04:40:40.863Z",
-      "updated": "2026-08-16T05:53:41.820Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T12:53:22.728Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T12:53:22.728Z"
     },
     {
       "id": "c06lni1w",
@@ -131560,7 +131563,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": "Carry the error rail in the artifact: FORMAT 3 -> 4. Storing the error type's NAME is sufficient for all four predicates, since each only tests Type::Named -- so one string plus the booleans, not a general type serialization.\n\nBump the format version so an existing FORMAT 3 artifact is refused rather than misread; a stale artifact that silently loses the rail is exactly the bug being fixed, so a reload must not accept one.\n\nThe test that would have caught this is the same-program-twice assertion in the warm-hit coverage card, with a fixture that EXITS NON-ZERO. Make sure the matrix includes a failing entry, because every fixture that currently exercises warm hits exits 0, which is precisely why this was invisible. blockedBy: none",
       "blockedBy": [],
@@ -131570,38 +131573,38 @@
         {
           "n": 1,
           "text": "A program that exits non-zero cold exits with the same status warm, for all three named examples",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T05:53:38.699Z"
+          "evidence": "Verified by orchestrator at merged master c2eb365be in .claude/worktrees/builder: cargo test --test run_cache = ok, 12 passed / 0 failed. The new example_stems_replay_identically_on_a_second_run row for examples/features/errors/default_err_edge.jet asserts run2 exit code == run1 exit code, and tests/run_cache.rs:411-416 additionally asserts that row really exits NON-ZERO so it cannot quietly lose its teeth. Cold-vs-warm exit divergence is therefore closed and permanently guarded.",
+          "at": "2026-08-16T12:53:23.161Z"
         },
         {
           "n": 2,
           "text": "The artifact carries the error rail and the format version is bumped so a stale artifact is refused rather than misread",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T05:53:39.134Z"
+          "evidence": "Artifact FORMAT bumped 3 -> 4 at crates/jet-jit/src/jit/tier_cache.rs:33, carrying struct EntryRail (:82-100) with the four booleans plus the error type NAME only (no general type serializer, since every consumer tests solely Type::Named). Capture at :106-120 copies the rail off the live ResidentModule rather than re-deriving it in an engine (I9). Reload at :686-693 replaces the five hard-coded false/None. Stale-artifact refusal at :543-550: Some(FORMAT) => {} and any other version returns Err, so a FORMAT 3 artifact never reaches decode_body and can never be read as if it had a rail. Source/RunCache.rs:207-214 turns that Err into a miss, removes the directory, and recomputes cold.",
+          "at": "2026-08-16T12:53:23.589Z"
         },
         {
           "n": 3,
           "text": "The run cache is not disabled wholesale; warm hits still occur for programs that legitimately cache",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T05:53:39.996Z"
+          "evidence": "Not disabled wholesale: cargo test --test run_cache shows the pre-existing warm-hit tests still green (warm_hit_skips_front_end_and_matches_stdout, phases_zero_on_inprocess_warm_hit, default_run_stays_jit_module_cache_not_aot all ok). The withdrawn capture-site opt-out was NOT reintroduced. tests/run_cache.rs:418-430 runs a traced third run on the failing row and requires a literal [run-cache] hit, proving the row passes from the warm path rather than from a refused artifact recompiling cold - identical output alone would not have distinguished those.",
+          "at": "2026-08-16T12:53:25.744Z"
         },
         {
           "n": 4,
           "text": "A warm-hit test covers a fixture that exits non-zero, not only exit-0 fixtures",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T05:53:40.823Z"
+          "evidence": "The matrix includes a non-zero-exit fixture: examples/features/errors/default_err_edge.jet, must_exit_nonzero = true. Previously every warm-hit fixture exited 0, which is exactly why this defect was invisible.",
+          "at": "2026-08-16T12:53:26.659Z"
         }
       ],
       "refs": [],
@@ -131614,7 +131617,550 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T05:53:38.267Z",
-      "updated": "2026-08-16T05:53:40.824Z",
+      "updated": "2026-08-16T12:53:27.924Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T12:53:27.924Z"
+    },
+    {
+      "id": "c0n0c2y4",
+      "num": 2012,
+      "title": "jit_covered_example_stems drops stems silently, the same hole as the coverage audit",
+      "body": "Sibling of #1998, found while fixing it. `observe_jit_coverage` silently dropped any stem whose in-process Loader or Sema failed, so 81 of 496 stems never entered the audit's universe; #1998 replaced that with a total three-way classification.\n\n`jit_covered_example_stems` still has the SAME silent-drop defect, and it feeds `cranelift_three_way_differential_battery`. So the three-way differential battery is scoped to an unstated denominator in exactly the way the coverage audit was: stems it cannot load are not reported as uncovered, they simply are not tested, and the battery still reports success.\n\nThat is the same false-confidence class #1998 and #1663 exist to correct, one battery further out.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Give jit_covered_example_stems the same totality #1998 gave observe_jit_coverage: every stem lands in a named bucket, an out-of-universe stem carries a counted reason, and the battery states the universe it is scoped to rather than implying the corpus.\n\nPrefer sharing the classification helper #1998 introduced over writing a second one — two oracles that can disagree is the defect being removed, not a smaller version of it (I8).",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jit_covered_example_stems classifies every stem it walks; no code path drops a stem without a counted reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:04.102Z"
+        },
+        {
+          "n": 2,
+          "text": "It shares the classification helper introduced for observe_jit_coverage rather than reimplementing it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:04.547Z"
+        },
+        {
+          "n": 3,
+          "text": "cranelift_three_way_differential_battery states the universe it is scoped to, and cannot report success while that universe is incomplete",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:04.991Z"
+        },
+        {
+          "n": 4,
+          "text": "The universe size is pinned so a stem cannot silently leave it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:05.415Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:36:49.841Z",
+      "updated": "2026-08-16T12:37:05.416Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0y6raw5",
+      "num": 2013,
+      "title": "tests/jit_corpus_gate.txt is 122 rows stale, so its classifications cannot be cited",
+      "body": "Measured while fixing #1998: the corpus holds 496 top-level stems and tests/jit_corpus_gate.txt records 374, so 122 stems have NO row in any gate section. The file's own stated invariant is that every top-level example appears in exactly one section.\n\nConsequence, and the reason this is P1 rather than hygiene: several open cards cite this file's resident_jit and deopt_interp classifications as current evidence about which tier runs a stem. With 122 stems unclassified and the file not reconciled since the corpus grew, those citations are not trustworthy, and example_corpus_strict_jit_aot_differential_gate cannot be green while the file disagrees with the corpus.\n\nexamples/features/tooling/data_plot.jet is one confirmed instance: it appears in no section at all.\n\nThis is a sibling of #1998 (the coverage audit's universe hole) and #1663 (the jit_gaps ledger's three hand-falsifications), and it must not be fixed the way those were broken: by hand-editing rows to match whatever an incomplete oracle currently observes.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Re-derive the gate file from an observed run once, after #1998's total classification has landed, and pin its row count against the corpus stem count so a stem cannot fall out of a section unnoticed.\n\nDo not hand-add rows. The reconciliation that produced the current state of tests/jit_gaps.txt (12648cdcc) made the ledger self-consistent with an INCOMPLETE oracle and thereby understated real coverage; repeating that here would be the fourth hand-edit of a file class that has already been falsified three times.\n\nSequencing: depends on #1998 being integrated first, since a re-derivation against a blind oracle reproduces the bug.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every top-level corpus stem appears in exactly one section of tests/jit_corpus_gate.txt, and the file's row count is pinned against the corpus stem count",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:06.105Z"
+        },
+        {
+          "n": 2,
+          "text": "The rows are re-derived from an observed run, not hand-added to match a classification",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:07.170Z"
+        },
+        {
+          "n": 3,
+          "text": "A stem that leaves a section fails a test rather than disappearing",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:08.215Z"
+        },
+        {
+          "n": 4,
+          "text": "tooling/data_plot specifically has a section and a reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:09.124Z"
+        },
+        {
+          "n": 5,
+          "text": "No card's evidence still cites a classification this file no longer supports",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:10.080Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:36:50.517Z",
+      "updated": "2026-08-16T12:37:10.080Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0f02mn4",
+      "num": 2014,
+      "title": "concurrency/scoped_borrow_bands: the interpreter fails a task.all that AOT completes",
+      "body": "Found by the strict corpus gate at c2eb365be (tests/dev.rs:9194, thread corpus-gate-5). The pure interpreter and AOT disagree on examples/features/concurrency/scoped_borrow_bands.jet.\n\nAOT: stdout \"[12, 34]\\n12\\n20\\n34\\n23\\n23\\n\", empty stderr, exit 0.\nPure interpreter: empty stdout, and a Stop [E3001] `panic: task.all failed` raised at scoped_borrow_bands.jet:23 in run, from the `} ?? panic(\"task.all failed\"))` arm.\n\nSo task.all succeeds on AOT and fails on the interpreter for the same program. This is an I9 tier-parity violation and a member of the silent-wrong-answer class: the interpreter produced a confident, well-rendered failure for a program that is correct.\n\nThe panic( arm is the example reporting the failure, not the cause. The cause is whatever makes task.all fail under the interpreter.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Find why task.all resolves to a failure under the pure interpreter when AOT completes it. Per I9 the join/outcome semantics belong to the Prelude and the interpreter ambient is a marshalling adapter: if the ambient re-derives any part of task.all's completion or outcome, that is the defect. Do not weaken the example, do not replace the ?? panic( arm, and do not record this as a tier classification.\n\nRelated context: this epoch already found time.sleep not being a wait point (which made #Shield a semantic no-op) and a task's panic discarding the program's own message. Check whether either mechanism is implicated before looking wider.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root cause of the interpreter-side task.all failure is named at file:line, and it is a single mechanism rather than a per-stem patch",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:11.534Z"
+        },
+        {
+          "n": 2,
+          "text": "concurrency/scoped_borrow_bands produces byte-identical stdout, stderr and exit code on AOT, default jet run, and the pure interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:12.376Z"
+        },
+        {
+          "n": 3,
+          "text": "Any task.all completion or outcome logic re-encoded in the interpreter ambient is deleted and replaced by a call to the same Prelude symbol AOT uses (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:13.147Z"
+        },
+        {
+          "n": 4,
+          "text": "A cross-tier differential test covers the case and asserts the tier actually compiled the function, so a silent deopt cannot supply a passing answer",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:14.205Z"
+        },
+        {
+          "n": 5,
+          "text": "No stem is parked in a gap ledger and no skip guard is added",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:14.908Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:37:02.417Z",
+      "updated": "2026-08-16T12:37:14.909Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0m4rfbe",
+      "num": 2015,
+      "title": "tooling/data_json: the interpreter fails a data.json decode that AOT completes",
+      "body": "Found by the strict corpus gate at c2eb365be (tests/dev.rs:9194, thread corpus-gate-5). The pure interpreter and AOT disagree on examples/features/tooling/data_json.jet.\n\nAOT: stdout \"team:String\\nminutes:Float\\nselected:2\\nTools:5.0\\nCore:8.0\\nempty_struct:0\\ngeneric:value:Int\\ncore.data.json:native\\n\", empty stderr, exit 0.\nPure interpreter: empty stdout, and a Stop [E3001] `panic: bad json` raised at data_json.jet:20 in run, from `rows :: data.json<Ticket>(raw) ?? panic(\"bad json\")`.\n\nSo a typed generic JSON decode succeeds on AOT and fails on the interpreter for the same input. This is an I9 tier-parity violation of the silent-wrong-answer class.\n\nNote the last line of the AOT output, `core.data.json:native`: the example itself asserts which implementation answered, so the interpreter is not merely slower, it is taking a different path.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Find why data.json<Ticket> decode fails under the pure interpreter while AOT decodes the same text. Per I9 the decode is Prelude/CoreLib semantics and the interpreter ambient marshals only; a re-implemented or partially-implemented decode in the ambient is the defect. Generic type argument handling is the first suspect, since the failing call is data.json<Ticket> with a user struct and the sibling generic surface prints generic:value:Int.\n\nDo not weaken the example and do not change the golden.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root cause of the interpreter-side decode failure is named at file:line",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:15.500Z"
+        },
+        {
+          "n": 2,
+          "text": "tooling/data_json produces byte-identical stdout, stderr and exit code on AOT, default jet run, and the pure interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:16.553Z"
+        },
+        {
+          "n": 3,
+          "text": "The interpreter reaches the same Prelude decode symbol AOT embeds; any re-implemented decode path in the ambient is deleted (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:17.682Z"
+        },
+        {
+          "n": 4,
+          "text": "A cross-tier differential test covers a typed generic decode and asserts the tier actually compiled the function",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:18.415Z"
+        },
+        {
+          "n": 5,
+          "text": "No stem is parked in a gap ledger and no skip guard is added",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:19.308Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:37:02.849Z",
+      "updated": "2026-08-16T12:37:19.308Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0sujl09",
+      "num": 2016,
+      "title": "The strict corpus gate hangs 30s on web/app_hello because a server example has no bounded stop",
+      "body": "Found by the strict corpus gate at c2eb365be (tests/dev.rs:418). The compiled binary for examples/features/web/app_hello.jet prints `serving http://127.0.0.1:8080` and then never exits, so the gate kills it after 30s and records a classification failure.\n\nThis is not a tier divergence. It is a harness/corpus contract gap: the gate compiles and RUNS every top-level stem, and a server example's correct behaviour is to serve until stopped. Under the current contract a correct program is indistinguishable from a hung one.\n\nCost: 30 seconds of every gate run, plus a classification failure that masks whether anything else about this stem is wrong. Card #1796 covered a DIFFERENT app_hello failure (Rc<dyn Fn> not Send) and is closed; this is new.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "Decide the contract deliberately, then implement it once for the whole family rather than special-casing one stem. Either a server-shaped example declares a bounded stop the harness can drive (serve-then-exit on a signal, a request budget, or a documented run mode), or the gate declares such stems out of its RUN universe with a counted, named reason while still requiring them to COMPILE.\n\nThe second option must follow the rule established for the coverage audit's universe on card #1998: an excluded stem carries a named reason and is counted, so the number can only shrink. A bare skip list is not acceptable.\n\nAudit for siblings: any other stem that serves or waits indefinitely has the same problem and must be handled by the same mechanism.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The chosen contract is recorded, and it is one mechanism applied to every indefinitely-running stem rather than a per-stem exception",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:20.517Z"
+        },
+        {
+          "n": 2,
+          "text": "The strict corpus gate no longer spends its timeout on web/app_hello, and a genuinely hung program is still distinguishable from a correct server",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:21.240Z"
+        },
+        {
+          "n": 3,
+          "text": "Every server-shaped or indefinitely-waiting stem is enumerated and handled by that mechanism",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:22.070Z"
+        },
+        {
+          "n": 4,
+          "text": "If any stem is excluded from the run universe, the exclusion is counted and carries a named reason, and the stem is still required to compile",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:23.153Z"
+        },
+        {
+          "n": 5,
+          "text": "example_corpus_strict_jit_aot_differential_gate reaches its own assertion without a timeout kill",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:24.043Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:37:03.255Z",
+      "updated": "2026-08-16T12:37:24.043Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0zkvjon",
+      "num": 2017,
+      "title": "One stdin fixture source for the three harnesses that feed terminal examples",
+      "body": "Found while closing #2009. examples/features/io/terminal_parity.jet needs stdin, and the answer bytes are hardcoded in three places today: tests/golden.rs:469 (b\"\\nnot-a-number\\n3\\n2\\n\"), tests/corelib_parts/http_data.rs:1362, and tests/terminal.rs (four call sites, the PTY one appending a trailing \"secret\\n\").\n\nTwo dev.rs batteries feed NO stdin at all and compare a no-input run against the fed-stdin golden: interpreter_matches_expected_golden (via dev_iteration_with_timeout) and assert_io_cli_terminal_time_three_way (via dev_iteration plus compiled_binary_output). Before #2009 that mismatch presented as a 30s hang; after #2009 it is a fast, readable golden mismatch, which is why this is now tractable.\n\nThe hard half: dev_iteration_with_timeout runs IN-PROCESS on a worker thread (tests/dev.rs:463-471), so there is no child stdin to pipe. That half needs either a real subprocess or an injected reader. dev.rs:228 compiled_binary_output_with_stdin takes Option<&Path> while golden.rs hardcodes bytes, so the signatures disagree too.\n\nThat combination is why this is a design task and not plumbing, and why it is its own card rather than folded into a terminal lane.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m18-devloop-testing",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Introduce one stem-to-stdin-answers source, read by golden.rs, both dev.rs batteries, and terminal.rs. One fixture, N readers (I8) — a fourth hardcoded copy of the same byte string is the defect, not the fix.\n\nResolve the in-process half explicitly: either dev_iteration_with_timeout gains an injected reader, or the battery moves to a real subprocess. Say which and why, since the choice decides whether the interpreter path is exercised in-process or out.\n\nUnify the signature disagreement between compiled_binary_output_with_stdin (Option<&Path>) and golden.rs (inline bytes) rather than adding a converter at each call site.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One fixture source maps stem to stdin answers, and golden.rs, both dev.rs batteries and terminal.rs all read it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:24.648Z"
+        },
+        {
+          "n": 2,
+          "text": "No hardcoded copy of a stdin answer string remains in any harness",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:25.628Z"
+        },
+        {
+          "n": 3,
+          "text": "The in-process dev_iteration_with_timeout path receives its input by a stated mechanism (injected reader or subprocess), and the choice is recorded with its reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:26.514Z"
+        },
+        {
+          "n": 4,
+          "text": "interpreter_matches_expected_golden and assert_io_cli_terminal_time_three_way feed the same input the golden was recorded with, so a pass means agreement rather than a shared absence of input",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:27.395Z"
+        },
+        {
+          "n": 5,
+          "text": "io/terminal_parity passes on golden, both dev batteries, and terminal.rs including the PTY case",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:37:28.369Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:37:03.662Z",
+      "updated": "2026-08-16T12:37:28.369Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0dr8aqt",
+      "num": 2018,
+      "title": "53 shipped examples fail in-process Loader or Sema and were invisible to every coverage claim",
+      "body": "Exposed by #1998, which replaced the JIT coverage oracle's two silent `continue`s with a total three-way classification. Measured at c2eb365be by `cargo test --test dev -- jit_coverage_audit --exact --nocapture`:\n\n  jit compile-coverage universe: 496 example stem(s) = 415 compile-covered + 28 compile gap(s) + 53 outside this oracle\n\nThose 53 shipped examples FAIL in-process Loader or Sema. They were invisible for as long as the oracle existed, so no coverage or parity claim has ever included them. Breakdown by diagnostic, with a representative stem and the real message:\n\n- 28x sema E2402 - `?` can't convert `NetError` into `Err` - no declared conversion exists (net/dns_lookup, net/email_dkim, net/email_message, net/http_rest_service, net/http_routes, net/http_server_lifecycle, and 22 more; the net/* and serde/* families)\n- 7x loader E0606 - project module `project.math` is declared more than once (modules/fact_value_arguments, modules/generic_modules, modules/inline_module, modules/library, modules/module_inline_sibling, modules/pub_file, +1)\n- 5x sema E0405 - `?? return` here needs a value (net/http_client, net/http_get, net/http_readiness, tooling/debug_native, web/ui_showcase)\n- 3x sema E0113 - `run` promises to return Unit ? Err, but this `return` is empty (concurrency/parallel_scan, concurrency/parallel_scan_expert, io/watcher)\n- 2x sema E0740 - `run` uses the effect `Panic`, which its signature doesn't allow (crypto/vault_keys, io/db_read_footprint)\n- 1x each: E0510 core.crypto.vault.get requires an audited #Unsafe region (crypto/vault_secret); E0712 #Grant region uses Panic without capability (effects/effect_grant); E0106 the name `Queue` is built in and can't be redefined (memory/pin); E1101 `changed` cannot cross the `task capture` boundary (memory/shared_guard_queue); loader E0003 expected `::` or `:=` (modules/package); E1004 core.encoding.json has no item `decode` (serde/json_coerce); E0107 nothing named `time` exists here (text/duration_facts); E0956 core.compiler.lex is compile-time only (tooling/compiler_api)\n\nThe split that matters is whether each is (a) an in-process HARNESS gap - the stem needs a package/manifest context the oracle does not construct, and compiles fine in the corpus - or (b) a real frontend defect on a shipped example. The uniformity of the 28x E2402 and 7x E0606 suggests (a) for those two families, and the singletons look more like (b), but NEITHER has been established. Do not assume.\n\nKnown related cards, check before duplicating: #1782 owns modules/generic_modules E0956/E0107; #2002 owns E1004 rejecting json.decode then suggesting json.decode; tooling/compiler_api's E0956 is the same family as #1782.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Establish the (a)/(b) split with evidence, one family at a time, largest first.\n\nFor an (a) family, the fix is to make the oracle construct the context the corpus gate already constructs, so the stems enter the universe and are actually judged. Declaring them permanently out-of-universe is the weaker outcome and must be justified per family, not per stem.\n\nFor a (b) stem, the example or the front end is genuinely broken and the audit was hiding it; fix the defect. E2402 in particular is a real language question: 28 shipped net/* examples using `?` on NetError with no declared conversion is either a missing Prelude conversion or 28 examples written against a surface that no longer exists.\n\nWhatever the outcome, OUT_OF_UNIVERSE_CEILING in tests/dev.rs must be lowered by exactly the number of stems this card recovers, in the same diff. The ceiling is the ratchet: the population may only shrink.\n\nDo not add a skip list, and do not raise the ceiling to accommodate a new failure.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each of the 53 stems is established as (a) an in-process harness/context gap or (b) a real frontend defect, with per-family evidence rather than an assumption",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:54:01.973Z"
+        },
+        {
+          "n": 2,
+          "text": "Every (a) family either enters the oracle's universe because the harness now constructs the context, or carries a per-family justification for remaining outside it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:54:02.403Z"
+        },
+        {
+          "n": 3,
+          "text": "Every (b) stem is fixed, or has its own card with the diagnostic recorded",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:54:02.836Z"
+        },
+        {
+          "n": 4,
+          "text": "The 28x E2402 NetError conversion family is resolved at the mechanism level, not by editing 28 examples one at a time",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:54:03.276Z"
+        },
+        {
+          "n": 5,
+          "text": "OUT_OF_UNIVERSE_CEILING is lowered by exactly the number of stems recovered, in the same diff, and no skip list is introduced",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:54:03.698Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:54:01.076Z",
+      "updated": "2026-08-16T12:54:03.699Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c032bed5",
+      "num": 2019,
+      "title": "The jet-codegen lib test target never ran, hiding a TIR coverage failure and a stack overflow",
+      "body": "The `jet-codegen` lib test target has never been runnable, so 217 unit tests including the whole `Codegen::TIR::tests` coverage suite have never guarded anything. Found while verifying #2004, whose enforcement test lives in this target.\n\nTwo compile errors, both present at c14e1ec2f and fixed by the orchestrator in 3360a6bb0 so the target builds:\n- `Codegen/mod.rs` tests module called `install_comptime_bridge` without importing it (E0425)\n- `time_monotonic_pos` was bound twice, so the first binding was unused and `#![deny(warnings)]` rejected the crate\n\nWith the target compiling, two REAL defects are now visible (`cargo test -p jet-codegen --lib -- --test-threads=1 --nocapture` at 3360a6bb0):\n\n1. `Codegen::TIR::tests::covers_generic_optional_return` FAILS: `assertion failed: covers(src, \"opt_id\")` at crates/jet-codegen/src/Codegen/TIR/tests.rs:2068. A generic function with an optional return is not TIR-covered. This is the same predicate family as #1976/#1986/#1987 and the same \"sema admits, TIR does not cover\" polarity as #2008.\n\n2. `Codegen::TIR::tests::covers_labeled_loops` ABORTS the process with a genuine STACK OVERFLOW:\n```\nthread 'Codegen::TIR::tests::covers_labeled_loops' has overflowed its stack\nfatal runtime error: stack overflow, aborting\n```\nNote the discriminator that card #1997 documents: this is the textually distinct exhaustion pair (`has overflowed its stack` + `fatal runtime error: stack overflow`), NOT the `failed to initiate panic, error 5` case. So this IS real recursion depth, and raising a stack constant would be treating the symptom - something is recursing without bound on labeled loops.\n\nBecause the abort kills the process partway through the suite, every test ordered after `covers_labeled_loops` is still unmeasured. The pass/fail counts above are a floor, not the full picture.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Fix both defects, then run the whole target once to find what the abort has been hiding - the two known failures are only the tests reached before the process died.\n\nFor `covers_generic_optional_return`: establish whether the correct outcome is that lowering learns the construct (preferred, real capability) or that sema rejects it with a registered diagnostic (I3/I4). Do NOT make `covers` return true without proving lowering handles it; a wrong true in a coverage predicate already admitted an unsafe function to the JIT this epoch.\n\nFor `covers_labeled_loops`: find the unbounded recursion. Treat a stack-size increase as a non-fix.\n\nThen decide how this target stays runnable, because it silently rotted: it is not in the dev suite's build set, which is why two compile errors and two live defects sat undetected. Either it joins a routine target set or something asserts it compiles.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Codegen::TIR::tests::covers_generic_optional_return passes because lowering handles the construct, or sema rejects it with a registered diagnostic and a UI snapshot - not because the coverage predicate was loosened",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:57:34.179Z"
+        },
+        {
+          "n": 2,
+          "text": "Codegen::TIR::tests::covers_labeled_loops completes without aborting, and the fix is the unbounded recursion rather than a larger stack",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:57:34.599Z"
+        },
+        {
+          "n": 3,
+          "text": "The full jet-codegen lib test target runs to libtest's own summary with no SIGABRT, and every test the abort previously hid is accounted for",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:57:35.046Z"
+        },
+        {
+          "n": 4,
+          "text": "The target is kept runnable by a stated mechanism, so two compile errors cannot sit in it undetected again",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T12:57:35.490Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T12:57:33.754Z",
+      "updated": "2026-08-16T12:57:35.490Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -175130,6 +175676,461 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T12:57:35.490Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c032bed5",
+      "note": "#4 The target is kept runnable by a stated mechanism, so two co"
+    },
+    {
+      "at": "2026-08-16T12:57:35.047Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c032bed5",
+      "note": "#3 The full jet-codegen lib test target runs to libtest's own s"
+    },
+    {
+      "at": "2026-08-16T12:57:34.599Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c032bed5",
+      "note": "#2 Codegen::TIR::tests::covers_labeled_loops completes without "
+    },
+    {
+      "at": "2026-08-16T12:57:34.179Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c032bed5",
+      "note": "#1 Codegen::TIR::tests::covers_generic_optional_return passes b"
+    },
+    {
+      "at": "2026-08-16T12:57:33.755Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c032bed5",
+      "note": "The jet-codegen lib test target never ran, hiding a TIR coverage failure and a stack overflow"
+    },
+    {
+      "at": "2026-08-16T12:57:33.330Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0drec4f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T12:57:32.710Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0drec4f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T12:57:32.282Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0drec4f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T12:57:31.852Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0drec4f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T12:54:03.699Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#5 OUT_OF_UNIVERSE_CEILING is lowered by exactly the number of "
+    },
+    {
+      "at": "2026-08-16T12:54:03.276Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#4 The 28x E2402 NetError conversion family is resolved at the "
+    },
+    {
+      "at": "2026-08-16T12:54:02.836Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#3 Every (b) stem is fixed, or has its own card with the diagno"
+    },
+    {
+      "at": "2026-08-16T12:54:02.403Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#2 Every (a) family either enters the oracle's universe because"
+    },
+    {
+      "at": "2026-08-16T12:54:01.973Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#1 Each of the 53 stems is established as (a) an in-process har"
+    },
+    {
+      "at": "2026-08-16T12:54:01.077Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0dr8aqt",
+      "note": "53 shipped examples fail in-process Loader or Sema and were invisible to every coverage claim"
+    },
+    {
+      "at": "2026-08-16T12:53:27.924Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c06lni1w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T12:53:26.659Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06lni1w",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T12:53:25.745Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06lni1w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T12:53:23.589Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06lni1w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T12:53:23.161Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06lni1w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T12:53:22.729Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08cflxy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T12:53:22.114Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08cflxy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T12:53:21.688Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08cflxy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T12:53:20.509Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08cflxy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T12:53:19.563Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08cflxy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T12:53:18.674Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08pvmkh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T12:53:16.934Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08pvmkh",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T12:53:16.160Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08pvmkh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T12:53:15.717Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08pvmkh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T12:53:15.300Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08pvmkh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T12:37:28.369Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zkvjon",
+      "note": "#5 io/terminal_parity passes on golden, both dev batteries, and"
+    },
+    {
+      "at": "2026-08-16T12:37:27.396Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zkvjon",
+      "note": "#4 interpreter_matches_expected_golden and assert_io_cli_termin"
+    },
+    {
+      "at": "2026-08-16T12:37:26.514Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zkvjon",
+      "note": "#3 The in-process dev_iteration_with_timeout path receives its "
+    },
+    {
+      "at": "2026-08-16T12:37:25.628Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zkvjon",
+      "note": "#2 No hardcoded copy of a stdin answer string remains in any ha"
+    },
+    {
+      "at": "2026-08-16T12:37:24.648Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zkvjon",
+      "note": "#1 One fixture source maps stem to stdin answers, and golden.rs"
+    },
+    {
+      "at": "2026-08-16T12:37:24.043Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sujl09",
+      "note": "#5 example_corpus_strict_jit_aot_differential_gate reaches its "
+    },
+    {
+      "at": "2026-08-16T12:37:23.154Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sujl09",
+      "note": "#4 If any stem is excluded from the run universe, the exclusion"
+    },
+    {
+      "at": "2026-08-16T12:37:22.071Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sujl09",
+      "note": "#3 Every server-shaped or indefinitely-waiting stem is enumerat"
+    },
+    {
+      "at": "2026-08-16T12:37:21.241Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sujl09",
+      "note": "#2 The strict corpus gate no longer spends its timeout on web/a"
+    },
+    {
+      "at": "2026-08-16T12:37:20.517Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0sujl09",
+      "note": "#1 The chosen contract is recorded, and it is one mechanism app"
+    },
+    {
+      "at": "2026-08-16T12:37:19.308Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m4rfbe",
+      "note": "#5 No stem is parked in a gap ledger and no skip guard is added"
+    },
+    {
+      "at": "2026-08-16T12:37:18.415Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m4rfbe",
+      "note": "#4 A cross-tier differential test covers a typed generic decode"
+    },
+    {
+      "at": "2026-08-16T12:37:17.682Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m4rfbe",
+      "note": "#3 The interpreter reaches the same Prelude decode symbol AOT e"
+    },
+    {
+      "at": "2026-08-16T12:37:16.554Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m4rfbe",
+      "note": "#2 tooling/data_json produces byte-identical stdout, stderr and"
+    },
+    {
+      "at": "2026-08-16T12:37:15.500Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m4rfbe",
+      "note": "#1 The root cause of the interpreter-side decode failure is nam"
+    },
+    {
+      "at": "2026-08-16T12:37:14.909Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0f02mn4",
+      "note": "#5 No stem is parked in a gap ledger and no skip guard is added"
+    },
+    {
+      "at": "2026-08-16T12:37:14.205Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0f02mn4",
+      "note": "#4 A cross-tier differential test covers the case and asserts t"
+    },
+    {
+      "at": "2026-08-16T12:37:13.148Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0f02mn4",
+      "note": "#3 Any task.all completion or outcome logic re-encoded in the i"
+    },
+    {
+      "at": "2026-08-16T12:37:12.376Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0f02mn4",
+      "note": "#2 concurrency/scoped_borrow_bands produces byte-identical stdo"
+    },
+    {
+      "at": "2026-08-16T12:37:11.534Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0f02mn4",
+      "note": "#1 The root cause of the interpreter-side task.all failure is n"
+    },
+    {
+      "at": "2026-08-16T12:37:10.080Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0y6raw5",
+      "note": "#5 No card's evidence still cites a classification this file no"
+    },
+    {
+      "at": "2026-08-16T12:37:09.124Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0y6raw5",
+      "note": "#4 tooling/data_plot specifically has a section and a reason"
+    },
+    {
+      "at": "2026-08-16T12:37:08.216Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0y6raw5",
+      "note": "#3 A stem that leaves a section fails a test rather than disapp"
+    },
+    {
+      "at": "2026-08-16T12:37:07.171Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0y6raw5",
+      "note": "#2 The rows are re-derived from an observed run, not hand-added"
+    },
+    {
+      "at": "2026-08-16T12:37:06.106Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0y6raw5",
+      "note": "#1 Every top-level corpus stem appears in exactly one section o"
+    },
+    {
+      "at": "2026-08-16T12:37:05.416Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0n0c2y4",
+      "note": "#4 The universe size is pinned so a stem cannot silently leave "
+    },
+    {
+      "at": "2026-08-16T12:37:04.992Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0n0c2y4",
+      "note": "#3 cranelift_three_way_differential_battery states the universe"
+    },
+    {
+      "at": "2026-08-16T12:37:04.548Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0n0c2y4",
+      "note": "#2 It shares the classification helper introduced for observe_j"
+    },
+    {
+      "at": "2026-08-16T12:37:04.103Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0n0c2y4",
+      "note": "#1 jit_covered_example_stems classifies every stem it walks; no"
+    },
+    {
+      "at": "2026-08-16T12:37:03.662Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0zkvjon",
+      "note": "One stdin fixture source for the three harnesses that feed terminal examples"
+    },
+    {
+      "at": "2026-08-16T12:37:03.255Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0sujl09",
+      "note": "The strict corpus gate hangs 30s on web/app_hello because a server example has no bounded stop"
+    },
+    {
+      "at": "2026-08-16T12:37:02.849Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0m4rfbe",
+      "note": "tooling/data_json: the interpreter fails a data.json decode that AOT completes"
+    },
+    {
+      "at": "2026-08-16T12:37:02.418Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0f02mn4",
+      "note": "concurrency/scoped_borrow_bands: the interpreter fails a task.all that AOT completes"
+    },
+    {
+      "at": "2026-08-16T12:36:50.517Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0y6raw5",
+      "note": "tests/jit_corpus_gate.txt is 122 rows stale, so its classifications cannot be cited"
+    },
+    {
+      "at": "2026-08-16T12:36:49.844Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0n0c2y4",
+      "note": "jit_covered_example_stems drops stems silently, the same hole as the coverage audit"
+    },
+    {
       "at": "2026-08-16T11:28:48.010Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -178173,461 +179174,6 @@
       "action": "card.criteria-meet",
       "ref": "c08wqdlb",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:43:31.750Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0w07otg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:43:30.573Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T08:43:29.454Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T08:43:28.918Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T08:43:28.381Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T08:43:27.838Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T08:43:27.302Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T08:43:26.765Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T08:43:26.227Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w07otg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:25:53.976Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0jeuiwf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:25:52.490Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0jeuiwf",
-      "note": "#9: Existing reflect test only checks generic struct shape, not a tracked value reporting tracked=true/source."
-    },
-    {
-      "at": "2026-08-15T08:25:51.953Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0jeuiwf",
-      "note": "#3: Fresh review found TrackOrigin always built from None and not connected to the actual #Track marker."
-    },
-    {
-      "at": "2026-08-15T08:25:51.392Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:25:50.686Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#8: Fresh review found the registry/read unification still masks planes without source reads and comptime returns None."
-    },
-    {
-      "at": "2026-08-15T08:25:50.144Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#6: Fresh review found Flow/Taint/Duty registered planes lack fact read projection, contradicting no-special-case typed plane coverage."
-    },
-    {
-      "at": "2026-08-15T08:25:49.578Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:25:48.856Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0ihiv43",
-      "note": "#1: Fresh M03 review found registered Flow/Taint/Duty planes absent from source fact reads and comptime projection; type_plane_rows-only proof was incomplete."
-    },
-    {
-      "at": "2026-08-15T08:20:42.405Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0xa53la",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:20:41.707Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xa53la",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T08:20:40.813Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xa53la",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T08:20:39.894Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xa53la",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T08:20:39.304Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xa53la",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T08:20:38.248Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xa53la",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:20:37.367Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c005rd0v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:20:36.418Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c005rd0v",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T08:20:35.595Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c005rd0v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T08:20:35.052Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c005rd0v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T08:20:34.523Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c005rd0v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:17:58.198Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:17:57.463Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T08:17:56.537Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:17:55.318Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:10:19.704Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0199z6h",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:10:18.244Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T08:10:17.219Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T08:10:16.175Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T08:10:15.049Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T08:10:14.263Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T08:10:13.494Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T08:10:12.720Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T08:10:11.844Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:07:02.668Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0s9r12v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:07:01.965Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9r12v",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T08:07:01.423Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9r12v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T08:07:00.876Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9r12v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T08:07:00.336Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9r12v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:06:30.175Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:06:29.477Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#8: Fresh M03 review found aggregate reflect rows and per-fact reads diverge for measure, exactness, classification, and obligation; same-row equivalence is incomplete."
-    },
-    {
-      "at": "2026-08-15T08:06:28.920Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:06:28.115Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0ihiv43",
-      "note": "#1: Fresh M03 review found Registry::fact_read and Syntax::FACT_READS omit @measure, @exactness, @classification, and @obligation, so the every-plane claim is false and its guard is circular."
-    },
-    {
-      "at": "2026-08-15T08:00:03.324Z",
-      "by": "fable-e3-burndown",
-      "action": "papercut.add",
-      "ref": "pc03jkmzq",
-      "note": ""
-    },
-    {
-      "at": "2026-08-15T07:59:22.566Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:57:29.194Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0kh8udw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:57:28.517Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kh8udw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T07:57:27.980Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kh8udw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T07:57:27.436Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kh8udw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T07:54:01.408Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08q9a90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:54:00.704Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T07:50:24.262Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0jeuiwf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:50:23.580Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jeuiwf",
-      "note": "#13"
-    },
-    {
-      "at": "2026-08-15T07:50:23.042Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jeuiwf",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-15T07:50:22.500Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jeuiwf",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T07:50:21.964Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jeuiwf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T07:42:11.674Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0dv1nkh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:42:10.973Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dv1nkh",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
