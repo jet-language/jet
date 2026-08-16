@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2025,
-    "rev": 37928,
+    "rev": 37969,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -129223,7 +129223,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Stop consulting has_direct_symbol() in the TIR-subset decision: the registry short-circuit returns row.coverage.contains(TIR_SUBSET). A row that genuinely has no TIR lowering must drop the TIR_SUBSET bit in the table instead of being filtered by an AOT-only fact. Then delete the five hand-added dodge blocks above line 80 and the now-live D-TIMEDEPTH1 block becomes redundant too (one canonical decision, per greenfield).. CODE SITE: crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:80-83 (primary); crates/jet-foundation/src/Syntax/core_calls.rs:542-553, 889-890, 1312-1317 (data). blockedBy: none",
       "blockedBy": [],
@@ -129236,8 +129236,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "TIR-subset gate no longer consults the AOT-only aot_direct projection; commit 6302dbd60. Verified: cargo test --test dev jit_coverage_audit ledger reports gaps 0 run_gaps 0.",
-          "at": "2026-08-15T22:39:47.675Z"
+          "evidence": "All seven member stems (text/dates, text/datetime, text/time_calendar, tooling/compute_linalg, tooling/compute_simd, tooling/compute_tensor, tooling/compute_autodiff) are in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:58:42.071Z"
         },
         {
           "n": 2,
@@ -129245,8 +129245,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "TIR_SUBSET bit is now the whole decision for a registry key; the five hand-added dodge blocks that existed only to jump the early return are deleted. Commit 6302dbd60. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
-          "at": "2026-08-15T23:28:20.960Z"
+          "evidence": "The fix is the one named in the plan and it is one change, not seven. TIR/subset/core_calls.rs:47-49 now returns row.coverage.contains(TIR_SUBSET) directly; the `&& row.has_direct_symbol()` conjunct is gone and the registry lookup was hoisted above the remaining hand blocks. Deciding JIT coverage from an AOT-only projection fact was the category error. The five hand-added dodge blocks were deleted along with the now-redundant D-TIMEDEPTH1 block, and a regression audit confirmed the widening lost nothing: every key those dodges admitted is a registry row carrying TIR_SUBSET, since coverage is CoreCallCoverage::ALL for every row (new_with_coverage has zero call sites). Gate polarity: WRONGLY REFUSING.",
+          "at": "2026-08-16T23:58:42.484Z"
         },
         {
           "n": 3,
@@ -129254,17 +129254,17 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "TIR_SUBSET bit is now the whole decision for a registry key; the five hand-added dodge blocks that existed only to jump the early return are deleted. Commit 6302dbd60. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
-          "at": "2026-08-15T23:28:21.396Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:58:42.916Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:57:21.848Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:58:43.333Z"
         }
       ],
       "refs": [],
@@ -129276,8 +129276,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:56:49.468Z",
-      "updated": "2026-08-15T23:28:21.397Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:58:43.950Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:58:43.950Z"
     },
     {
       "id": "c0n60ekq",
@@ -129617,7 +129618,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Extend the fall-through to the existing lower_jet_show_value route (already used at :25045 for collections/options) whenever the Named type has a registered Show/Display, instead of the per-type ladder above it.. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:25074-25123. blockedBy: none",
       "blockedBy": [],
@@ -129627,38 +129628,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists tooling/service_runtime, types/unit_literals under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:18.262Z"
+          "evidence": "Both member stems (tooling/service_runtime, types/unit_literals) are in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:58:44.992Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:18.681Z"
+          "evidence": "One change at the named site, not a per-type rung. The terminal `_ =>` arm of emit_print's host selector now delegates to lower_jet_show_value, the same function already used for List/FixedList/Map/Option/Result and for materialized iterator lists, and the same operation AOT performs since it emits print(x) as ({x}).jet_show(). ServiceUpgradeReceipt reaches its pre-existing service_show arm; Duration reaches a new arm keyed on Syntax::DURATION_TYPE. Duration's Show text was NOT re-encoded in the host: a new Prelude kernel jet_duration_kernel_show now owns it and AOT's impl JetShow for Duration calls the same kernel, so the JIT host is marshalling only. Pre-existing rungs above the selector were deliberately left untouched, since deleting them is a behaviour change that cannot be proven without a run.",
+          "at": "2026-08-16T23:58:46.127Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:19.101Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:58:46.961Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:19.522Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:58:47.812Z"
         }
       ],
       "refs": [],
@@ -129670,8 +129671,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:17.213Z",
-      "updated": "2026-08-15T18:58:19.522Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:58:49.089Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:58:49.089Z"
     },
     {
       "id": "c0levnfe",
@@ -129682,7 +129684,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: One card, two criteria in the same function: map any list/handle ok-type to the i64 handle ABI, and admit the partial() operand through the same Option-style presence route the ok/err split already uses.. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:16455-16480. blockedBy: none",
       "blockedBy": [],
@@ -129692,38 +129694,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists concurrency/pipeline, errors/partial_and_notes under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:20.966Z"
+          "evidence": "Both member stems (concurrency/pipeline, errors/partial_and_notes) are in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:58:50.215Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:21.384Z"
+          "evidence": "Both cases were fixed in the one named function. A new list_handle_carrier states once that a List or FixedList travels as the i64 handle, and the ret_ty chain in the ?? Result path consults it for both the ok type and the expression type - the reported ok=List(Named(\"Unit\")) came from exactly that chain. The partial() operand was admitted through the same Option-style presence route the ok/err split already uses, not a second route.",
+          "at": "2026-08-16T23:58:51.261Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:21.822Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:58:52.141Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:22.250Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:58:53.058Z"
         }
       ],
       "refs": [],
@@ -129735,8 +129737,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:19.943Z",
-      "updated": "2026-08-15T18:58:22.250Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:58:54.224Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:58:54.223Z"
     },
     {
       "id": "c0uig3ju",
@@ -129747,7 +129750,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Drive the JIT host projection from the registry row's symbol (CoreCallRecord::prelude_symbol() / jit_symbol) instead of per-module hand matches, so a table row cannot exist without a JIT adapter. Minimal alternative (if the table-driven change is too wide for one card): add the two symbols — but note that the hand matches are the reason the gap exists at all.. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:11944-11946 and the sibling _ => arms listed above. blockedBy: none",
       "blockedBy": [],
@@ -129757,38 +129760,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists io/files_depth, io/log_structured under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:24.240Z"
+          "evidence": "Both member stems (io/files_depth, io/log_structured) are in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:58:54.761Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:25.177Z"
+          "evidence": "Taken table-driven, not as two hand rows. The JIT host projection now reads the registry row's symbol, so a table row cannot exist without a JIT adapter, which is what let two rows go missing in the first place. Two naming defects surfaced and were fixed as part of it: jit_symbol_candidates projects core.log.int and core.log.bool onto jet_jit_log_int and jet_jit_log_bool, so the old _field spellings were unreachable and the whole function deopted; and core.files.create_dir_all had no resident host at all, now marshalled to the same std::fs::create_dir_all behind the same FS.Write fault gate the Prelude uses, rather than inventing a second policy.",
+          "at": "2026-08-16T23:58:55.198Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:25.584Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:58:55.630Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:25.997Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:58:56.059Z"
         }
       ],
       "refs": [],
@@ -129800,8 +129803,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:22.670Z",
-      "updated": "2026-08-15T18:58:25.997Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:58:56.648Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:58:56.647Z"
     },
     {
       "id": "c0khsi7k",
@@ -129812,7 +129816,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Populate real_address_values on the sentry/address_of lowering path so both guards see a real address; one insertion point closes both. (Note: dev-tier unsafe sentries are the named I9 instrumentation carve-out per D-MEM-SENTRY1 — the carve-out covers the sentry, not the missing address tracking.). CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:12700-12712, 17725-17740 (+ wherever real_address_values is inserted). blockedBy: none",
       "blockedBy": [],
@@ -129822,38 +129826,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists memory/unsafe_sentries, memory/unsafe_sentries_provenance under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:27.432Z"
+          "evidence": "Both member stems (memory/unsafe_sentries, memory/unsafe_sentries_provenance) are in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:58:57.071Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:27.851Z"
+          "evidence": "One insertion point per address-minting path, and NO guard was relaxed - confirmed. The four guards (Deref, volatile_read, volatile_write, raw store) are byte-identical and each still admits only values recorded at a mint site. The deref half: the RawOf non-local fall-through minted a stack_addr from its own fresh ExplicitSlot and never inserted it into real_address_values, so the guard refused a pointer the JIT itself had just produced. The volatile-write half: TExprFromAddr returned the lowered address without inserting it. Registration is rule-based, not ad hoc: only an IntLit operand whose value survives lowering as its own word, decided by calling heap.int_from_i64 rather than restating its range, because S58 defines the pointer AS the supplied address. The fabricated stable non-zero identity for a place with no stable address is deliberately NOT registered, because that word is not an address. Note the D-MEM-SENTRY1 carve-out covers the sentry, not the missing address tracking, so this was a real gap.",
+          "at": "2026-08-16T23:58:58.086Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:28.288Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:58:59.124Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:28.721Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:58:59.884Z"
         }
       ],
       "refs": [],
@@ -129865,8 +129869,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:26.418Z",
-      "updated": "2026-08-15T18:58:28.721Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:59:00.487Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:59:00.487Z"
     },
     {
       "id": "c0v2w0vu",
@@ -129877,7 +129882,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Admit the ExpiringValue/ExpiringSecret static constructors in the subset's static-method table alongside the other Core handle constructors, then give them a JIT host route. Sibling of F1 — check first whether the row exists in the registry with .without_direct_aot(), in which case F1's fix closes this too and this card can be marked dependent.. CODE SITE: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs (static/type-name receiver shape, ~:1477-1490) + registry row. blockedBy: none",
       "blockedBy": [],
@@ -129887,38 +129892,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists memory/expiring_secret under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:31.161Z"
+          "evidence": "The member stem memory/expiring_secret is in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:59:01.298Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:32.476Z"
+          "evidence": "F1 was proven NOT to subsume this card, with the registry cited: there is no CoreCallRecord row for ExpiringValue or ExpiringSecret at all, so no row could carry .without_direct_aot() and the F1 short-circuit could not reach this stem. The real cause: sema writes recv_type = Some(\"ExpiringValue\") for the constructor, and static_method_call_in_subset is gated on recv_type.is_none(), which made the existing (\"ExpiringValue\",\"new\",3) row unreachable dead code. The stem then fell through to the user-method shape and returned false. One predicate, two victims: the same tir_covers call is consulted by lower_jit_program (the JIT deopt) and by emit_func (the codegen ICE at Items.rs:2851-2862), which is why this stem showed up as both.",
+          "at": "2026-08-16T23:59:02.209Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:33.281Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:59:03.028Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:33.807Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:59:04.057Z"
         }
       ],
       "refs": [],
@@ -129930,8 +129935,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:29.235Z",
-      "updated": "2026-08-15T18:58:33.808Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:59:05.154Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:59:05.154Z"
     },
     {
       "id": "c05xp4wo",
@@ -129942,7 +129948,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Admit structural ==/!= on any distinct type whose base is a covered scalar (not just #Numeric), at that one predicate.. CODE SITE: crates/jet-codegen/src/Codegen/TIR/subset/methods.rs:1272-1306. blockedBy: none",
       "blockedBy": [],
@@ -129952,38 +129958,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists types/distinct_types under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:35.423Z"
+          "evidence": "The member stem types/distinct_types is in the observed compile_covered set. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:59:05.690Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:35.887Z"
+          "evidence": "The card's own recorded cause was MEDIUM and UNCONFIRMED, and it was settled before any fix was written rather than assumed. The same tir_covers predicate feeds both gates, so this stem appeared simultaneously as a JIT deopt and as the (run) codegen ICE the strict gate reported at Items.rs:2858 - one defect, two symptoms. Structural equality on a distinct type whose base is a covered scalar is now admitted at that one predicate rather than only for #Numeric.",
+          "at": "2026-08-16T23:59:06.128Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:36.386Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The 3 gaps that remain are deliberately left unrecorded per I9 - they are lowering bugs to fix, not debt to park - so the audit stays honestly red on them.",
+          "at": "2026-08-16T23:59:06.957Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:36.892Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: this stem raises no classification failure, so AOT and the default jet run agree. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:59:07.944Z"
         }
       ],
       "refs": [],
@@ -129995,8 +130001,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:34.245Z",
-      "updated": "2026-08-15T18:58:36.892Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:59:08.869Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:59:08.868Z"
     },
     {
       "id": "c0m0jmc6",
@@ -130340,7 +130347,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Materialize per-block constants at use, or route the value through a Variable, in the iterator-adapter lowering that builds the increment. Then add a Variable-only rule for values that cross a block boundary in that lowering path. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs — iterator/adapter loop lowering (the iadd increment site). blockedBy: none",
       "blockedBy": [],
@@ -130350,38 +130357,38 @@
         {
           "n": 1,
           "text": "The emitted CLIF passes Cranelift's verifier for collections/iter_adapters",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:07.936Z"
+          "evidence": "The member stem collections/iter_adapters is in the observed compile_covered set, and the dedicated regression test jit_run::iter_adapter_latches_emit_dominating_clif PASSES. Measured at 07f1a9e0f by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 440 compile-covered + 3 compile gaps + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 across two waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time, which is the ratchet move the file's own law requires for a gain.",
+          "at": "2026-08-16T23:59:10.070Z"
         },
         {
           "n": 2,
           "text": "The fix is in Jet's CLIF emission, not a decline: no stem is dropped from compile_covered and none is parked in tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:08.362Z"
+          "evidence": "Recorded per this card's own severity rule: this was never an unsupported construct but a lowering bug of the class I2 names, so it is NOT recorded as unsupported anywhere. Root cause located exactly: lower_iter_chunk_while minted iconst(I64,1) inside block `existing` and read it in block `step`, whose predecessors are first/append/new_chunk, so `existing` is not in dom(step) - precisely the reported `uses value v1072 from non-dominating inst1390`. Route chosen: materialize the constant AT the use site. The durable half is a new advance_index_var helper whose doc states the rule that a value crossing a block boundary travels through a Cranelift Variable, and 23 iterator and adapter latches were converted to it, so no latch names a constant or a next value across a boundary any more. The shape cannot be reintroduced by copying a neighbouring latch, and no second gate was added: Cranelift's verifier remains the one oracle.",
+          "at": "2026-08-16T23:59:11.025Z"
         },
         {
           "n": 3,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:08.773Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 8989126c0: collections/iter_adapters raises no classification failure, so AOT and the default jet run agree byte for byte on stdout, stderr and exit code. Every internal compiler error that previously failed this gate is gone.",
+          "at": "2026-08-16T23:59:33.845Z"
         },
         {
           "n": 4,
           "text": "A regression test pins the emitted shape so invalid CLIF at this site cannot return silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:09.210Z"
+          "evidence": "tests/jit_run.rs::iter_adapter_latches_emit_dominating_clif, verified PASSING by the orchestrator at 7599f9dcc (cargo test --test jit_run). It pins the emitted shape rather than only the answer, which matters here because invalid CLIF is caught by Cranelift's verifier during try_compile and a silent deopt would otherwise produce the right output from the wrong tier. The durable half is structural rather than a single pinned site: 23 iterator and adapter latches were converted to the advance_index_var helper, so no latch carries a raw Value across a block boundary and the shape cannot be reintroduced by copying a neighbour. No second gate was added - Cranelift's verifier remains the one oracle for this class.",
+          "at": "2026-08-16T23:59:34.322Z"
         }
       ],
       "refs": [],
@@ -130394,8 +130401,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:59:06.877Z",
-      "updated": "2026-08-15T18:59:09.210Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T23:59:34.973Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T23:59:34.973Z"
     },
     {
       "id": "c048a8ue",
@@ -176148,6 +176156,293 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T23:59:34.973Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05m3i37",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:59:34.323Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05m3i37",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:59:33.846Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05m3i37",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:59:11.619Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05m3i37",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:59:11.026Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05m3i37",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:59:10.070Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05m3i37",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:59:08.869Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05xp4wo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:59:07.944Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05xp4wo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:59:06.957Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05xp4wo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:59:06.128Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05xp4wo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:59:05.690Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05xp4wo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:59:05.154Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0v2w0vu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:59:04.057Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v2w0vu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:59:03.029Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v2w0vu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:59:02.210Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v2w0vu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:59:01.298Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v2w0vu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:59:00.487Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0khsi7k",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:58:59.884Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0khsi7k",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:58:59.124Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0khsi7k",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:58:58.086Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0khsi7k",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:58:57.071Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0khsi7k",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:58:56.648Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0uig3ju",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:58:56.060Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0uig3ju",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:58:55.630Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0uig3ju",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:58:55.199Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0uig3ju",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:58:54.761Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0uig3ju",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:58:54.224Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0levnfe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:58:53.059Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0levnfe",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:58:52.141Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0levnfe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:58:51.261Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0levnfe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:58:50.215Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0levnfe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:58:49.090Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0c9pndv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:58:47.813Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c9pndv",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:58:46.961Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c9pndv",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:58:46.128Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c9pndv",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:58:44.992Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c9pndv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T23:58:43.950Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c014nejk",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T23:58:43.333Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T23:58:42.916Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T23:58:42.485Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T23:58:42.071Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-16T23:57:11.023Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -179359,293 +179654,6 @@
       "action": "card.criteria-meet",
       "ref": "c0wk4xnv",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-15T17:04:09.622Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T17:04:09.184Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T17:03:54.670Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c04czzvb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T17:03:47.309Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#12"
-    },
-    {
-      "at": "2026-08-15T17:03:46.896Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-15T17:03:46.481Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T17:03:46.035Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T17:03:45.606Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T17:03:45.188Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T17:03:44.771Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04czzvb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T17:03:44.344Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04czzvb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T17:03:43.926Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04czzvb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T16:14:40.974Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-15T15:37:58.406Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c01pwyjw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T15:37:57.829Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T15:37:57.402Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T15:37:56.971Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T15:37:56.554Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T15:37:56.139Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T15:37:55.719Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T15:37:55.310Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01pwyjw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T15:22:58.788Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ej2y7w",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T15:22:58.173Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0nnhbti",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T15:22:57.599Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T15:22:56.903Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T15:22:55.883Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T15:22:55.048Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T15:22:53.976Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T15:22:52.819Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T15:22:51.634Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T15:22:50.262Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T15:22:49.223Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ej2y7w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T15:22:48.149Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnhbti",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T15:22:46.848Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnhbti",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T15:22:45.630Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnhbti",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T15:22:45.211Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnhbti",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T15:22:44.772Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnhbti",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T15:22:44.360Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnhbti",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T15:12:56.450Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0199z6h",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T15:12:55.854Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02z5lgc",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T15:12:55.433Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#6"
     }
   ],
   "nextNum": 368,
