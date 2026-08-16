@@ -4,6 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::JitBackend::JitBackend;
+use jet_jit::CraneliftBackend;
+
 fn compile(name: &str, src: &str) -> (PathBuf, jet::CompileOutput) {
     let dir = std::env::temp_dir().join(format!("jet_env_overlay_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -471,4 +475,127 @@ fn run() {
     assert_eq!(run.status.code(), Some(70));
     assert!(stderr.contains("panic: core.sys.set: invalid environment variable name"));
     assert!(stderr.contains("invalid.jet:5 in run"), "missing call-site frame: {stderr}");
+}
+
+/// Card #2003 criterion 3 — one env owner, proved as a CROSS-TIER
+/// DIFFERENTIAL.
+///
+/// PROVES: a `env.set` performed by the running program is visible, with the
+/// same value, to BOTH the decoding read (`env.get`) and the raw-by-name read
+/// behind an env-derived terminal fact (`io.terminal_width()` reads `COLUMNS`,
+/// `io.terminal_height()` reads `LINES`), on AOT, on the resident JIT and on
+/// the interpreter. Each tier is asserted to have actually executed as that
+/// tier: the AOT tier is a rustc-built binary, the JIT tier asserts
+/// `jit_executed_for_test()` with no deopt and no fallback, and the
+/// interpreter tier asserts that NO JIT execution happened while it ran — a
+/// silent deopt would otherwise hand back the right answer from the wrong
+/// tier.
+///
+/// WHY BOTH READS: an `env.set` + `env.get` pair alone is a false green. Two
+/// owners agree with themselves; the divergence only appears when the write
+/// lands in one owner and a second read consults the other. Before #2003 the
+/// interpreter wrote `env.set` into the compiler's own `std::env` while
+/// `io.terminal_width()` read Jet's logical table, so `env.get` returned the
+/// new value and the width did not.
+#[test]
+fn env_set_is_visible_identically_on_aot_jit_and_interpreter() {
+    if !common::have_rustc() || !jet_jit::cranelift_host_supported() {
+        eprintln!("note: rustc or the cranelift host is unavailable; skipping tier differential");
+        return;
+    }
+    std::thread::Builder::new()
+        .name("env-owner-tier-parity".into())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(env_set_is_visible_identically_on_aot_jit_and_interpreter_inner)
+        .expect("spawn env tier-parity worker")
+        .join()
+        .expect("env tier-parity worker must not panic");
+}
+
+fn env_set_is_visible_identically_on_aot_jit_and_interpreter_inner() {
+    let src = r#"
+use core.sys as env
+use core.term as io
+
+fn run() {
+    env.set("JET_ENV_TIER_OWNER", "shared-owner")
+    env.set("COLUMNS", "137")
+    env.set("LINES", "41")
+    print(env.get("JET_ENV_TIER_OWNER") ?? "missing")
+    print(io.terminal_width())
+    print(io.terminal_height())
+}
+"#;
+    const EXPECTED: &str = "shared-owner\n137\n41\n";
+
+    let (dir, out) = compile("tier_owner", src);
+    let entry = dir.join("tier_owner.jet");
+    let shown = entry.to_string_lossy().into_owned();
+
+    // Tier 1 — AOT: rustc builds the generated program and the OS runs it.
+    let bin = build(&dir, "tier_owner", &out);
+    let aot = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT run failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    let aot_stdout = String::from_utf8_lossy(&aot.stdout).into_owned();
+
+    // Tier 2 — resident JIT: compiled natively in this process, no deopt.
+    let mut bundle = jet::Loader::load_entry(&shown).expect("tier fixture must load");
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "tier fixture must type-check: {errors:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "env fixture must be resident-JIT safe: {:?}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = CraneliftBackend::new();
+    let jit_stdout = match backend.run(&bundle, false) {
+        RunOutcome::Ran {
+            stdout, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 0, "resident JIT exited non-zero");
+            stdout
+        }
+        RunOutcome::Problems(diags) => panic!("resident JIT did not run the fixture: {diags:?}"),
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "fixture did not execute in the resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "resident JIT tier deopted or fell back, so it proves nothing about the JIT"
+    );
+
+    // Tier 3 — interpreter: same process, evaluator only.
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted_stdout = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 0, "interpreter exited non-zero");
+            stdout
+        }
+        RunOutcome::Problems(diags) => panic!("interpreter did not run the fixture: {diags:?}"),
+    };
+    assert!(
+        !jet_jit::jit_executed_for_test(),
+        "the interpreter tier silently executed native JIT code"
+    );
+
+    assert_eq!(aot_stdout, EXPECTED, "AOT drifted from the pinned observable");
+    assert_eq!(jit_stdout, aot_stdout, "resident JIT diverged from AOT");
+    assert_eq!(
+        interpreted_stdout, aot_stdout,
+        "interpreter diverged from AOT — `env.set` reached a different owner"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }

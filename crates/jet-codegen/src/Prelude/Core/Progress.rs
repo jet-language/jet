@@ -68,7 +68,7 @@ fn jet_progress_strip_ansi(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod progress_render_tests {
     use super::jet_progress_render;
 
     #[test]

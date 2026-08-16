@@ -196,7 +196,7 @@ pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod structural_debug_tests {
     use super::{
         jet_debug_field_metadata, jet_debug_record, jet_debug_record_fields, jet_debug_variant,
         JetDebugField,

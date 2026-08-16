@@ -916,7 +916,7 @@ impl JetShow for JetAriaRole {
 }
 
 #[cfg(test)]
-mod tests {
+mod ui_backend_tests {
     use super::*;
 
     #[test]

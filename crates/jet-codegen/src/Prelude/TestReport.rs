@@ -143,7 +143,7 @@ impl JetTestFailure {
 }
 
 #[cfg(test)]
-mod tests {
+mod test_report_tests {
     use super::JetTestFailure;
 
     #[test]

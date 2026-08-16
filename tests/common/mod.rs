@@ -186,11 +186,27 @@ pub fn add_generated_rust(
         .iter()
         .map(|flag| std::ffi::OsString::from(*flag))
         .collect::<Vec<_>>();
-    // A raw Rust `--test` invocation asks rustc to synthesize a harness from
-    // every embedded `#[cfg(test)]` module. Keep that uncommon inspection mode
-    // inline; it is not the Jet test-harness build path.
-    let rust_test_harness = rustc_flags.contains(&"--test");
-    let prepared = if has_rust_ffi || rust_test_harness {
+    // #2004 — DECISION: a raw `rustc --test` build of generated Jet output is
+    // NOT a supported mode, so this helper refuses it by name instead of
+    // letting it fail 10,000 lines deep in someone else's fragment.
+    //
+    // `--test` asks rustc to synthesize a harness from every `#[cfg(test)]`
+    // module in the crate. The generated crate is one flat splice of the
+    // Prelude, so that switch activates the COMPILER's private fragment unit
+    // tests inside a user program — a set that is not the program's tests, is
+    // not shipped, and whose only shared namespace is the generated crate root.
+    // The supported way to run Jet tests is `jet test`, which builds its own
+    // harness (TEST_PRELUDE / `jet_test_print`). A probe that needs to observe
+    // generated internals hooks the generated `main` instead — see
+    // `tests/dev.rs::io_style_raw_nonunicode_no_color_uses_presence_semantics`.
+    assert!(
+        !rustc_flags.contains(&"--test"),
+        "`rustc --test` over generated Jet output is not a supported build mode: it \
+         synthesizes a harness from the Prelude's own `#[cfg(test)]` modules inside a \
+         user program. Run Jet tests with `jet test`, or hook the generated `main` for \
+         an inspection probe."
+    );
+    let prepared = if has_rust_ffi {
         jet::RuntimeCache::PreparedRuntime::inline(generated)
     } else {
         match jet::RuntimeCache::prepare(std::ffi::OsStr::new("rustc"), generated, &flags, &[]) {

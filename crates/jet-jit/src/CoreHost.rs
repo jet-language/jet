@@ -73,11 +73,7 @@ mod os_rt {
     }
 
     fn jet_std_env_get(name: &String) -> Option<String> {
-        let key = std::ffi::OsStr::new(name);
-        super::jit_env_snapshot_raw()
-            .into_iter()
-            .find(|(candidate, _)| super::jit_env_key_eq(candidate.as_os_str(), key))
-            .and_then(|(_, value)| value.into_string().ok())
+        super::jit_env_value(name)
     }
 
     fn jet_std_process_exit(code: i64) {
@@ -1221,6 +1217,51 @@ pub(crate) fn jit_env_snapshot_raw() -> JitEnvEntries {
     jit_env_read().clone()
 }
 
+// #2003 / D-ENV-MUTATE1: one raw-by-name read over Jet's logical environment
+// table, for every in-process engine. The resident JIT host (`IO.rs`), the
+// `core.sys` shims above, the extern "C" heap-ABI shims below and the
+// interpreter ambient (`ambient_interp`) all call THIS — an engine marshals
+// arguments and results, it never re-derives the lookup (I9). The AOT Prelude
+// keeps its own definition because generated programs do not link jet-jit; see
+// the comment on `jet_env_value_raw` in
+// `jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs`.
+//
+// Raw `OsString` on purpose: `NO_COLOR` counts by PRESENCE, so a value that is
+// not valid Unicode must still read as present. Decoding here would turn
+// "present but not UTF-8" into "absent" — the defect #1206's review caught in
+// AOT. Callers that need a `String` go through `jit_env_value`.
+pub(crate) fn jit_env_value_raw(name: &str) -> Option<std::ffi::OsString> {
+    let name = std::ffi::OsStr::new(name);
+    jit_env_read()
+        .iter()
+        .find(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), name))
+        .map(|(_, value)| value.clone())
+}
+
+/// The decoding read behind `core.sys.get` (Prelude `jet_std_env_get`): a
+/// non-Unicode value reads as absent to a `String` caller.
+pub(crate) fn jit_env_value(name: &str) -> Option<String> {
+    jit_env_value_raw(name).and_then(|value| value.into_string().ok())
+}
+
+/// The one write behind `core.sys.set` (Prelude `jet_std_env_set`): validate,
+/// drop any earlier spelling of the key, then append so the last spelling
+/// wins. Never touches the host process environment.
+pub(crate) fn jit_env_set(name: &str, value: &str) -> Result<(), &'static str> {
+    jit_env_validate_name(name)?;
+    jit_env_validate_value(value)?;
+    let key = std::ffi::OsString::from(name);
+    let mut entries = jit_env_write();
+    if let Some(old) = entries
+        .iter()
+        .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key.as_os_str()))
+    {
+        entries.remove(old);
+    }
+    entries.push((key, std::ffi::OsString::from(value)));
+    Ok(())
+}
+
 fn jet_temp_path(prefix: &str) -> String {
     let clean: String = prefix
         .chars()
@@ -1725,40 +1766,14 @@ extern "C" fn jet_jit_math_ceil_f32(x: f64) -> f64 {
 
 /// Option ABI: `0` = None, else string-handle+1 (same as list_get_opt).
 extern "C" fn jet_jit_env_get(name: i64) -> i64 {
-    let key = clone_string(name);
-    let key = std::ffi::OsStr::new(&key);
-    let value = jit_env_read()
-        .iter()
-        .find(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key))
-        .and_then(|(_, value)| value.to_str().map(str::to_string));
-    match value {
-        Some(value) => {
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
-            sid.wrapping_add(1)
-        }
-        None => 0,
-    }
+    option_string_bits(jit_env_value(&clone_string(name)))
 }
 
 extern "C" fn jet_jit_env_set(name: i64, value: i64) -> i64 {
-    let key = clone_string(name);
-    let val = clone_string(value);
-    if let Err(error) = jit_env_validate_name(&key) {
-        return result_err_msg(error);
+    match jit_env_set(&clone_string(name), &clone_string(value)) {
+        Ok(()) => result_ok(0),
+        Err(error) => result_err_msg(error),
     }
-    if let Err(error) = jit_env_validate_value(&val) {
-        return result_err_msg(error);
-    }
-    let key = std::ffi::OsString::from(key);
-    let mut entries = jit_env_write();
-    if let Some(old) = entries
-        .iter()
-        .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key.as_os_str()))
-    {
-        entries.remove(old);
-    }
-    entries.push((key, std::ffi::OsString::from(val)));
-    result_ok(0)
 }
 
 extern "C" fn jet_jit_env_unset(name: i64) -> i64 {

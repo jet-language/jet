@@ -4,7 +4,7 @@
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs
 
 use super::Concurrency;
-use super::CoreHost::{jit_env_key_eq, jit_env_snapshot_raw};
+use super::CoreHost::{jit_env_value, jit_env_value_raw};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -155,18 +155,10 @@ fn list_from_lines(lines: Vec<String>) -> i64 {
     })
 }
 
-fn env_value(name: &str) -> Option<std::ffi::OsString> {
-    let name = std::ffi::OsStr::new(name);
-    jit_env_snapshot_raw()
-        .into_iter()
-        .find(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), name))
-        .map(|(_, value)| value)
-}
-
 fn style_enabled() -> bool {
     term_prelude::jet_term_style_enabled(
-        env_value("NO_COLOR").is_some(),
-        env_value("TERM")
+        jit_env_value_raw("NO_COLOR").is_some(),
+        jit_env_value_raw("TERM")
             .and_then(|term| term.into_string().ok())
             .is_some_and(|term| term == "dumb"),
         term_prelude::jet_term_stdout_is_terminal(),
@@ -397,15 +389,11 @@ extern "C" fn jet_jit_stderr_is_tty(_h: i64) -> i8 {
 }
 
 extern "C" fn jet_jit_terminal_width() -> i64 {
-    term_prelude::jet_term_width(|name| {
-        env_value(name).and_then(|value| value.into_string().ok())
-    })
+    term_prelude::jet_term_width(jit_env_value)
 }
 
 extern "C" fn jet_jit_terminal_height() -> i64 {
-    term_prelude::jet_term_height(|name| {
-        env_value(name).and_then(|value| value.into_string().ok())
-    })
+    term_prelude::jet_term_height(jit_env_value)
 }
 
 extern "C" fn jet_jit_io_style(style: i64, text: i64) -> i64 {
@@ -529,7 +517,7 @@ pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
                 state.count,
                 state.total,
                 state.started.elapsed().as_secs_f64(),
-                env_value("NO_COLOR").is_some(),
+                jit_env_value_raw("NO_COLOR").is_some(),
             ));
         }
         state.displayed = true;
@@ -586,7 +574,7 @@ pub(crate) fn progress_exhaust_state(list: i64) {
                     state.count,
                     state.total,
                     state.started.elapsed().as_secs_f64(),
-                    env_value("NO_COLOR").is_some(),
+                    jit_env_value_raw("NO_COLOR").is_some(),
                 ));
             }
             state.displayed |= !texts.is_empty();

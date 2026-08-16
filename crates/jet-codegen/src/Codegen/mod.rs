@@ -3014,6 +3014,93 @@ mod tests {
         assert!(!emitted.contains("crate::Registry"));
     }
 
+    /// #2004: every Prelude fragment is spliced into ONE flat generated crate,
+    /// so a crate-root `mod tests` in two fragments is E0428 in every program
+    /// that carries both — and it surfaces from the middle of a 10,000-line
+    /// generated file, nowhere near the fragment that caused it. Fragment-unique
+    /// names (`auth_tests`, `typed_boundary_tests`, `shared_protocol_tests`,
+    /// `interrupt_boundary_tests`, …) are the convention; this is its
+    /// enforcement, because two violations arrived AFTER the convention existed.
+    #[test]
+    fn prelude_fragments_never_declare_a_crate_root_mod_tests() {
+        fn declares_bare_test_module(source: &str) -> bool {
+            source.lines().any(|line| {
+                // Fragments are emitted flat, so only column-zero declarations
+                // land at the generated crate root. A nested `mod tests` inside
+                // another fragment module is scoped and cannot collide.
+                if line.starts_with(char::is_whitespace) {
+                    return false;
+                }
+                let rest = line
+                    .strip_prefix("pub(crate) ")
+                    .or_else(|| line.strip_prefix("pub "))
+                    .unwrap_or(line);
+                rest.strip_prefix("mod tests").is_some_and(|tail| {
+                    let tail = tail.trim_start();
+                    tail.starts_with('{') || tail.starts_with(';')
+                })
+            })
+        }
+
+        fn collect_fragments(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+            let mut entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+                .map(|entry| entry.expect("prelude directory entry").path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    collect_fragments(&path, out);
+                } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut fragments = Vec::new();
+        collect_fragments(&root.join("src/Prelude"), &mut fragments);
+        // Foundation-owned parts are spliced into the same flat crate.
+        for relative in [
+            "../jet-foundation/src/Outcome.rs",
+            "../jet-foundation/src/Report.rs",
+            "../jet-foundation/src/ExactUnitConversion.rs",
+            "../jet-foundation/src/StructuralDebug.rs",
+            "../jet-foundation/src/StreamCursor.rs",
+        ] {
+            fragments.push(root.join(relative));
+        }
+
+        let offenders = fragments
+            .iter()
+            .filter(|path| {
+                let source = std::fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                declares_bare_test_module(&source)
+            })
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            offenders.is_empty(),
+            "these Prelude fragments declare a crate-root `mod tests`, which collides \
+             (E0428) with every other fragment that does the same once both are emitted \
+             into one generated crate. Rename each to a fragment-unique module \
+             (`<fragment>_tests`), as SharedProtocol.rs, TypedText.rs, Auth.rs and \
+             Scheduler.rs already do:\n{}",
+            offenders.join("\n")
+        );
+
+        // The emitted bytes themselves, not just the files on disk: every part
+        // in this list is in EVERY generated program.
+        for (index, part) in PRELUDE_PARTS.iter().enumerate() {
+            assert!(
+                !declares_bare_test_module(part),
+                "PRELUDE_PARTS[{index}] declares a crate-root `mod tests`; every generated \
+                 program carries it"
+            );
+        }
+    }
+
     #[test]
     fn cached_runtime_block_covers_every_fixed_runtime_source_part() {
         let mut emitted = String::new();
