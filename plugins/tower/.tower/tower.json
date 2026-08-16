@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2020,
-    "rev": 37861,
+    "nextNum": 2024,
+    "rev": 37889,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e6"
       ]
     },
-    "completionCursor": "2026-08-16T11:06:25.365Z"
+    "completionCursor": "2026-08-16T14:03:54.025Z"
   },
   "epochs": [
     {
@@ -132162,6 +132162,310 @@
       "created": "2026-08-16T12:57:33.754Z",
       "updated": "2026-08-16T12:57:35.490Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0h9oynm",
+      "num": 2020,
+      "title": "The dev suite exceeds its own 900s budget, so ~30 tests never run and no summary prints",
+      "body": "Measured at c89ccb688 by `JET_NIX_TMP_CLEANED=1 timeout 3500 scripts/agent/jet-env cargo test --no-fail-fast --test dev`. The run ends:\n\n  jet test guard: exceeded the 900s suite budget - aborting; this suite must be split or sped up, not given a longer deadline\n  error: test failed ... (signal: 6, SIGABRT: process abort signal)\n\nConsequences, all measured in that one run:\n\n- 169 tests are declared; only 139 ever START. About 30 never run at all, so they guard nothing.\n- libtest never prints `test result:` and never prints its `failures:` section, because the guard aborts the process first. The only failure record is the inline `... FAILED` markers, which is why a full-suite log does NOT contain the failure bodies (re-run a single test with --test-threads=1 --nocapture to get one).\n- Inline tally at abort: 123 ok, 16 FAILED.\n- 43 individual tests each report `has been running for over 60 seconds`.\n\nThis makes every dev-suite pass/fail number a PARTIAL measurement rather than a result. The 2026-08-15 handoff recorded \"121 passing / 18 failing\", which is within noise of this run's 123/16 - strong evidence that figure was also truncated by the same guard and was never a whole-suite count.\n\nThe guard's own message states the resolution and forbids the easy way out: split or speed up, never extend the deadline. AGENTS.md agrees - a guard trip is a defect to report, never a limit to raise.\n\nSeparately worth recording because it is the good news in the same run: this abort is the BUDGET guard, not an unwind failure. No `failed to initiate panic, error 5`, no SIGSEGV, and no `overflowed its stack` appeared anywhere in the log. The 2026-08-15 handoff described the suite ending on a bare SIGSEGV; that specific failure mode is absent here.\n\nThe 16 inline failures at abort, for reference (several are expected-red pending the M13 tier-parity families and must not be assumed independent): cranelift_matches_variadic_fixed_writeback, cranelift_matches_plain_parameter_read_write_and_take_modes, jit_1216_adversarial_regressions, json_coerce_audit_reports_jit_gap_on_default_dev, interpreter_matches_expected_golden, range_values_run_in_resident_jit_without_fallback, jit_coverage_audit, jit_try_compile_manifest_matches, cranelift_three_way_differential_battery, stream_pull_hostile_matrix_matches_interpreter_jit_and_aot, concurrency_and_game_match_interpreter_jit_and_aot, example_corpus_strict_jit_aot_differential_gate, collections_memory_and_streams_match_interpreter_jit_and_aot, unsafe_blocks_reach_the_canonical_tir_interpreter_boundary, crypto_auth_and_vault_match_interpreter_jit_and_aot, data_pipelines_and_parsing_match_interpreter_jit_and_aot.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m18-devloop-testing",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Split the suite so every declared test actually runs and libtest reaches its own summary. Do not raise the budget.\n\nWhere the time goes, from the same run: the 43 slow tests are dominated by whole-corpus three-way differentials (the `*_match_interpreter_jit_and_aot` family, example_corpus_strict_jit_aot_differential_gate, cranelift_three_way_differential_battery, jit_coverage_audit, jit_try_compile_manifest_matches). Each compiles a large slice of the example corpus, and several compile overlapping slices, so the same stems are compiled repeatedly across tests.\n\nTwo directions, and the choice should be stated rather than assumed:\n1. Split by cost into separate targets, so a routine target stays fast and the expensive corpus batteries run as their own target with their own budget.\n2. Share the compile work. collect_jit_coverage already memoises one corpus observation per test binary via LazyLock; the differential batteries could read one shared observation instead of each walking the corpus. That attacks the cause rather than the symptom.\n\nPrefer 2 where the batteries genuinely want the same observation, and 1 for the rest. Note that a split must not quietly drop a test from the routine set: the reason five jit_run failures went unrecorded for a whole session is that jit_run was not in the routine set.\n\nWhatever the shape, the acceptance is that the summary prints and the declared count equals the run count.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --no-fail-fast --test dev reaches libtest's own summary and prints test result plus a failures section, with no budget-guard abort",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:36:59.423Z"
+        },
+        {
+          "n": 2,
+          "text": "Every declared test runs: the started count equals the declared count, and no test is silently skipped",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:36:59.855Z"
+        },
+        {
+          "n": 3,
+          "text": "The 900s budget is met by splitting or speeding up, and the budget constant is NOT raised",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:37:00.271Z"
+        },
+        {
+          "n": 4,
+          "text": "Redundant corpus compilation across the differential batteries is either shared through one observation or explicitly justified per battery",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:37:00.721Z"
+        },
+        {
+          "n": 5,
+          "text": "Any test moved to a separate target is added to a named routine set, so no target can sit unrun and unrecorded the way jit_run did",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:37:01.162Z"
+        },
+        {
+          "n": 6,
+          "text": "The whole-suite pass/fail tally is a complete measurement and is recorded as such",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:37:01.598Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T14:36:58.997Z",
+      "updated": "2026-08-16T14:37:01.599Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c02cuoc0",
+      "num": 2021,
+      "title": "L0502 float_comparison fires on a struct declaration, not a float comparison",
+      "body": "Measured at ad64bf671 by `cargo test --test run_interpret`. AOT (`release`) emits this on examples/features/tooling/data_json.jet:\n\n  Warning [L0502] (float_comparison): comparing floats with `==` is unreliable\n    --> examples/features/tooling/data_json.jet:5:8\n      |\n    5 | struct Ticket {\n      |        ^^^^^^\n\nThe span points at a STRUCT DECLARATION. There is no `==` there and no comparison of any kind - `struct Ticket {` is a type definition. The lint's what/why/fix text (\"comparing floats with == is unreliable\", \"compare within a tolerance\") is therefore advice about code the user did not write, attached to a line that cannot contain the defect.\n\nPer I4 a diagnostic is a product. A warning that names the wrong construct at the wrong span teaches the reader to distrust the whole diagnostic surface, and it is worse than silence because the suggested fix is unactionable.\n\nImpact beyond the noise: it is currently the only thing preventing card #2015 from closing. The cross-tier differential for tooling/data_json asserts stderr agreement across tiers, and AOT writes this warning to stderr while the other tiers do not - so a spurious lint is masquerading as a tier divergence.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Find why the float_comparison lint selects a struct declaration span. The likely shape, to be confirmed rather than assumed: the lint walks a type or field whose declared type is Float and treats the declaration site as a comparison site, or a span is being inherited from an enclosing item instead of the offending expression.\n\nThen decide whether data_json contains a real float comparison at all. If it does, the lint must point AT it. If it does not, the lint must not fire.\n\nAlso establish whether this fires only under AOT. The card evidence shows AOT emitting it while the interpreter tier does not, which by itself is an I9 question: a lint is a front-end fact and should not depend on the execution tier that follows.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "NOTE on numbering: this card was first minted as #2020 and lost when the orchestrator ran git reset --hard on master, which reverted the tracked plugins/tower/.tower store to the previous board commit. The number 2020 was then reused by a different card. The implementation for THIS card is already merged on master (branch bd-w2, commit fc6f0fb2b), so it was built against the old number - the work is real, the number moved."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The L0502 span names an actual float comparison, or the lint does not fire on tooling/data_json",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:03.840Z"
+        },
+        {
+          "n": 2,
+          "text": "Whether a real float comparison exists in that example is stated, with the line",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:04.254Z"
+        },
+        {
+          "n": 3,
+          "text": "The lint produces the same result on every tier: AOT, default jet run, and the interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:04.671Z"
+        },
+        {
+          "n": 4,
+          "text": "A UI snapshot pins the corrected behaviour (I4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:05.115Z"
+        },
+        {
+          "n": 5,
+          "text": "run_interpret::data_json_agrees_on_every_tier no longer fails on a stderr difference caused by this warning",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:05.535Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T14:38:03.399Z",
+      "updated": "2026-08-16T14:38:11.754Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c08gtzcw",
+      "num": 2022,
+      "title": "Generated Rust reads a String field through jet_int_to_string and rustc rejects it (I2)",
+      "body": "Pre-existing at c14e1ec2f, measured by `cargo test --test env_overlay` (test raw_non_unicode_value_survives_child_snapshot_and_vars_fails_whole_snapshot, tests/env_overlay.rs:42 \"rustc rejected generated code\"):\n\n  error[E0308]: mismatched types\n       --> raw.rs:56817:71\n        |\n  56817 |   { let _ = jet_term_write_stdout_line(&(jet_std::jet_int_to_string((__jet_child).output)), false); };\n        |                                          -------------------------- ^^^^^^^^^^^^^^^^^^^^ expected `i64`, found `String`\n  note: function defined here\n       --> raw.rs:27642:12\n        |\n  27642 |   pub fn jet_int_to_string(value: i64) -> String {\n\nThe emitter chose the INTEGER accessor for a String field: `(__jet_child).output` is a String and is handed to `jet_int_to_string`, which takes i64.\n\nPer I2 this is an internal compiler error by definition - rustc rejecting generated code is a compiler bug, never a user diagnostic - and the test correctly reports it as \"rustc rejected generated code\".\n\nThis is a RECURRENCE of a known class, which is why it is P1 rather than a one-off: the 2026-08-15 session found \"a String field read through the integer accessor, printing the source path\" among eleven silent wrong answers. That instance was fixed; this is the same wrong-accessor selection on a different struct, so the earlier fix was site-local rather than mechanism-level.\n\nNote the failure mode difference that makes this one luckier: here the types are incompatible so rustc catches it. When the wrong accessor happens to typecheck, the program silently prints the wrong value - which is exactly what happened before.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Find where the accessor is selected for a field read in the print/show path and why it consults an integer projection for a String field. Fix it at the selection mechanism, not at this field: the recurrence is the evidence that a site-local fix does not hold.\n\nEstablish which struct `__jet_child` is and where its field types come from. A field-type table that disagrees with the emitter's accessor choice is the likely seam, and this epoch has already found four separate copies of Core struct field metadata (card #1979), so check whether the accessor reads a different table from the one that declares the field.\n\nThen look for the silent siblings: enumerate field reads where the wrong accessor would still TYPECHECK, because those print wrong answers with no error at all. That enumeration is the durable half of this card.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The accessor selection for a field read is fixed at the mechanism, and the fix is not specific to the output field or its struct",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:06.368Z"
+        },
+        {
+          "n": 2,
+          "text": "The generated Rust for the env_overlay raw-snapshot fixture compiles, so no rustc rejection remains (I2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:06.785Z"
+        },
+        {
+          "n": 3,
+          "text": "Field reads where a wrong accessor would still typecheck are enumerated, and any that select wrongly are fixed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:07.229Z"
+        },
+        {
+          "n": 4,
+          "text": "A cross-tier differential covers a String field read through the show/print path and asserts the value, not just that it compiled",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:07.646Z"
+        },
+        {
+          "n": 5,
+          "text": "env_overlay::raw_non_unicode_value_survives_child_snapshot_and_vars_fails_whole_snapshot passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:08.058Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T14:38:05.945Z",
+      "updated": "2026-08-16T14:38:08.058Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0ejmyy7",
+      "num": 2023,
+      "title": "Five jit_run process and args tests fail: builders deopt, parse_or_exit exits 1, expert terminal hits E0956",
+      "body": "Pre-existing at c14e1ec2f and unchanged through wave 2 (verified by running the suite at c14e1ec2f, at ad64bf671, and at the wave-2 merge: identical five failures each time, so no session change caused or fixed them). `cargo test --test jit_run`: 10 passed, 5 failed.\n\n1. `zero_arg_process_spec_builders_run_resident` (tests/jit_run.rs:252) - \"the builders must lower to host calls, not deopt\". A deopt here is a silent I9 tier gap: AOT compiles, default `jet run` quietly interprets.\n2. `arg_process_spec_builders_reach_the_child` (tests/jit_run.rs:797) - default and release disagree. Default prints the expected lens output (`cwd=...|logical=logical-value|set=spec-value|removed=true`, then two rejection lines); release emits NOTHING to stdout and an internal compiler error to stderr: \"the generated Rust did not compile\", E0308 at builders.rs on a `jet_term_write_stdout_line(&(jet_std::jet_int_to_string(...)))` call. That rustc rejection is the same wrong-accessor defect carded separately, so this row may close with it.\n3. `process_run_checked_matches_default_and_aot_lenses` - the two lenses disagree.\n4. `args_parse_or_exit_runs_resident_for_return_help_and_usage_error` (tests/jit_run.rs:657) - exit 1 where 0 is expected.\n5. `expert_terminal_model_runs_resident_and_fails_closed` (tests/jit_run.rs:323) - \"expert terminal model must run under default `jet run`\", got E0956.\n\nThese were not among the 18 dev-suite failures recorded in the 2026-08-15 handoff, because that handoff measured `--test dev` only. `--test jit_run` was not in the routine set, which is how five red rows sat unrecorded.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Group by cause before fixing. Row 2's release half is a generated-Rust rejection already carded (the String-through-integer-accessor defect); confirm whether fixing that closes row 2 and possibly row 3, since both compare a default lens against an AOT lens.\n\nRows 1 and 5 are gate polarity questions of the kind this epoch has repeatedly found: does the gate wrongly refuse, or can lowering genuinely not follow? E0956 (\"compile-time only\") on the expert terminal model, and a deopt where host calls are expected, are both \"the engine refuses something it may well handle\". Establish which polarity each is, and never loosen a predicate without showing the lowering exists.\n\nRow 4's exit-1-instead-of-0 needs the actual diagnostic; a usage-error path returning the wrong status is a user-visible contract bug.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each of the five failures has a named root cause, grouped by shared cause rather than fixed one test at a time",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:08.931Z"
+        },
+        {
+          "n": 2,
+          "text": "The process spec builders lower to host calls on the resident JIT rather than deopting, or the refusal is proven correct and the test's expectation is the thing that was wrong",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:09.356Z"
+        },
+        {
+          "n": 3,
+          "text": "The default and release lenses agree for arg_process_spec_builders_reach_the_child and process_run_checked_matches_default_and_aot_lenses, with no rustc rejection of generated code (I2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:09.793Z"
+        },
+        {
+          "n": 4,
+          "text": "args_parse_or_exit_runs_resident_for_return_help_and_usage_error exits 0, and the exit-status contract for help and usage errors is stated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:10.243Z"
+        },
+        {
+          "n": 5,
+          "text": "expert_terminal_model_runs_resident_and_fails_closed runs under default jet run with no E0956",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:10.697Z"
+        },
+        {
+          "n": 6,
+          "text": "cargo test --test jit_run reports zero failures, and the target is added to a routine set so five red rows cannot sit unrecorded again",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T14:38:11.153Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T14:38:08.489Z",
+      "updated": "2026-08-16T14:38:11.154Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -175676,6 +175980,202 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T14:38:11.755Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02cuoc0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T14:38:11.154Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ejmyy7",
+      "note": "#6 cargo test --test jit_run reports zero failures, and the tar"
+    },
+    {
+      "at": "2026-08-16T14:38:10.698Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ejmyy7",
+      "note": "#5 expert_terminal_model_runs_resident_and_fails_closed runs un"
+    },
+    {
+      "at": "2026-08-16T14:38:10.244Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ejmyy7",
+      "note": "#4 args_parse_or_exit_runs_resident_for_return_help_and_usage_e"
+    },
+    {
+      "at": "2026-08-16T14:38:09.793Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ejmyy7",
+      "note": "#3 The default and release lenses agree for arg_process_spec_bu"
+    },
+    {
+      "at": "2026-08-16T14:38:09.356Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ejmyy7",
+      "note": "#2 The process spec builders lower to host calls on the residen"
+    },
+    {
+      "at": "2026-08-16T14:38:08.931Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ejmyy7",
+      "note": "#1 Each of the five failures has a named root cause, grouped by"
+    },
+    {
+      "at": "2026-08-16T14:38:08.490Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0ejmyy7",
+      "note": "Five jit_run process and args tests fail: builders deopt, parse_or_exit exits 1, expert terminal hits E0956"
+    },
+    {
+      "at": "2026-08-16T14:38:08.058Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gtzcw",
+      "note": "#5 env_overlay::raw_non_unicode_value_survives_child_snapshot_a"
+    },
+    {
+      "at": "2026-08-16T14:38:07.646Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gtzcw",
+      "note": "#4 A cross-tier differential covers a String field read through"
+    },
+    {
+      "at": "2026-08-16T14:38:07.229Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gtzcw",
+      "note": "#3 Field reads where a wrong accessor would still typecheck are"
+    },
+    {
+      "at": "2026-08-16T14:38:06.785Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gtzcw",
+      "note": "#2 The generated Rust for the env_overlay raw-snapshot fixture "
+    },
+    {
+      "at": "2026-08-16T14:38:06.368Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gtzcw",
+      "note": "#1 The accessor selection for a field read is fixed at the mech"
+    },
+    {
+      "at": "2026-08-16T14:38:05.945Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c08gtzcw",
+      "note": "Generated Rust reads a String field through jet_int_to_string and rustc rejects it (I2)"
+    },
+    {
+      "at": "2026-08-16T14:38:05.536Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02cuoc0",
+      "note": "#5 run_interpret::data_json_agrees_on_every_tier no longer fail"
+    },
+    {
+      "at": "2026-08-16T14:38:05.115Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02cuoc0",
+      "note": "#4 A UI snapshot pins the corrected behaviour (I4)"
+    },
+    {
+      "at": "2026-08-16T14:38:04.672Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02cuoc0",
+      "note": "#3 The lint produces the same result on every tier: AOT, defaul"
+    },
+    {
+      "at": "2026-08-16T14:38:04.255Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02cuoc0",
+      "note": "#2 Whether a real float comparison exists in that example is st"
+    },
+    {
+      "at": "2026-08-16T14:38:03.840Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02cuoc0",
+      "note": "#1 The L0502 span names an actual float comparison, or the lint"
+    },
+    {
+      "at": "2026-08-16T14:38:03.399Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c02cuoc0",
+      "note": "L0502 float_comparison fires on a struct declaration, not a float comparison"
+    },
+    {
+      "at": "2026-08-16T14:37:01.599Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h9oynm",
+      "note": "#6 The whole-suite pass/fail tally is a complete measurement an"
+    },
+    {
+      "at": "2026-08-16T14:37:01.163Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h9oynm",
+      "note": "#5 Any test moved to a separate target is added to a named rout"
+    },
+    {
+      "at": "2026-08-16T14:37:00.721Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h9oynm",
+      "note": "#4 Redundant corpus compilation across the differential batteri"
+    },
+    {
+      "at": "2026-08-16T14:37:00.272Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h9oynm",
+      "note": "#3 The 900s budget is met by splitting or speeding up, and the "
+    },
+    {
+      "at": "2026-08-16T14:36:59.856Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h9oynm",
+      "note": "#2 Every declared test runs: the started count equals the decla"
+    },
+    {
+      "at": "2026-08-16T14:36:59.424Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h9oynm",
+      "note": "#1 cargo test --no-fail-fast --test dev reaches libtest's own s"
+    },
+    {
+      "at": "2026-08-16T14:36:58.997Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0h9oynm",
+      "note": "The dev suite exceeds its own 900s budget, so ~30 tests never run and no summary prints"
+    },
+    {
+      "at": "2026-08-16T14:03:54.025Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-16T14:03:54.025Z"
+    },
+    {
       "at": "2026-08-16T12:57:35.490Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -178978,202 +179478,6 @@
       "action": "card.update",
       "ref": "c0pw8xgx",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T09:41:54.933Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T09:41:54.387Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T09:15:15.393Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0onpxuj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T09:15:14.683Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T09:15:13.758Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T09:15:12.634Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T09:15:12.091Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T09:15:11.549Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T09:15:11.026Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T09:15:10.475Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T09:15:09.927Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T09:15:09.383Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0onpxuj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T08:54:57.118Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08wqdlb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:54:56.416Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c08wqdlb",
-      "note": "#4: Fresh M04 review found user derive bodies still accept inner impl items; expanded impls bypass derive_member_collision, leaving the retired parallel form and collision path."
-    },
-    {
-      "at": "2026-08-15T08:54:55.829Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0199z6h",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:54:55.122Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0199z6h",
-      "note": "#1: Fresh M04 review found recursive eligibility only special-cases direct Named(owner); Node? and other recursive containers silently fail structural derive readiness."
-    },
-    {
-      "at": "2026-08-15T08:47:21.832Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08wqdlb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T08:47:20.771Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-15T08:47:19.540Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T08:47:18.072Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T08:47:16.321Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T08:47:15.504Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T08:47:14.970Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T08:47:14.437Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T08:47:13.904Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T08:47:13.364Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T08:47:12.824Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T08:47:12.289Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
