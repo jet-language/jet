@@ -334,7 +334,7 @@ fn poll_watch(handle: i64) -> Vec<WatchEvent> {
     })
 }
 
-extern "C" fn jet_jit_event_scope() -> i64 {
+fn jet_jit_event_scope() -> i64 {
     let _ = NEXT_ID.with(|n| n.fetch_add(1, Ordering::Relaxed));
     push_scope(EventScopeState {
         cancelled: false,
@@ -342,7 +342,7 @@ extern "C" fn jet_jit_event_scope() -> i64 {
     })
 }
 
-extern "C" fn jet_jit_event_scope_cancel(handle: i64) {
+fn jet_jit_event_scope_cancel(handle: i64) {
     SCOPES.with(|slot| {
         if let Some(Some(st)) = slot.borrow_mut().get_mut(handle.saturating_sub(1) as usize) {
             if st.cancelled {
@@ -356,18 +356,18 @@ extern "C" fn jet_jit_event_scope_cancel(handle: i64) {
     });
 }
 
-extern "C" fn jet_jit_event_scope_frame_push() {
+fn jet_jit_event_scope_frame_push() {
     SCOPE_FRAMES.with(|f| f.borrow_mut().push(Vec::new()));
 }
 
-extern "C" fn jet_jit_event_scope_frame_pop() {
+fn jet_jit_event_scope_frame_pop() {
     let handles = SCOPE_FRAMES.with(|f| f.borrow_mut().pop()).unwrap_or_default();
     for h in handles {
         jet_jit_event_scope_cancel(h);
     }
 }
 
-extern "C" fn jet_jit_subscription_is_active(handle: i64) -> i8 {
+fn jet_jit_subscription_is_active(handle: i64) -> i8 {
     SUBS.with(|slot| {
         slot.borrow()
             .get(handle.saturating_sub(1) as usize)
@@ -377,7 +377,7 @@ extern "C" fn jet_jit_subscription_is_active(handle: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_watcher_files(path: i64) -> i64 {
+fn jet_jit_watcher_files(path: i64) -> i64 {
     let root = clone_string(path);
     match watch_snapshot(&root) {
         Ok(snapshot) => result_ok(push_watch(WatchState {
@@ -391,7 +391,7 @@ extern "C" fn jet_jit_watcher_files(path: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_watcher_process_pid(pid: i64) -> i64 {
+fn jet_jit_watcher_process_pid(pid: i64) -> i64 {
     push_watch(WatchState {
         target: WatchTarget::Process { pid },
         snapshot: Snapshot::new(),
@@ -401,7 +401,7 @@ extern "C" fn jet_jit_watcher_process_pid(pid: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_watcher_port(host: i64, port: i64) -> i64 {
+fn jet_jit_watcher_port(host: i64, port: i64) -> i64 {
     push_watch(WatchState {
         target: WatchTarget::Port {
             host: clone_string(host),
@@ -414,7 +414,7 @@ extern "C" fn jet_jit_watcher_port(host: i64, port: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_watcher_set() -> i64 {
+fn jet_jit_watcher_set() -> i64 {
     SETS.with(|slot| {
         let mut v = slot.borrow_mut();
         v.push(Some(Vec::new()));
@@ -422,11 +422,11 @@ extern "C" fn jet_jit_watcher_set() -> i64 {
     })
 }
 
-extern "C" fn jet_jit_watch_poll(handle: i64) -> i64 {
+fn jet_jit_watch_poll(handle: i64) -> i64 {
     list_from_events(poll_watch(handle))
 }
 
-extern "C" fn jet_jit_watch_cancel(handle: i64) {
+fn jet_jit_watch_cancel(handle: i64) {
     WATCHES.with(|slot| {
         if let Some(Some(st)) = slot.borrow_mut().get_mut(handle.saturating_sub(1) as usize) {
             st.active = false;
@@ -434,7 +434,7 @@ extern "C" fn jet_jit_watch_cancel(handle: i64) {
     });
 }
 
-extern "C" fn jet_jit_watch_is_active(handle: i64) -> i8 {
+fn jet_jit_watch_is_active(handle: i64) -> i8 {
     WATCHES.with(|slot| {
         slot.borrow()
             .get(handle.saturating_sub(1) as usize)
@@ -444,7 +444,7 @@ extern "C" fn jet_jit_watch_is_active(handle: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_watch_summary(handle: i64) -> i64 {
+fn jet_jit_watch_summary(handle: i64) -> i64 {
     let text = WATCHES.with(|slot| {
         slot.borrow()
             .get(handle.saturating_sub(1) as usize)
@@ -459,7 +459,7 @@ extern "C" fn jet_jit_watch_summary(handle: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_watch_on(
+fn jet_jit_watch_on(
     watch: i64,
     scope: i64,
     fn_ptr: i64,
@@ -472,7 +472,7 @@ extern "C" fn jet_jit_watch_on(
     watch_register(watch, scope, fn_ptr, n_caps, c0, c1, c2, c3, false)
 }
 
-extern "C" fn jet_jit_watch_once(
+fn jet_jit_watch_once(
     watch: i64,
     scope: i64,
     fn_ptr: i64,
@@ -524,7 +524,7 @@ fn watch_register(
     push_sub(SubscriptionState { active })
 }
 
-extern "C" fn jet_jit_watchset_add(set: i64, watch: i64) {
+fn jet_jit_watchset_add(set: i64, watch: i64) {
     SETS.with(|slot| {
         if let Some(Some(handles)) = slot.borrow_mut().get_mut(set.saturating_sub(1) as usize) {
             handles.push(watch);
@@ -532,7 +532,7 @@ extern "C" fn jet_jit_watchset_add(set: i64, watch: i64) {
     });
 }
 
-extern "C" fn jet_jit_watchset_poll(set: i64) -> i64 {
+fn jet_jit_watchset_poll(set: i64) -> i64 {
     let handles = SETS.with(|slot| {
         slot.borrow()
             .get(set.saturating_sub(1) as usize)
@@ -546,7 +546,7 @@ extern "C" fn jet_jit_watchset_poll(set: i64) -> i64 {
     list_from_events(events)
 }
 
-extern "C" fn jet_jit_watchset_summary(set: i64) -> i64 {
+fn jet_jit_watchset_summary(set: i64) -> i64 {
     let n = SETS.with(|slot| {
         slot.borrow()
             .get(set.saturating_sub(1) as usize)

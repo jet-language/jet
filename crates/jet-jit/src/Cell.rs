@@ -442,7 +442,7 @@ fn with_cell(f: impl FnOnce(&mut crate::JitRuntime)) {
     });
 }
 
-extern "C" fn jet_jit_cell_frame_enter() {
+fn jet_jit_cell_frame_enter() {
     with_cell(|rt| {
         let frame = rt.cells.next_frame;
         rt.cells.next_frame += 1;
@@ -450,7 +450,7 @@ extern "C" fn jet_jit_cell_frame_enter() {
     });
 }
 
-extern "C" fn jet_jit_cell_frame_leave(layout_handle: i64, returned: i64) {
+fn jet_jit_cell_frame_leave(layout_handle: i64, returned: i64) {
     with_cell(|rt| {
         let mut read = HashSet::new();
         let mut edit = HashSet::new();
@@ -463,7 +463,7 @@ extern "C" fn jet_jit_cell_frame_leave(layout_handle: i64, returned: i64) {
     });
 }
 
-extern "C" fn jet_jit_cell_new(raw: i64, schema_handle: i64) -> i64 {
+fn jet_jit_cell_new(raw: i64, schema_handle: i64) -> i64 {
     with_cell_result(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = decode_value(rt, raw, &schema).expect("Cell value ABI");
@@ -472,7 +472,7 @@ extern "C" fn jet_jit_cell_new(raw: i64, schema_handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_cell_get(cell: i64, schema_handle: i64) -> i64 {
+fn jet_jit_cell_get(cell: i64, schema_handle: i64) -> i64 {
     with_cell_result(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = rt.cells.cells[(cell - 1) as usize].get();
@@ -480,7 +480,7 @@ extern "C" fn jet_jit_cell_get(cell: i64, schema_handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_cell_set(cell: i64, raw: i64, schema_handle: i64) {
+fn jet_jit_cell_set(cell: i64, raw: i64, schema_handle: i64) {
     with_cell(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = decode_value(rt, raw, &schema).expect("Cell value ABI");
@@ -488,7 +488,7 @@ extern "C" fn jet_jit_cell_set(cell: i64, raw: i64, schema_handle: i64) {
     });
 }
 
-extern "C" fn jet_jit_cell_replace(cell: i64, raw: i64, schema_handle: i64) -> i64 {
+fn jet_jit_cell_replace(cell: i64, raw: i64, schema_handle: i64) -> i64 {
     with_cell_result(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = decode_value(rt, raw, &schema).expect("Cell value ABI");
@@ -497,7 +497,7 @@ extern "C" fn jet_jit_cell_replace(cell: i64, raw: i64, schema_handle: i64) -> i
     })
 }
 
-extern "C" fn jet_jit_cell_guard_read(cell: i64) -> i64 {
+fn jet_jit_cell_guard_read(cell: i64) -> i64 {
     with_cell_result(|rt| {
         let guard = rt.cells.cells[(cell - 1) as usize].guard_read();
         let owner = rt.cells.owner();
@@ -505,7 +505,7 @@ extern "C" fn jet_jit_cell_guard_read(cell: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_cell_guard_edit(cell: i64) -> i64 {
+fn jet_jit_cell_guard_edit(cell: i64) -> i64 {
     with_cell_result(|rt| {
         let guard = rt.cells.cells[(cell - 1) as usize].guard_edit();
         let owner = rt.cells.owner();
@@ -513,7 +513,7 @@ extern "C" fn jet_jit_cell_guard_edit(cell: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_cell_guard_get(kind: i64, guard: i64, schema_handle: i64) -> i64 {
+fn jet_jit_cell_guard_get(kind: i64, guard: i64, schema_handle: i64) -> i64 {
     with_cell_result(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = if kind == 1 {
@@ -533,7 +533,7 @@ extern "C" fn jet_jit_cell_guard_get(kind: i64, guard: i64, schema_handle: i64) 
     })
 }
 
-extern "C" fn jet_jit_cell_guard_set(guard: i64, raw: i64, schema_handle: i64) {
+fn jet_jit_cell_guard_set(guard: i64, raw: i64, schema_handle: i64) {
     with_cell(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = decode_value(rt, raw, &schema).expect("Cell guard value ABI");
@@ -545,7 +545,7 @@ extern "C" fn jet_jit_cell_guard_set(guard: i64, raw: i64, schema_handle: i64) {
     });
 }
 
-extern "C" fn jet_jit_cell_get_or_set_store(
+fn jet_jit_cell_get_or_set_store(
     guard: i64,
     raw: i64,
     schema_handle: i64,
@@ -561,7 +561,7 @@ extern "C" fn jet_jit_cell_get_or_set_store(
     });
 }
 
-extern "C" fn jet_jit_cell_guard_drop(kind: i64, guard: i64) {
+fn jet_jit_cell_guard_drop(kind: i64, guard: i64) {
     with_cell(|rt| {
         if kind == 1 {
             rt.cells.read_guards[(guard - 1) as usize].guard = None;
@@ -571,7 +571,7 @@ extern "C" fn jet_jit_cell_guard_drop(kind: i64, guard: i64) {
     });
 }
 
-extern "C" fn jet_jit_cell_guard_project(
+fn jet_jit_cell_guard_project(
     kind: i64,
     guard: i64,
     projection_handle: i64,
@@ -632,7 +632,7 @@ extern "C" fn jet_jit_cell_guard_project(
     })
 }
 
-extern "C" fn jet_jit_cell_get_or_set_begin(cell: i64, schema_handle: i64) -> i64 {
+fn jet_jit_cell_get_or_set_begin(cell: i64, schema_handle: i64) -> i64 {
     with_cell_result(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let cell = rt.cells.cells[(cell - 1) as usize].clone();

@@ -349,7 +349,7 @@ fn timeout_record(milliseconds: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_url_parse(s: i64) -> i64 {
+fn jet_jit_url_parse(s: i64) -> i64 {
     let text = clone_string(s);
     match runtime::url_parse(&text) {
         Ok(url) => result_ok(push(NetValue::Url(url)) as u64),
@@ -357,18 +357,18 @@ extern "C" fn jet_jit_url_parse(s: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
+fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
     let literals = list_strings(literals).unwrap_or_default();
     let holes = list_strings(holes).unwrap_or_default();
     push(NetValue::Url(runtime::url_typed_literal(&literals, &holes)))
 }
 
-extern "C" fn jet_jit_url_file(path: i64) -> i64 {
+fn jet_jit_url_file(path: i64) -> i64 {
     let path = clone_string(path);
     push(NetValue::Url(runtime::url_file(&path)))
 }
 
-extern "C" fn jet_jit_url_data(mime: i64, text: i64) -> i64 {
+fn jet_jit_url_data(mime: i64, text: i64) -> i64 {
     let text = clone_string(text);
     let Some(mime) = with_net(mime, |v| match v {
         NetValue::Mime(m) => Some(m.clone()),
@@ -379,17 +379,17 @@ extern "C" fn jet_jit_url_data(mime: i64, text: i64) -> i64 {
     push(NetValue::Url(runtime::url_data(&mime, &text)))
 }
 
-extern "C" fn jet_jit_url_query(pairs: i64) -> i64 {
+fn jet_jit_url_query(pairs: i64) -> i64 {
     let pairs = read_string_pair_list(pairs);
     alloc_string(runtime::url_query(&pairs))
 }
 
-extern "C" fn jet_jit_url_percent_encode(s: i64) -> i64 {
+fn jet_jit_url_percent_encode(s: i64) -> i64 {
     let s = clone_string(s);
     alloc_string(runtime::url_percent_encode(&s))
 }
 
-extern "C" fn jet_jit_url_percent_decode(s: i64) -> i64 {
+fn jet_jit_url_percent_decode(s: i64) -> i64 {
     let s = clone_string(s);
     match runtime::url_percent_decode(&s) {
         Ok(text) => result_ok(alloc_string(text) as u64),
@@ -397,7 +397,7 @@ extern "C" fn jet_jit_url_percent_decode(s: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_mime_parse(s: i64) -> i64 {
+fn jet_jit_mime_parse(s: i64) -> i64 {
     let text = clone_string(s);
     match runtime::mime_parse(&text) {
         Ok(mime) => result_ok(push(NetValue::Mime(mime)) as u64),
@@ -405,17 +405,17 @@ extern "C" fn jet_jit_mime_parse(s: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_mime_from_extension(ext: i64) -> i64 {
+fn jet_jit_mime_from_extension(ext: i64) -> i64 {
     let ext = clone_string(ext);
     option_string(runtime::mime_from_extension(&ext))
 }
 
-extern "C" fn jet_jit_mime_extension(mime: i64) -> i64 {
+fn jet_jit_mime_extension(mime: i64) -> i64 {
     let mime = clone_string(mime);
     option_string(runtime::mime_extension(&mime))
 }
 
-extern "C" fn jet_jit_url_to_string(recv: i64) -> i64 {
+fn jet_jit_url_to_string(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.to_string_value()),
         NetValue::Mime(m) => Some(m.to_string_value()),
@@ -426,7 +426,7 @@ extern "C" fn jet_jit_url_to_string(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_scheme(recv: i64) -> i64 {
+fn jet_jit_url_scheme(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.scheme()),
         _ => None,
@@ -436,14 +436,14 @@ extern "C" fn jet_jit_url_scheme(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_host(recv: i64) -> i64 {
+fn jet_jit_url_host(recv: i64) -> i64 {
     option_string(with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.host()),
         _ => None,
     }).and_then(|r| r.ok()))
 }
 
-extern "C" fn jet_jit_url_path(recv: i64) -> i64 {
+fn jet_jit_url_path(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.path()),
         _ => None,
@@ -453,7 +453,7 @@ extern "C" fn jet_jit_url_path(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_query_value(recv: i64) -> i64 {
+fn jet_jit_url_query_value(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.query()),
         _ => None,
@@ -463,7 +463,7 @@ extern "C" fn jet_jit_url_query_value(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_query_pairs(recv: i64) -> i64 {
+fn jet_jit_url_query_pairs(recv: i64) -> i64 {
     let Some(pairs) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.query_pairs()),
         _ => None,
@@ -473,7 +473,7 @@ extern "C" fn jet_jit_url_query_pairs(recv: i64) -> i64 {
     list_of_string_pairs(pairs)
 }
 
-extern "C" fn jet_jit_url_path_segments(recv: i64) -> i64 {
+fn jet_jit_url_path_segments(recv: i64) -> i64 {
     let Some(segs) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.path_segments()),
         _ => None,
@@ -483,14 +483,14 @@ extern "C" fn jet_jit_url_path_segments(recv: i64) -> i64 {
     list_of_strings(segs)
 }
 
-extern "C" fn jet_jit_url_fragment(recv: i64) -> i64 {
+fn jet_jit_url_fragment(recv: i64) -> i64 {
     option_string(with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.fragment()),
         _ => None,
     }).and_then(|r| r.ok()))
 }
 
-extern "C" fn jet_jit_url_username(recv: i64) -> i64 {
+fn jet_jit_url_username(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.username()),
         _ => None,
@@ -500,7 +500,7 @@ extern "C" fn jet_jit_url_username(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_password(recv: i64) -> i64 {
+fn jet_jit_url_password(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.password()),
         _ => None,
@@ -510,7 +510,7 @@ extern "C" fn jet_jit_url_password(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_userinfo(recv: i64) -> i64 {
+fn jet_jit_url_userinfo(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.userinfo()),
         _ => None,
@@ -520,7 +520,7 @@ extern "C" fn jet_jit_url_userinfo(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_authority(recv: i64) -> i64 {
+fn jet_jit_url_authority(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.authority()),
         _ => None,
@@ -530,7 +530,7 @@ extern "C" fn jet_jit_url_authority(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_url_default_port(recv: i64) -> i64 {
+fn jet_jit_url_default_port(recv: i64) -> i64 {
     match with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.default_port()),
         _ => None,
@@ -542,7 +542,7 @@ extern "C" fn jet_jit_url_default_port(recv: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_url_port(recv: i64) -> i64 {
+fn jet_jit_url_port(recv: i64) -> i64 {
     match with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.port()),
         _ => None,
@@ -554,7 +554,7 @@ extern "C" fn jet_jit_url_port(recv: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_url_normalize(recv: i64) -> i64 {
+fn jet_jit_url_normalize(recv: i64) -> i64 {
     let Some(url) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.normalize()),
         _ => None,
@@ -564,7 +564,7 @@ extern "C" fn jet_jit_url_normalize(recv: i64) -> i64 {
     push(NetValue::Url(url))
 }
 
-extern "C" fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
+fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
     let rel = clone_string(rel);
     let Some(url) = with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.clone()),
@@ -578,7 +578,7 @@ extern "C" fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
+fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
     let key = clone_string(key);
     let value = clone_string(value);
     let Some(url) = with_net(recv, |v| match v {
@@ -590,7 +590,7 @@ extern "C" fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
     push(NetValue::Url(url))
 }
 
-extern "C" fn jet_jit_url_add_query(recv: i64, key: i64, value: i64) -> i64 {
+fn jet_jit_url_add_query(recv: i64, key: i64, value: i64) -> i64 {
     let key = clone_string(key);
     let value = clone_string(value);
     let Some(url) = with_net(recv, |v| match v {
@@ -602,7 +602,7 @@ extern "C" fn jet_jit_url_add_query(recv: i64, key: i64, value: i64) -> i64 {
     push(NetValue::Url(url))
 }
 
-extern "C" fn jet_jit_mime_essence(recv: i64) -> i64 {
+fn jet_jit_mime_essence(recv: i64) -> i64 {
     let Some(text) = with_net(recv, |v| match v {
         NetValue::Mime(m) => Some(m.essence()),
         _ => None,
@@ -612,7 +612,7 @@ extern "C" fn jet_jit_mime_essence(recv: i64) -> i64 {
     alloc_string(text)
 }
 
-extern "C" fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
+fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
     let name = clone_string(name);
     option_string(with_net(recv, |v| match v {
         NetValue::Mime(m) => Some(m.param(&name)),
@@ -620,7 +620,7 @@ extern "C" fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
     }).and_then(|r| r.ok()))
 }
 
-extern "C" fn jet_jit_browser_profile(name: i64) -> i64 {
+fn jet_jit_browser_profile(name: i64) -> i64 {
     let name = clone_string(name);
     match runtime::browser_profile(&name) {
         Ok((name, version)) => result_ok(profile_record(name, version) as u64),
@@ -628,7 +628,7 @@ extern "C" fn jet_jit_browser_profile(name: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_browser_timeout(ms: i64) -> i64 {
+fn jet_jit_browser_timeout(ms: i64) -> i64 {
     match runtime::browser_timeout(ms) {
         Ok(milliseconds) => result_ok(timeout_record(milliseconds) as u64),
         Err(err) => result_err(err),
@@ -937,7 +937,7 @@ fn email_send_report_handle(report: runtime::jet_email::SendReport) -> i64 {
     handle
 }
 
-extern "C" fn jet_jit_email_address(text: i64) -> i64 {
+fn jet_jit_email_address(text: i64) -> i64 {
     let Some(text) = email_string(text) else {
         return email_config_error("address", "invalid address text");
     };
@@ -949,7 +949,7 @@ extern "C" fn jet_jit_email_address(text: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_email_attachment(filename: i64, mime: i64, bytes: i64) -> i64 {
+fn jet_jit_email_attachment(filename: i64, mime: i64, bytes: i64) -> i64 {
     let Some(filename) = email_string(filename) else {
         return email_config_error("attachment", "invalid attachment filename");
     };
@@ -970,7 +970,7 @@ extern "C" fn jet_jit_email_attachment(filename: i64, mime: i64, bytes: i64) -> 
     }
 }
 
-extern "C" fn jet_jit_email_message(
+fn jet_jit_email_message(
     from: i64,
     to: i64,
     bcc: i64,
@@ -1018,7 +1018,7 @@ extern "C" fn jet_jit_email_message(
     }
 }
 
-extern "C" fn jet_jit_email_envelope(from: i64, recipients: i64) -> i64 {
+fn jet_jit_email_envelope(from: i64, recipients: i64) -> i64 {
     let Some(from) = email_address_from_handle(from) else {
         return email_config_error("envelope", "invalid sender address");
     };
@@ -1031,7 +1031,7 @@ extern "C" fn jet_jit_email_envelope(from: i64, recipients: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_email_serialize(message: i64) -> i64 {
+fn jet_jit_email_serialize(message: i64) -> i64 {
     let msg = match email_message_from_handle(message) {
         Some(m) => m,
         None => {
@@ -1055,7 +1055,7 @@ extern "C" fn jet_jit_email_serialize(message: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_email_limits_safe() -> i64 {
+fn jet_jit_email_limits_safe() -> i64 {
     let limits = runtime::jet_email::Limits::safe();
     let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(6));
     let fields = [
@@ -1074,21 +1074,21 @@ extern "C" fn jet_jit_email_limits_safe() -> i64 {
     handle
 }
 
-extern "C" fn jet_jit_email_smtp_from_env() -> i64 {
+fn jet_jit_email_smtp_from_env() -> i64 {
     match runtime::jet_email::smtp_from_env(runtime::email_runtime()) {
         Ok(mailer) => result_ok(push(NetValue::EmailMailer(mailer)) as u64),
         Err(error) => email_err(error),
     }
 }
 
-extern "C" fn jet_jit_email_message_envelope(message: i64) -> i64 {
+fn jet_jit_email_message_envelope(message: i64) -> i64 {
     let Some(message) = email_message_from_handle(message) else {
         return email_config_error("envelope", "invalid message");
     };
     email_envelope_handle(message.envelope())
 }
 
-extern "C" fn jet_jit_email_message_with_envelope(message: i64, envelope: i64) -> i64 {
+fn jet_jit_email_message_with_envelope(message: i64, envelope: i64) -> i64 {
     let Some(message) = email_message_from_handle(message) else {
         return email_config_error("with_envelope", "invalid message");
     };
@@ -1101,7 +1101,7 @@ extern "C" fn jet_jit_email_message_with_envelope(message: i64, envelope: i64) -
     }
 }
 
-extern "C" fn jet_jit_email_mailer_send(mailer: i64, message: i64) -> i64 {
+fn jet_jit_email_mailer_send(mailer: i64, message: i64) -> i64 {
     let Some(message) = email_message_from_handle(message) else {
         return email_config_error("send", "invalid message");
     };
@@ -1116,7 +1116,7 @@ extern "C" fn jet_jit_email_mailer_send(mailer: i64, message: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
+fn jet_jit_email_smtp(config: i64) -> i64 {
     let Some(mut config) = unpack_smtp_config(config) else {
         return email_config_error("smtp", "invalid SMTP configuration value");
     };
@@ -1161,7 +1161,7 @@ pub(crate) fn clear_net_state() {
     ADDRS.with(|s| s.borrow_mut().clear());
 }
 
-extern "C" fn jet_jit_net_tcp_listen(addr: i64) -> i64 {
+fn jet_jit_net_tcp_listen(addr: i64) -> i64 {
     let addr = clone_string(addr);
     match TcpListener::bind(addr.as_str()) {
         Ok(listener) => {
@@ -1174,7 +1174,7 @@ extern "C" fn jet_jit_net_tcp_listen(addr: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
+fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
     if listener <= 0 {
         return result_err("invalid TcpListener".into());
     }
@@ -1191,7 +1191,7 @@ extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_net_socket_port(addr: i64) -> i64 {
+fn jet_jit_net_socket_port(addr: i64) -> i64 {
     if addr <= 0 {
         return 0;
     }

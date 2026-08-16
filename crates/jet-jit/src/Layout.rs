@@ -50,7 +50,7 @@ fn slot(handle: i64) -> LayoutSlot {
     .expect("jit layout: no active runtime")
 }
 
-extern "C" fn jet_jit_layout_new(label: i64) -> i64 {
+fn jet_jit_layout_new(label: i64) -> i64 {
     with_rt(|rt| {
         let label = rt.heap.clone_string(label).unwrap_or_else(|| "layout".into());
         let h = jet_layout::Handle::new(&label);
@@ -59,46 +59,46 @@ extern "C" fn jet_jit_layout_new(label: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_layout_from_const(v: f64) -> i64 {
+fn jet_jit_layout_from_const(v: f64) -> i64 {
     push_slot(LayoutSlot::Expr(jet_layout::LinExpr::from_const(v)))
 }
 
-extern "C" fn jet_jit_layout_ge(lhs: i64, rhs: i64) -> i64 {
+fn jet_jit_layout_ge(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::ge(a, b))),
         _ => jet_foundation::ice!(None, "jit layout ge: bad operands"),
     }
 }
 
-extern "C" fn jet_jit_layout_le(lhs: i64, rhs: i64) -> i64 {
+fn jet_jit_layout_le(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::le(a, b))),
         _ => jet_foundation::ice!(None, "jit layout le: bad operands"),
     }
 }
 
-extern "C" fn jet_jit_layout_eq(lhs: i64, rhs: i64) -> i64 {
+fn jet_jit_layout_eq(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::eq_(a, b))),
         _ => jet_foundation::ice!(None, "jit layout eq: bad operands"),
     }
 }
 
-extern "C" fn jet_jit_layout_add(lhs: i64, rhs: i64) -> i64 {
+fn jet_jit_layout_add(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Expr(a + b)),
         _ => jet_foundation::ice!(None, "jit layout add: bad operands"),
     }
 }
 
-extern "C" fn jet_jit_layout_sub(lhs: i64, rhs: i64) -> i64 {
+fn jet_jit_layout_sub(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Expr(a - b)),
         _ => jet_foundation::ice!(None, "jit layout sub: bad operands"),
     }
 }
 
-extern "C" fn jet_jit_layout_h(handle: i64, box_name: i64, anchor: i64) -> i64 {
+fn jet_jit_layout_h(handle: i64, box_name: i64, anchor: i64) -> i64 {
     with_rt(|rt| {
         let box_name = rt.heap.clone_string(box_name).unwrap_or_default();
         let anchor = rt.heap.clone_string(anchor).unwrap_or_default();
@@ -116,7 +116,7 @@ extern "C" fn jet_jit_layout_h(handle: i64, box_name: i64, anchor: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_layout_v(handle: i64, box_name: i64, anchor: i64) -> i64 {
+fn jet_jit_layout_v(handle: i64, box_name: i64, anchor: i64) -> i64 {
     with_rt(|rt| {
         let box_name = rt.heap.clone_string(box_name).unwrap_or_default();
         let anchor = rt.heap.clone_string(anchor).unwrap_or_default();
@@ -134,7 +134,7 @@ extern "C" fn jet_jit_layout_v(handle: i64, box_name: i64, anchor: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_layout_value(handle: i64, expr: i64) -> f64 {
+fn jet_jit_layout_value(handle: i64, expr: i64) -> f64 {
     with_rt(|rt| {
         let LayoutSlot::Handle(h) = rt
             .layout_slots
@@ -156,7 +156,7 @@ extern "C" fn jet_jit_layout_value(handle: i64, expr: i64) -> f64 {
     })
 }
 
-extern "C" fn jet_jit_layout_suggest(handle: i64, expr: i64, value: f64) {
+fn jet_jit_layout_suggest(handle: i64, expr: i64, value: f64) {
     with_rt(|rt| {
         let LayoutSlot::Handle(h) = rt
             .layout_slots
@@ -178,7 +178,7 @@ extern "C" fn jet_jit_layout_suggest(handle: i64, expr: i64, value: f64) {
     });
 }
 
-extern "C" fn jet_jit_layout_is_feasible(handle: i64) -> i8 {
+fn jet_jit_layout_is_feasible(handle: i64) -> i8 {
     with_rt(|rt| {
         let LayoutSlot::Handle(h) = rt
             .layout_slots
@@ -196,12 +196,12 @@ extern "C" fn jet_jit_layout_is_feasible(handle: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_layout_add_constraint(handle: i64, constraint: i64) {
+fn jet_jit_layout_add_constraint(handle: i64, constraint: i64) {
     let _ = (handle, constraint);
     // Constraints auto-register via jet_layout::ge/le/eq_ (make_constraint).
 }
 
-extern "C" fn jet_jit_layout_strength(constraint: i64, kind: i64) -> i64 {
+fn jet_jit_layout_strength(constraint: i64, kind: i64) -> i64 {
     with_rt(|rt| {
         let LayoutSlot::Constraint(c) = rt
             .layout_slots

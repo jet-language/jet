@@ -225,41 +225,76 @@ pub enum JetSchedulerWait<T> {
     Panicked(String),
 }
 
-pub fn jet_scheduler_wait_without_unwind<F, T>(f: F) -> JetSchedulerWait<T>
+/// Catch an unwind inside a frame that foreign code sits *below*.
+///
+/// D-JITUNWIND1 (#1997): `cranelift-jit` registers no unwind information for
+/// the code it emits, so a JIT frame carries no FDE and a Rust panic raised
+/// above one can never be walked past — libgcc's phase 1 returns
+/// `_URC_END_OF_STACK` and std rtaborts with `failed to initiate panic,
+/// error 5` before any outer `catch_unwind` exists to see it. The answer is
+/// conversion at the boundary: catch inside the host frame, hand back a
+/// status, and let native code leave through its own control flow. This is the
+/// catch half; [`jet_scheduler_classify_unwind`] is the conversion half.
+///
+/// The catching flag is set for one reason only: the process panic hook must
+/// stay quiet for a control transfer this frame converts
+/// (`jet_scheduler_suppress_panic_report`). The wait-point bookkeeping that
+/// [`jet_scheduler_wait_without_unwind`] adds is deliberately absent — an
+/// ordinary host seam is not a wait point and must not make one look live.
+pub fn jet_scheduler_catch_foreign_boundary<F, T>(
+    f: F,
+) -> Result<T, Box<dyn std::any::Any + Send>>
 where
     F: FnOnce() -> T,
 {
     jet_scheduler_install_panic_hook();
+    JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
+        let previous = catching.replace(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        catching.set(previous);
+        result
+    })
+}
+
+/// Read a caught payload as one of the scheduler's own outcomes. I8: this is
+/// the single place a payload becomes a status, so a wait point and a plain
+/// host seam cannot disagree about what a cancel or a blown deadline means.
+pub fn jet_scheduler_classify_unwind<T>(
+    payload: Box<dyn std::any::Any + Send>,
+) -> JetSchedulerWait<T> {
+    if payload.is::<JetCancelUnwind>() {
+        return JetSchedulerWait::Cancelled;
+    }
+    if payload.is::<JetDeadlineUnwind>() {
+        let deadline = payload
+            .downcast::<JetDeadlineUnwind>()
+            .expect("deadline payload type checked");
+        return JetSchedulerWait::Deadline(deadline.rendered);
+    }
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
+        .unwrap_or_else(|| "scheduler wait panicked".to_string());
+    JetSchedulerWait::Panicked(message)
+}
+
+pub fn jet_scheduler_wait_without_unwind<F, T>(f: F) -> JetSchedulerWait<T>
+where
+    F: FnOnce() -> T,
+{
     let result = JET_IN_SCHEDULER_TASK.with(|in_task| {
-        JET_SCHEDULER_CATCHING_PANIC.with(|catching| {
-            let previous_task = in_task.replace(true);
-            let previous_catching = catching.replace(true);
-            let result = {
-                let _boundary = JetSchedulerWaitBoundary::enter();
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
-            };
-            catching.set(previous_catching);
-            in_task.set(previous_task);
-            result
-        })
+        let previous_task = in_task.replace(true);
+        let result = {
+            let _boundary = JetSchedulerWaitBoundary::enter();
+            jet_scheduler_catch_foreign_boundary(f)
+        };
+        in_task.set(previous_task);
+        result
     });
     match result {
         Ok(value) => JetSchedulerWait::Ready(value),
-        Err(payload) if payload.is::<JetCancelUnwind>() => JetSchedulerWait::Cancelled,
-        Err(payload) if payload.is::<JetDeadlineUnwind>() => {
-            let deadline = payload
-                .downcast::<JetDeadlineUnwind>()
-                .expect("deadline payload type checked");
-            JetSchedulerWait::Deadline(deadline.rendered)
-        }
-        Err(payload) => {
-            let message = payload
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_string()))
-                .unwrap_or_else(|| "scheduler wait panicked".to_string());
-            JetSchedulerWait::Panicked(message)
-        }
+        Err(payload) => jet_scheduler_classify_unwind(payload),
     }
 }
 

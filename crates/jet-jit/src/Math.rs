@@ -245,7 +245,7 @@ fn trap(msg: &str) {
 /// - for math-value args: math handles
 /// - for array args (`from_array`): list handle of f64
 /// Returns packed float or math handle.
-extern "C" fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
+fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
     let ty = clone_string(type_name);
     let func = clone_string(func);
     let argv = Concurrency::with_runtime_mut(|rt| {
@@ -567,15 +567,15 @@ extern "C" fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
     result.unwrap_or(0)
 }
 
-extern "C" fn jet_jit_math_result_is_float(packed: i64) -> i8 {
+fn jet_jit_math_result_is_float(packed: i64) -> i8 {
     i8::from(is_float_pack(packed))
 }
 
-extern "C" fn jet_jit_math_result_float(packed: i64) -> f64 {
+fn jet_jit_math_result_float(packed: i64) -> f64 {
     unpack_float(packed)
 }
 
-extern "C" fn jet_jit_math_result_handle(packed: i64) -> i64 {
+fn jet_jit_math_result_handle(packed: i64) -> i64 {
     unpack_handle(packed)
 }
 
@@ -616,13 +616,13 @@ fn typed_datetime_interpolate(literals: i64, holes: i64) -> Option<String> {
     ))
 }
 
-extern "C" fn jet_jit_typed_path_interpolate(literals: i64, holes: i64) -> i64 {
+fn jet_jit_typed_path_interpolate(literals: i64, holes: i64) -> i64 {
     typed_path_interpolate(literals, holes)
         .map(alloc_string)
         .unwrap_or(0)
 }
 
-extern "C" fn jet_jit_typed_datetime_interpolate(literals: i64, holes: i64) -> i64 {
+fn jet_jit_typed_datetime_interpolate(literals: i64, holes: i64) -> i64 {
     typed_datetime_interpolate(literals, holes)
         .map(alloc_string)
         .unwrap_or(0)
@@ -668,11 +668,11 @@ fn clone_sql_value(value: i64) -> Option<(String, Vec<String>)> {
     })
 }
 
-extern "C" fn jet_jit_typed_sql_raw(s: i64) -> i64 {
+fn jet_jit_typed_sql_raw(s: i64) -> i64 {
     alloc_sql_value(typed_text_semantics::jet_typed_sql_raw(clone_string(s)))
 }
 
-extern "C" fn jet_jit_typed_sql_interpolate(literals: i64, holes: i64) -> i64 {
+fn jet_jit_typed_sql_interpolate(literals: i64, holes: i64) -> i64 {
     let Some(literals) = require_string_list(literals) else {
         return 0;
     };
@@ -686,7 +686,7 @@ extern "C" fn jet_jit_typed_sql_interpolate(literals: i64, holes: i64) -> i64 {
     ))
 }
 
-extern "C" fn jet_jit_typed_sql_template(value: i64) -> i64 {
+fn jet_jit_typed_sql_template(value: i64) -> i64 {
     let Some(value) = clone_sql_value(value) else {
         trap("typed-text SQL value is malformed");
         return 0;
@@ -694,7 +694,7 @@ extern "C" fn jet_jit_typed_sql_template(value: i64) -> i64 {
     alloc_string(typed_text_semantics::jet_typed_sql_template(&value))
 }
 
-extern "C" fn jet_jit_typed_sql_params(value: i64) -> i64 {
+fn jet_jit_typed_sql_params(value: i64) -> i64 {
     let Some(value) = clone_sql_value(value) else {
         trap("typed-text SQL value is malformed");
         return 0;
@@ -702,11 +702,11 @@ extern "C" fn jet_jit_typed_sql_params(value: i64) -> i64 {
     alloc_string_list(typed_text_semantics::jet_typed_sql_params(&value))
 }
 
-extern "C" fn jet_jit_typed_sh_raw(s: i64) -> i64 {
+fn jet_jit_typed_sh_raw(s: i64) -> i64 {
     alloc_string_list(typed_text_semantics::jet_typed_sh_raw(clone_string(s)))
 }
 
-extern "C" fn jet_jit_typed_sh_interpolate(literals: i64, holes: i64) -> i64 {
+fn jet_jit_typed_sh_interpolate(literals: i64, holes: i64) -> i64 {
     let Some(literals) = require_string_list(literals) else {
         return 0;
     };
@@ -720,7 +720,7 @@ extern "C" fn jet_jit_typed_sh_interpolate(literals: i64, holes: i64) -> i64 {
     ))
 }
 
-extern "C" fn jet_jit_typed_html_interpolate(literals: i64, holes: i64) -> i64 {
+fn jet_jit_typed_html_interpolate(literals: i64, holes: i64) -> i64 {
     let Some(literals) = require_string_list(literals) else {
         return 0;
     };
@@ -734,19 +734,19 @@ extern "C" fn jet_jit_typed_html_interpolate(literals: i64, holes: i64) -> i64 {
     ))
 }
 
-extern "C" fn jet_jit_typed_html_raw(value: i64) -> i64 {
+fn jet_jit_typed_html_raw(value: i64) -> i64 {
     alloc_string(typed_text_semantics::jet_typed_html_raw(clone_string(value)))
 }
 
-extern "C" fn jet_jit_typed_html_text(value: i64) -> i64 {
+fn jet_jit_typed_html_text(value: i64) -> i64 {
     alloc_string(typed_text_semantics::jet_typed_html_text(clone_string(value)))
 }
 
-extern "C" fn jet_jit_html_escape(s: i64) -> i64 {
+fn jet_jit_html_escape(s: i64) -> i64 {
     alloc_string(typed_text_semantics::jet_typed_html_escape(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
+fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
     let left = clone_string(a);
     let right = clone_string(b);
     alloc_string(string_concat_semantics::jet_string_concat(&left, &right))

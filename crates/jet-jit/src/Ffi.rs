@@ -234,7 +234,7 @@ fn load_cdylib(
 
 /// `wrapper` / `args` are heap string / int-list handles. Returns Jet ABI value
 /// (string handle, i64, f64-bits, bool as i64).
-extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
+fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
     let name = clone_string(wrapper);
     let argv = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(args).unwrap_or(0);

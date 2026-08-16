@@ -718,6 +718,56 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.net.url` | Kernel | `Prelude/CoreLib/JetStd/UrlMime.rs` owns URL parse/render/percent rules; `UrlLite` marshals `JetURL`. |
 
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
+- **R13 — An abort is never an outcome; no unwind may reach a JIT frame.**
+  (D-JITUNWIND1, #1995 / #1997.) `cranelift-jit` registers no unwind
+  information for the code it emits, so a JIT frame carries no FDE. A Rust
+  panic raised above one makes libgcc's phase-1 walk run off the top of the
+  stack and the process rtaborts with `fatal runtime error: failed to initiate
+  panic, error 5` before any outer `catch_unwind` can see it. The user gets a
+  bare `SIGABRT` with no text, which is not one of the exit codes below.
+
+  Two mechanisms could fix that, and the choice is recorded here rather than
+  left implicit at each call site.
+
+  1. **Register unwind info for JIT'd code** — `create_unwind_info(isa)` plus
+     per-function FDE registration. **Rejected.** It makes unwinding a
+     *supported* path through generated machine code: a far larger semantic
+     commitment than it looks, platform-specific frame registration, and it
+     writes Rust panic propagation into the contract of Jet-generated code.
+  2. **Convert at the boundary** — every host seam turns a panic into a status
+     before returning into JIT'd code, so no unwind ever begins with JIT frames
+     below it. **Chosen.** It is how the tiers already talk: `#Shield` delivers
+     a deferred cancel as a status
+     (`jet_scheduler_shield_leave_status`), and the deopt seam already carried
+     exactly this conversion.
+
+  **The recorded cost of (2) is that the guarantee has to hold across every one
+  of the ~1.7k JIT host symbols, so it needs a mechanical check and not review
+  discipline.** That cost is the centre of the design. It is paid structurally,
+  three ways:
+
+  - A host seam is an ordinary Rust `fn`, never an `extern "C" fn`. rustc gives
+    an `extern "C"` **body** an abort-on-unwind shim, so a panic inside one dies
+    as `thread caused non-unwinding panic` at that body's own edge, before any
+    wrapper above it could catch. A boundary can only be added by *replacing*
+    the C frame, never by wrapping one.
+  - The boundary is **generated**, from the one canonical per-symbol
+    declaration `host_fns!` already owns (card #1633).
+    `crates/jet-jit/src/host_seam.rs` builds an `extern "C"` shim with the
+    seam's exact C signature whose body runs the seam inside `guard_seam`, and
+    `builder.symbol` registers that shim. A new host symbol cannot be declared
+    without one.
+  - `tests/jit_no_unwind_boundary.rs` is the check: no `extern "C" fn jet_*`
+    may be defined in `crates/jet-jit` at all, no host address may escape except
+    through `guarded_addr`, and the macro must still emit the guard.
+
+  Conversion targets the tier's **existing** status channel — a cancel or a
+  blown deadline lands on the pending-interrupt channel `#Shield` already uses,
+  a program stop renders through the shared report boundary and exits `70`, and
+  an engine defect takes the branded ICE rail and exits `101` (I2). No second
+  error channel is introduced (I8), and `Prelude/Scheduler.rs` stays the only
+  place a caught payload is read as a status (I9).
+
 
 ## Exit codes (stable contract)
 

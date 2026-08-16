@@ -179,7 +179,7 @@ fn result_data_err(e: DataError) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_error_show(handle: i64) -> i64 {
+fn jet_jit_data_error_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let kind = rt
             .heap
@@ -239,17 +239,17 @@ fn pack_status(rows: Vec<DataStatus>) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_status() -> i64 {
+fn jet_jit_data_status() -> i64 {
     pack_status(data_kernel::jet_data_status())
 }
 
-extern "C" fn jet_jit_data_require_bridge(provider: i64) -> i64 {
+fn jet_jit_data_require_bridge(provider: i64) -> i64 {
     let name =
         Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(provider).unwrap_or_default());
     result_unit(data_kernel::jet_data_require_bridge(&name))
 }
 
-extern "C" fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
+fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
     let vals = float_list(values);
     let r = match op {
         0 => data_kernel::jet_data_mean_checked(&vals),
@@ -263,13 +263,13 @@ extern "C" fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
     result_f64(r)
 }
 
-extern "C" fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
+fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
     let vals = float_list(values);
     let q = f64::from_bits(q_bits as u64);
     result_f64(data_kernel::jet_data_quantile_checked(&vals, q))
 }
 
-extern "C" fn jet_jit_data_describe(values: i64) -> i64 {
+fn jet_jit_data_describe(values: i64) -> i64 {
     let vals = float_list(values);
     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_describe_checked(&vals) {
                 Ok(s) => {
@@ -313,7 +313,7 @@ fn load_groups(groups: i64) -> Vec<DataGroup> {
     })
 }
 
-extern "C" fn jet_jit_data_bar_text(groups: i64) -> i64 {
+fn jet_jit_data_bar_text(groups: i64) -> i64 {
     let groups = load_groups(groups);
     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_bar_text_checked(&groups) {
         Ok(s) => {
@@ -327,7 +327,7 @@ extern "C" fn jet_jit_data_bar_text(groups: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_bar_svg(groups: i64) -> i64 {
+fn jet_jit_data_bar_svg(groups: i64) -> i64 {
     let groups = load_groups(groups);
     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_bar_svg_checked(&groups) {
         Ok(s) => {
@@ -398,7 +398,7 @@ fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
     result_data_err(err_at(kind, error.operation, error.index, error.reason))
 }
 
-extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
+fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
     let groups = load_groups(groups);
     let options = load_line_options(options);
     Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_text_plot_checked(
@@ -414,7 +414,7 @@ extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
+fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
     let groups = load_groups(groups);
     let options = load_line_options(options);
     Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_svg_plot_checked(
@@ -430,7 +430,7 @@ extern "C" fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i64 {
+fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let n = rt.heap.list_len(keys).unwrap_or(0);
         let mut map: BTreeMap<String, (i64, f64)> = BTreeMap::new();
@@ -476,7 +476,7 @@ extern "C" fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i6
     })
 }
 
-extern "C" fn jet_jit_data_inner_join(
+fn jet_jit_data_inner_join(
     left: i64,
     right: i64,
     left_keys: i64,
@@ -511,7 +511,7 @@ extern "C" fn jet_jit_data_inner_join(
     })
 }
 
-extern "C" fn jet_jit_data_left_join(
+fn jet_jit_data_left_join(
     left: i64,
     right: i64,
     left_keys: i64,
@@ -555,7 +555,7 @@ extern "C" fn jet_jit_data_left_join(
     })
 }
 
-extern "C" fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) -> i64 {
+fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let n = rt.heap.list_len(row_keys).unwrap_or(0);
         let mut map: BTreeMap<(String, String), (i64, f64)> = BTreeMap::new();
@@ -602,7 +602,7 @@ extern "C" fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) 
     })
 }
 
-extern "C" fn jet_jit_data_rolling_mean(values: i64, width: i64) -> i64 {
+fn jet_jit_data_rolling_mean(values: i64, width: i64) -> i64 {
     let vals = float_list(values);
     let out = match data_kernel::jet_data_rolling_mean_checked(&vals, width) {
         Ok(out) => out,
@@ -617,7 +617,7 @@ extern "C" fn jet_jit_data_rolling_mean(values: i64, width: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_missing_count(series: i64) -> i64 {
+fn jet_jit_data_missing_count(series: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let values = rt.heap.record_get_int(series, 0).unwrap_or(0);
         let stored = rt.heap.record_get_int(series, 1).unwrap_or(0);
@@ -684,7 +684,7 @@ fn clone_frame_ops(src: i64, dst: i64) {
     }
 }
 
-extern "C" fn jet_jit_data_lazy_push_op(frame: i64, kind: i64, func_id: i64) -> i64 {
+fn jet_jit_data_lazy_push_op(frame: i64, kind: i64, func_id: i64) -> i64 {
     note_lazy_callable(FuncId::from_u32(func_id as u32));
     if let Ok(mut ops) = LAZY_FRAME_OPS.lock() {
         ops.entry(frame).or_default().push((kind as u8, func_id as u32));
@@ -692,7 +692,7 @@ extern "C" fn jet_jit_data_lazy_push_op(frame: i64, kind: i64, func_id: i64) -> 
     frame
 }
 
-extern "C" fn jet_jit_data_lazy_clone_ops(src: i64, dst: i64) -> i64 {
+fn jet_jit_data_lazy_clone_ops(src: i64, dst: i64) -> i64 {
     clone_frame_ops(src, dst);
     dst
 }
@@ -765,14 +765,14 @@ fn materialize_lazy_rows(rt: &mut crate::JitRuntime, frame: i64) -> Result<i64, 
     Ok(rt.heap.alloc_int_list(cur))
 }
 
-extern "C" fn jet_jit_data_lazy_count(frame: i64) -> i64 {
+fn jet_jit_data_lazy_count(frame: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let rows = rt.heap.record_get_int(frame, 0).unwrap_or(0);
         rt.heap.list_len(rows).unwrap_or(0)
     })
 }
 
-extern "C" fn jet_jit_data_collect(frame: i64) -> i64 {
+fn jet_jit_data_collect(frame: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let rows = rt.heap.record_get_int(frame, 0).unwrap_or(0);
         let missing = rt.heap.record_get_int(frame, 1).unwrap_or(0);
@@ -809,7 +809,7 @@ fn option_bits(opt: Option<i64>) -> u64 {
 }
 
 /// Decode CSV `service,latency_ms` rows into Event records.
-extern "C" fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
+fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64) -> i64 {
     let csv = crate::enc_stream::jet_jit_csv_reader(file, encoding);
     let (ok, handle) = Concurrency::with_runtime_mut(|rt| {
         let ok = crate::runtime_host::jit_result_is_ok(rt, csv).unwrap_or(false);
@@ -875,7 +875,7 @@ extern "C" fn jet_jit_data_csv_reader(file: i64, encoding: i64, max_groups: i64)
     })
 }
 
-extern "C" fn jet_jit_data_stream_next(handle: i64) -> i64 {
+fn jet_jit_data_stream_next(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = match (handle as usize).checked_sub(1) {
             Some(i) => i,
@@ -919,7 +919,7 @@ extern "C" fn jet_jit_data_stream_next(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_stream_rest(handle: i64) -> i64 {
+fn jet_jit_data_stream_rest(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = match (handle as usize).checked_sub(1) {
             Some(i) => i,
@@ -961,7 +961,7 @@ extern "C" fn jet_jit_data_stream_rest(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_stream_max_groups(handle: i64) -> i64 {
+fn jet_jit_data_stream_max_groups(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = match (handle as usize).checked_sub(1) {
             Some(i) => i,
@@ -974,7 +974,7 @@ extern "C" fn jet_jit_data_stream_max_groups(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_groups: i64) -> i64 {
+fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_groups: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let n = rt.heap.list_len(keys).unwrap_or(0);
         let mut map: BTreeMap<String, (i64, f64)> = BTreeMap::new();

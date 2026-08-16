@@ -307,51 +307,51 @@ fn decode_text_width(policy: i64) -> (bool, bool) {
     })
 }
 
-extern "C" fn jet_jit_text_lower(s: i64) -> i64 {
+fn jet_jit_text_lower(s: i64) -> i64 {
     alloc_string(text_rt::lower(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_upper(s: i64) -> i64 {
+fn jet_jit_text_upper(s: i64) -> i64 {
     alloc_string(text_rt::upper(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_graphemes(s: i64) -> i64 {
+fn jet_jit_text_graphemes(s: i64) -> i64 {
     list_from_strings(text_rt::graphemes(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_words(s: i64) -> i64 {
+fn jet_jit_text_words(s: i64) -> i64 {
     list_from_strings(text_rt::words(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_sentences(s: i64) -> i64 {
+fn jet_jit_text_sentences(s: i64) -> i64 {
     list_from_strings(text_rt::sentences(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_nfc(s: i64) -> i64 {
+fn jet_jit_text_nfc(s: i64) -> i64 {
     alloc_string(text_rt::nfc(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_nfkc(s: i64) -> i64 {
+fn jet_jit_text_nfkc(s: i64) -> i64 {
     alloc_string(text_rt::nfkc(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_nfd(s: i64) -> i64 {
+fn jet_jit_text_nfd(s: i64) -> i64 {
     alloc_string(text_rt::nfd(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_nfkd(s: i64) -> i64 {
+fn jet_jit_text_nfkd(s: i64) -> i64 {
     alloc_string(text_rt::nfkd(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_caseless_eq(a: i64, b: i64) -> i8 {
+fn jet_jit_text_caseless_eq(a: i64, b: i64) -> i8 {
     i8::from(text_rt::caseless_eq(&clone_string(a), &clone_string(b)))
 }
 
-extern "C" fn jet_jit_text_display_width(s: i64) -> i64 {
+fn jet_jit_text_display_width(s: i64) -> i64 {
     text_rt::display_width_default(&clone_string(s))
 }
 
-extern "C" fn jet_jit_text_display_width_policy(s: i64, policy: i64) -> i64 {
+fn jet_jit_text_display_width_policy(s: i64, policy: i64) -> i64 {
     let (ambiguous_wide, controls_reject) = decode_text_width(policy);
     match text_rt::display_width_policy(&clone_string(s), ambiguous_wide, controls_reject) {
         Ok(w) => result_ok_i64(w),
@@ -359,54 +359,54 @@ extern "C" fn jet_jit_text_display_width_policy(s: i64, policy: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_text_is_alphabetic(s: i64) -> i8 {
+fn jet_jit_text_is_alphabetic(s: i64) -> i8 {
     i8::from(text_rt::is_alphabetic(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_is_numeric(s: i64) -> i8 {
+fn jet_jit_text_is_numeric(s: i64) -> i8 {
     i8::from(text_rt::is_numeric(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_is_whitespace(s: i64) -> i8 {
+fn jet_jit_text_is_whitespace(s: i64) -> i8 {
     i8::from(text_rt::is_whitespace(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_is_ascii(s: i64) -> i8 {
+fn jet_jit_text_is_ascii(s: i64) -> i8 {
     i8::from(text_rt::is_ascii(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_trim_start(s: i64) -> i64 {
+fn jet_jit_text_trim_start(s: i64) -> i64 {
     alloc_string(text_rt::trim_start(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_trim_end(s: i64) -> i64 {
+fn jet_jit_text_trim_end(s: i64) -> i64 {
     alloc_string(text_rt::trim_end(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_pad_start(s: i64, width: i64, fill: i64) -> i64 {
+fn jet_jit_text_pad_start(s: i64, width: i64, fill: i64) -> i64 {
     alloc_string(text_rt::pad_start(&clone_string(s), width, &clone_string(fill)))
 }
 
-extern "C" fn jet_jit_text_pad_end(s: i64, width: i64, fill: i64) -> i64 {
+fn jet_jit_text_pad_end(s: i64, width: i64, fill: i64) -> i64 {
     alloc_string(text_rt::pad_end(&clone_string(s), width, &clone_string(fill)))
 }
 
-extern "C" fn jet_jit_text_index_of(s: i64, needle: i64) -> i64 {
+fn jet_jit_text_index_of(s: i64, needle: i64) -> i64 {
     text_rt::index_of(&clone_string(s), &clone_string(needle))
         .map_or(0, |index| index.wrapping_add(1))
 }
 
-extern "C" fn jet_jit_text_count(s: i64, needle: i64) -> i64 {
+fn jet_jit_text_count(s: i64, needle: i64) -> i64 {
     text_rt::count(&clone_string(s), &clone_string(needle))
 }
 
-extern "C" fn jet_jit_text_title(s: i64) -> i64 {
+fn jet_jit_text_title(s: i64) -> i64 {
     alloc_string(text_rt::title(&clone_string(s)))
 }
 
 /// #1476 StringMethod dispatcher. method ids mirror lower_ctx match.
 /// Returns i64; bool methods use 0/1 and are narrowed to i8 by the caller.
-extern "C" fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
+fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
     let s = clone_string(recv);
     match method {
         0 => text_rt::last_index_of(&s, &clone_string(arg0))
@@ -426,7 +426,7 @@ extern "C" fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
+fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
     let Some((before, after)) = text_rt::split_once(&clone_string(s), &clone_string(separator)) else {
         return 0;
     };
@@ -440,20 +440,20 @@ extern "C" fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
+fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
     alloc_string(text_rt::center(&clone_string(s), width, &clone_string(fill)))
 }
 
-extern "C" fn jet_jit_text_starts_any(s: i64, prefixes: i64) -> i8 {
+fn jet_jit_text_starts_any(s: i64, prefixes: i64) -> i8 {
     let prefs = list_of_strings(prefixes);
     i8::from(text_rt::starts_any(&clone_string(s), &prefs))
 }
 
-extern "C" fn jet_jit_text_char_indices(s: i64) -> i64 {
+fn jet_jit_text_char_indices(s: i64) -> i64 {
     list_from_strings(text_rt::char_indices(&clone_string(s)))
 }
 
-extern "C" fn jet_jit_text_inspect(s: i64) -> i64 {
+fn jet_jit_text_inspect(s: i64) -> i64 {
     list_from_strings(text_rt::inspect(&clone_string(s)))
 }
 
@@ -523,38 +523,38 @@ fn list_strings(items: Vec<String>) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_regex_flags(ci: i64, ml: i64, ds: i64) -> i64 {
+fn jet_jit_regex_flags(ci: i64, ml: i64, ds: i64) -> i64 {
     push_regex(RegexValue::Flags(text_rt::jet_std::jet_regex_flags(ci != 0, ml != 0, ds != 0)))
 }
 
-extern "C" fn jet_jit_regex_literal(pat: i64) -> i64 {
+fn jet_jit_regex_literal(pat: i64) -> i64 {
     push_regex(RegexValue::Regex(text_rt::jet_std::jet_regex_literal(
         &clone_string(pat),
     )))
 }
 
-extern "C" fn jet_jit_regex_is_match(pat: i64, text: i64) -> i8 {
+fn jet_jit_regex_is_match(pat: i64, text: i64) -> i8 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
         .map(|regex| i8::from(regex.is_match(&t)))
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_find(pat: i64, text: i64) -> i64 {
+fn jet_jit_regex_find(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
         .map(|regex| option_string_bits(regex.find(&t).ok()))
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_find_all(pat: i64, text: i64) -> i64 {
+fn jet_jit_regex_find_all(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
         .map(|regex| list_strings(regex.find_all(&t)))
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
+fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
     let text = clone_string(text);
     let Some(regex) = clone_compiled_regex(pat) else {
         return 0;
@@ -569,7 +569,7 @@ extern "C" fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
     list
 }
 
-extern "C" fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
+fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
         .and_then(|regex| regex.match_value(&t).ok())
@@ -577,7 +577,7 @@ extern "C" fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_replace_all(pat: i64, text: i64, repl: i64) -> i64 {
+fn jet_jit_regex_replace_all(pat: i64, text: i64, repl: i64) -> i64 {
     let t = clone_string(text);
     let r = clone_string(repl);
     clone_compiled_regex(pat)
@@ -587,7 +587,7 @@ extern "C" fn jet_jit_regex_replace_all(pat: i64, text: i64, repl: i64) -> i64 {
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
+fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
     let text = clone_string(text);
     let replacement = clone_string(repl);
     clone_compiled_regex(pat)
@@ -597,28 +597,28 @@ extern "C" fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
+fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
         .map(|regex| list_strings(regex.split(&t)))
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_split_limit(pat: i64, text: i64, limit: i64) -> i64 {
+fn jet_jit_regex_split_limit(pat: i64, text: i64, limit: i64) -> i64 {
     let text = clone_string(text);
     clone_compiled_regex(pat)
         .map(|regex| list_strings(regex.split_limit(&text, limit)))
         .unwrap_or_default()
 }
 
-extern "C" fn jet_jit_regex_compile(pat: i64) -> i64 {
+fn jet_jit_regex_compile(pat: i64) -> i64 {
     match text_rt::jet_std::jet_regex_compile(&clone_string(pat)) {
         Ok(rx) => regex_result_ok(push_regex(RegexValue::Regex(rx)) as u64),
         Err(e) => regex_result_err(e),
     }
 }
 
-extern "C" fn jet_jit_regex_compile_with(pat: i64, flags: i64) -> i64 {
+fn jet_jit_regex_compile_with(pat: i64, flags: i64) -> i64 {
     let flags = with_regex(flags, |v| match v {
         RegexValue::Flags(f) => Some(f.clone()),
         _ => None,
@@ -631,7 +631,7 @@ extern "C" fn jet_jit_regex_compile_with(pat: i64, flags: i64) -> i64 {
 }
 
 /// Regex/Match method. method is string handle.
-extern "C" fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
+fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
     let method = clone_string(method);
     with_regex(recv, |v| match (v, method.as_str()) {
         (RegexValue::Regex(rx), "is_match") => i64::from(rx.is_match(&clone_string(arg0))),
@@ -691,7 +691,7 @@ extern "C" fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64)
     })
 }
 
-extern "C" fn jet_jit_regex_escape(text: i64) -> i64 {
+fn jet_jit_regex_escape(text: i64) -> i64 {
     let s = text_rt::jet_std::jet_regex_escape(&clone_string(text));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }

@@ -41,22 +41,22 @@ where
     Concurrency::with_runtime_mut(f)
 }
 
-extern "C" fn jet_jit_web_on(_sel: i64, _ev: i64, _fn: i64) {
+fn jet_jit_web_on(_sel: i64, _ev: i64, _fn: i64) {
     // Native no-op — real registration is JS/Wasm only (emit/core_calls.rs).
 }
 
-extern "C" fn jet_jit_web_value() -> i64 {
+fn jet_jit_web_value() -> i64 {
     with_rt(|rt| rt.heap.alloc_string(String::new()))
 }
 
-extern "C" fn jet_jit_web_app() -> i64 {
+fn jet_jit_web_app() -> i64 {
     with_rt(|rt| {
         rt.web.apps.push(web_rt::jet_app());
         rt.web.apps.len() as i64
     })
 }
 
-extern "C" fn jet_jit_web_page(title: i64, body: i64) -> i64 {
+fn jet_jit_web_page(title: i64, body: i64) -> i64 {
     with_rt(|rt| {
         let title = rt.heap.clone_string(title).unwrap_or_default();
         let body = rt.heap.clone_string(body).unwrap_or_default();
@@ -79,7 +79,7 @@ pub(crate) fn serve_app(app: i64) {
     app_handle.serve();
 }
 
-extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
+fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
     let method_name = with_rt(|rt| rt.heap.clone_string(method).unwrap_or_default());
     if method_name == "serve" || method_name == "serve_on" {
         // Serving blocks. Keep the resident runtime published, but release its
@@ -199,7 +199,7 @@ extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) ->
     })
 }
 
-extern "C" fn jet_jit_devserver_app() -> i64 {
+fn jet_jit_devserver_app() -> i64 {
     // Under test/run without JET_DEV_FILE, return a for_app on the empty path
     // rather than exiting — compile + unused `fn dev()` must succeed.
     with_rt(|rt| {
@@ -214,7 +214,7 @@ extern "C" fn jet_jit_devserver_app() -> i64 {
     })
 }
 
-extern "C" fn jet_jit_devserver_for_app(path: i64) -> i64 {
+fn jet_jit_devserver_for_app(path: i64) -> i64 {
     with_rt(|rt| {
         let path = rt.heap.clone_string(path).unwrap_or_default();
         rt.web.servers.push(web_rt::jet_devserver_for_app(&path));
@@ -222,7 +222,7 @@ extern "C" fn jet_jit_devserver_for_app(path: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_devserver_html(server: i64, path: i64) -> i64 {
+fn jet_jit_devserver_html(server: i64, path: i64) -> i64 {
     with_rt(|rt| {
         let path = rt.heap.clone_string(path).unwrap_or_default();
         let next = rt
@@ -236,7 +236,7 @@ extern "C" fn jet_jit_devserver_html(server: i64, path: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_devserver_port(server: i64, port: i64) -> i64 {
+fn jet_jit_devserver_port(server: i64, port: i64) -> i64 {
     with_rt(|rt| {
         let next = rt
             .web
@@ -249,7 +249,7 @@ extern "C" fn jet_jit_devserver_port(server: i64, port: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_devserver_serve(server: i64) {
+fn jet_jit_devserver_serve(server: i64) {
     // Do not block forever in JIT/AOT ProgramOutput tests — `fn run()` never
     // calls serve; compiling `fn dev()` only needs the symbol to exist.
     let _ = server;

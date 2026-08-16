@@ -12,13 +12,13 @@ pub(crate) mod math_rt {
     include!(concat!(env!("OUT_DIR"), "/math_rt.rs"));
 }
 
-extern "C" fn jet_jit_math_abs_i64(value: i64) -> i64 {
+fn jet_jit_math_abs_i64(value: i64) -> i64 {
     math_rt::jet_std_math_abs_i64(value)
 }
-extern "C" fn jet_jit_math_abs_f64(value: f64) -> f64 {
+fn jet_jit_math_abs_f64(value: f64) -> f64 {
     math_rt::jet_std_math_abs_f64(value)
 }
-extern "C" fn jet_jit_math_abs_f32(value: f64) -> f64 {
+fn jet_jit_math_abs_f32(value: f64) -> f64 {
     math_rt::jet_std_math_abs_f32(value as f32) as f64
 }
 
@@ -29,31 +29,31 @@ fn opt_i64(v: Option<i64>) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_math_min_i64(left: i64, right: i64) -> i64 {
+fn jet_jit_math_min_i64(left: i64, right: i64) -> i64 {
     math_rt::jet_std_math_min_i64(left, right)
 }
-extern "C" fn jet_jit_math_max_i64(left: i64, right: i64) -> i64 {
+fn jet_jit_math_max_i64(left: i64, right: i64) -> i64 {
     math_rt::jet_std_math_max_i64(left, right)
 }
-extern "C" fn jet_jit_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
+fn jet_jit_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
     math_rt::jet_std_math_clamp_i64(value, low, high)
 }
-extern "C" fn jet_jit_math_min_f64(left: f64, right: f64) -> f64 {
+fn jet_jit_math_min_f64(left: f64, right: f64) -> f64 {
     math_rt::jet_std_math_min_f64(left, right)
 }
-extern "C" fn jet_jit_math_max_f64(left: f64, right: f64) -> f64 {
+fn jet_jit_math_max_f64(left: f64, right: f64) -> f64 {
     math_rt::jet_std_math_max_f64(left, right)
 }
-extern "C" fn jet_jit_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
+fn jet_jit_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
     math_rt::jet_std_math_clamp_f64(value, low, high)
 }
-extern "C" fn jet_jit_math_min_f32(left: f64, right: f64) -> f64 {
+fn jet_jit_math_min_f32(left: f64, right: f64) -> f64 {
     math_rt::jet_std_math_min_f32(left as f32, right as f32) as f64
 }
-extern "C" fn jet_jit_math_max_f32(left: f64, right: f64) -> f64 {
+fn jet_jit_math_max_f32(left: f64, right: f64) -> f64 {
     math_rt::jet_std_math_max_f32(left as f32, right as f32) as f64
 }
-extern "C" fn jet_jit_math_clamp_f32(value: f64, low: f64, high: f64) -> f64 {
+fn jet_jit_math_clamp_f32(value: f64, low: f64, high: f64) -> f64 {
     math_rt::jet_std_math_clamp_f32(value as f32, low as f32, high as f32) as f64
 }
 
@@ -86,173 +86,173 @@ fn pair_ii(a: i64, b: i64) -> i64 {
 
 // ── Prelude-backed (#1464) ───────────────────────────────────────────────────
 
-extern "C" fn jet_jit_math_erf(x: f64) -> f64 {
+fn jet_jit_math_erf(x: f64) -> f64 {
     math_rt::jet_std_math_erf(x)
 }
-extern "C" fn jet_jit_math_erfc(x: f64) -> f64 {
+fn jet_jit_math_erfc(x: f64) -> f64 {
     math_rt::jet_std_math_erfc(x)
 }
-extern "C" fn jet_jit_math_gamma(x: f64) -> f64 {
+fn jet_jit_math_gamma(x: f64) -> f64 {
     math_rt::jet_std_math_gamma(x)
 }
-extern "C" fn jet_jit_math_lgamma(x: f64) -> f64 {
+fn jet_jit_math_lgamma(x: f64) -> f64 {
     math_rt::jet_std_math_lgamma(x)
 }
-extern "C" fn jet_jit_math_ulp(x: f64) -> f64 {
+fn jet_jit_math_ulp(x: f64) -> f64 {
     math_rt::jet_std_math_ulp(x)
 }
-extern "C" fn jet_jit_math_significand(x: f64) -> f64 {
+fn jet_jit_math_significand(x: f64) -> f64 {
     math_rt::jet_std_math_significand(x)
 }
-extern "C" fn jet_jit_math_logb(x: f64) -> f64 {
+fn jet_jit_math_logb(x: f64) -> f64 {
     math_rt::jet_std_math_logb(x)
 }
-extern "C" fn jet_jit_math_ldexp(x: f64, exp: i64) -> f64 {
+fn jet_jit_math_ldexp(x: f64, exp: i64) -> f64 {
     math_rt::jet_std_math_ldexp(x, exp)
 }
-extern "C" fn jet_jit_math_next_after(x: f64, toward: f64) -> f64 {
+fn jet_jit_math_next_after(x: f64, toward: f64) -> f64 {
     math_rt::jet_std_math_next_after(x, toward)
 }
-extern "C" fn jet_jit_math_cmp(a: f64, b: f64) -> i64 {
+fn jet_jit_math_cmp(a: f64, b: f64) -> i64 {
     math_rt::jet_std_math_cmp(a, b)
 }
-extern "C" fn jet_jit_math_ilogb(x: f64) -> i64 {
+fn jet_jit_math_ilogb(x: f64) -> i64 {
     opt_i64(math_rt::jet_std_math_ilogb(x))
 }
-extern "C" fn jet_jit_math_isqrt(v: i64) -> i64 {
+fn jet_jit_math_isqrt(v: i64) -> i64 {
     opt_i64(math_rt::jet_std_math_isqrt(v))
 }
-extern "C" fn jet_jit_math_factorial(v: i64) -> i64 {
+fn jet_jit_math_factorial(v: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_factorial(v) {
         Some(value) => value.wrapping_add(1),
         None => 0,
     })
 }
-extern "C" fn jet_jit_math_binomial(n: i64, k: i64) -> i64 {
+fn jet_jit_math_binomial(n: i64, k: i64) -> i64 {
     opt_i64(math_rt::jet_std_math_binomial(n, k))
 }
-extern "C" fn jet_jit_math_digits(v: i64) -> i64 {
+fn jet_jit_math_digits(v: i64) -> i64 {
     math_rt::jet_std_math_digits(v)
 }
-extern "C" fn jet_jit_math_leading_ones(v: i64) -> i64 {
+fn jet_jit_math_leading_ones(v: i64) -> i64 {
     math_rt::jet_std_math_leading_ones(v)
 }
-extern "C" fn jet_jit_math_trailing_ones(v: i64) -> i64 {
+fn jet_jit_math_trailing_ones(v: i64) -> i64 {
     math_rt::jet_std_math_trailing_ones(v)
 }
 
 // ── AOT-inlined f64/i64 methods (same semantics, marshall only) ──────────────
 
-extern "C" fn jet_jit_math_asinh(x: f64) -> f64 {
+fn jet_jit_math_asinh(x: f64) -> f64 {
     x.asinh()
 }
-extern "C" fn jet_jit_math_acosh(x: f64) -> f64 {
+fn jet_jit_math_acosh(x: f64) -> f64 {
     x.acosh()
 }
-extern "C" fn jet_jit_math_atanh(x: f64) -> f64 {
+fn jet_jit_math_atanh(x: f64) -> f64 {
     x.atanh()
 }
-extern "C" fn jet_jit_math_atan(x: f64) -> f64 {
+fn jet_jit_math_atan(x: f64) -> f64 {
     x.atan()
 }
-extern "C" fn jet_jit_math_asin(x: f64) -> f64 {
+fn jet_jit_math_asin(x: f64) -> f64 {
     x.asin()
 }
-extern "C" fn jet_jit_math_acos(x: f64) -> f64 {
+fn jet_jit_math_acos(x: f64) -> f64 {
     x.acos()
 }
-extern "C" fn jet_jit_math_tan(x: f64) -> f64 {
+fn jet_jit_math_tan(x: f64) -> f64 {
     x.tan()
 }
-extern "C" fn jet_jit_math_sinh(x: f64) -> f64 {
+fn jet_jit_math_sinh(x: f64) -> f64 {
     x.sinh()
 }
-extern "C" fn jet_jit_math_cosh(x: f64) -> f64 {
+fn jet_jit_math_cosh(x: f64) -> f64 {
     x.cosh()
 }
-extern "C" fn jet_jit_math_tanh(x: f64) -> f64 {
+fn jet_jit_math_tanh(x: f64) -> f64 {
     x.tanh()
 }
-extern "C" fn jet_jit_math_cbrt(x: f64) -> f64 {
+fn jet_jit_math_cbrt(x: f64) -> f64 {
     x.cbrt()
 }
-extern "C" fn jet_jit_math_exp2(x: f64) -> f64 {
+fn jet_jit_math_exp2(x: f64) -> f64 {
     x.exp2()
 }
-extern "C" fn jet_jit_math_exp_m1(x: f64) -> f64 {
+fn jet_jit_math_exp_m1(x: f64) -> f64 {
     x.exp_m1()
 }
-extern "C" fn jet_jit_math_ln_1p(x: f64) -> f64 {
+fn jet_jit_math_ln_1p(x: f64) -> f64 {
     x.ln_1p()
 }
-extern "C" fn jet_jit_math_log(x: f64, base: f64) -> f64 {
+fn jet_jit_math_log(x: f64, base: f64) -> f64 {
     x.log(base)
 }
-extern "C" fn jet_jit_math_copysign(x: f64, y: f64) -> f64 {
+fn jet_jit_math_copysign(x: f64, y: f64) -> f64 {
     x.copysign(y)
 }
-extern "C" fn jet_jit_math_signum(x: f64) -> f64 {
+fn jet_jit_math_signum(x: f64) -> f64 {
     x.signum()
 }
-extern "C" fn jet_jit_math_fma(a: f64, b: f64, c: f64) -> f64 {
+fn jet_jit_math_fma(a: f64, b: f64, c: f64) -> f64 {
     a.mul_add(b, c)
 }
-extern "C" fn jet_jit_math_is_even(n: i64) -> i8 {
+fn jet_jit_math_is_even(n: i64) -> i8 {
     i8::from(n % 2 == 0)
 }
-extern "C" fn jet_jit_math_is_odd(n: i64) -> i8 {
+fn jet_jit_math_is_odd(n: i64) -> i8 {
     i8::from(n % 2 != 0)
 }
-extern "C" fn jet_jit_math_checked_abs(n: i64) -> i64 {
+fn jet_jit_math_checked_abs(n: i64) -> i64 {
     opt_i64(n.checked_abs())
 }
-extern "C" fn jet_jit_math_checked_neg(n: i64) -> i64 {
+fn jet_jit_math_checked_neg(n: i64) -> i64 {
     opt_i64(n.checked_neg())
 }
-extern "C" fn jet_jit_math_checked_div(a: i64, b: i64) -> i64 {
+fn jet_jit_math_checked_div(a: i64, b: i64) -> i64 {
     opt_i64(a.checked_div(b))
 }
-extern "C" fn jet_jit_math_checked_rem(a: i64, b: i64) -> i64 {
+fn jet_jit_math_checked_rem(a: i64, b: i64) -> i64 {
     opt_i64(a.checked_rem(b))
 }
-extern "C" fn jet_jit_math_is_normal(x: f64) -> i8 {
+fn jet_jit_math_is_normal(x: f64) -> i8 {
     i8::from(x.is_normal())
 }
-extern "C" fn jet_jit_math_is_subnormal(x: f64) -> i8 {
+fn jet_jit_math_is_subnormal(x: f64) -> i8 {
     i8::from(x.is_subnormal())
 }
-extern "C" fn jet_jit_math_is_canonical(x: f64) -> i8 {
+fn jet_jit_math_is_canonical(x: f64) -> i8 {
     i8::from(x.is_finite() || x.is_nan())
 }
-extern "C" fn jet_jit_math_is_signed(x: f64) -> i8 {
+fn jet_jit_math_is_signed(x: f64) -> i8 {
     i8::from(x.is_sign_negative())
 }
-extern "C" fn jet_jit_math_is_zero_f(x: f64) -> i8 {
+fn jet_jit_math_is_zero_f(x: f64) -> i8 {
     i8::from(x == 0.0)
 }
-extern "C" fn jet_jit_math_is_integer(x: f64) -> i8 {
+fn jet_jit_math_is_integer(x: f64) -> i8 {
     i8::from(x.is_finite() && x.fract() == 0.0)
 }
-extern "C" fn jet_jit_math_next_up(x: f64) -> f64 {
+fn jet_jit_math_next_up(x: f64) -> f64 {
     x.next_up()
 }
-extern "C" fn jet_jit_math_next_down(x: f64) -> f64 {
+fn jet_jit_math_next_down(x: f64) -> f64 {
     x.next_down()
 }
-extern "C" fn jet_jit_math_cot(x: f64) -> f64 {
+fn jet_jit_math_cot(x: f64) -> f64 {
     1.0 / x.tan()
 }
-extern "C" fn jet_jit_math_inv(x: f64) -> f64 {
+fn jet_jit_math_inv(x: f64) -> f64 {
     1.0 / x
 }
-extern "C" fn jet_jit_math_sin_cos(x: f64) -> i64 {
+fn jet_jit_math_sin_cos(x: f64) -> i64 {
     let (s, c) = x.sin_cos();
     pair_ff(s, c)
 }
-extern "C" fn jet_jit_math_modf(x: f64) -> i64 {
+fn jet_jit_math_modf(x: f64) -> i64 {
     pair_ff(x.fract(), x.trunc())
 }
-extern "C" fn jet_jit_math_frexp(x: f64) -> i64 {
+fn jet_jit_math_frexp(x: f64) -> i64 {
     let exp = math_rt::jet_std_math_ilogb(x).unwrap_or(0);
     let frac = if x == 0.0 || !x.is_finite() {
         x
@@ -261,13 +261,13 @@ extern "C" fn jet_jit_math_frexp(x: f64) -> i64 {
     };
     pair_fi(frac, exp)
 }
-extern "C" fn jet_jit_math_div_mod(a: i64, b: i64) -> i64 {
+fn jet_jit_math_div_mod(a: i64, b: i64) -> i64 {
     if b == 0 {
         return pair_ii(0, 0);
     }
     pair_ii(a.div_euclid(b), a.rem_euclid(b))
 }
-extern "C" fn jet_jit_math_div_rem(a: i64, b: i64) -> i64 {
+fn jet_jit_math_div_rem(a: i64, b: i64) -> i64 {
     if b == 0 {
         return pair_ii(0, 0);
     }

@@ -371,14 +371,14 @@ fn allocator_slot(
     Ok((view.allocator, slot))
 }
 
-extern "C" fn jet_jit_allocator_new() -> i64 {
+fn jet_jit_allocator_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.allocators.push(AllocatorState::default());
         rt.allocators.len() as i64
     })
 }
 
-extern "C" fn jet_jit_allocator_new_named(kind: i64) -> i64 {
+fn jet_jit_allocator_new_named(kind: i64) -> i64 {
     let allocator = match kind {
         1 => "Bump",
         2 => "Pool",
@@ -403,7 +403,7 @@ extern "C" fn jet_jit_allocator_new_named(kind: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
+fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
     let (allocator, is_fixed) = match fixed {
         1 => ("Fixed", true),
         2 => ("Bump", false),
@@ -424,7 +424,7 @@ extern "C" fn jet_jit_allocator_new_capacity(capacity: i64, fixed: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_allocator_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64 {
+fn jet_jit_allocator_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let slot = match allocator_store(rt, handle, value, requested_bytes) {
             Ok(slot) => slot,
@@ -445,7 +445,7 @@ extern "C" fn jet_jit_allocator_alloc(handle: i64, value: i64, requested_bytes: 
     })
 }
 
-extern "C" fn jet_jit_allocator_view_read(view: i64) -> i64 {
+fn jet_jit_allocator_view_read(view: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match allocator_slot(rt, view) {
         Ok((_, slot)) => slot.value,
         Err(message) => {
@@ -455,7 +455,7 @@ extern "C" fn jet_jit_allocator_view_read(view: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_allocator_view_write(view: i64, value: i64) {
+fn jet_jit_allocator_view_write(view: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let view = match allocator_view(rt, view) {
             Ok(view) => view,
@@ -489,7 +489,7 @@ extern "C" fn jet_jit_allocator_view_write(view: i64, value: i64) {
     });
 }
 
-extern "C" fn jet_jit_allocator_try_alloc(
+fn jet_jit_allocator_try_alloc(
     handle: i64,
     value: i64,
     requested_bytes: i64,
@@ -539,7 +539,7 @@ extern "C" fn jet_jit_allocator_try_alloc(
     })
 }
 
-extern "C" fn jet_jit_allocator_reset(handle: i64) {
+fn jet_jit_allocator_reset(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
             rt.set_trap("allocator handle is closed or invalid");
@@ -551,7 +551,7 @@ extern "C" fn jet_jit_allocator_reset(handle: i64) {
     });
 }
 
-extern "C" fn jet_jit_allocator_close(handle: i64) {
+fn jet_jit_allocator_close(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(state) = rt.allocators.get_mut((handle as usize).wrapping_sub(1)) else {
             rt.set_trap("allocator handle is closed or invalid");
@@ -578,7 +578,7 @@ const JIT_GC_SITE: jet_rt::__gc::PromotionSite = jet_rt::__gc::PromotionSite {
     bytes: 0,
 };
 
-extern "C" fn jet_jit_gc_promote(value: i64) -> i64 {
+fn jet_jit_gc_promote(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let root = match jet_rt::__gc::AutomaticRoot::promote(value, JIT_GC_SITE) {
             Ok(root) => root,
@@ -593,7 +593,7 @@ extern "C" fn jet_jit_gc_promote(value: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_gc_read(handle: i64) -> i64 {
+fn jet_jit_gc_read(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let result = match rt.gc_roots.get((handle as usize).wrapping_sub(1)) {
             Some(root) => root.read(|value| *value).map_err(|fault| fault.to_string()),
@@ -609,7 +609,7 @@ extern "C" fn jet_jit_gc_read(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_gc_edit(handle: i64, value: i64) {
+fn jet_jit_gc_edit(handle: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let result = match rt.gc_roots.get((handle as usize).wrapping_sub(1)) {
             Some(root) => root
@@ -624,7 +624,7 @@ extern "C" fn jet_jit_gc_edit(handle: i64, value: i64) {
     });
 }
 
-extern "C" fn jet_jit_gc_clear_edges(handle: i64) {
+fn jet_jit_gc_clear_edges(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let index = (handle as usize).wrapping_sub(1);
         let result = match (rt.gc_edges.get_mut(index), rt.gc_roots.get(index)) {
@@ -641,7 +641,7 @@ extern "C" fn jet_jit_gc_clear_edges(handle: i64) {
     });
 }
 
-extern "C" fn jet_jit_gc_add_edge(handle: i64, child: i64, edge_slot: i64) {
+fn jet_jit_gc_add_edge(handle: i64, child: i64, edge_slot: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let root_index = (handle as usize).wrapping_sub(1);
         let child_id = rt
@@ -679,14 +679,14 @@ extern "C" fn jet_jit_gc_add_edge(handle: i64, child: i64, edge_slot: i64) {
     });
 }
 
-extern "C" fn jet_jit_pool_new() -> i64 {
+fn jet_jit_pool_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.pools.push(Arc::new(Mutex::new(PoolState::default())));
         rt.pools.len() as i64
     })
 }
 
-extern "C" fn jet_jit_pool_add(handle: i64, value: i64) -> i64 {
+fn jet_jit_pool_add(handle: i64, value: i64) -> i64 {
     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
         return 0;
     };
@@ -716,7 +716,7 @@ fn pool_value(handle: i64, id: i64) -> Option<i64> {
     (slot.generation == generation).then_some(slot.value).flatten()
 }
 
-extern "C" fn jet_jit_pool_get(handle: i64, id: i64) -> i64 {
+fn jet_jit_pool_get(handle: i64, id: i64) -> i64 {
     match pool_value(handle, id) {
         Some(value) => value,
         None => {
@@ -730,7 +730,7 @@ extern "C" fn jet_jit_pool_get(handle: i64, id: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_pool_remove(handle: i64, id: i64) -> i64 {
+fn jet_jit_pool_remove(handle: i64, id: i64) -> i64 {
     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
         return 0;
     };
@@ -753,7 +753,7 @@ extern "C" fn jet_jit_pool_remove(handle: i64, id: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_pool_ids(handle: i64) -> i64 {
+fn jet_jit_pool_ids(handle: i64) -> i64 {
     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
         return 0;
     };
@@ -772,14 +772,14 @@ extern "C" fn jet_jit_pool_ids(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list(ids))
 }
 
-extern "C" fn jet_jit_shared_new(value: i64) -> i64 {
+fn jet_jit_shared_new(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.shareds.push(Arc::new(SharedState::new(value)));
         rt.shareds.len() as i64
     })
 }
 
-extern "C" fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
+fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
     };
@@ -795,11 +795,11 @@ extern "C" fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
     value
 }
 
-extern "C" fn jet_jit_shared_end_read(handle: i64) {
+fn jet_jit_shared_end_read(handle: i64) {
     drop(take_active_shared_permit(handle));
 }
 
-extern "C" fn jet_jit_shared_end_write(handle: i64, value: i64) {
+fn jet_jit_shared_end_write(handle: i64, value: i64) {
     if let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) {
         shared.value.store(value, Ordering::Release);
     }
@@ -808,11 +808,11 @@ extern "C" fn jet_jit_shared_end_write(handle: i64, value: i64) {
 
 /// D-SHARED-CYCLE1=C: weak handle is the same slot index; upgrade packs
 /// Option as `0` (None) or `handle + 1` (Some).
-extern "C" fn jet_jit_shared_downgrade(handle: i64) -> i64 {
+fn jet_jit_shared_downgrade(handle: i64) -> i64 {
     handle
 }
 
-extern "C" fn jet_jit_shared_strong_count(handle: i64) -> i64 {
+fn jet_jit_shared_strong_count(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle)
             // `shared()` clones the Arc out of `rt.shareds` to hand back an
@@ -823,7 +823,7 @@ extern "C" fn jet_jit_shared_strong_count(handle: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_shared_weak_upgrade(weak: i64) -> i64 {
+fn jet_jit_shared_weak_upgrade(weak: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if shared(rt, weak).is_some() {
             weak.wrapping_add(1)
@@ -833,26 +833,26 @@ extern "C" fn jet_jit_shared_weak_upgrade(weak: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_condition_new() -> i64 {
+fn jet_jit_condition_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.conditions.push(Arc::new(ConditionState::new()));
         rt.conditions.len() as i64
     })
 }
 
-extern "C" fn jet_jit_condition_notify_one(handle: i64) {
+fn jet_jit_condition_notify_one(handle: i64) {
     if let Some(condition) = Concurrency::with_runtime_mut(|rt| condition(rt, handle)) {
         shared_protocol::jet_shared_condition_notify_one(&condition.protocol);
     }
 }
 
-extern "C" fn jet_jit_condition_notify_all(handle: i64) {
+fn jet_jit_condition_notify_all(handle: i64) {
     if let Some(condition) = Concurrency::with_runtime_mut(|rt| condition(rt, handle)) {
         shared_protocol::jet_shared_condition_notify_all(&condition.protocol);
     }
 }
 
-extern "C" fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
+fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return Concurrency::with_runtime_mut(|rt| {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -877,7 +877,7 @@ extern "C" fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
+fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if guard_shared_handle(rt, guard).is_none() {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -915,7 +915,7 @@ extern "C" fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) ->
     })
 }
 
-extern "C" fn jet_jit_shared_guard_clone(guard: i64, editable: i64) -> i64 {
+fn jet_jit_shared_guard_clone(guard: i64, editable: i64) -> i64 {
     let Some((shared, value, state)) = Concurrency::with_runtime_mut(|rt| {
         let shared = guard_shared_handle(rt, guard)?;
         let value = rt.heap.record_get_int(guard, GUARD_VALUE)?;
@@ -941,7 +941,7 @@ extern "C" fn jet_jit_shared_guard_clone(guard: i64, editable: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_shared_guard_value(guard: i64) -> i64 {
+fn jet_jit_shared_guard_value(guard: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field)) = readable_guard_slot(rt, guard) else {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -955,7 +955,7 @@ extern "C" fn jet_jit_shared_guard_value(guard: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_shared_guard_value_f64(guard: i64) -> f64 {
+fn jet_jit_shared_guard_value_f64(guard: i64) -> f64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field)) = readable_guard_slot(rt, guard) else {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -976,7 +976,7 @@ extern "C" fn jet_jit_shared_guard_value_f64(guard: i64) -> f64 {
     })
 }
 
-extern "C" fn jet_jit_shared_guard_value_bool(guard: i64) -> i8 {
+fn jet_jit_shared_guard_value_bool(guard: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field)) = readable_guard_slot(rt, guard) else {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -997,7 +997,7 @@ extern "C" fn jet_jit_shared_guard_value_bool(guard: i64) -> i8 {
     })
 }
 
-extern "C" fn jet_jit_shared_guard_value_char(guard: i64) -> i32 {
+fn jet_jit_shared_guard_value_char(guard: i64) -> i32 {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field)) = readable_guard_slot(rt, guard) else {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -1024,7 +1024,7 @@ extern "C" fn jet_jit_shared_guard_value_char(guard: i64) -> i32 {
     })
 }
 
-extern "C" fn jet_jit_shared_guard_value_string(guard: i64) -> i64 {
+fn jet_jit_shared_guard_value_string(guard: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field)) = readable_guard_slot(rt, guard) else {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
@@ -1094,7 +1094,7 @@ fn store_root_guard_value(
     Ok(())
 }
 
-extern "C" fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
+fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
             return;
@@ -1111,7 +1111,7 @@ extern "C" fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
     });
 }
 
-extern "C" fn jet_jit_shared_guard_set_value_f64(guard: i64, value: f64) {
+fn jet_jit_shared_guard_set_value_f64(guard: i64, value: f64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
             return;
@@ -1131,7 +1131,7 @@ extern "C" fn jet_jit_shared_guard_set_value_f64(guard: i64, value: f64) {
     });
 }
 
-extern "C" fn jet_jit_shared_guard_set_value_bool(guard: i64, value: i8) {
+fn jet_jit_shared_guard_set_value_bool(guard: i64, value: i8) {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
             return;
@@ -1152,7 +1152,7 @@ extern "C" fn jet_jit_shared_guard_set_value_bool(guard: i64, value: i8) {
     });
 }
 
-extern "C" fn jet_jit_shared_guard_set_value_char(guard: i64, value: i32) {
+fn jet_jit_shared_guard_set_value_char(guard: i64, value: i32) {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
             return;
@@ -1179,7 +1179,7 @@ extern "C" fn jet_jit_shared_guard_set_value_char(guard: i64, value: i32) {
     });
 }
 
-extern "C" fn jet_jit_shared_guard_set_value_string(guard: i64, value: i64) {
+fn jet_jit_shared_guard_set_value_string(guard: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
             return;
@@ -1198,7 +1198,7 @@ extern "C" fn jet_jit_shared_guard_set_value_string(guard: i64, value: i64) {
     });
 }
 
-extern "C" fn jet_jit_shared_guard_end(guard: i64) {
+fn jet_jit_shared_guard_end(guard: i64) {
     let Some((shared, value, editable, root, state)) = Concurrency::with_runtime_mut(|rt| {
         let Some(shared_handle) = guard_shared_handle(rt, guard) else {
             return None;
@@ -1245,7 +1245,7 @@ fn shared_guard_result(
     crate::runtime_host::alloc_jit_result(rt, ok, bits)
 }
 
-extern "C" fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) -> i64 {
+fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) -> i64 {
     let Some((shared_handle, state, condition)) = Concurrency::with_runtime_mut(|rt| {
         let shared_handle = guard_shared_handle(rt, guard)?;
         let state = guard_state(rt, guard)?;
@@ -1331,7 +1331,7 @@ extern "C" fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) 
     }
 }
 
-extern "C" fn jet_jit_shared_txn_begin() {
+fn jet_jit_shared_txn_begin() {
     SHARED_TRANSACTIONS.with(|transactions| {
         transactions.borrow_mut().push(SharedTransaction {
             transaction: shared_protocol::jet_shared_transaction_begin(),
@@ -1339,7 +1339,7 @@ extern "C" fn jet_jit_shared_txn_begin() {
     });
 }
 
-extern "C" fn jet_jit_shared_txn_record(
+fn jet_jit_shared_txn_record(
     handle: i64,
     callback_ptr: i64,
     environment: i64,
@@ -1383,7 +1383,7 @@ extern "C" fn jet_jit_shared_txn_record(
     i64::from(recorded)
 }
 
-extern "C" fn jet_jit_shared_txn_commit() {
+fn jet_jit_shared_txn_commit() {
     let Some(transaction) =
         SHARED_TRANSACTIONS.with(|transactions| transactions.borrow_mut().pop())
     else {
@@ -1392,13 +1392,13 @@ extern "C" fn jet_jit_shared_txn_commit() {
     transaction.transaction.commit();
 }
 
-extern "C" fn jet_jit_shared_txn_abort() {
+fn jet_jit_shared_txn_abort() {
     SHARED_TRANSACTIONS.with(|transactions| {
         transactions.borrow_mut().pop();
     });
 }
 
-extern "C" fn jet_jit_expiring_new(
+fn jet_jit_expiring_new(
     value: i64,
     duration: i64,
     clock: i64,
@@ -1435,7 +1435,7 @@ extern "C" fn jet_jit_expiring_new(
     })
 }
 
-extern "C" fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
+fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
     let (status, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
         let stored_clock = rt
             .expirings
@@ -1465,7 +1465,7 @@ extern "C" fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
     status
 }
 
-extern "C" fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
+fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
     i8::from(jet_jit_expiring_get(handle, clock) != 0)
 }
 
