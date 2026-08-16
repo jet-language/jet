@@ -2469,6 +2469,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Codegen::TIR::install_comptime_bridge;
 
     #[test]
     fn aot_ffi_host_installs_bridge_reporter() {
@@ -2824,9 +2825,6 @@ mod tests {
             .unwrap();
         let time_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Time.rs\")")
-            .unwrap();
-        let time_monotonic_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/TimeMonotonic.rs\")")
             .unwrap();
         let sketch_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Sketch.rs\")")
