@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1995,
-    "rev": 37621,
+    "nextNum": 2002,
+    "rev": 37717,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e6"
       ]
     },
-    "completionCursor": "2026-08-15T17:54:45.331Z"
+    "completionCursor": "2026-08-16T00:41:06.618Z"
   },
   "epochs": [
     {
@@ -64848,6 +64848,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "VERIFICATION INTEGRITY finding, recorded 2026-08-15 while diagnosing this test.\n\nThis card's criterion 4 evidence reads `jit_1216_adversarial_regressions ok 0.07s`. That timing cannot be real: the test spawns six CHILD test processes, each running a Cranelift compile. 0.07s observed an early return, not six green cases -- almost certainly the `skip_if_cranelift_host_unsupported()` guard or the env-gated case dispatch returning before any case ran. So the criterion was recorded met against a test that never exercised its subject.\n\nCorroboration from this card's own log: at 2026-07-27 it records this same test red for an unrelated reason (the generator fixture using stale `->` syntax, E0070). So it was known red, then recorded green in 0.07s.\n\nTwo live defects were hiding behind that false green:\n1. `raw_alias` asserts native execution, but D-MEM-SENTRY1=A (ratified 2026-08-12, card #1889) is an owner-ratified I9 instrumentation carve-out that keeps raw memory on canonical TIR -- so the correct route is a silent deopt, not native. The case was authored 2026-07-27, sixteen days before that ratification. Corrected in tests/dev.rs to assert the sentry route.\n2. `generator` aborts the child process with `fatal runtime error: failed to initiate panic, error 5` -- the #1997 unwind class. This is now the best known reproducer for that card.\n\nLesson worth generalising: a suspiciously fast green on a test that spawns subprocesses is evidence of an early return, not of speed. A guard that skips silently and a pass are indistinguishable in the recorded evidence."
+        },
+        {
           "at": "2026-07-27",
           "by": "e3-1216-verify",
           "text": "Independent verify closed #1216: criteria 1-4 verified by e3-1216-verify on 5ffbcff5b. Proofs: collections_memory_and_streams_match_interpreter_jit_and_aot ok 46.29s; jit_1216_adversarial_regressions ok 0.07s; jit_coverage_audit ok 8.00s. Diff review clean."
@@ -65062,8 +65067,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T00:40:51.813Z",
-      "updated": "2026-07-27T11:21:27.553Z",
-      "updatedBy": "e3-1216-verify",
+      "updated": "2026-08-16T01:06:45.398Z",
+      "updatedBy": "fable-e3-burndown",
       "tags": [],
       "parentId": null
     },
@@ -97770,6 +97775,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "Evidence from the physical_quantities fixture work: criterion 5 (Time takes part in unit algebra; 12meter / 2s type-checks as a speed) is ALREADY satisfied in-tree. examples/features/types/dimensional_quantities.jet:6-8 does exactly this through the Prelude's dimensional Length, with golden examples/features/expected/types/dimensional_quantities.out line 2 = '4 meter/ns'. D-SHAPE-QUANTITY1=A ratifies it and binary.rs:1331-1351 implements it by deriving the exponent map for * and / . Recheck this criterion against the tree before treating it as open work."
+        },
+        {
           "at": "2026-08-13",
           "by": "fable-e3-burndown",
           "text": "Luna active in recycled warm b-m04-s2 lane; unifying Time with the unit plane."
@@ -97849,7 +97859,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:01.689Z",
-      "updated": "2026-08-14T17:22:56.413Z",
+      "updated": "2026-08-16T01:03:31.971Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 610
     },
@@ -108569,6 +108579,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "Ledger reconcile for #1663 surfaced a false pin here: serde_jit_parity_manifest_pins asserts 'serde/encoding_breadth must remain compile-covered', but that stem is NOT observed covered. It never enters the JIT coverage audit's universe at all, because it fails Loader/Sema in-process (root cause carded as #1998, 43 stems in that state). It was already like this at the start of the 2026-08-15 session, so the pin has been asserting something untrue. The stale compile_covered row was REMOVED rather than kept, so the purpose-built alarm now fires instead of being absorbed -- keeping it would have been exactly the falsification #1663 documents. Resolve by deciding which side is wrong: either the stem should be covered (find why it is not; it may be the universe hole rather than a lowering gap), or the pin asserts a capability the product never had and the pin is the defect. Do NOT re-add a compile_covered row to make it pass."
+        },
+        {
           "at": "2026-08-15",
           "by": "fable-e3-burndown",
           "text": "Census complete and minted. The 51 observed gaps are now 18 real cards under this parent, not another umbrella: 13 root-cause families (F1=#1976, F2=#1977, F3=#1978, F4=#1979, F5=#1980, F6=#1981, F7=#1982, F8=#1983, F9=#1984, F10=#1985, F11=#1986, F12=#1987, F13=#1988) and 5 invalid-CLIF cards (L1=#1989, L2=#1990, L3=#1991, L4=#1992, L5=#1993). The CLIF cards are P1 and deliberately separated: Cranelift's verifier rejected code Jet itself emitted, which is a lowering bug of the same class as I2's rustc rule and must never be recorded as an unsupported construct. Families were minted with --force because the duplicate probe flagged the existing M13 cards; that overlap is real and is recorded in each family body, which names the existing card (#1754, #1756, #1757, #1758, #1760, #1761, #1931) that already describes a member stem. The rule is: the existing card describes the stem, the family card describes the shared root cause, so fix once at the family and close the stem card on the same evidence. Census also found a second falsification beyond this card's premise: aec11ad74 deleted types/unit_literals from compile_covered without adding a gaps row while the stem is a live gap, and 10b09c6eb and 6c71a1efc deleted types/range_types and types/measurement although both ARE covered - the hand-edits were guesses in both directions. And a ratchet hole: only gaps and run_gaps are shrink-only, so deleting a row from compile_covered or from gaps is invisible to the shrink check and is caught only by the two set comparisons at tests/dev.rs:7973 and :7977, which have been red. Criteria 1 and 3 of this card remain unmeetable until those 18 close, and they may not be met by editing the file."
@@ -108661,7 +108676,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:17:01.497Z",
-      "updated": "2026-08-15T18:59:25.572Z",
+      "updated": "2026-08-16T00:21:52.714Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 206
     },
@@ -115527,6 +115542,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "Ledger reconcile for #1663 surfaced a false pin here: serde_jit_parity_manifest_pins asserts 'serde/encoding_breadth must remain compile-covered', but that stem is NOT observed covered. It never enters the JIT coverage audit's universe at all, because it fails Loader/Sema in-process (root cause carded as #1998, 43 stems in that state). It was already like this at the start of the 2026-08-15 session, so the pin has been asserting something untrue. The stale compile_covered row was REMOVED rather than kept, so the purpose-built alarm now fires instead of being absorbed -- keeping it would have been exactly the falsification #1663 documents. Resolve by deciding which side is wrong: either the stem should be covered (find why it is not; it may be the universe hole rather than a lowering gap), or the pin asserts a capability the product never had and the pin is the defect. Do NOT re-add a compile_covered row to make it pass."
+        },
+        {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
           "text": "audit #1869: plan authored from the 2026-08-12 evidence packet (target-audit-e3/packets-infra.md); criteria hardened to the exit-criteria quality bar."
@@ -115578,8 +115598,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T09:47:28.488Z",
-      "updated": "2026-08-12T18:12:09.540Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-16T00:21:51.440Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0irn826",
@@ -129148,29 +129168,29 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists text/dates, text/datetime, text/time_calendar, tooling/compute_linalg, tooling/compute_simd, tooling/compute_tensor, tooling/compute_autodiff under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:57:20.565Z"
+          "evidence": "TIR-subset gate no longer consults the AOT-only aot_direct projection; commit 6302dbd60. Verified: cargo test --test dev jit_coverage_audit ledger reports gaps 0 run_gaps 0.",
+          "at": "2026-08-15T22:39:47.675Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:57:20.985Z"
+          "evidence": "TIR_SUBSET bit is now the whole decision for a registry key; the five hand-added dodge blocks that existed only to jump the early return are deleted. Commit 6302dbd60. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:20.960Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:57:21.419Z"
+          "evidence": "TIR_SUBSET bit is now the whole decision for a registry key; the five hand-added dodge blocks that existed only to jump the early return are deleted. Commit 6302dbd60. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:21.396Z"
         },
         {
           "n": 4,
@@ -129191,7 +129211,7 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:56:49.468Z",
-      "updated": "2026-08-15T18:57:21.848Z",
+      "updated": "2026-08-15T23:28:21.397Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -129203,7 +129223,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Add the three arms at that one site: Bool ordering via bool_from_icmp on the I8 values; Option Eq/Ne via the existing tagged-option presence bit + inner compare (mirror lower_tuple_eq's recursive shape at :24753); Union Eq/Ne via arm-tag compare then payload compare. One card, three criteria, one function.. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:24636-24749. blockedBy: none",
       "blockedBy": [],
@@ -129213,38 +129233,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists basics/first_hour, cli/typed_entry_args, serde/serde_derive, types/anonymous_unions under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:57:59.308Z"
+          "evidence": "lower_binary gained rows for (Bool, Lt|Gt|Le|Ge), (Option, Eq|Ne) and (Union, Eq|Ne). Equality is presence-then-payload for Option and same-arm-then-payload for Union, mirroring the existing discriminant/payload walk rather than a second one, because a raw icmp is wrong once the payload is a String. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:24.349Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:57:59.738Z"
+          "evidence": "lower_binary gained rows for (Bool, Lt|Gt|Le|Ge), (Option, Eq|Ne) and (Union, Eq|Ne). Equality is presence-then-payload for Option and same-arm-then-payload for Union, mirroring the existing discriminant/payload walk rather than a second one, because a raw icmp is wrong once the payload is a String. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:25.190Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:00.170Z"
+          "evidence": "lower_binary gained rows for (Bool, Lt|Gt|Le|Ge), (Option, Eq|Ne) and (Union, Eq|Ne). Equality is presence-then-payload for Option and same-arm-then-payload for Union, mirroring the existing discriminant/payload walk rather than a second one, because a raw icmp is wrong once the payload is a String. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:26.297Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:00.603Z"
+          "evidence": "lower_binary gained rows for (Bool, Lt|Gt|Le|Ge), (Option, Eq|Ne) and (Union, Eq|Ne). Equality is presence-then-payload for Option and same-arm-then-payload for Union, mirroring the existing discriminant/payload walk rather than a second one, because a raw icmp is wrong once the payload is a String. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:27.505Z"
         }
       ],
       "refs": [],
@@ -129256,8 +129276,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:57:58.281Z",
-      "updated": "2026-08-15T18:58:00.603Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:28.674Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:28.673Z"
     },
     {
       "id": "c0wm4nqu",
@@ -129268,7 +129289,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Lower (Plain, Plain) as a nested short-circuit using the composition that already exists — lower_plain_if_with_then(left, |…| lower_plain_if_with_then(right, then_body, else_body), else_body) — and route the expression-position site (:12467) to the same helper instead of erroring. That closes all three. Also fix the message to name the actual unsupported pair.. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:4804-4838 and :12464-12469. blockedBy: none",
       "blockedBy": [],
@@ -129278,38 +129299,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists collections/index_hook, game/raylib_window, basics/if_expression under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:03.606Z"
+          "evidence": "TIfCond::And now lowers a plain && between two ordinary conditions at both the statement and if-expression sites through one helper; the existing (IfLet, Plain) guarded-variant case is untouched and still takes precedence. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:29.081Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:04.522Z"
+          "evidence": "TIfCond::And now lowers a plain && between two ordinary conditions at both the statement and if-expression sites through one helper; the existing (IfLet, Plain) guarded-variant case is untouched and still takes precedence. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:29.519Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:05.520Z"
+          "evidence": "TIfCond::And now lowers a plain && between two ordinary conditions at both the statement and if-expression sites through one helper; the existing (IfLet, Plain) guarded-variant case is untouched and still takes precedence. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:29.932Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:05.947Z"
+          "evidence": "TIfCond::And now lowers a plain && between two ordinary conditions at both the statement and if-expression sites through one helper; the existing (IfLet, Plain) guarded-variant case is untouched and still takes precedence. Commit 2015da937. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:30.354Z"
         }
       ],
       "refs": [],
@@ -129321,8 +129342,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:01.029Z",
-      "updated": "2026-08-15T18:58:05.948Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:31.106Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:31.106Z"
     },
     {
       "id": "c0d9tenn",
@@ -129398,7 +129420,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Install every lam.captures entry (including fn-value and __jet___cap_* names) into vars/var_tys from the capture environment before lowering the body, in lower_callable_lambda_with_env. One fix, three stems; it also removes the sibling error path at lower_ctx.rs:320 (jit lambda capture unknown).. CODE SITE: crates/jet-jit/src/jit/functions_compile.rs:1039-1142; error surfaces at crates/jet-jit/src/jit/lower_ctx.rs:10353-10358. blockedBy: none",
       "blockedBy": [],
@@ -129408,38 +129430,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists effects/effect_levers, ui/ui_native_linux, web/ui_web_click under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:12.791Z"
+          "evidence": "Two holes closed: the sema capture walker never recorded a fn-valued callee because Call carries its callee in Call::name and not as Expr::Ident, and the TIR capture pack synthesized its place from the Jet name instead of reading env.rust_name_of, so a slot already rebound by an outer clone prelude named a place the body never reads. Callees live in their own set and are admitted only when the type is Type::Fn, so nothing is over-captured, and capture order was not changed. Commit 3d19e2c85. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:32.162Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:13.213Z"
+          "evidence": "Two holes closed: the sema capture walker never recorded a fn-valued callee because Call carries its callee in Call::name and not as Expr::Ident, and the TIR capture pack synthesized its place from the Jet name instead of reading env.rust_name_of, so a slot already rebound by an outer clone prelude named a place the body never reads. Callees live in their own set and are admitted only when the type is Type::Fn, so nothing is over-captured, and capture order was not changed. Commit 3d19e2c85. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:33.101Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:13.636Z"
+          "evidence": "Two holes closed: the sema capture walker never recorded a fn-valued callee because Call carries its callee in Call::name and not as Expr::Ident, and the TIR capture pack synthesized its place from the Jet name instead of reading env.rust_name_of, so a slot already rebound by an outer clone prelude named a place the body never reads. Callees live in their own set and are admitted only when the type is Type::Fn, so nothing is over-captured, and capture order was not changed. Commit 3d19e2c85. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:33.529Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:14.067Z"
+          "evidence": "Two holes closed: the sema capture walker never recorded a fn-valued callee because Call carries its callee in Call::name and not as Expr::Ident, and the TIR capture pack synthesized its place from the Jet name instead of reading env.rust_name_of, so a slot already rebound by an outer clone prelude named a place the body never reads. Callees live in their own set and are admitted only when the type is Type::Fn, so nothing is over-captured, and capture order was not changed. Commit 3d19e2c85. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:34.431Z"
         }
       ],
       "refs": [],
@@ -129451,8 +129473,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:11.781Z",
-      "updated": "2026-08-15T18:58:14.067Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:36.074Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:36.074Z"
     },
     {
       "id": "c038mpqz",
@@ -129463,7 +129486,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: Make lambda declaration idempotent: look up module.get_name(&lam.jit_name) and reuse the existing FuncId (or memoize jit_name → FuncId in JitRuntime), returning early without re-emitting the body — exactly the :760-762 pattern.. CODE SITE: crates/jet-jit/src/jit/functions_compile.rs:1069-1071. blockedBy: none",
       "blockedBy": [],
@@ -129473,38 +129496,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists collections/filter_map, io/progress under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:15.507Z"
+          "evidence": "try_collect receiver lowered once; lambda declaration idempotent keyed by ABI variant; commit d4738d334. Verified: builder build clean, dev suite runs to completion where it previously aborted.",
+          "at": "2026-08-15T22:39:48.185Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:15.916Z"
+          "evidence": "The try_collect receiver was lowered twice, registering one lambda twice and emitting a second list_closure_map over the same source -- which would double-advance io/progress's reporter even if the symbol clash were tolerated. Lambda declaration is now idempotent, keyed by ABI variant because the three entry points produce different signatures. Commit d4738d334. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:37.128Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:16.335Z"
+          "evidence": "The try_collect receiver was lowered twice, registering one lambda twice and emitting a second list_closure_map over the same source -- which would double-advance io/progress's reporter even if the symbol clash were tolerated. Lambda declaration is now idempotent, keyed by ABI variant because the three entry points produce different signatures. Commit d4738d334. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:38.353Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:16.777Z"
+          "evidence": "The try_collect receiver was lowered twice, registering one lambda twice and emitting a second list_closure_map over the same source -- which would double-advance io/progress's reporter even if the symbol clash were tolerated. Lambda declaration is now idempotent, keyed by ABI variant because the three entry points produce different signatures. Commit d4738d334. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:39.463Z"
         }
       ],
       "refs": [],
@@ -129516,8 +129539,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:14.491Z",
-      "updated": "2026-08-15T18:58:16.777Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:40.243Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:40.243Z"
     },
     {
       "id": "c0c9pndv",
@@ -129983,7 +130007,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Give host-handle field reads ONE total type source (the same table AOT uses) instead of per-receiver special cases, so Print and call-argument marshalling select hosts from the same fact. A defensive assert/convert at call_host (reject a Value whose CLIF type disagrees with the declared AbiParam) turns any future instance into a loud internal error instead of a verifier crash — cheap and worth its own criterion. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:23912-23944 (type recovery), :25105-25126 (print host), :16748-16793 (host-handle field reads). blockedBy: none",
       "blockedBy": [],
@@ -129993,38 +130017,38 @@
         {
           "n": 1,
           "text": "The emitted CLIF passes Cranelift's verifier for ui/ui_null_backend, web/web_hello, comptime/computed_constants",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:57.013Z"
+          "evidence": "Two independent sites fixed: emit_print Int fast path now keys on display_abi_ty, and list push host selected from the payload value CLIF type; commit d4738d334.",
+          "at": "2026-08-15T22:39:48.656Z"
         },
         {
           "n": 2,
           "text": "The fix is in Jet's CLIF emission, not a decline: no stem is dropped from compile_covered and none is parked in tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:57.442Z"
+          "evidence": "emit_print integer fast paths key on display_abi_ty; list push host selected from the payload value's own CLIF type. Commit d4738d334. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:23.760Z"
         },
         {
           "n": 3,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:57.863Z"
+          "evidence": "Both sites fixed: emit_print integer fast paths key on display_abi_ty, and the datatree list push host is selected from the payload value's own CLIF type. Commit d4738d334; pinned by resident_jit_1989_print_and_decode_host_types_pass_the_verifier. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:13.492Z"
         },
         {
           "n": 4,
           "text": "A regression test pins the emitted shape so invalid CLIF at this site cannot return silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:58.301Z"
+          "evidence": "Both sites fixed: emit_print integer fast paths key on display_abi_ty, and the datatree list push host is selected from the payload value's own CLIF type. Commit d4738d334; pinned by resident_jit_1989_print_and_decode_host_types_pass_the_verifier. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:13.917Z"
         }
       ],
       "refs": [],
@@ -130037,8 +130061,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:55.939Z",
-      "updated": "2026-08-15T18:58:58.301Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:14.693Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:14.693Z"
     },
     {
       "id": "c0exr0fm",
@@ -130049,7 +130074,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Extend/narrow at the single host-call argument marshal point (call_host): coerce each Value to the declared AbiParam type (uextend for Bool→i64) rather than at individual call sites. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs — call_host argument marshalling. blockedBy: none",
       "blockedBy": [],
@@ -130059,38 +130084,38 @@
         {
           "n": 1,
           "text": "The emitted CLIF passes Cranelift's verifier for text/regex",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:59.773Z"
+          "evidence": "marshal_host_args zero-extends i8/i32 to i64 at the one registry seam; the pre-existing widen_bool was dead because the registry path shadowed it; commit d4738d334.",
+          "at": "2026-08-15T22:39:49.151Z"
         },
         {
           "n": 2,
           "text": "The fix is in Jet's CLIF emission, not a decline: no stem is dropped from compile_covered and none is parked in tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:00.187Z"
+          "evidence": "marshal_host_args zero-extends i8/i32 to i64 at the one registry seam. The pre-existing widen_bool was dead because the registry path shadowed it. Commit d4738d334. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:24.998Z"
         },
         {
           "n": 3,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:00.608Z"
+          "evidence": "marshal_host_args zero-extends i8/i32 to i64 at the one registry seam; the pre-existing widen_bool was dead because the registry path shadowed it. Commit d4738d334; pinned by resident_jit_1990_bool_core_call_args_pass_the_verifier. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:15.095Z"
         },
         {
           "n": 4,
           "text": "A regression test pins the emitted shape so invalid CLIF at this site cannot return silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:01.028Z"
+          "evidence": "marshal_host_args zero-extends i8/i32 to i64 at the one registry seam; the pre-existing widen_bool was dead because the registry path shadowed it. Commit d4738d334; pinned by resident_jit_1990_bool_core_call_args_pass_the_verifier. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:15.519Z"
         }
       ],
       "refs": [],
@@ -130103,8 +130128,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:58.734Z",
-      "updated": "2026-08-15T18:59:01.028Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:16.287Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:16.287Z"
     },
     {
       "id": "c0nycd3c",
@@ -130115,7 +130141,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Convert arm values to the merge block's parameter type at the jump (one place: wherever merge-block args are assembled), instead of trusting each arm to have widened. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs — if/match merge block jump construction. blockedBy: none",
       "blockedBy": [],
@@ -130125,38 +130151,38 @@
         {
           "n": 1,
           "text": "The emitted CLIF passes Cranelift's verifier for types/enum_dot_patterns",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:02.470Z"
+          "evidence": "Unreachable and Todo now return a zero in the expression own CLIF type via dead_edge_zero; commit d4738d334.",
+          "at": "2026-08-15T22:39:50.449Z"
         },
         {
           "n": 2,
           "text": "The fix is in Jet's CLIF emission, not a decline: no stem is dropped from compile_covered and none is parked in tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:02.895Z"
+          "evidence": "dead_edge_zero returns a zero in the expression's own CLIF type, so Unreachable/Todo no longer feed an i64 zero into an f64 merge param. Commit d4738d334. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:25.680Z"
         },
         {
           "n": 3,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:03.313Z"
+          "evidence": "typed_dead_edge yields a zero in the edge's own type at all four merge sites (if-expression, result if-let, datatree if-let, enum if-let). d4738d334's dead_edge_zero was incomplete -- the new regression test caught the residual on its first run, and 12a124836 completed it. Pinned by resident_jit_1991_dead_edge_zero_passes_the_verifier. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:17.352Z"
         },
         {
           "n": 4,
           "text": "A regression test pins the emitted shape so invalid CLIF at this site cannot return silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:03.736Z"
+          "evidence": "typed_dead_edge yields a zero in the edge's own type at all four merge sites (if-expression, result if-let, datatree if-let, enum if-let). d4738d334's dead_edge_zero was incomplete -- the new regression test caught the residual on its first run, and 12a124836 completed it. Pinned by resident_jit_1991_dead_edge_zero_passes_the_verifier. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:18.450Z"
         }
       ],
       "refs": [],
@@ -130169,8 +130195,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:59:01.455Z",
-      "updated": "2026-08-15T18:59:03.736Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:19.937Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:19.937Z"
     },
     {
       "id": "c0wmrkel",
@@ -130181,7 +130208,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Derive both the declaration and the call from ONE arity fact (the registry row's borrow mask / signature, CoreCallRecord::arity/accepts_arity), instead of a hand-written declaration plus a hand-written call. Add a debug assertion comparing arg_vals.len() to the declared signature at call_host so this class fails loudly at emit time. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs host declaration/call sites; crates/jet-foundation/src/Syntax/core_calls.rs:510-521 (arity facts). blockedBy: none",
       "blockedBy": [],
@@ -130191,38 +130218,38 @@
         {
           "n": 1,
           "text": "The emitted CLIF passes Cranelift's verifier for io/path, tooling/data_hostile, tooling/data_stream_bounds",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:05.190Z"
+          "evidence": "The last open stem was the io/path one: path_home declared sig_unary_i64 while its host is nullary. The DECLARATION was wrong, corroborated five ways (CoreLib body, AOT emit leaving recv unused, comptime eval, the JIT's own args.is_empty() gate, the Prelude kernel). All 134 host_fns rows in CoreHost.rs were then mechanically checked against their extern fn types including returns, and all 97 core emission sites against declared param counts: zero remaining disagreements. Commit 27a8f3b27. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:20.931Z"
         },
         {
           "n": 2,
           "text": "The fix is in Jet's CLIF emission, not a decline: no stem is dropped from compile_covered and none is parked in tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:05.606Z"
+          "evidence": "The last open stem was the io/path one: path_home declared sig_unary_i64 while its host is nullary. The DECLARATION was wrong, corroborated five ways (CoreLib body, AOT emit leaving recv unused, comptime eval, the JIT's own args.is_empty() gate, the Prelude kernel). All 134 host_fns rows in CoreHost.rs were then mechanically checked against their extern fn types including returns, and all 97 core emission sites against declared param counts: zero remaining disagreements. Commit 27a8f3b27. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:21.359Z"
         },
         {
           "n": 3,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:06.028Z"
+          "evidence": "The last open stem was the io/path one: path_home declared sig_unary_i64 while its host is nullary. The DECLARATION was wrong, corroborated five ways (CoreLib body, AOT emit leaving recv unused, comptime eval, the JIT's own args.is_empty() gate, the Prelude kernel). All 134 host_fns rows in CoreHost.rs were then mechanically checked against their extern fn types including returns, and all 97 core emission sites against declared param counts: zero remaining disagreements. Commit 27a8f3b27. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:21.761Z"
         },
         {
           "n": 4,
           "text": "A regression test pins the emitted shape so invalid CLIF at this site cannot return silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:59:06.450Z"
+          "evidence": "The last open stem was the io/path one: path_home declared sig_unary_i64 while its host is nullary. The DECLARATION was wrong, corroborated five ways (CoreLib body, AOT emit leaving recv unused, comptime eval, the JIT's own args.is_empty() gate, the Prelude kernel). All 134 host_fns rows in CoreHost.rs were then mechanically checked against their extern fn types including returns, and all 97 core emission sites against declared param counts: zero remaining disagreements. Commit 27a8f3b27. Builder verification at 54e7ca662 (.claude/worktrees/builder). Named regression tests green: resident_jit_1989_print_and_decode_host_types_pass_the_verifier, resident_jit_1990_bool_core_call_args_pass_the_verifier, resident_jit_1991_dead_edge_zero_passes_the_verifier, plus all four multi_head tests = 7 passed 0 failed. Each regression test asserts the tier COMPILED the function (try_compile_bundle with an empty deopt index forces every function through Cranelift's verify_function) as well as output equality, so a silent deopt cannot green them. Full dev suite: 85 passed at this commit, up from a run that aborted on the 4th test at session start.",
+          "at": "2026-08-16T00:39:22.184Z"
         }
       ],
       "refs": [],
@@ -130235,8 +130262,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:59:04.157Z",
-      "updated": "2026-08-15T18:59:06.450Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T00:39:23.356Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T00:39:23.355Z"
     },
     {
       "id": "c05m3i37",
@@ -130313,7 +130341,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Install the re-entrant boundary at TIR::lower_jit_program (crates/jet-codegen/src/Codegen/TIR/mod.rs:1417) and at Sema::check_bundle, the two narrowest points every path shares. Both crates already take a path dependency on jet-foundation so the shared flag is reachable and the driver/JIT outer boundaries will make these inline. The blocker to watch: lower_jit_program returns diagnostic state through the LAST_JIT_LOWER_FAILURE thread-local that callers read afterwards via lower_jit_program_fail_reason, so the wrapper must take that value inside the worker and restore it on the caller thread. Confirm JitProgram is Send and ProgramBundle is Sync before wrapping; if either is not, add the bound or carry the result through a channel rather than loosening the type. blockedBy: none",
       "blockedBy": [],
@@ -130323,38 +130351,38 @@
         {
           "n": 1,
           "text": "cargo test --test dev completes without a stack overflow and without any test being skipped, serialized, or given its own boundary",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:48:50.782Z"
+          "evidence": "Boundary installed at the private funnel each public family shares (load_entry_with_overlays_mode_with_sink, check_bundle_opts_for_output_with_context) plus TIR::lower_jit_program, covering ~28 inline dev.rs callers and any embedder with zero caller edits. with_package_edition moved under the boundary. Commits eb0dddcaf, c5a54b0f1, 17d04068e, d062262ae. Stack-overflow abort class no longer reproduces. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:26.820Z"
         },
         {
           "n": 2,
           "text": "The boundary is installed at TIR::lower_jit_program and Sema::check_bundle and is re-entrant, so no path spawns a second worker",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:48:51.851Z"
+          "evidence": "Boundary installed at the private funnel each public family shares (load_entry_with_overlays_mode_with_sink, check_bundle_opts_for_output_with_context) plus TIR::lower_jit_program, covering ~28 inline dev.rs callers and any embedder with zero caller edits. with_package_edition moved under the boundary. Commits eb0dddcaf, c5a54b0f1, 17d04068e, d062262ae. Stack-overflow abort class no longer reproduces. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:27.623Z"
         },
         {
           "n": 3,
           "text": "LAST_JIT_LOWER_FAILURE survives the boundary: lower_jit_program_fail_reason still reports the reason the wrapped lowering recorded",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:48:53.009Z"
+          "evidence": "Boundary installed at the private funnel each public family shares (load_entry_with_overlays_mode_with_sink, check_bundle_opts_for_output_with_context) plus TIR::lower_jit_program, covering ~28 inline dev.rs callers and any embedder with zero caller edits. with_package_edition moved under the boundary. Commits eb0dddcaf, c5a54b0f1, 17d04068e, d062262ae. Stack-overflow abort class no longer reproduces. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:28.037Z"
         },
         {
           "n": 4,
           "text": "tests/compiler_stack.rs gains a case proving a caller that bypasses both the driver and the JIT public entries is still protected",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:48:54.146Z"
+          "evidence": "Boundary installed at the private funnel each public family shares (load_entry_with_overlays_mode_with_sink, check_bundle_opts_for_output_with_context) plus TIR::lower_jit_program, covering ~28 inline dev.rs callers and any embedder with zero caller edits. with_package_edition moved under the boundary. Commits eb0dddcaf, c5a54b0f1, 17d04068e, d062262ae. Stack-overflow abort class no longer reproduces. Builder verification at 6e144ac0b (.claude/worktrees/builder). dev suite: 104 tests reached, 78 passed (was: aborted on the 4th test at session start; 48 failed / 56 ok mid-session). Stack-overflow abort class, non-unwinding abort class and the SIGSEGV are all eliminated. Three-tier proof for the Option carrier: jet run, jet run --release and jet run --interpret all print hit 7 / negative -1 / miss -99; fn_dispatch_map.jet prints byte-identical to its golden with exit 0.",
+          "at": "2026-08-15T23:28:28.444Z"
         }
       ],
       "refs": [],
@@ -130366,7 +130394,506 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-15T19:48:40.278Z",
-      "updated": "2026-08-15T19:48:54.146Z",
+      "updated": "2026-08-15T23:28:29.157Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-15T23:28:29.157Z"
+    },
+    {
+      "id": "c0oks05m",
+      "num": 1995,
+      "title": "extern \"C\" JIT frames abort the process instead of reporting",
+      "body": "crates/jet-jit/src/jit/deopt.rs:451 `extern \"C\" fn jet_deopt_call` runs the whole TIR interpreter inside a nounwind frame. Any JetCancelUnwind the interpreter raises at a wait point (crates/jet-codegen/src/Prelude/Scheduler.rs:287-299) unwinds straight into that boundary, so the process aborts instead of producing a diagnostic. Same class in the same crate: a bare panic! at crates/jet-jit/src/Concurrency.rs:438, and ~14 .expect(...) sites inside extern \"C\" fn jet_jit_* at Concurrency.rs lines 423, 429, 434, 502, 521, 532, 544, 631, 650, 1056, 1060, 1096, 1100. Found while diagnosing a different abort; no card owned it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "An abort is never a user-facing outcome. A program-side stop renders through the shared report boundary and exits 70; a Jet compiler defect is exit 101 (I2). Neither is SIGABRT with no text. Catch at each extern \"C\" boundary and convert to the tier's existing status/report channel rather than letting an unwind reach the frame; the cancel path already has a status representation, since #Shield delivers deferred cancel as a status rather than an unwind. Audit every extern \"C\" fn jet_* in crates/jet-jit for an unwinding call, not only the ones listed. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-15",
+          "by": "fable-e3-burndown",
+          "text": "Ranking correction from the diagnosing lane: jet_deopt_call (deopt.rs:451) outranks the .expect sites and should be proven first. The .expect sites are bad-handle asserts that fire only on a compiler defect, so they are I2 exit-101 material and mostly unreachable in practice. jet_deopt_call is different in kind: it runs the entire TIR interpreter inside a nounwind frame, so an ordinary expected program event -- a cancel at a wait point raising JetCancelUnwind from Prelude/Scheduler.rs:287-299 -- aborts. That is reachable by correct user programs on the mixed tier, which makes it the load-bearing criterion. Also retired: #Shield as a statement directly inside a task { } block had sema's blessing (CheckerCore/statements.rs:2417-2422) but no executed precedent until 8ec6ee4; it now has one and ran clean."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No extern \"C\" frame in crates/jet-jit can be reached by an unwind: each catches and converts at its own boundary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:42.835Z"
+        },
+        {
+          "n": 2,
+          "text": "A cancel raised at an interpreter wait point inside jet_deopt_call surfaces as a status, not a process abort",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:43.628Z"
+        },
+        {
+          "n": 3,
+          "text": "The ~14 .expect sites and the bare panic! in Concurrency.rs either cannot fire or report through the boundary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:44.320Z"
+        },
+        {
+          "n": 4,
+          "text": "A regression test drives cancel through the deopt path and asserts a diagnostic plus exit code, not a signal",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:45.287Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "jit",
+        "i9",
+        "abort",
+        "concurrency"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-15T21:27:41.947Z",
+      "updated": "2026-08-15T21:28:24.548Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0qirkh3",
+      "num": 1996,
+      "title": "Scheduler panic hook hides the message for every task body",
+      "body": "crates/jet-codegen/src/Prelude/Scheduler.rs:68-80 suppresses the panic message whenever JET_SCHEDULER_CATCHING_PANIC is set, and that flag is set for the entire duration of every spawned task body. So any failure inside a task body -- including a nounwind abort -- prints nothing. This cost a burndown lane most of its budget: .claude/burndown-logs/dev3.txt records an abort with zero diagnostic text, and the lane had to reconstruct the cause statically because the message was swallowed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Suppression exists so an expected caught panic does not spam the user. That is legitimate for a panic the scheduler is about to catch and convert. It is not legitimate for one that is escaping. Print unconditionally when the panic will not be caught -- in particular on the nounwind/abort path, where the message is the only evidence anyone will ever get. Keep the quiet path for genuinely caught-and-converted panics. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A panic escaping a task body prints its message and location even with JET_SCHEDULER_CATCHING_PANIC set",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:47.204Z"
+        },
+        {
+          "n": 2,
+          "text": "A panic the scheduler catches and converts stays quiet, so the flag still does its job",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:47.629Z"
+        },
+        {
+          "n": 3,
+          "text": "A test asserts the escaping case prints and the caught case does not",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T21:27:48.572Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "concurrency",
+        "dx"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-15T21:27:46.418Z",
+      "updated": "2026-08-15T21:27:48.572Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0js0lqr",
+      "num": 1997,
+      "title": "No Rust panic may be raised while JIT frames are on the stack",
+      "body": "cranelift-jit 0.112.3 registers NO unwind information for the code it emits, and there is no API to ask it to. Verified mechanically: grep for eh_frame|__register_frame|unwind|UnwindInfo|register_frame across the whole crate source returns zero matches, while a control grep for 'fn |struct |impl ' on the same path returns 60+, so the zero is real. define_function_with_control_plane compiles, copies the code buffer into RWX memory, collects relocs, records for perf and updates the GOT -- it never calls compiled_code.create_unwind_info(isa) and never registers an FDE.\n\nConsequence: when JIT-compiled frames are on the stack, the unwinder cannot walk past them. _Unwind_Find_FDE misses, libgcc phase 1 returns _URC_END_OF_STACK, and std's rust_panic rtaborts with 'fatal runtime error: failed to initiate panic, error 5'. A clobbered or absent return address in a JIT frame is equally consistent with the bare SIGSEGV the dev suite still ends on.\n\nThis is why error 5 is NOT a stack-space condition and why bumping COMPILER_STACK_SIZE cannot help: real exhaustion prints 'has overflowed its stack' plus 'fatal runtime error: stack overflow', a textually distinct pair. Evidence trail: .claude/burndown-logs/dev.txt:4005-4006 has the exhaustion pair; dev2.txt and dev6.txt have the error-5 pair instead; dev2.txt predates the sized-stack boundary by 4.5 hours, so the boundary is not implicated.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "The invariant to establish and then enforce: a Rust panic must never be raised while JIT frames are on the stack. Two candidate mechanisms, and the choice is an architecture call worth making explicitly rather than per-site.\n\n(1) Emit and register unwind info for JIT'd code. cranelift's compiled_code.create_unwind_info(isa) exists at the codegen layer even though cranelift-jit does not call it; registering FDEs would make JIT frames walkable and let a panic cross them. Cost: platform-specific frame registration, and it makes unwinding a supported path through generated code, which is a larger semantic commitment than it looks.\n\n(2) Guarantee conversion at the boundary: every host seam that can panic converts to a status BEFORE returning into JIT'd code, so no unwind ever starts with JIT frames below. This matches how the tiers already talk -- #Shield delivers deferred cancel as a status, and 9623985d0 put the same conversion at jet_deopt_call. Cost: the guarantee must hold across all 1679 host_fns entries, so it needs a mechanical check, not review discipline.\n\nPrerequisite for either: the call-site inventory of places that can raise while JIT frames are live. Note that host_fns being extern \"C\" does NOT save us -- rustc gives an extern \"C\" body an empty-filter landing pad, so those panics are found in phase 1 and die in phase 2 as 'thread caused non-unwinding panic', a different abort. Error 5 is specifically the case where phase 1 finds nothing at all. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "REPRODUCER FOUND (2026-08-15, at f7f21742c). The error-5 abort no longer needs the whole suite: it fires in ~3 seconds from one child case.\n\n  cargo test --no-fail-fast --test dev -- --test-threads=1 --exact --nocapture jit_1216_adversarial_regressions\n\nOutput:\n  generator: stdout:\n    running 1 test\n  stderr:\n    fatal runtime error: failed to initiate panic, error 5, aborting\n\nSo the `generator` adversarial case of jit_1216_adversarial_regressions spawns a child test process that dies with the exact _URC_END_OF_STACK abort this card describes. That child is a single Cranelift-compiled generator program, which is a far smaller surface than a 168-test binary.\n\nWhy this matters for the fix: it confirms the diagnosis independently. Error 5 means phase 1 walked off the top of the stack without finding a handler, and a generator is precisely where JIT frames sit under a resumption/unwind edge -- consistent with cranelift-jit registering no eh_frame for emitted code. It also explains why no full-suite log in this campaign ever contained libtest's `---- <test> stdout ----` failure section: the abort kills the process before libtest prints it, which is why every lane in this session had to reconstruct failure bodies from serial reruns.\n\nUse this reproducer rather than the suite. It is deterministic, isolated, and fast."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The chosen mechanism is recorded as a decision with its cost, not left implicit per call site",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T22:57:41.000Z"
+        },
+        {
+          "n": 2,
+          "text": "No Rust panic can be raised while JIT frames are on the stack, enforced by a mechanical check rather than review discipline",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T22:57:41.754Z"
+        },
+        {
+          "n": 3,
+          "text": "cargo test --no-fail-fast --test dev reaches libtest's own summary with no SIGABRT and no SIGSEGV",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T22:57:42.582Z"
+        },
+        {
+          "n": 4,
+          "text": "A panic that would previously have aborted now surfaces as a diagnostic with exit 70 for a program stop or 101 for a compiler defect",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T22:57:43.866Z"
+        },
+        {
+          "n": 5,
+          "text": "The error-5 vs stack-overflow discriminator is documented where someone would otherwise bump the stack constant",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-15T22:57:44.999Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "jit",
+        "i1",
+        "i9",
+        "unwind",
+        "abort"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-15T22:57:40.077Z",
+      "updated": "2026-08-16T01:06:44.710Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c08pvmkh",
+      "num": 1998,
+      "title": "43 example stems are invisible to the JIT coverage audit",
+      "body": "collect_jit_coverage skips a stem entirely when it fails Loader or Sema in-process, so the stem enters neither compile_covered nor gaps -- it simply vanishes from the audit's universe. 43 stems are currently in that state: net/*, serde/*, modules/*, crypto/vault_*, memory/pin, io/watcher and others. Found while reconciling the ledger for #1663 (391 -> 414 rows).\n\nWhy this matters more than the count: every coverage claim the audit makes is silently scoped to the stems it could load, so 'gaps: 0' has never meant 'no gaps'. It means 'no gaps among the stems that loaded'. That is the same class of false confidence #1663 exists to correct, one level further out -- the ledger was falsified by hand three times, and this hole means even an honest ledger overstates coverage.\n\nThis is a frontend/universe hole, not a JIT regression: the stems fail before the JIT is consulted.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Establish why each of the 43 fails Loader/Sema in-process when the same examples are expected to build in the corpus. Two candidates, and the split matters: (a) they genuinely need a package/manifest context the in-process harness does not construct, in which case the harness must construct it or the audit must declare them out of universe EXPLICITLY rather than by silent omission; (b) they fail for a real frontend defect, in which case each is a bug and the audit was hiding it. Do not close this by adding a skip list -- an explicit out-of-universe declaration must name the reason per stem and be counted, so the number can only shrink. Then pin the universe size the same way COMPILE_COVERED_FLOOR pins coverage, so a stem cannot fall out of the universe silently. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "Ledger reconcile for #1663 surfaced a false pin here: serde_jit_parity_manifest_pins asserts 'serde/encoding_breadth must remain compile-covered', but that stem is NOT observed covered. It never enters the JIT coverage audit's universe at all, because it fails Loader/Sema in-process (root cause carded as #1998, 43 stems in that state). It was already like this at the start of the 2026-08-15 session, so the pin has been asserting something untrue. The stale compile_covered row was REMOVED rather than kept, so the purpose-built alarm now fires instead of being absorbed -- keeping it would have been exactly the falsification #1663 documents. Resolve by deciding which side is wrong: either the stem should be covered (find why it is not; it may be the universe hole rather than a lowering gap), or the pin asserts a capability the product never had and the pin is the defect. Do NOT re-add a compile_covered row to make it pass."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each of the 43 stems is classified as genuinely out-of-universe with a named reason, or as a frontend defect with a card",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:20:54.044Z"
+        },
+        {
+          "n": 2,
+          "text": "The audit's universe size is pinned outside tests/jit_gaps.txt so a stem cannot silently leave it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:20:54.492Z"
+        },
+        {
+          "n": 3,
+          "text": "gaps: 0 is only reportable when the universe is complete, or the report states the universe it is scoped to",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:20:55.286Z"
+        },
+        {
+          "n": 4,
+          "text": "No skip list is introduced that lets a stem vanish without a counted reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:20:56.440Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "jit",
+        "coverage",
+        "evidence",
+        "i9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T00:20:52.947Z",
+      "updated": "2026-08-16T00:21:52.104Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c08gsdcg",
+      "num": 1999,
+      "title": "Interpreter ambient reads host env, not the Jet-owned env table",
+      "body": "crates/jet-jit/src/ambient_interp.rs:2563-2566 reads NO_COLOR and TERM with std::env::var_os / std::env::var -- the HOST process environment. AOT (crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:657) and the JIT host (crates/jet-jit/src/IO.rs:158-168) both read the Jet-owned LOGICAL env table, per D-ENV-MUTATE1.\n\nObservable consequence: a program that calls env.set(\"NO_COLOR\", ...) at runtime disables colour on two tiers and not the third. One program, two meanings -- an I9 break.\n\nFound while diagnosing the io_style presence-semantics test. Presence semantics themselves are correct on every tier and need no change; the defect is purely which env table the interpreter ambient consults.\n\nRelated, same area, worth fixing together: tests/dev.rs:6248 probes jet_style_env_enabled(), a symbol DELETED on 2026-08-13 by 97469e2f9 / 6ed8d4a95 when the terminal runtime was unified and its body was inlined into jet_style_enabled. The probe compiled and passed from 2026-07-28 until then and has been a hard rustc error since. Renaming it to jet_style_enabled() would go green while proving NOTHING: under libtest, stdout is piped, so jet_term_stdout_is_terminal() is false and jet_term_style_enabled returns false regardless of NO_COLOR. That is a false green an earlier Tower review already flagged. The correct fix restores an env-only seam.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Route ambient_interp.rs to read the same Jet-owned logical env table AOT and the JIT host read, so env.set is visible identically on all three tiers. Do not duplicate the lookup: per I9 the engines are marshalling adapters and the table is the single owner, so the interpreter should call the same accessor rather than growing its own. Then restore an env-only seam for the style probe so the test can assert presence semantics WITHOUT depending on whether stdout is a terminal, and state plainly in the test what it does and does not prove. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "env.set(\"NO_COLOR\", ...) at runtime has identical effect on AOT, resident JIT and interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:26:54.726Z"
+        },
+        {
+          "n": 2,
+          "text": "The interpreter ambient calls the same env accessor as the other tiers rather than std::env",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:26:55.173Z"
+        },
+        {
+          "n": 3,
+          "text": "The style probe compiles and asserts presence semantics independently of stdout being a terminal",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:26:55.614Z"
+        },
+        {
+          "n": 4,
+          "text": "The test states what it proves, so a piped-stdout false green cannot recur",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:26:56.780Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "jit",
+        "i9",
+        "env",
+        "terminal"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T00:26:54.278Z",
+      "updated": "2026-08-16T00:26:56.781Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0ib3m4h",
+      "num": 2000,
+      "title": "each loses its capture write on both dev tiers",
+      "body": "A closure passed to `each` runs, but a write it makes to a captured local never reaches the caller's frame -- on BOTH the interpreter and the resident JIT. Only AOT is correct, which is why the goldens are right and the failure looked like an interpreter-only golden mismatch.\n\nMinimal reproduction, verified at 54e7ca662:\n\n  fn run() {\n      xs := [1, 2, 3]\n      seen := [Int].{}\n      xs.each((n: Int) => { seen.push(n) })\n      print(\"list each: {seen}\")\n      s := Set.from([1, 2, 3])\n      t := [Int].{}\n      s.each((n: Int) => { t.push(n) })\n      print(\"set each: {t}\")\n      print(\"fold: {s.fold(0, (a: Int, n: Int) => a + n)}\")\n  }\n\n  jet run           -> list each: []   set each: []   fold: 6\n  jet run --interpret -> list each: []   set each: []   fold: 6\n\n`fold: 6` on the same receiver proves the collection is populated and the callback IS invoked; only the capture write is dropped. Not Set-specific -- a plain List each fails identically.\n\nWhy it hid: every other closure form (filter, map, all, fold, flat_map) consumes the callback's RETURN value, so a dropped capture write is invisible. `each` returns Unit, so the capture write is its ONLY observable effect. Diagnosed via examples/features/collections/set.jet, where one line of ~40 differs: 'each visited sorted: []' against the golden's '[1, 3, 4]'.\n\nProbable mechanism (from the diagnosing lane, unconfirmed): eval/mod.rs sync_callable_captures published write-back by iterating TLambda::captures only, but that vector is filled exclusively from the AOT clone pack (lower/lambdas.rs). For a non-escaping FnMut lambda `is_move` is false and AOT deliberately relies on Rust's native &mut lexical capture, so nothing is packed and `captures` is EMPTY. The write completes inside the callable slot and is then dropped at the scope boundary. A first attempt to seed and republish lexical captures did not fix it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "Model a non-packed capture as what it is on every other tier: a reference to the enclosing local, seeded before the call and published after. Fix it at the shared seam, not per engine -- the JIT shows the identical symptom, so an interpreter-only patch would leave the I9 break half-closed.\n\nHard constraint on the predicate: names in frozen_captures (D-CONC-FREEZE1) and materialized_captures (D-MEM-COPYSEM1) are ratified SNAPSHOTS and must NOT track the outer local. Publishing through them would trade a missing write for a corrupted one, which is worse. Lambda source_params are likewise excluded.\n\nSeverity note for scheduling: `jet dev` currently reports success for a program whose loop body does nothing observable, so this is a beginner-facing correctness trap on the most ordinary imperative idiom in the language. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A closure passed to each writes to a captured local visibly in the caller's frame on interpreter, resident JIT and AOT",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:37:37.453Z"
+        },
+        {
+          "n": 2,
+          "text": "The minimal reproduction above prints list each: [1, 2, 3] and set each: [1, 2, 3] on all three tiers",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:37:37.888Z"
+        },
+        {
+          "n": 3,
+          "text": "examples/features/collections/set.jet matches its golden byte-for-byte on every tier",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:37:38.309Z"
+        },
+        {
+          "n": 4,
+          "text": "frozen_captures and materialized_captures still do not track the outer local, with a test pinning that",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:37:38.724Z"
+        },
+        {
+          "n": 5,
+          "text": "The fix lives at one shared seam rather than being re-encoded per engine",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T00:37:39.142Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "i9",
+        "closures",
+        "interpreter",
+        "jit"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T00:37:37.024Z",
+      "updated": "2026-08-16T00:37:39.143Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0llay0r",
+      "num": 2001,
+      "title": "E2201 blames a missing run function when lowering failed",
+      "body": "A whole-program TIR lowering failure is reported to the user as E2201 \"`jet dev` needs a `run` function to run\", why: \"a library with no `run` has nothing to execute\" -- on a program that HAS a `run` function. The diagnostic names a cause that is provably not the cause.\n\nFound in the `range_unboxed` fixture of `range_values_run_in_resident_jit_without_fallback`: the fixture does define `fn run()`, and the lane confirmed on a second tier that the real failure is an internal lowering error. So this is an I2 case surfacing as a user diagnostic instead of exit 101, and simultaneously an I4 case: the message teaches the reader a false rule about their own program and sends them to add a function that already exists.\n\nSeverity is higher than the one fixture suggests. Any program whose whole-program lowering fails on this path gets told its `run` is missing, so the misattribution hides every defect that reaches it -- including, until this session, the coverage gap the fixture was written to detect. It also means the test's claim (\"range values run in the resident JIT without fallback\") has never actually been verified.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Separate the two failures the path currently conflates. A genuinely absent `run` is a real user error and keeps E2201. A lowering failure is a compiler defect and must take the branded internal-error rail: render the actual lowering reason and exit 101 (I2), never blame the user's program. Find where the lowering Err is discarded and replaced by the entry-point check, and carry the real reason through instead.\n\nThen check the same shape elsewhere: an entry-point precondition tested AFTER a fallible lowering step, so that any lowering failure is reported as the precondition failing. Report every instance found, not only this one.\n\nRelated: the sibling test was strengthened to report the real reason rather than the misattributed E2201, so once this is fixed the test should name the genuine gap. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A program with a run function never receives E2201",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:03:29.703Z"
+        },
+        {
+          "n": 2,
+          "text": "A whole-program lowering failure renders its real reason and exits 101, not a user diagnostic",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:03:30.114Z"
+        },
+        {
+          "n": 3,
+          "text": "A genuinely absent run function still receives E2201 with its existing text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:03:30.552Z"
+        },
+        {
+          "n": 4,
+          "text": "Every other site testing an entry-point precondition after a fallible lowering step is reported",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:03:30.969Z"
+        },
+        {
+          "n": 5,
+          "text": "range_values_run_in_resident_jit_without_fallback either passes or names the genuine resident gap",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T01:03:31.389Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "i2",
+        "i4",
+        "jit"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T01:03:29.268Z",
+      "updated": "2026-08-16T01:03:31.389Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -173882,6 +174409,678 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T01:06:45.398Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xu36jp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T01:06:44.710Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0js0lqr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T01:03:31.971Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0p834bt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T01:03:31.389Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0llay0r",
+      "note": "#5 range_values_run_in_resident_jit_without_fallback either pas"
+    },
+    {
+      "at": "2026-08-16T01:03:30.969Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0llay0r",
+      "note": "#4 Every other site testing an entry-point precondition after a"
+    },
+    {
+      "at": "2026-08-16T01:03:30.552Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0llay0r",
+      "note": "#3 A genuinely absent run function still receives E2201 with it"
+    },
+    {
+      "at": "2026-08-16T01:03:30.114Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0llay0r",
+      "note": "#2 A whole-program lowering failure renders its real reason and"
+    },
+    {
+      "at": "2026-08-16T01:03:29.704Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0llay0r",
+      "note": "#1 A program with a run function never receives E2201"
+    },
+    {
+      "at": "2026-08-16T01:03:29.268Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0llay0r",
+      "note": "E2201 blames a missing run function when lowering failed"
+    },
+    {
+      "at": "2026-08-16T00:41:06.618Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-16T00:41:06.618Z"
+    },
+    {
+      "at": "2026-08-16T00:39:40.243Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c038mpqz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:39.463Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c038mpqz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:38.353Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c038mpqz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:37.128Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c038mpqz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T00:39:36.075Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ufm0hy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:34.431Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ufm0hy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:33.529Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ufm0hy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:33.101Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ufm0hy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T00:39:32.162Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ufm0hy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T00:39:31.106Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wm4nqu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:30.354Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wm4nqu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:29.933Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wm4nqu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:29.519Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wm4nqu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T00:39:29.082Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wm4nqu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T00:39:28.674Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0n60ekq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:27.506Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n60ekq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:26.298Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n60ekq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:25.190Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n60ekq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T00:39:24.350Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n60ekq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T00:39:23.356Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wmrkel",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:22.185Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wmrkel",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:21.761Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wmrkel",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:21.359Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wmrkel",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T00:39:20.931Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wmrkel",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T00:39:19.937Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0nycd3c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:18.450Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nycd3c",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:17.353Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nycd3c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:16.288Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0exr0fm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:15.520Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exr0fm",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:15.096Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exr0fm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:39:14.694Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04q38ak",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T00:39:13.917Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04q38ak",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T00:39:13.493Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04q38ak",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T00:37:39.143Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ib3m4h",
+      "note": "#5 The fix lives at one shared seam rather than being re-encode"
+    },
+    {
+      "at": "2026-08-16T00:37:38.725Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ib3m4h",
+      "note": "#4 frozen_captures and materialized_captures still do not track"
+    },
+    {
+      "at": "2026-08-16T00:37:38.310Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ib3m4h",
+      "note": "#3 examples/features/collections/set.jet matches its golden byt"
+    },
+    {
+      "at": "2026-08-16T00:37:37.888Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ib3m4h",
+      "note": "#2 The minimal reproduction above prints list each: [1, 2, 3] a"
+    },
+    {
+      "at": "2026-08-16T00:37:37.453Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ib3m4h",
+      "note": "#1 A closure passed to each writes to a captured local visibly "
+    },
+    {
+      "at": "2026-08-16T00:37:37.024Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0ib3m4h",
+      "note": "each loses its capture write on both dev tiers"
+    },
+    {
+      "at": "2026-08-16T00:26:56.781Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gsdcg",
+      "note": "#4 The test states what it proves, so a piped-stdout false gree"
+    },
+    {
+      "at": "2026-08-16T00:26:55.614Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gsdcg",
+      "note": "#3 The style probe compiles and asserts presence semantics inde"
+    },
+    {
+      "at": "2026-08-16T00:26:55.173Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gsdcg",
+      "note": "#2 The interpreter ambient calls the same env accessor as the o"
+    },
+    {
+      "at": "2026-08-16T00:26:54.726Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08gsdcg",
+      "note": "#1 env.set(\"NO_COLOR\", ...) at runtime has identical effect on "
+    },
+    {
+      "at": "2026-08-16T00:26:54.278Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c08gsdcg",
+      "note": "Interpreter ambient reads host env, not the Jet-owned env table"
+    },
+    {
+      "at": "2026-08-16T00:21:52.714Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02ur7xi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T00:21:52.104Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08pvmkh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T00:21:51.441Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c06yvlcb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T00:20:56.441Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08pvmkh",
+      "note": "#4 No skip list is introduced that lets a stem vanish without a"
+    },
+    {
+      "at": "2026-08-16T00:20:55.287Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08pvmkh",
+      "note": "#3 gaps: 0 is only reportable when the universe is complete, or"
+    },
+    {
+      "at": "2026-08-16T00:20:54.493Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08pvmkh",
+      "note": "#2 The audit's universe size is pinned outside tests/jit_gaps.t"
+    },
+    {
+      "at": "2026-08-16T00:20:54.045Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08pvmkh",
+      "note": "#1 Each of the 43 stems is classified as genuinely out-of-unive"
+    },
+    {
+      "at": "2026-08-16T00:20:52.948Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c08pvmkh",
+      "note": "43 example stems are invisible to the JIT coverage audit"
+    },
+    {
+      "at": "2026-08-15T23:40:30.902Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-15T23:40:30.902Z"
+    },
+    {
+      "at": "2026-08-15T23:28:29.157Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c048a8ue",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-15T23:28:28.444Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c048a8ue",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-15T23:28:28.037Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c048a8ue",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T23:28:27.624Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c048a8ue",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T23:28:26.820Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c048a8ue",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T23:28:25.680Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nycd3c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T23:28:24.999Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exr0fm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T23:28:23.761Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04q38ak",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T23:28:22.400Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c038mpqz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T23:28:21.975Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c038mpqz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T23:28:21.397Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-15T23:28:20.961Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-15T22:57:44.999Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0js0lqr",
+      "note": "#5 The error-5 vs stack-overflow discriminator is documented wh"
+    },
+    {
+      "at": "2026-08-15T22:57:43.866Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0js0lqr",
+      "note": "#4 A panic that would previously have aborted now surfaces as a"
+    },
+    {
+      "at": "2026-08-15T22:57:42.583Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0js0lqr",
+      "note": "#3 cargo test --no-fail-fast --test dev reaches libtest's own s"
+    },
+    {
+      "at": "2026-08-15T22:57:41.754Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0js0lqr",
+      "note": "#2 No Rust panic can be raised while JIT frames are on the stac"
+    },
+    {
+      "at": "2026-08-15T22:57:41.000Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0js0lqr",
+      "note": "#1 The chosen mechanism is recorded as a decision with its cost"
+    },
+    {
+      "at": "2026-08-15T22:57:40.078Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0js0lqr",
+      "note": "No Rust panic may be raised while JIT frames are on the stack"
+    },
+    {
+      "at": "2026-08-15T22:39:50.449Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nycd3c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T22:39:49.152Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exr0fm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T22:39:48.657Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04q38ak",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T22:39:48.185Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c038mpqz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T22:39:47.678Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c014nejk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-15T21:28:24.548Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0oks05m",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-15T21:27:48.572Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0qirkh3",
+      "note": "#3 A test asserts the escaping case prints and the caught case "
+    },
+    {
+      "at": "2026-08-15T21:27:47.629Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0qirkh3",
+      "note": "#2 A panic the scheduler catches and converts stays quiet, so t"
+    },
+    {
+      "at": "2026-08-15T21:27:47.204Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0qirkh3",
+      "note": "#1 A panic escaping a task body prints its message and location"
+    },
+    {
+      "at": "2026-08-15T21:27:46.419Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0qirkh3",
+      "note": "Scheduler panic hook hides the message for every task body"
+    },
+    {
+      "at": "2026-08-15T21:27:45.287Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0oks05m",
+      "note": "#4 A regression test drives cancel through the deopt path and a"
+    },
+    {
+      "at": "2026-08-15T21:27:44.320Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0oks05m",
+      "note": "#3 The ~14 .expect sites and the bare panic! in Concurrency.rs "
+    },
+    {
+      "at": "2026-08-15T21:27:43.628Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0oks05m",
+      "note": "#2 A cancel raised at an interpreter wait point inside jet_deop"
+    },
+    {
+      "at": "2026-08-15T21:27:42.835Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0oks05m",
+      "note": "#1 No extern \"C\" frame in crates/jet-jit can be reached by an u"
+    },
+    {
+      "at": "2026-08-15T21:27:41.948Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0oks05m",
+      "note": "extern \"C\" JIT frames abort the process instead of reporting"
+    },
+    {
       "at": "2026-08-15T19:48:54.146Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -176707,678 +177906,6 @@
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
       "ref": "c053e5jw",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T06:19:36.965Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T06:19:36.443Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T06:19:35.913Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:19:35.387Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T06:19:34.865Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c053e5jw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:19:16.453Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0fki8ve",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T06:19:15.117Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T06:19:14.088Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T06:19:12.700Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T06:19:11.390Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T06:19:10.602Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T06:19:09.475Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T06:19:08.180Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T06:19:07.121Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fki8ve",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:06:18.669Z",
-      "by": "fable-e3-burndown",
-      "action": "milestone.verify",
-      "ref": "e3-m02-failure-model",
-      "note": "Integrated fresh-context review corrections through 665e9912f/0757714b6. Builder proof at 0757714b6: outcome_carrier 10/10; explicit_exit_101_maps_to_user_error_on_every_tier PASS; explicit_process_exit_cleanup_golden_matches_all_execution_tiers PASS; effects::panic_prohibition_is_e0749_with_three_exits PASS. Earlier fresh root cargo build PASS after review corrections. Review found and corrected contract-kernel path, web malformed-host carrier, union widening, generated fallible edge, and canonical typed carrier proof; no remaining M02-specific blocker."
-    },
-    {
-      "at": "2026-08-15T05:13:51.353Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0nwijdh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T05:13:50.334Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nwijdh",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T05:13:49.420Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nwijdh",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T05:13:48.520Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nwijdh",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T05:13:47.105Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nwijdh",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T05:13:45.927Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nwijdh",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T05:13:44.950Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nwijdh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T03:16:57.439Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-15T03:16:57.439Z"
-    },
-    {
-      "at": "2026-08-15T03:11:43.951Z",
-      "by": "fable-e3-burndown",
-      "action": "papercut.add",
-      "ref": "pc0vjbo7r",
-      "note": ""
-    },
-    {
-      "at": "2026-08-15T02:49:51.639Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0qin2v4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T02:49:50.984Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qin2v4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T02:49:50.490Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qin2v4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T02:49:49.985Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qin2v4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T02:24:39.167Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0a6fi08",
-      "note": "Tower board loads fast: slim initial payload, lazy closed-card content"
-    },
-    {
-      "at": "2026-08-15T02:22:20.087Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-15T02:22:20.087Z"
-    },
-    {
-      "at": "2026-08-15T02:11:01.360Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0o7s5iz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T02:10:59.958Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0o7s5iz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T02:06:08.022Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0weud0q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T02:06:05.169Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0weud0q",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T02:06:04.663Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0weud0q",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T02:06:03.496Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0weud0q",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T02:06:02.434Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0weud0q",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T02:06:01.936Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0weud0q",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T01:39:34.581Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T01:39:33.491Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0ihiv43",
-      "note": "#10: Fresh M03 review found nested fact field/index/len folding can reach ordinary lowering instead of erasing before codegen."
-    },
-    {
-      "at": "2026-08-15T01:39:32.957Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08q9a90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T01:39:32.314Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c08q9a90",
-      "note": "#6: Fresh M03 review found typed reflection JIT/Web parity false-green and a retained comptime/reflect jit_gaps row."
-    },
-    {
-      "at": "2026-08-15T01:39:31.761Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T01:39:31.118Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#10: Fresh review found tier fixture does not exercise typed reflection and comptime/reflect remains in jit_gaps."
-    },
-    {
-      "at": "2026-08-15T01:39:30.622Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#8: Fresh review found missing plane reads, missing typed details, stale report. metadata, and incomplete nested folding."
-    },
-    {
-      "at": "2026-08-15T01:39:30.129Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#7: Fresh review found comptime/reflect still parked in jit_gaps and Web proof compiles but does not execute."
-    },
-    {
-      "at": "2026-08-15T01:39:29.647Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#6: Fresh review found law_violations does not guard read resolution, typed payloads, and producers end to end."
-    },
-    {
-      "at": "2026-08-15T01:39:29.173Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#2: Fresh review found reflection metadata shells without typed detail and no Exactness carrier."
-    },
-    {
-      "at": "2026-08-15T01:39:28.550Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0pw8xgx",
-      "note": "#1: Fresh M03 review found registered Measure/Exactness/Classification/Obligation planes lack FactRead mappings."
-    },
-    {
-      "at": "2026-08-15T01:36:33.500Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T01:36:32.862Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T01:36:32.371Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T01:36:31.889Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T01:36:31.410Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T01:36:30.937Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T01:36:30.455Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T01:36:29.942Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T01:33:10.274Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T01:33:08.816Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T01:33:07.592Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T01:33:07.118Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T01:33:06.638Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T01:33:06.140Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T01:32:48.003Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08q9a90",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T01:32:47.351Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T01:18:31.163Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-15T01:18:31.163Z"
-    },
-    {
-      "at": "2026-08-14T23:46:58.029Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0t5khxi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:46:57.384Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0t5khxi",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-14T23:46:56.880Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0t5khxi",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T23:46:56.390Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0t5khxi",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T23:46:33.836Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ubf542",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:46:33.223Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ubf542",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-14T23:45:57.130Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0o7s5iz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:45:55.876Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0qin2v4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:45:54.713Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0o7s5iz",
-      "note": "#2: Fresh milestone review found Core native cleanup preserves only E3001 strings and JIT runtime_host maps arbitrary Rust helper panics to E3001 user stops, violating the 1/70/101 edge law."
-    },
-    {
-      "at": "2026-08-14T23:45:54.234Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0qin2v4",
-      "note": "#7: Fresh milestone review contradicted all-stop-kind parity: typed non-E3001 stops are not preserved through native cleanup and host panic classification."
-    },
-    {
-      "at": "2026-08-14T23:45:53.738Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0qin2v4",
-      "note": "#5: Fresh milestone review found typed E3010/E3011/E3012 may escape as raw 101 while spoofed host strings can become exit 70."
-    },
-    {
-      "at": "2026-08-14T23:45:53.236Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-reopen",
-      "ref": "c0qin2v4",
-      "note": "#1: Fresh milestone review found Outcome::jet_render_runtime_stop hardcodes E30xx policy instead of resolving active Registry rows and accepts unknown/inactive codes as exit-70 user stops."
-    },
-    {
-      "at": "2026-08-14T23:44:22.118Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08q9a90",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T23:41:51.944Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-14T23:41:51.944Z"
-    },
-    {
-      "at": "2026-08-14T23:40:10.968Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0fsjhdc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:40:10.325Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0fsjhdc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T23:33:25.834Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-14T23:33:25.834Z"
-    },
-    {
-      "at": "2026-08-14T23:26:13.266Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08yj420",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:26:12.609Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08yj420",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T23:26:12.136Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08yj420",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-14T23:26:11.642Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08yj420",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T23:26:11.148Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08yj420",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T23:03:47.456Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0kfna9f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:03:46.308Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-14T23:03:45.188Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-14T23:03:43.878Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-14T23:03:42.824Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0kfna9f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-14T23:03:42.115Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0mjxw0l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-14T23:03:40.582Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-14T23:03:39.281Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mjxw0l",
       "note": "#6"
     }
   ],
