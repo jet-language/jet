@@ -571,49 +571,45 @@ pub(super) fn place_mut_handle(base: &str, path: &[ViewMutPathStep]) -> CtValue 
     }
 }
 
-pub(super) fn place_mut_parts(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>)> {
+/// D-TASKBORROW1=A: a loaned window carries a runtime slot instead of an
+/// owner local, because the child thread cannot name the owner's scope.
+pub(super) fn place_loan_handle(slot: usize) -> CtValue {
+    CtValue::Struct {
+        type_name: PLACE_MUT_TYPE.into(),
+        fields: vec![("loan".into(), CtValue::Int(slot as i64))],
+    }
+}
+
+/// What a `__JetPlaceMut` handle windows into.
+pub(super) enum PlaceMutTarget {
+    /// A place inside an owner local held by the reading scope.
+    Owner(String, Vec<ViewMutPathStep>),
+    /// A shared runtime slot loaned across a task boundary.
+    Loan(usize),
+}
+
+pub(super) fn place_mut_target(value: &CtValue) -> Option<PlaceMutTarget> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
     if type_name != PLACE_MUT_TYPE {
         return None;
     }
-    let base = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("base", CtValue::Str(base)) => Some(base.clone()),
-        _ => None,
-    })?;
-    Some((base, parse_view_mut_path(fields)))
-}
-
-/// Read the value the handle windows into, or `None` when the owner is gone.
-pub(super) fn read_place_mut(
-    value: &CtValue,
-    scope: &HashMap<String, CtValue>,
-    span: Span,
-) -> Option<Result<CtValue, Diagnostic>> {
-    let (base, path) = place_mut_parts(value)?;
-    let Some(root) = scope.get(&base) else {
-        return Some(Err(unsupported("place window owner", span)));
-    };
-    Some(project_list_place(root, &path, span).cloned())
-}
-
-/// Write through the handle into the owner's storage.
-pub(super) fn write_place_mut(
-    handle: &CtValue,
-    replacement: CtValue,
-    scope: &mut HashMap<String, CtValue>,
-    span: Span,
-) -> Option<Result<(), Diagnostic>> {
-    let (base, path) = place_mut_parts(handle)?;
-    let Some(root) = scope.get(&base).cloned() else {
-        return Some(Err(unsupported("place window owner", span)));
-    };
-    Some(
-        replace_list_place(root, &path, replacement, span).map(|updated| {
-            scope.insert(base, updated);
-        }),
-    )
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            ("loan", CtValue::Int(slot)) => {
+                return usize::try_from(*slot).ok().map(PlaceMutTarget::Loan);
+            }
+            ("base", CtValue::Str(base)) => {
+                return Some(PlaceMutTarget::Owner(
+                    base.clone(),
+                    parse_view_mut_path(fields),
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// One step from a root local to the list a `__JetViewMut` windows into.
@@ -1081,6 +1077,28 @@ pub(super) struct EvalCtx<'a> {
     shared_guards: Vec<usize>,
     /// Nested `#Transact` frames for auto-snapshot + commit/rollback hooks.
     txn_stack: Vec<EvalTxnFrame<'a>>,
+    /// D-TASKBORROW1=A: whole-place write windows currently loaned to task
+    /// children, innermost `task.group` last. Opened at the spawn boundary,
+    /// written back into the owner when the group joins.
+    place_loans: Vec<EvalPlaceLoan>,
+    /// One `place_loans` watermark per open `task.group` block.
+    loan_scopes: Vec<usize>,
+}
+
+/// D-TASKBORROW1=A: one open loan of a whole-place write window.
+///
+/// AOT and Cranelift hand the child a real reference into the owner's storage.
+/// The evaluator runs children on their own threads with their own scopes, so
+/// the window is backed by one shared runtime slot for the life of the loan
+/// and flushed into the owner when the group joins. Without this the child
+/// cannot even name the owner local and the whole join fails (I9).
+struct EvalPlaceLoan {
+    /// Window local rebound to the loan on the spawning side.
+    source: String,
+    /// Owner local the window projects out of.
+    base: String,
+    path: Vec<ViewMutPathStep>,
+    slot: usize,
 }
 
 pub(super) struct EvalTxnFrame<'a> {
@@ -1201,6 +1219,10 @@ struct EvalRuntime<'a> {
     task_groups: Vec<Arc<crate::task_group::JetTaskGroupRuntime<usize>>>,
     tasks: Vec<Option<EvalTask>>,
     apps: Vec<EvalApp>,
+    /// D-TASKBORROW1=A: storage behind every open whole-place task loan. This
+    /// is the evaluator's stand-in for the address AOT passes to the child, so
+    /// parent and child address one slot instead of two scope copies.
+    place_loan_slots: Vec<Arc<Mutex<CtValue>>>,
     /// D-MEMO1=A: one Prelude memo store per memoized function. The evaluator
     /// keeps only the key/result values; bound, LRU order, and counters live in
     /// the shared Memo substrate.
@@ -1422,6 +1444,7 @@ impl EvalRuntime<'_> {
             task_groups: Vec::new(),
             tasks: Vec::new(),
             apps: Vec::new(),
+            place_loan_slots: Vec::new(),
             memos,
             allocators: HashMap::new(),
             gc_roots: Vec::new(),
@@ -1701,6 +1724,8 @@ impl<'a> EvalCtx<'a> {
             scope_guards: Vec::new(),
             shared_guards: Vec::new(),
             txn_stack: Vec::new(),
+            place_loans: Vec::new(),
+            loan_scopes: Vec::new(),
         };
         let mut scope = job.captured;
         let result = match &job.lambda.body {
@@ -1779,16 +1804,19 @@ impl<'a> EvalCtx<'a> {
             .spawn_lambdas
             .get(site)
             .ok_or_else(|| unsupported("spawn body", self.span()))?;
+        let span = self.span();
         let mut child = HashMap::new();
         for capture in &lam.captures {
-            child.insert(
-                capture.name.clone(),
-                scope
-                    .get(&capture.source)
-                    .cloned()
-                    .or_else(|| self.globals.get(&capture.source).cloned())
-                    .unwrap_or(CtValue::Unit),
-            );
+            let value = scope
+                .get(&capture.source)
+                .cloned()
+                .or_else(|| self.globals.get(&capture.source).cloned())
+                .unwrap_or(CtValue::Unit);
+            // D-TASKBORROW1=A: a whole-place write window crossing into a child
+            // is a loan. AOT gives the child the owner's address; the evaluator
+            // promotes the window to one shared slot both sides address.
+            let value = self.open_place_loan(&capture.source, value, scope, span)?;
+            child.insert(capture.name.clone(), value);
         }
         let sender = self
             .task_sender
@@ -1856,6 +1884,141 @@ impl<'a> EvalCtx<'a> {
             type_name: "__JetTirTask".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(task as i64))],
         })
+    }
+
+    /// Storage behind one open loan.
+    fn place_loan_slot(
+        &self,
+        slot: usize,
+        span: Span,
+    ) -> Result<Arc<Mutex<CtValue>>, Diagnostic> {
+        self.runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .place_loan_slots
+            .get(slot)
+            .cloned()
+            .ok_or_else(|| unsupported("task loan storage", span))
+    }
+
+    /// Read the value a `__JetPlaceMut` handle windows into, or `None` when the
+    /// value is not a window at all.
+    pub(super) fn read_place_mut(
+        &self,
+        value: &CtValue,
+        scope: &HashMap<String, CtValue>,
+        span: Span,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        Some(match place_mut_target(value)? {
+            PlaceMutTarget::Loan(slot) => self.place_loan_slot(slot, span).map(|slot| {
+                slot.lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .clone()
+            }),
+            PlaceMutTarget::Owner(base, path) => match scope.get(&base) {
+                Some(root) => project_list_place(root, &path, span).cloned(),
+                None => Err(unsupported("place window owner", span)),
+            },
+        })
+    }
+
+    /// Write through the handle into the storage it windows into.
+    pub(super) fn write_place_mut(
+        &self,
+        handle: &CtValue,
+        replacement: CtValue,
+        scope: &mut HashMap<String, CtValue>,
+        span: Span,
+    ) -> Option<Result<(), Diagnostic>> {
+        Some(match place_mut_target(handle)? {
+            PlaceMutTarget::Loan(slot) => self.place_loan_slot(slot, span).map(|slot| {
+                *slot
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = replacement;
+            }),
+            PlaceMutTarget::Owner(base, path) => match scope.get(&base).cloned() {
+                Some(root) => {
+                    replace_list_place(root, &path, replacement, span).map(|updated| {
+                        scope.insert(base, updated);
+                    })
+                }
+                None => Err(unsupported("place window owner", span)),
+            },
+        })
+    }
+
+    /// D-TASKBORROW1=A: open the loan a capture needs to cross into a child.
+    ///
+    /// Values that are not owner-rooted write windows pass straight through,
+    /// including a window that is already loaned by an outer spawn: one loan
+    /// per window, shared by every child that names it.
+    fn open_place_loan(
+        &mut self,
+        source: &str,
+        value: CtValue,
+        scope: &mut HashMap<String, CtValue>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let target = place_mut_target(&value);
+        let Some(PlaceMutTarget::Owner(base, path)) = target else {
+            return Ok(value);
+        };
+        if self.loan_scopes.is_empty() {
+            // No enclosing group means no join, so no boundary at which the
+            // owner could see the child's writes. Refuse instead of dropping
+            // them: a silent wrong answer is worse than a stop.
+            return Err(unsupported("task borrow outside a task group", span));
+        }
+        let Some(root) = scope.get(&base) else {
+            return Err(unsupported("place window owner", span));
+        };
+        let current = project_list_place(root, &path, span)?.clone();
+        let slot = {
+            let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            runtime.place_loan_slots.push(Arc::new(Mutex::new(current)));
+            runtime.place_loan_slots.len() - 1
+        };
+        let handle = place_loan_handle(slot);
+        // The owner side addresses the loan too, so a read after the spawn sees
+        // the child's writes rather than a stale copy.
+        scope.insert(source.to_string(), handle.clone());
+        self.place_loans.push(EvalPlaceLoan {
+            source: source.to_string(),
+            base,
+            path,
+            slot,
+        });
+        Ok(handle)
+    }
+
+    /// Mark the loan watermark for a `task.group` block that just opened.
+    fn open_loan_scope(&mut self) {
+        self.loan_scopes.push(self.place_loans.len());
+    }
+
+    /// D-TASKBORROW1=A: every loan opened inside this `task.group` closes when
+    /// the group joins, and the owner sees the writes from that point on.
+    fn close_place_loans(
+        &mut self,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let span = self.span();
+        let mark = self.loan_scopes.pop().unwrap_or(0);
+        let closing = self.place_loans.split_off(mark.min(self.place_loans.len()));
+        for loan in closing {
+            let value = self
+                .place_loan_slot(loan.slot, span)?
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .clone();
+            let Some(root) = scope.get(&loan.base).cloned() else {
+                return Err(unsupported("task loan owner", span));
+            };
+            let updated = replace_list_place(root, &loan.path, value, span)?;
+            scope.insert(loan.base.clone(), updated);
+            scope.insert(loan.source, place_mut_handle(&loan.base, &loan.path));
+        }
+        Ok(())
     }
 
     fn taskgroup_index(value: &CtValue) -> Option<usize> {
@@ -2334,7 +2497,20 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
-    fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
+    /// Join every child, then close the loans the block opened. The loans are
+    /// closed on the cancelled path too: the children are already drained, and
+    /// dropping their writes would be a silent divergence from AOT (I9).
+    fn close_taskgroup(
+        &mut self,
+        index: usize,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let joined = self.join_taskgroup(index);
+        let closed = self.close_place_loans(scope);
+        joined.and(closed)
+    }
+
+    fn join_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
         let span = self.span();
         let group = self
             .runtime
@@ -3918,6 +4094,8 @@ fn run_program_with_structs_on_stack(
         scope_guards: Vec::new(),
         shared_guards: Vec::new(),
         txn_stack: Vec::new(),
+        place_loans: Vec::new(),
+        loan_scopes: Vec::new(),
     };
     let mut scope = HashMap::new();
     let entry_args = match cli_dispatch {
@@ -4045,6 +4223,8 @@ pub fn run_named_func_with_memos(
         scope_guards: Vec::new(),
         shared_guards: Vec::new(),
         txn_stack: Vec::new(),
+        place_loans: Vec::new(),
+        loan_scopes: Vec::new(),
     };
     let mut scope = HashMap::new();
     let result = ctx.with_task_dispatcher(|ctx| ctx.run_func(func, args, &mut scope));
@@ -4283,6 +4463,8 @@ fn eval_expr_hook(
         scope_guards: Vec::new(),
         shared_guards: Vec::new(),
         txn_stack: Vec::new(),
+        place_loans: Vec::new(),
+        loan_scopes: Vec::new(),
     };
     let mut scope = globals;
     let result = if spawn_lambdas.is_empty() {
@@ -4422,6 +4604,8 @@ fn eval_block_hook(
         scope_guards: Vec::new(),
         shared_guards: Vec::new(),
         txn_stack: Vec::new(),
+        place_loans: Vec::new(),
+        loan_scopes: Vec::new(),
     };
     let mut scope = globals;
     let outcome = if spawn_lambdas.is_empty() {

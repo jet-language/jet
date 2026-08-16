@@ -2913,7 +2913,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     /// One whole record: parse, then decode. `Err` is the `[FieldError]` value.
-    fn decode_codec_value(
+    pub(super) fn decode_codec_value(
         &mut self,
         module: &str,
         target: &Type,
@@ -2956,7 +2956,7 @@ impl<'a> EvalCtx<'a> {
     /// (1-based) and a short row leaves its cells empty, as the Prelude does.
     /// A file is one column layout, so the batch reports the first row that
     /// actually migrated.
-    fn decode_codec_rows(
+    pub(super) fn decode_codec_rows(
         &mut self,
         target: &Type,
         text: String,
@@ -5372,7 +5372,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 // D-MEM1 S9 / D-PIN1=A: a whole-place window local reads the
                 // owner's current storage, never the value it held at binding.
-                if let Some(read) = super::read_place_mut(&value, scope, self.span()) {
+                if let Some(read) = self.read_place_mut(&value, scope, self.span()) {
                     return read;
                 }
                 if local.uninit_fixed {
@@ -9045,9 +9045,10 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Local(local) => {
                 // D-MEM1 S9 / D-PIN1=A: writing a whole-place window writes the
                 // owner's storage, not the window binding.
+                let span = self.span();
                 if let Some(handle) = scope.get(&local.name).cloned() {
                     if let Some(written) =
-                        super::write_place_mut(&handle, value.clone(), scope, self.span())
+                        self.write_place_mut(&handle, value.clone(), scope, span)
                     {
                         return written;
                     }

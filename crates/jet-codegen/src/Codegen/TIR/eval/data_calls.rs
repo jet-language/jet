@@ -7,16 +7,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
-use crate::Comptime::Builtins::{as_bool, exact_int_value};
+use crate::Comptime::Builtins::as_bool;
 use crate::Comptime::{apply_core_call, apply_data_line_call, CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
 
 use super::{unsupported, EvalCtx};
-
-mod range_semantics {
-    include!("../../../Prelude/Core/InlineRange.rs");
-}
 
 fn ok(v: CtValue) -> CtValue {
     CtValue::Present(Box::new(v))
@@ -58,55 +54,6 @@ fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
     }
 }
 
-fn decode_error(reason: impl Into<String>) -> CtValue {
-    CtValue::List(vec![CtValue::Struct {
-        type_name: "FieldError".to_string(),
-        fields: vec![
-            ("path".to_string(), CtValue::Str(String::new())),
-            ("reason".to_string(), CtValue::Str(reason.into())),
-        ],
-    }])
-}
-
-fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
-    match ty {
-        Type::String => Ok(CtValue::Str(cell.to_string())),
-        Type::Float | Type::Float32 => cell
-            .parse::<f64>()
-            .map(|f| CtValue::Float(CtFloat::f64(f)))
-            .map_err(|_| format!("expected Float, got `{cell}`")),
-        Type::Int => jet_foundation::Numeric::CtBigInt::from_str(cell)
-            .map(exact_int_value)
-            .map_err(|_| format!("expected Int, got `{cell}`")),
-        Type::IntN { .. } => cell
-            .parse::<i64>()
-            .map(CtValue::Int)
-            .map_err(|_| format!("expected Int, got `{cell}`")),
-        Type::InlineRange { lo, hi, .. } => cell
-            .parse::<i64>()
-            .map_err(|_| format!("expected Int, got `{cell}`"))
-            .and_then(|value| {
-                range_semantics::jet_inline_range_from_int(value, *lo, *hi)
-                    .map(CtValue::Int)
-            }),
-        Type::Bool => match cell {
-            "true" | "True" | "1" => Ok(CtValue::Bool(true)),
-            "false" | "False" | "0" => Ok(CtValue::Bool(false)),
-            _ => Err(format!("expected Bool, got `{cell}`")),
-        },
-        Type::Named(n) if n == "String" => Ok(CtValue::Str(cell.to_string())),
-        Type::Named(n) if n == "Float" => cell
-            .parse::<f64>()
-            .map(|f| CtValue::Float(CtFloat::f64(f)))
-            .map_err(|_| format!("expected Float, got `{cell}`")),
-        Type::Named(n) if n == "Int" => jet_foundation::Numeric::CtBigInt::from_str(cell)
-            .map(exact_int_value)
-            .map_err(|_| format!("expected Int, got `{cell}`")),
-        Type::Named(n) if n == "Bool" => parse_cell(&Type::Bool, cell),
-        other => Err(format!("unsupported CSV field type `{other:?}`")),
-    }
-}
-
 impl<'a> EvalCtx<'a> {
     /// Evaluate `core.data.*` without pre-evaluating lambda arguments.
     pub(super) fn eval_core_data_call(
@@ -121,6 +68,11 @@ impl<'a> EvalCtx<'a> {
             || PackageEdition::package_edition_at_least("2027");
 
         match method {
+            // I9: `core.data.{csv,json}` IS `core.encoding.{csv,json}.decode<[T]>`.
+            // AOT emits exactly that — `jet_enc_csv_decode::<Vec<T>>` and
+            // `jet_enc_json_decode::<Vec<T>>` in TIR/emit/core_calls.rs:1450
+            // and :1459 — so this tier marshals into the one typed-decode entry
+            // instead of owning a second decoder.
             "csv" | "json" => {
                 let text = match self.eval_expr(&args[0], scope)? {
                     CtValue::Str(s) => s,
@@ -129,11 +81,16 @@ impl<'a> EvalCtx<'a> {
                 let elem = list_elem(call_ty).cloned().ok_or_else(|| {
                     unsupported(&format!("`data.{method}<T>()` needs a list result type"), span)
                 })?;
-                if method == "csv" {
-                    Ok(self.decode_csv_rows(&text, &elem, span))
+                let target = Type::List(Box::new(elem));
+                let decoded = if method == "csv" {
+                    self.decode_codec_rows(&target, text, span)?
                 } else {
-                    Ok(self.decode_json_rows(&text, &elem, span))
-                }
+                    self.decode_codec_value("core.encoding.json", &target, text, span)?
+                };
+                Ok(match decoded {
+                    Ok((value, _migration)) => ok(value),
+                    Err(error) => err(error),
+                })
             }
             "count" => {
                 let recv = self.eval_expr(&args[0], scope)?;
@@ -501,59 +458,5 @@ impl<'a> EvalCtx<'a> {
             self.span(),
             self.repl_mode,
         )
-    }
-
-    fn decode_csv_rows(&self, text: &str, elem_ty: &Type, span: Span) -> CtValue {
-        let rows = match crate::Comptime::runtime_csv_parse(text) {
-            Ok(r) => r,
-            Err(e) => return err(decode_error(e)),
-        };
-        let mut it = rows.into_iter();
-        let Some(header) = it.next() else {
-            return ok(CtValue::List(Vec::new()));
-        };
-        let Type::Named(type_name) = elem_ty else {
-            return err(decode_error(format!(
-                "data.csv currently decodes named structs on the JIT path, got {elem_ty:?}"
-            )));
-        };
-        let fields = match self.struct_field_types.get(type_name) {
-            Some(f) => f,
-            None => {
-                return err(decode_error(format!(
-                    "unknown Codable type `{type_name}` for data.csv"
-                )));
-            }
-        };
-        let mut values = Vec::new();
-        for (i, row) in it.enumerate() {
-            let mut out_fields = Vec::with_capacity(fields.len());
-            for (fname, fty) in fields {
-                let col = header.iter().position(|h| h == fname);
-                let cell = col
-                    .and_then(|c| row.get(c))
-                    .cloned()
-                    .unwrap_or_default();
-                match parse_cell(fty, &cell) {
-                    Ok(v) => out_fields.push((fname.clone(), v)),
-                    Err(reason) => {
-                        return err(decode_error(format!("row {}: {reason}", i + 1)));
-                    }
-                }
-            }
-            values.push(CtValue::Struct {
-                type_name: type_name.clone(),
-                fields: out_fields,
-            });
-        }
-        let _ = span;
-        ok(CtValue::List(values))
-    }
-
-    fn decode_json_rows(&self, text: &str, elem_ty: &Type, span: Span) -> CtValue {
-        let _ = (self, text, elem_ty, span);
-        err(decode_error(
-            "data.json on the JIT interpreter path is not wired yet; use `jet run --profile=debug`",
-        ))
     }
 }
