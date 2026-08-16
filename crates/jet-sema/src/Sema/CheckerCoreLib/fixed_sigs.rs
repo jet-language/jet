@@ -122,6 +122,17 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.term", "eprint")
             | ("core.term", "print")
             | ("core.term", "progress")
+            // D-TEXTWIDTH1=B: `text.display_width(s)` returns `Int`, while
+            // `text.display_width(s, policy: p)` returns `Int ? TextError` —
+            // the `.Reject` control policy can fail. One call, two return
+            // types chosen by arity, so no `core_fixed_sig` row can state it:
+            // that table holds exactly one param list and one return, and
+            // `core_fixed_sig_for_row` pins the list length to the call's
+            // arity. The bespoke `infer_core_call` arm already dispatches both
+            // forms; this row is what makes sema write that answer onto
+            // `resolved_ret`, so every tier reads the one resolved type
+            // instead of falling back to Unit (I3).
+            | ("core.text", "display_width")
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
             // types depend on the value type / call-site `<T>`, so codegen reads
             // them from resolved_ret (I3).

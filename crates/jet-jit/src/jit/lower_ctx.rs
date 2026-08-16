@@ -1394,13 +1394,15 @@ impl LowerCtx<'_, '_> {
                     Some(Type::Int)
                 }
                 // D-TEXTWIDTH1=B: the policy overload can reject a control
-                // character, so its return type is `Int ? TextError`. State the
-                // whole type here — this is the one place a Unit-stamped Core
-                // call's real return type lives, and answering `None` forced a
-                // second half-row elsewhere that named only the ok side.
-                // AOT selects the policy helper on `args.len() >= 2`; use the
-                // same guard so the two tiers cannot disagree about which
-                // overload a call is.
+                // character, so its return type is `Int ? TextError`. The
+                // DECLARING table is sema's `is_polymorphic_core_special` +
+                // `infer_core_call`, which now stamps that type onto the node,
+                // so `??`/`?` read it off `value.ty` and never reach here. This
+                // row stays only as the Unit-recovery answer shared with the
+                // other consumers of this function (let-binding `stored_ty`,
+                // `expr_arith_type_from_op`), and it states the same fact those
+                // two tiers state — AOT selects the policy helper on
+                // `args.len() >= 2`, and so does the guard below.
                 "display_width" if args.len() >= 2 => Some(Type::Result {
                     ok: Box::new(Type::Int),
                     err: Box::new(Type::Named("TextError".to_string())),
@@ -1471,11 +1473,11 @@ impl LowerCtx<'_, '_> {
     /// The ok type of a `??` / `?` operand whose TIR node carries no `Result`
     /// annotation.
     ///
-    /// `recover_core_return_ty` is the one place a Unit-stamped Core call's real
-    /// return type lives, so read the whole type from it and take the ok side.
-    /// The previous form kept a second row naming only `display_width`'s ok
-    /// type, while the table above answered `None` for the very same call — two
-    /// half-facts about one call, disagreeing on whether it is fallible at all.
+    /// `recover_core_return_ty` states the return type of a Core call whose TIR
+    /// node was left `Unit`, so read the whole type from it and take the ok
+    /// side. Never a second opinion about fallibility: a call whose declaring
+    /// table types it (now including `text.display_width`) is answered by
+    /// `value.ty` at the call sites before this recovery runs.
     fn result_ok_ty_recover(value: &TExpr) -> Option<Type> {
         if let Some(ty) = Self::datatree_handle_ok_ty(value) {
             return Some(ty);

@@ -105,13 +105,11 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.http" && matches!(method, "router" | "parse" | "dispatch") {
         return true;
     }
-    // D-TEXTWIDTH1=B: `text.display_width` — NOT in `core_fixed_sig` (its return
-    // type varies with arg count: `Int` for 1 arg, `Int ? TextError` for the
-    // `policy:` 2-arg form). Sema's bespoke `core_call.rs` dispatch resolves
-    // it totally per call-site arity, mirroring `core.game.run` above.
-    if module == "core.text" && method == "display_width" {
-        return true;
-    }
+    // D-TEXTWIDTH1=B: `text.display_width` used to be claimed here by name.
+    // It is now registered in `is_polymorphic_core_special` (its return type
+    // is arity-dependent: `Int` for 1 arg, `Int ? TextError` for the `policy:`
+    // form), so the check above already covers it and sema carries the
+    // resolved type on `resolved_ret`. One coverage mechanism, not two (I8).
     // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
     // type (`Result<String, IOError>`) lives in sema's bespoke `infer_core_call` arm
     // (CheckerCoreLib.rs), carried total by `core_call_return_ty`. It is the DISTINCT
