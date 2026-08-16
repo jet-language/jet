@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2012,
-    "rev": 37768,
+    "rev": 37794,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e6"
       ]
     },
-    "completionCursor": "2026-08-16T00:41:06.618Z"
+    "completionCursor": "2026-08-16T11:06:25.365Z"
   },
   "epochs": [
     {
@@ -99634,6 +99634,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "D-PANICROOT1 IS RATIFIED, outcome A (deny-only), created and ratified 2026-08-15, ballotMode full, all five review passes recorded, whyNot covering B/C/D. It is NOT awaiting the owner -- I twice reported it as owner-gated and both claims were wrong. All 572 board decisions are ratified; there are no open ballots anywhere.\n\nThe live gap is IMPLEMENTATION, and outcome A is unimplemented at da0d189b1. Under A the CODE moves, not the corpus. Three sites still contradict the ratified outcome:\n- crates/jet-sema/src/Sema/CheckerItems.rs:3427 -- inside check_panic_call (declared :3423), `self.record_effect(Effect::Panic.name(), call.name_span)` still records Panic as an ORDINARY effect.\n- crates/jet-codegen/src/Prelude/Effects.jet:18 -- `effect Panic` is still declared a root alongside GPU and FFI.\n- E0751, the positive-mention diagnostic option A specifies, exists nowhere in crates/ (grep returns no matches).\n\nSingle seam for the fix: `effects_uncovered` at crates/jet-sema/src/Sema/Effects.rs:148. Its own doc comment states it is reached by every E0740/E0741/E0712/E0747/E0742 subset check, so dropping the Panic root there implements A everywhere at once rather than per call site.\n\nTwo shipped failures this must clear, both currently red:\n- examples/features/effects/effect_grant.jet -- `#Grant(caps: FS, IO)` at :16 omits Panic while the body panics at :17 and :18, so E0712.\n- examples/features/lowlevel/polyglot_fortran/main.jet:4 -- `fn run() =[Fortran, IO]=>` omits Panic and the reach is cross-file, so E0740.\n\nCare needed: deny-only is ASYMMETRIC. A deny surface must still refuse Panic (=[!Panic]=>, effects:{deny:[Panic]}, E0749, and the #Pre/refinement discharge from D-NOPANIC1=D all stay), while #Grant/#Caps must neither require nor accept it. Simply deleting Panic from the table would lose the deny side too. Under A the 21 gate sites across 12 example files plus 8 in tests that a grantable-Panic world would need become unnecessary; if any still needs a declaration afterwards, the gate is asymmetric the wrong way."
+        },
+        {
           "at": "2026-08-15",
           "by": "fable-e3-burndown",
           "text": "Orchestrator finding at master 6cfe66872: the Panic effect root is already breaking the shipped corpus, which raises the priority of this card's root-count question. examples/features/effects/effect_grant.jet fails the front end with E0712 'this #Grant region uses the effect Panic, which it has no capability for' at effect_grant.jet:16 on '#Grant(caps: FS, IO) {', and examples/features/lowlevel/polyglot_fortran/main.jet fails with E0740 'run uses the effect Panic, which its signature doesn't allow'. Panic ships as a root in Prelude/Effects.jet alongside the 30 others this card records, so every #Grant region and every signature that can panic must now declare it. That is a large new declaration burden on the beginner surface and it is an owner call, not an implementation detail: decide whether Panic is an effect root at all before migrating the examples. If it stays a root, the examples need Panic in their caps lists and the beginner story needs review; if it does not, the root table shrinks toward the 13 this card specifies."
@@ -99757,6 +99762,60 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-15T19:15:51.487Z"
+        },
+        {
+          "n": 13,
+          "text": "effects_uncovered no longer treats Panic as a grantable root, so no #Grant or #Caps site must name it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T11:08:35.520Z"
+        },
+        {
+          "n": 14,
+          "text": "A deny surface still refuses Panic: =[!Panic]=>, effects:{deny:[Panic]} and E0749 all still fire",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T11:08:35.950Z"
+        },
+        {
+          "n": 15,
+          "text": "check_panic_call no longer records Panic as an ordinary effect, and Prelude/Effects.jet no longer declares it a root",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T11:08:36.398Z"
+        },
+        {
+          "n": 16,
+          "text": "E0751 exists with a registered row and a UI snapshot, or the acceptance terms are recorded as not requiring it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T11:08:37.415Z"
+        },
+        {
+          "n": 17,
+          "text": "examples/features/effects/effect_grant.jet and lowlevel/polyglot_fortran both compile and run without naming Panic",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T11:08:38.371Z"
+        },
+        {
+          "n": 18,
+          "text": "docs/spec/syntax-decisions.md carries a D-PANICROOT1 entry; today it records only D-NOPANIC1=D at line 7165",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T11:08:38.931Z"
         }
       ],
       "refs": [
@@ -99769,8 +99828,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-15T19:15:51.487Z",
-      "updatedBy": "owner",
+      "updated": "2026-08-16T11:08:38.932Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1120
     },
     {
@@ -130484,7 +130543,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Suppression exists so an expected caught panic does not spam the user. That is legitimate for a panic the scheduler is about to catch and convert. It is not legitimate for one that is escaping. Print unconditionally when the panic will not be caught -- in particular on the nounwind/abort path, where the message is the only evidence anyone will ever get. Keep the quiet path for genuinely caught-and-converted panics. blockedBy: none",
       "blockedBy": [],
@@ -130494,29 +130553,29 @@
         {
           "n": 1,
           "text": "A panic escaping a task body prints its message and location even with JET_SCHEDULER_CATCHING_PANIC set",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T21:27:47.204Z"
+          "evidence": "Fixed in f7fee5d51. The hook suppressed panic output whenever JET_SCHEDULER_CATCHING_PANIC was set, and that flag covers the whole body of every task, so any failure inside a task body printed nothing. A blanket flag test cannot be right for a can_unwind == false panic: std runs the hook and then aborts, so no catch frame downstream ever sees it -- the flag silenced exactly the fatal case. Suppression now keys on the payload, so only the control-transfer types the scheduler actually swallows stay quiet. A second, independent suppressor in crates/jet-jit (catch_jit_panic replacing the hook with a no-op for the whole run) was fixed separately in the same session.",
+          "at": "2026-08-16T11:02:10.344Z"
         },
         {
           "n": 2,
           "text": "A panic the scheduler catches and converts stays quiet, so the flag still does its job",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T21:27:47.629Z"
+          "evidence": "Fixed in f7fee5d51. The hook suppressed panic output whenever JET_SCHEDULER_CATCHING_PANIC was set, and that flag covers the whole body of every task, so any failure inside a task body printed nothing. A blanket flag test cannot be right for a can_unwind == false panic: std runs the hook and then aborts, so no catch frame downstream ever sees it -- the flag silenced exactly the fatal case. Suppression now keys on the payload, so only the control-transfer types the scheduler actually swallows stay quiet. A second, independent suppressor in crates/jet-jit (catch_jit_panic replacing the hook with a no-op for the whole run) was fixed separately in the same session.",
+          "at": "2026-08-16T11:02:11.619Z"
         },
         {
           "n": 3,
           "text": "A test asserts the escaping case prints and the caught case does not",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T21:27:48.572Z"
+          "evidence": "Fixed in f7fee5d51. The hook suppressed panic output whenever JET_SCHEDULER_CATCHING_PANIC was set, and that flag covers the whole body of every task, so any failure inside a task body printed nothing. A blanket flag test cannot be right for a can_unwind == false panic: std runs the hook and then aborts, so no catch frame downstream ever sees it -- the flag silenced exactly the fatal case. Suppression now keys on the payload, so only the control-transfer types the scheduler actually swallows stay quiet. A second, independent suppressor in crates/jet-jit (catch_jit_panic replacing the hook with a no-op for the whole run) was fixed separately in the same session.",
+          "at": "2026-08-16T11:02:12.806Z"
         }
       ],
       "refs": [],
@@ -130528,8 +130587,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-15T21:27:46.418Z",
-      "updated": "2026-08-15T21:27:48.572Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T11:02:13.725Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T11:02:13.724Z"
     },
     {
       "id": "c0js0lqr",
@@ -130610,7 +130670,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-15T22:57:40.077Z",
-      "updated": "2026-08-16T01:06:44.710Z",
+      "updated": "2026-08-16T11:01:28.481Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -130699,7 +130759,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Route ambient_interp.rs to read the same Jet-owned logical env table AOT and the JIT host read, so env.set is visible identically on all three tiers. Do not duplicate the lookup: per I9 the engines are marshalling adapters and the table is the single owner, so the interpreter should call the same accessor rather than growing its own. Then restore an env-only seam for the style probe so the test can assert presence semantics WITHOUT depending on whether stdout is a terminal, and state plainly in the test what it does and does not prove. blockedBy: none",
       "blockedBy": [],
@@ -130709,38 +130769,38 @@
         {
           "n": 1,
           "text": "env.set(\"NO_COLOR\", ...) at runtime has identical effect on AOT, resident JIT and interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:26:54.726Z"
+          "evidence": "Fixed in bbdc5015d. ambient_interp read NO_COLOR, TERM, COLUMNS and LINES with std::env, the HOST process environment, while AOT and the JIT host read the Jet-owned logical env table per D-ENV-MUTATE1 -- so env.set took effect on two tiers and not the third. All four reads now go through one accessor over the same single-owner snapshot the JIT host uses; terminal_width and height were the identical defect in the same match arms and are fixed with it rather than leaving two of four. The style seam was also split so the env-only predicate and the production decision share ONE read of the table, so the seam cannot drift from production, and the probe now runs in the generated program's own main rather than under rustc --test. VERIFIED: io_style_raw_nonunicode_no_color_uses_presence_semantics passes at 49f1a7bd7.",
+          "at": "2026-08-16T11:02:04.420Z"
         },
         {
           "n": 2,
           "text": "The interpreter ambient calls the same env accessor as the other tiers rather than std::env",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:26:55.173Z"
+          "evidence": "Fixed in bbdc5015d. ambient_interp read NO_COLOR, TERM, COLUMNS and LINES with std::env, the HOST process environment, while AOT and the JIT host read the Jet-owned logical env table per D-ENV-MUTATE1 -- so env.set took effect on two tiers and not the third. All four reads now go through one accessor over the same single-owner snapshot the JIT host uses; terminal_width and height were the identical defect in the same match arms and are fixed with it rather than leaving two of four. The style seam was also split so the env-only predicate and the production decision share ONE read of the table, so the seam cannot drift from production, and the probe now runs in the generated program's own main rather than under rustc --test. VERIFIED: io_style_raw_nonunicode_no_color_uses_presence_semantics passes at 49f1a7bd7.",
+          "at": "2026-08-16T11:02:05.468Z"
         },
         {
           "n": 3,
           "text": "The style probe compiles and asserts presence semantics independently of stdout being a terminal",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:26:55.614Z"
+          "evidence": "Fixed in bbdc5015d. ambient_interp read NO_COLOR, TERM, COLUMNS and LINES with std::env, the HOST process environment, while AOT and the JIT host read the Jet-owned logical env table per D-ENV-MUTATE1 -- so env.set took effect on two tiers and not the third. All four reads now go through one accessor over the same single-owner snapshot the JIT host uses; terminal_width and height were the identical defect in the same match arms and are fixed with it rather than leaving two of four. The style seam was also split so the env-only predicate and the production decision share ONE read of the table, so the seam cannot drift from production, and the probe now runs in the generated program's own main rather than under rustc --test. VERIFIED: io_style_raw_nonunicode_no_color_uses_presence_semantics passes at 49f1a7bd7.",
+          "at": "2026-08-16T11:02:06.789Z"
         },
         {
           "n": 4,
           "text": "The test states what it proves, so a piped-stdout false green cannot recur",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:26:56.780Z"
+          "evidence": "Fixed in bbdc5015d. ambient_interp read NO_COLOR, TERM, COLUMNS and LINES with std::env, the HOST process environment, while AOT and the JIT host read the Jet-owned logical env table per D-ENV-MUTATE1 -- so env.set took effect on two tiers and not the third. All four reads now go through one accessor over the same single-owner snapshot the JIT host uses; terminal_width and height were the identical defect in the same match arms and are fixed with it rather than leaving two of four. The style seam was also split so the env-only predicate and the production decision share ONE read of the table, so the seam cannot drift from production, and the probe now runs in the generated program's own main rather than under rustc --test. VERIFIED: io_style_raw_nonunicode_no_color_uses_presence_semantics passes at 49f1a7bd7.",
+          "at": "2026-08-16T11:02:07.886Z"
         }
       ],
       "refs": [],
@@ -130753,8 +130813,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T00:26:54.278Z",
-      "updated": "2026-08-16T00:26:56.781Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T11:02:09.351Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T11:02:09.350Z"
     },
     {
       "id": "c0ib3m4h",
@@ -130765,7 +130826,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": "Model a non-packed capture as what it is on every other tier: a reference to the enclosing local, seeded before the call and published after. Fix it at the shared seam, not per engine -- the JIT shows the identical symptom, so an interpreter-only patch would leave the I9 break half-closed.\n\nHard constraint on the predicate: names in frozen_captures (D-CONC-FREEZE1) and materialized_captures (D-MEM-COPYSEM1) are ratified SNAPSHOTS and must NOT track the outer local. Publishing through them would trade a missing write for a corrupted one, which is worse. Lambda source_params are likewise excluded.\n\nSeverity note for scheduling: `jet dev` currently reports success for a program whose loop body does nothing observable, so this is a beginner-facing correctness trap on the most ordinary imperative idiom in the language. blockedBy: none",
       "blockedBy": [],
@@ -130775,47 +130836,47 @@
         {
           "n": 1,
           "text": "A closure passed to each writes to a captured local visibly in the caller's frame on interpreter, resident JIT and AOT",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:37:37.453Z"
+          "evidence": "Fixed in 7d0d6c255. lower/lambdas.rs builds two capture packs and the interpreter aliased the one-slot lexical pack like the two-slot clone pack, minting a phantom captured[\"__jet_seen\"] and copying it OVER the body's real write. capture_is_one_slot now recognises place == source || place == local_place(source) and skips the phantom and both alias loops. VERIFIED on both dev tiers at 550a16cc9: jet run and jet run --interpret both print 'list each: [1, 2, 3]' and 'set each: [1, 2, 3]' with fold: 6 unchanged; examples/features/collections/set.jet matches its golden. frozen_captures and materialized_captures keep their exclusions, so D-CONC-FREEZE1 and D-MEM-COPYSEM1 snapshots still do not track the outer local.",
+          "at": "2026-08-16T11:02:00.735Z"
         },
         {
           "n": 2,
           "text": "The minimal reproduction above prints list each: [1, 2, 3] and set each: [1, 2, 3] on all three tiers",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:37:37.888Z"
+          "evidence": "Fixed in 7d0d6c255. lower/lambdas.rs builds two capture packs and the interpreter aliased the one-slot lexical pack like the two-slot clone pack, minting a phantom captured[\"__jet_seen\"] and copying it OVER the body's real write. capture_is_one_slot now recognises place == source || place == local_place(source) and skips the phantom and both alias loops. VERIFIED on both dev tiers at 550a16cc9: jet run and jet run --interpret both print 'list each: [1, 2, 3]' and 'set each: [1, 2, 3]' with fold: 6 unchanged; examples/features/collections/set.jet matches its golden. frozen_captures and materialized_captures keep their exclusions, so D-CONC-FREEZE1 and D-MEM-COPYSEM1 snapshots still do not track the outer local.",
+          "at": "2026-08-16T11:02:01.168Z"
         },
         {
           "n": 3,
           "text": "examples/features/collections/set.jet matches its golden byte-for-byte on every tier",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:37:38.309Z"
+          "evidence": "Fixed in 7d0d6c255. lower/lambdas.rs builds two capture packs and the interpreter aliased the one-slot lexical pack like the two-slot clone pack, minting a phantom captured[\"__jet_seen\"] and copying it OVER the body's real write. capture_is_one_slot now recognises place == source || place == local_place(source) and skips the phantom and both alias loops. VERIFIED on both dev tiers at 550a16cc9: jet run and jet run --interpret both print 'list each: [1, 2, 3]' and 'set each: [1, 2, 3]' with fold: 6 unchanged; examples/features/collections/set.jet matches its golden. frozen_captures and materialized_captures keep their exclusions, so D-CONC-FREEZE1 and D-MEM-COPYSEM1 snapshots still do not track the outer local.",
+          "at": "2026-08-16T11:02:01.602Z"
         },
         {
           "n": 4,
           "text": "frozen_captures and materialized_captures still do not track the outer local, with a test pinning that",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:37:38.724Z"
+          "evidence": "Fixed in 7d0d6c255. lower/lambdas.rs builds two capture packs and the interpreter aliased the one-slot lexical pack like the two-slot clone pack, minting a phantom captured[\"__jet_seen\"] and copying it OVER the body's real write. capture_is_one_slot now recognises place == source || place == local_place(source) and skips the phantom and both alias loops. VERIFIED on both dev tiers at 550a16cc9: jet run and jet run --interpret both print 'list each: [1, 2, 3]' and 'set each: [1, 2, 3]' with fold: 6 unchanged; examples/features/collections/set.jet matches its golden. frozen_captures and materialized_captures keep their exclusions, so D-CONC-FREEZE1 and D-MEM-COPYSEM1 snapshots still do not track the outer local.",
+          "at": "2026-08-16T11:02:02.020Z"
         },
         {
           "n": 5,
           "text": "The fix lives at one shared seam rather than being re-encoded per engine",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T00:37:39.142Z"
+          "evidence": "Fixed in 7d0d6c255. lower/lambdas.rs builds two capture packs and the interpreter aliased the one-slot lexical pack like the two-slot clone pack, minting a phantom captured[\"__jet_seen\"] and copying it OVER the body's real write. capture_is_one_slot now recognises place == source || place == local_place(source) and skips the phantom and both alias loops. VERIFIED on both dev tiers at 550a16cc9: jet run and jet run --interpret both print 'list each: [1, 2, 3]' and 'set each: [1, 2, 3]' with fold: 6 unchanged; examples/features/collections/set.jet matches its golden. frozen_captures and materialized_captures keep their exclusions, so D-CONC-FREEZE1 and D-MEM-COPYSEM1 snapshots still do not track the outer local.",
+          "at": "2026-08-16T11:02:02.465Z"
         }
       ],
       "refs": [],
@@ -130828,8 +130889,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T00:37:37.024Z",
-      "updated": "2026-08-16T00:37:39.143Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T11:02:03.261Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T11:02:03.261Z"
     },
     {
       "id": "c0llay0r",
@@ -175063,6 +175125,188 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T11:08:38.932Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#18 docs/spec/syntax-decisions.md carries a D-PANICROOT1 entry; "
+    },
+    {
+      "at": "2026-08-16T11:08:38.372Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#17 examples/features/effects/effect_grant.jet and lowlevel/poly"
+    },
+    {
+      "at": "2026-08-16T11:08:37.416Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#16 E0751 exists with a registered row and a UI snapshot, or the"
+    },
+    {
+      "at": "2026-08-16T11:08:36.398Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#15 check_panic_call no longer records Panic as an ordinary effe"
+    },
+    {
+      "at": "2026-08-16T11:08:35.951Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#14 A deny surface still refuses Panic: =[!Panic]=>, effects:{de"
+    },
+    {
+      "at": "2026-08-16T11:08:35.520Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c09mc3y7",
+      "note": "#13 effects_uncovered no longer treats Panic as a grantable root"
+    },
+    {
+      "at": "2026-08-16T11:08:35.103Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c09mc3y7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T11:06:25.365Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-16T11:06:25.365Z"
+    },
+    {
+      "at": "2026-08-16T11:02:13.725Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0qirkh3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T11:02:12.807Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qirkh3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T11:02:11.620Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qirkh3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T11:02:10.345Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qirkh3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T11:02:09.351Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08gsdcg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T11:02:07.887Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gsdcg",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T11:02:06.790Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gsdcg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T11:02:05.468Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gsdcg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T11:02:04.421Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gsdcg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T11:02:03.261Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ib3m4h",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T11:02:02.465Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ib3m4h",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-16T11:02:02.021Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ib3m4h",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T11:02:01.602Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ib3m4h",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T11:02:01.169Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ib3m4h",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T11:02:00.735Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ib3m4h",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T11:01:28.481Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.delete",
+      "ref": "D-JITUNWIND1",
+      "note": "JIT frames carry no unwind info: register FDEs, or forbid host-seam panics?"
+    },
+    {
+      "at": "2026-08-16T11:01:02.820Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-JITUNWIND1",
+      "note": "JIT frames carry no unwind info: register FDEs, or forbid host-seam panics? (draft)"
+    },
+    {
+      "at": "2026-08-16T10:24:04.024Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-16T10:24:04.024Z"
+    },
+    {
       "at": "2026-08-16T05:53:41.820Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -178379,188 +178623,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ybltrw",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-15T07:36:30.835Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ybltrw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T07:33:02.682Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09f2ym0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:33:01.743Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09f2ym0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T07:30:31.528Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0f7fhoy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:30:30.854Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f7fhoy",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T07:30:30.337Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f7fhoy",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T07:30:29.810Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f7fhoy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T07:30:28.815Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f7fhoy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T07:30:04.192Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0zvnp4f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:30:03.498Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zvnp4f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T07:30:02.122Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zvnp4f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T07:29:52.011Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0qukvac",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:29:50.833Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qukvac",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T07:27:43.039Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09f2ym0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:27:42.348Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09f2ym0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T07:27:41.825Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09f2ym0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T07:26:44.767Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c00t13v6",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:26:44.072Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c00t13v6",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T07:23:53.932Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09f2ym0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:23:53.199Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c09f2ym0",
-      "note": "#3 Focused diagnostic snapshot runs for both fixtures and diagn"
-    },
-    {
-      "at": "2026-08-15T07:23:52.655Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c09f2ym0",
-      "note": "#2 The real jet build --profile path emits registered E1219 wit"
-    },
-    {
-      "at": "2026-08-15T07:23:52.119Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c09f2ym0",
-      "note": "#1 The real jet install path emits registered E0043 with a test"
-    },
-    {
-      "at": "2026-08-15T07:19:23.069Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0s9oygd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:19:21.553Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0s9oygd",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T07:09:58.704Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0onk8jk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:09:09.916Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
