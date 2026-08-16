@@ -21,10 +21,9 @@ use super::builtins::eval_builtin;
 use super::handles::{eval_handle_with_type_and_sink, reflect_value_carrier};
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
 use super::{
-    materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
-    progress_no_color, progress_now, progress_source_has_exact_total, reborrow_repl_authorizer,
-    unsupported, view_mut_owner_value, view_mut_window_args, EvalCallable, EvalCtx, Flow,
-    ViewMutPathStep,
+    progress_elapsed, progress_emit, progress_iter_parts, progress_no_color, progress_now,
+    progress_source_has_exact_total, reborrow_repl_authorizer, unsupported, view_mut_window_args,
+    EvalCallable, EvalCtx, Flow, ViewMutPathStep,
 };
 
 #[allow(dead_code)]
@@ -5918,7 +5917,7 @@ impl<'a> EvalCtx<'a> {
                                 | crate::Codegen::TIR::TBuiltinOp::JoinSep
                         )
                     {
-                        r = materialize_view_mut_window(fields, scope, self.span())?;
+                        r = self.materialize_view_mut_window(fields, scope, self.span())?;
                         skip_view_mut_wb = true;
                     }
                 }
@@ -6466,7 +6465,7 @@ impl<'a> EvalCtx<'a> {
                         fields,
                     } if type_name == "__JetViewMut" => {
                         let window =
-                            materialize_view_mut_window(&fields, scope, self.span())?;
+                            self.materialize_view_mut_window(&fields, scope, self.span())?;
                         let CtValue::List(xs) = window else {
                             return Err(unsupported("view-mut window", self.span()));
                         };
@@ -6583,7 +6582,7 @@ impl<'a> EvalCtx<'a> {
                     } = &b
                     {
                         if type_name == "__JetViewMut" {
-                            let owner = view_mut_owner_value(fields, scope, self.span())?;
+                            let owner = self.view_mut_owner_value(fields, scope, self.span())?;
                             if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
                                 let window = view_mut_window_args(fields)
                                     .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
@@ -6595,7 +6594,7 @@ impl<'a> EvalCtx<'a> {
                                 );
                             }
                             let window =
-                                materialize_view_mut_window(fields, scope, self.span())?;
+                                self.materialize_view_mut_window(fields, scope, self.span())?;
                             let CtValue::List(xs) = window else {
                                 return Err(unsupported("view-mut window", self.span()));
                             };
@@ -9159,7 +9158,7 @@ impl<'a> EvalCtx<'a> {
                             }
                             if let (Some(start), Some(end)) = (start, end) {
                                 if start == end {
-                                    let mut items = super::load_view_mut_owner_list(
+                                    let mut items = self.load_view_mut_owner_list(
                                         &vm_fields,
                                         scope,
                                         self.span(),
@@ -9192,7 +9191,7 @@ impl<'a> EvalCtx<'a> {
                                         }
                                     }
                                     items[i] = elem;
-                                    return super::store_view_mut_owner_list(
+                                    return self.store_view_mut_owner_list(
                                         &vm_fields,
                                         scope,
                                         items,

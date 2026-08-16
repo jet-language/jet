@@ -8,11 +8,10 @@ use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::{
-    encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, progress_elapsed,
-    progress_emit, progress_iter_parts, progress_no_color, progress_now,
-    progress_source_has_exact_total, store_view_mut_owner_list, store_view_mut_owner_value,
-    unsupported, view_mut_owner_value, view_mut_place, view_mut_window_args, EvalCtx, Flow,
-    view_mut_parts, ViewMutPathStep,
+    encode_view_mut_path, parse_view_mut_path, progress_elapsed, progress_emit,
+    progress_iter_parts, progress_no_color, progress_now, progress_source_has_exact_total,
+    unsupported, view_mut_bounds, view_mut_parts, view_mut_place, view_mut_window_args, EvalCtx,
+    Flow, ViewMutPathStep,
 };
 use crate::Codegen::TIR::{TExpr, TExprKind, THandleOp};
 
@@ -622,7 +621,8 @@ impl<'a> EvalCtx<'a> {
                         }) = scope.get(&key).cloned()
                         {
                             if type_name == "__JetViewMut" {
-                                let owner = view_mut_owner_value(&fields, scope, self.span())?;
+                                let owner =
+                                    self.view_mut_owner_value(&fields, scope, self.span())?;
                                 if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
                                     let window = view_mut_window_args(&fields)
                                         .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
@@ -648,7 +648,7 @@ impl<'a> EvalCtx<'a> {
                                         &replacement,
                                         self.span(),
                                     )?;
-                                    store_view_mut_owner_value(
+                                    self.store_view_mut_owner_value(
                                         &fields,
                                         scope,
                                         updated,
@@ -667,7 +667,7 @@ impl<'a> EvalCtx<'a> {
                                 }
                                 if let (Some(start), Some(end)) = (start, end) {
                                     if start == end {
-                                        let mut items = load_view_mut_owner_list(
+                                        let mut items = self.load_view_mut_owner_list(
                                             &fields,
                                             scope,
                                             self.span(),
@@ -689,7 +689,7 @@ impl<'a> EvalCtx<'a> {
                                             )?;
                                         }
                                         items[i] = rhs;
-                                        store_view_mut_owner_list(
+                                        self.store_view_mut_owner_list(
                                             &fields,
                                             scope,
                                             items,
@@ -1554,7 +1554,7 @@ impl<'a> EvalCtx<'a> {
                 } = &base_value
                 {
                     if type_name == "__JetViewMut" {
-                        let owner = view_mut_owner_value(fields, scope, self.span())?;
+                        let owner = self.view_mut_owner_value(fields, scope, self.span())?;
                         if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
                             let window = view_mut_window_args(fields)
                                 .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
@@ -1566,7 +1566,7 @@ impl<'a> EvalCtx<'a> {
                                 &rhs,
                                 self.span(),
                             )?;
-                            store_view_mut_owner_value(
+                            self.store_view_mut_owner_value(
                                 fields,
                                 scope,
                                 updated,
@@ -1587,13 +1587,13 @@ impl<'a> EvalCtx<'a> {
                             return Err(unsupported("negative view index", self.span()));
                         }
                         let mut items =
-                            load_view_mut_owner_list(fields, scope, self.span())?;
+                            self.load_view_mut_owner_list(fields, scope, self.span())?;
                         let i = (start + idx) as usize;
                         if i >= items.len() {
                             return Err(unsupported("view-mut OOB", self.span()));
                         }
                         items[i] = rhs;
-                        store_view_mut_owner_list(fields, scope, items, self.span())?;
+                        self.store_view_mut_owner_list(fields, scope, items, self.span())?;
                         return Ok(Flow::Normal);
                     }
                 }
@@ -1653,8 +1653,8 @@ impl<'a> EvalCtx<'a> {
                 } = &base_value
                 {
                     if type_name == "__JetViewMut" {
-                        let owner = view_mut_owner_value(fields, scope, self.span())?;
-                        let (_, _, start, _) = view_mut_parts(fields)
+                        let owner = self.view_mut_owner_value(fields, scope, self.span())?;
+                        let (start, _) = view_mut_bounds(fields)
                             .ok_or_else(|| unsupported("view-mut fields", self.span()))?;
                         let absolute = start
                             .checked_add(idx)
@@ -1691,7 +1691,7 @@ impl<'a> EvalCtx<'a> {
                         } else {
                             *slot = rhs;
                         }
-                        return store_view_mut_owner_value(
+                        return self.store_view_mut_owner_value(
                             fields,
                             scope,
                             CtValue::List(items),
@@ -1854,7 +1854,7 @@ impl<'a> EvalCtx<'a> {
                         let CtValue::Struct { fields, .. } = &probe else {
                             return Err(unsupported("split views owner", self.span()));
                         };
-                        load_view_mut_owner_list(fields, scope, self.span())?
+                        self.load_view_mut_owner_list(fields, scope, self.span())?
                     };
                     let len_i = items.len() as i64;
                     if *start < 0 || *end < *start || *end >= len_i {
@@ -1940,7 +1940,7 @@ impl<'a> EvalCtx<'a> {
                         let CtValue::Struct { fields, .. } = &probe else {
                             return Err(unsupported("split views owner", self.span()));
                         };
-                        load_view_mut_owner_list(fields, scope, self.span())?
+                        self.load_view_mut_owner_list(fields, scope, self.span())?
                     };
                     let window = items[*start as usize..=*end as usize].to_vec();
                     if *single {

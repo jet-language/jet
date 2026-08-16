@@ -7,8 +7,8 @@ use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::{
-    materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
-    progress_iter_value, progress_no_color, progress_now, unsupported, EvalCtx, Flow,
+    progress_elapsed, progress_emit, progress_iter_parts, progress_iter_value, progress_no_color,
+    progress_now, unsupported, EvalCtx, Flow,
 };
 
 fn ordering_cmp(value: &CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
@@ -383,7 +383,7 @@ impl<'a> EvalCtx<'a> {
             if type_name == "__JetViewMut"
                 && matches!(op, TClosureOp::ViewMap | TClosureOp::ViewFold)
             {
-                recv_v = materialize_view_mut_window(fields, scope, self.span())?;
+                recv_v = self.materialize_view_mut_window(fields, scope, self.span())?;
             }
         }
         // Evaluate callback expression once per collection operation. A direct
