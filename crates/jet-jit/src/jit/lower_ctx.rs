@@ -3987,6 +3987,15 @@ impl LowerCtx<'_, '_> {
                         any_reaches_merge = true;
                     }
                     tail = next;
+                    // The previous arm's body may have diverged (`return`, `break`),
+                    // which leaves `self.dead` set. `lower_stmts_scoped_with_names`
+                    // clears it only at its own entry, so without this reset the NEXT
+                    // arm's `lower_expr(cond)` short-circuits to `dead_value()` and
+                    // every remaining arm tests a constant zero -- valid CLIF that
+                    // compiles clean, stays native, and silently falls to `else`.
+                    // The two sibling chain lowerings already reset here; this one
+                    // was the outlier.
+                    self.dead = false;
                 }
                 self.b.switch_to_block(tail);
                 self.b.seal_block(tail);
