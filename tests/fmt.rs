@@ -1958,8 +1958,8 @@ fn fmt_comptime_block_is_idempotent() {
 
 fn run() {
     @ {
-        @ratio :: limit / 10
-        if ratio < 1 { panic("bad") }
+        @ratio :: @limit / 10
+        if @ratio < 1 { panic("bad") }
     }
     print("ok")
 }
@@ -3716,7 +3716,7 @@ struct Widget {
 
 #Inline
 fn hot(a: Int) => Int {
-    return a * limit
+    return a * @limit
 }
 
 fn run() {

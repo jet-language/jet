@@ -383,7 +383,7 @@ fn check_aot_comptime(index: usize, name: &str, preamble: &str, expression: &str
     let src = format!(
         "{preamble}\n@expected :: {expression}\nfn run() {{\n\
              actual :: {expression}\n\
-             print(\"{{expected}}\")\n\
+             print(\"{{@expected}}\")\n\
              print(\"{{actual}}\")\n\
          }}\n"
     );

@@ -787,7 +787,7 @@ fn public_transcript_covers_rank_field_writeback_exactly() {
 
 fn parity_source(expression: &str, imports: &str) -> String {
     format!(
-        "{imports}\n@expected :: {expression}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{expected}}\")\n    print(\"{{actual}}\")\n}}\n"
+        "{imports}\n@expected :: {expression}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{@expected}}\")\n    print(\"{{actual}}\")\n}}\n"
     )
 }
 
@@ -1157,7 +1157,7 @@ fn rustc_backed_datetime_and_measurement_display_are_exact() {
     assert_eq!(
         check_aot_comptime(
             "measurement/interpolation-display",
-            "@value :: measurement(12.5, uncertainty: 0.25)\n@expected :: \"{value}\"\n\nfn run() {\n    actual :: measurement(12.5, uncertainty: 0.25)\n    print(expected)\n    print(actual)\n}\n",
+            "@value :: measurement(12.5, uncertainty: 0.25)\n@expected :: \"{@value}\"\n\nfn run() {\n    actual :: measurement(12.5, uncertainty: 0.25)\n    print(@expected)\n    print(actual)\n}\n",
         ),
         "12.5 ± 0.25"
     );

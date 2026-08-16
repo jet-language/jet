@@ -505,9 +505,9 @@ fn run() {}
 #[test]
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
-        "@value :: 42\n#HTML(value)\nfn run() {}",
-        "@value :: 42\n#Test(value) {}\nfn run() {}",
-        "@value :: 42\n#Bench(value) {}\nfn run() {}",
+        "@value :: 42\n#HTML(@value)\nfn run() {}",
+        "@value :: 42\n#Test(@value) {}\nfn run() {}",
+        "@value :: 42\n#Bench(@value) {}\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -538,9 +538,9 @@ fn run() {}
     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
 
     for source in [
-        "@value :: 42\n#[Codable, Discriminant(value)] enum Event { Ready }\nfn run() {}",
-        "@value :: 42\n#Codable struct Row { #Rename(value) id: Int }\nfn run() {}",
-        "@value :: 42\n#Codable enum Event { #Rename(value) Ready }\nfn run() {}",
+        "@value :: 42\n#[Codable, Discriminant(@value)] enum Event { Ready }\nfn run() {}",
+        "@value :: 42\n#Codable struct Row { #Rename(@value) id: Int }\nfn run() {}",
+        "@value :: 42\n#Codable enum Event { #Rename(@value) Ready }\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -613,8 +613,8 @@ fn duplicate_html_markers_still_fail_before_resolution() {
     let source = r#"
 @first :: "first.html"
 @second :: "second.html"
-#HTML(first)
-#HTML(second)
+#HTML(@first)
+#HTML(@second)
 fn run() {}
 "#;
     let dir = std::env::temp_dir().join(format!(
@@ -677,7 +677,7 @@ fn resolved_test_names_keep_duplicate_identity() {
     let diagnostics = codes(
         r#"
 @name :: "same"
-#Test(name) {}
+#Test(@name) {}
 #Test("same") {}
 fn run() {}
 "#,
@@ -694,9 +694,9 @@ fn run() {}
 
 #[test]
 fn formatter_preserves_static_rule_expressions() {
-    let source = "@name :: \"case\"\n#Test(name) {}\n#Bench(name) {}\n#HTML(name)\nfn run() {}\n";
+    let source = "@name :: \"case\"\n#Test(@name) {}\n#Bench(@name) {}\n#HTML(@name)\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("static rule expressions should format");
-    assert!(formatted.contains("#Test(name)"), "{formatted}");
-    assert!(formatted.contains("#Bench(name)"), "{formatted}");
-    assert!(formatted.contains("#HTML(name)"), "{formatted}");
+    assert!(formatted.contains("#Test(@name)"), "{formatted}");
+    assert!(formatted.contains("#Bench(@name)"), "{formatted}");
+    assert!(formatted.contains("#HTML(@name)"), "{formatted}");
 }
