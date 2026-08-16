@@ -265,9 +265,27 @@ fn enum_derive_items(
 }
 
 fn distinct_derive_items(d: &crate::AST::DistinctDef) -> Vec<Item> {
-    let Some(derive_span) = d.derives.first().map(|(_, span)| *span) else {
-        return Vec::new();
-    };
+    // Every distinct type is registered as auto-Equatable, unconditionally, by
+    // `Traits::register_distinct_meta` (jet-foundation/src/Traits.rs), and
+    // `implements_trait` answers `EQUATABLE` from that set. Sema then rewrites
+    // `a == b` on any nominal type that implements Equatable into the
+    // `Equatable.equal` method shape (CheckerInfer/binary.rs). So the registry
+    // promises the method for EVERY distinct type, while this builder used to
+    // generate it only when the declaration carried at least one capability
+    // marker (it read its span off `d.derives.first()` and bailed otherwise).
+    //
+    // A marker-less distinct (`UserId :: distinct Int`) therefore had `x == y`
+    // rewritten into a call to a method nobody generated: no `method_sigs` row,
+    // no `trait_methods` row, so the TIR subset gate correctly refused it and
+    // `emit_func` reached its I2 `ice!` for the whole enclosing function. The
+    // gate was telling the truth; the trait registry was the side that lied.
+    // One fact, one mechanism (I8): the span falls back to the declaration name
+    // so the promise and the generated impl come from the same place.
+    let derive_span = d
+        .derives
+        .first()
+        .map(|(_, span)| *span)
+        .unwrap_or(d.name_span);
     let equality = if matches!(d.base, Type::Float | Type::Float32) {
         binary(
             BinOp::And,
