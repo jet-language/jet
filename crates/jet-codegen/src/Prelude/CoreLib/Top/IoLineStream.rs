@@ -29,14 +29,13 @@ fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError>
             "fault injected: IO.Read",
         ));
     }
-    let mut s = String::new();
-    std::io::stdin()
-        .read_line(&mut s)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
-    while s.ends_with('\n') || s.ends_with('\r') {
-        s.pop();
-    }
-    Ok(s)
+    // #2009: the shared reader owns the line read and the trailing-newline
+    // trim. `io.input` answers with text, so a closed stream reads as an empty
+    // line here; the prompt kernels take the sharper `JetTermRead` fact.
+    let line = jet_term_read_stdin_line().map_err(|e| {
+        jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e)
+    })?;
+    Ok(jet_term_read_text(line))
 }
 
 // #1480: free-function spellings the Core surface ledger scores against peers.

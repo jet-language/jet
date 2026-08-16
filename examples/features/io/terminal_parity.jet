@@ -8,7 +8,10 @@ fn run() {
     env.set("NO_COLOR", "1")
     confirmed :: io.confirm("Continue?")
     print("confirm: {confirmed}")
-    choice :: io.choose("Choose a target:", ["staging", "production"]) ?? panic("choose failed")
+    // A closed input stream, or ten rejected answers, stops `choose` instead of
+    // asking again without end. That makes every non-interactive run finish, and
+    // this program answers such a stop with the documented "staging" default.
+    choice :: io.choose("Choose a target:", ["staging", "production"]) ?? "staging"
     print("choice: {choice}")
     if io.input_secret("Secret: ") == {
         .Ok(secret) -> { print("secret length: {secret.len()}") }
