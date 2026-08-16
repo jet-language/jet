@@ -4258,6 +4258,16 @@ fn run() ? {
 "#, "physical_quantity");
     assert_eq!(out.stdout, "1.0\n3.0 1.0\n");
 
+    // `run_cranelift_without_fallback` writes each fixture at this exact path,
+    // and every E3002 journey frame names it, so the expectations below must be
+    // built from it rather than from a hand-written literal.
+    let fixture_shown = |tag: &str| {
+        std::env::temp_dir()
+            .join(format!("jet_jit_no_fallback_{tag}.jet"))
+            .to_string_lossy()
+            .into_owned()
+    };
+
     let failed = run_cranelift_without_fallback(r#"
 #UnitFamily(Length, base: meter) {
     meter
@@ -4267,9 +4277,25 @@ fn run() ? {
     Meter.from_thirdish(1thirdish)?
 }
 "#, "physical_quantity_inexact");
+    // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each `?` hop joins the
+    // failure journey on every tier, whether it has a note or not." The `?` on
+    // line 7 is that hop, spelled exactly as E3002 registers it:
+    // `error propagated from: {fn} ({file}:{line}) via ?`. D-FAIL-ERROR1=A
+    // (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?` means
+    // `run() ? Err`, so the conversion's plain `String` error arrives as the
+    // default error and `jet_render_err` prints `Error: {message}` -- no code,
+    // because this error carries none -- at the process edge, then exits 1.
+    let inexact_shown = fixture_shown("physical_quantity_inexact");
     assert_eq!(
         failed,
-        ProgramOutput::ran("".into(), "unit conversion would round\n".into(), 1)
+        ProgramOutput::ran(
+            String::new(),
+            format!(
+                "error propagated from: run ({inexact_shown}:7) via ?\n\
+                 Error: unit conversion would round\n"
+            ),
+            1
+        )
     );
 
     let beyond_f64 = run_cranelift_without_fallback(r#"
@@ -4281,9 +4307,19 @@ fn run() ? {
     Meter.from_almost(1almost)?
 }
 "#, "physical_quantity_exact_rational_edge");
+    // Same ratified envelope as above (D-FAIL-CTX1=A / D-FAIL-ERROR1=A): the
+    // exact conversion's `?` is again on line 7 of the fixture.
+    let rational_edge_shown = fixture_shown("physical_quantity_exact_rational_edge");
     assert_eq!(
         beyond_f64,
-        ProgramOutput::ran("".into(), "unit conversion would round\n".into(), 1)
+        ProgramOutput::ran(
+            String::new(),
+            format!(
+                "error propagated from: run ({rational_edge_shown}:7) via ?\n\
+                 Error: unit conversion would round\n"
+            ),
+            1
+        )
     );
 
     let rational_edges = run_cranelift_without_fallback(r#"
@@ -4326,12 +4362,18 @@ fn run() ? {
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
 "#;
+    // Same ratified envelope (D-FAIL-CTX1=A / D-FAIL-ERROR1=A); this fixture's
+    // `?` is on line 5, so its single journey frame names that line.
+    let overflow_shown = fixture_shown("physical_quantity_rounded_overflow");
     assert_eq!(
         run_cranelift_without_fallback(overflow, "physical_quantity_rounded_overflow"),
         ProgramOutput::ran(
-            "".into(),
-            "unit conversion overflows its runtime representation\n".into(),
-            1,
+            String::new(),
+            format!(
+                "error propagated from: run ({overflow_shown}:5) via ?\n\
+                 Error: unit conversion overflows its runtime representation\n"
+            ),
+            1
         )
     );
 }
@@ -6323,10 +6365,6 @@ fn io_style_raw_nonunicode_no_color_uses_presence_semantics() {
             let bin = dir.join("raw_no_color_test");
             let probe = r#"
 
-thread_local! {
-    static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 // PROVES: the colour decision honours `NO_COLOR` by PRESENCE. The variable is
 // set here to a single 0xff byte -- present, and not valid Unicode -- and the
 // environment half of the production decision still says "no colour". It also
@@ -6334,16 +6372,18 @@ thread_local! {
 // reports the same variable absent, so routing the decision through it would
 // silently re-enable colour (the #1206 review defect).
 //
-// DOES NOT PROVE: that colour is emitted when `NO_COLOR` is absent. rustc's
-// `--test` harness pipes stdout, so the stream half of the decision
-// (`jet_term_stdout_is_terminal`) is false here for an unrelated reason.
-// That is precisely why the environment half is asserted through its own seam
-// and why the composed check below hands `jet_term_style_enabled` a forced
-// `stdout_is_terminal = true`: asserting `jet_style_enabled() == false` alone
-// would pass even if `NO_COLOR` were ignored outright. Terminal-attached
+// DOES NOT PROVE: that colour is emitted when `NO_COLOR` is absent. The test
+// harness captures this program's stdout with a pipe, so the stream half of the
+// decision (`jet_term_stdout_is_terminal`) is false here for an unrelated
+// reason. That is precisely why the environment half is asserted through its
+// own seam, and why the composed check below hands `jet_term_style_enabled` a
+// forced `stdout_is_terminal = true`: asserting `jet_style_enabled() == false`
+// alone would pass even if `NO_COLOR` were ignored outright. Terminal-attached
 // behaviour belongs to tests/terminal.rs and the io/terminal_parity ledger.
-#[test]
-fn raw_no_color_is_present_even_when_its_value_is_not_unicode() {
+//
+// Called from `main` right after `jet_std_env_init()`. A failure panics, so the
+// program exits non-zero and the entry never prints.
+fn jet_probe_no_color_presence() {
     // The raw logical-env lookup the colour decision uses sees the variable.
     assert!(jet_env_value_raw("NO_COLOR").is_some());
     // The decoding accessor calls the very same variable absent.
@@ -6366,32 +6406,74 @@ fn raw_no_color_is_present_even_when_its_value_is_not_unicode() {
     assert_eq!(styled, "plain");
 }
 "#;
-            let generated = format!("{}{}", compiled.rust, probe);
-            let mut command = Command::new("rustc");
-            add_generated_rust(
-                &mut command,
-                &rust,
-                &generated,
-                compiled.ffi.is_some(),
-                &["--test"],
+            // The probe runs from the generated program's own `main`, NOT from a
+            // `rustc --test` harness. `--test` turns `cfg(test)` on for the whole
+            // generated crate, which activates every Prelude fragment's private
+            // unit-test module at one crate root -- and `PRELUDE_PARTS`
+            // (Codegen/mod.rs:157) unconditionally emits both
+            // `Prelude/Core/Progress.rs` and `Prelude/NumericWiden.rs`, each of
+            // which declares a bare `mod tests`. That is E0428, in every generated
+            // program, since Progress.rs gained its module on 2026-08-04 (d0098d284;
+            // NumericWiden.rs got the first one 2026-07-29, e61c31131). No shipped
+            // consumer sees it -- `jet test` builds its own harness (TEST_PRELUDE /
+            // `jet_test_print`), and tests/common/mod.rs:189 already calls raw
+            // `--test` on generated Rust "an uncommon inspection mode ... not the
+            // Jet test-harness build path". So the collision is a Prelude hygiene
+            // defect worth its own card, and this probe simply stops needing the
+            // mode that exposes it.
+            //
+            // `jet_std_env_init();` is the first statement of every generated
+            // `main` (all four emitters: Codegen/mod.rs:3416, 3566, 4621, 4978), and
+            // tests/env_overlay.rs:118 pins that exact text. Hooking after it means
+            // the logical env table is already seeded when the probe reads it. The
+            // replacement count is asserted, so a drift in generated `main` fails
+            // loudly here instead of silently skipping the probe.
+            const MAIN_ANCHOR: &str = "fn main() {\n    jet_std_env_init();";
+            assert_eq!(
+                compiled.rust.matches(MAIN_ANCHOR).count(),
+                1,
+                "generated `main` no longer starts with `jet_std_env_init();` -- \
+                 re-anchor this probe, do not skip it"
             );
-            let built = command.arg("-o").arg(&bin).output().unwrap();
+            let hooked = compiled.rust.replacen(
+                MAIN_ANCHOR,
+                &format!("{MAIN_ANCHOR}\n    jet_probe_no_color_presence();"),
+                1,
+            );
+            let generated = format!("{hooked}{probe}");
+            // Build the whole generated crate as ONE crate. `add_generated_rust`
+            // only forces the inline (single-crate) form for `--test` or FFI
+            // builds; any other flag set splits `PRELUDE_PARTS` into a cached
+            // runtime rlib, which would put `jet_term_style_enabled` in another
+            // crate where the probe cannot see it. This fixture has no FFI, so an
+            // inline build needs no `--extern` and no cache.
+            assert!(compiled.ffi.is_none(), "raw NO_COLOR fixture must not need FFI");
+            fs::write(&rust, &generated).unwrap();
+            let built = Command::new("rustc")
+                .args(["--edition", "2021", "--crate-name", "raw_no_color"])
+                .arg(&rust)
+                .arg("-o")
+                .arg(&bin)
+                .output()
+                .unwrap();
             assert!(
                 built.status.success(),
                 "rustc rejected raw NO_COLOR probe:\n{}",
                 String::from_utf8_lossy(&built.stderr)
             );
             let run = Command::new(&bin)
-                .arg("--exact")
-                .arg("raw_no_color_is_present_even_when_its_value_is_not_unicode")
                 .env("NO_COLOR", std::ffi::OsString::from_vec(vec![0xff]))
                 .output()
                 .unwrap();
             assert!(
                 run.status.success(),
-                "raw NO_COLOR presence probe failed:\n{}",
-                String::from_utf8_lossy(&run.stdout)
+                "raw NO_COLOR presence probe failed:\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&run.stdout),
+                String::from_utf8_lossy(&run.stderr)
             );
+            // The probe ran before the Jet entry, and the entry's own output is the
+            // end-to-end half: `io.style("red", "plain")` carries no escape codes.
+            assert_eq!(String::from_utf8_lossy(&run.stdout), "plain\n");
             let _ = fs::remove_dir_all(dir);
         })
         .unwrap()
