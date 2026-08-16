@@ -3056,6 +3056,26 @@ impl<'a> EvalCtx<'a> {
     }
 }
 
+/// Do a capture's two spellings name ONE storage slot, or two?
+///
+/// `lower/lambdas.rs` builds two different capture packs and the difference is
+/// load-bearing here. The clone pack (`reactive_capture_name`) REBINDS the body
+/// to a fresh `__jet___cap_*` slot, so the body's own `TLocal::name` is that
+/// place and the pair really is two slots. The lexical pack leaves the body on
+/// the OUTER slot and records `env.rust_name_of(name)` — for a user local that
+/// is `local_place(source)` (`__jet_x`), a spelling no engine keys a value by,
+/// because `TLocal::user(name).name` is the bare `name`.
+///
+/// Treating the second kind as two slots invents a phantom the body never
+/// writes, and copying that phantom back over the body's real write loses the
+/// write with no diagnostic — `xs.each(n => { seen.push(n) })` then leaves
+/// `seen` empty while AOT, which gets it from Rust's own `FnMut` borrow, fills
+/// it. An already-generated outer slot reports its own name, so it lands on the
+/// `source == place` side and needs no aliasing either.
+pub(super) fn capture_is_one_slot(source: &str, place: &str) -> bool {
+    place == source || place == TIR::local_place(source)
+}
+
 fn empty_cx() -> Cx {
     build_cx_items(&[], "", "<eval>", None, &HashMap::new())
 }

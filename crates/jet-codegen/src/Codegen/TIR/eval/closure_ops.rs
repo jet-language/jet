@@ -1115,7 +1115,7 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let mut child = outer.clone();
         for (source, runtime, _) in &lam.captures {
-            if runtime != source {
+            if !super::capture_is_one_slot(source, runtime) {
                 if let Some(value) = outer.get(source).cloned() {
                     child.insert(runtime.clone(), value);
                 }
@@ -1152,8 +1152,11 @@ impl<'a> EvalCtx<'a> {
                 }
             },
         };
+        // A capture whose place is another spelling of the SAME slot must not be
+        // aliased: the body writes the slot's own key, and copying the phantom
+        // spelling back over it would erase that write (`capture_is_one_slot`).
         for (source, runtime, _) in &lam.captures {
-            if runtime != source {
+            if !super::capture_is_one_slot(source, runtime) {
                 if let Some(value) = child.get(runtime).cloned() {
                     child.insert(source.clone(), value);
                 }
@@ -1184,7 +1187,7 @@ impl<'a> EvalCtx<'a> {
         let mut child = outer.clone();
         child.insert(param.clone(), arg);
         for (source, runtime, _) in &lam.captures {
-            if runtime != source {
+            if !super::capture_is_one_slot(source, runtime) {
                 if let Some(value) = outer.get(source).cloned() {
                     child.insert(runtime.clone(), value);
                 }

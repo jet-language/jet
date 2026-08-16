@@ -8720,14 +8720,17 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Lambda(lambda) => {
-                // A captured lambda body uses the lowered runtime place (for
-                // example `__jet_cap_stop`), while the evaluator scope still
-                // exposes the source name (`stop`). Keep both spellings in
-                // the callable frame so the interpreter consumes the same
-                // capture contract as AOT and JIT.
+                // A capture REBOUND to its own clone slot (`__jet___cap_stop`)
+                // is read by the body under that generated spelling while the
+                // evaluator scope still exposes the source name (`stop`), so
+                // both spellings have to be in the callable frame. A capture
+                // whose place is only the Rust spelling of the SAME slot
+                // (`__jet_stop`) is one slot, and adding the second spelling
+                // would create a phantom the body never writes
+                // (`capture_is_one_slot`).
                 let mut captured = scope.clone();
                 for (source, runtime, _) in &lambda.captures {
-                    if runtime != source {
+                    if !super::capture_is_one_slot(source, runtime) {
                         if let Some(value) = scope.get(source).cloned() {
                             captured.insert(runtime.clone(), value);
                         }
@@ -8939,7 +8942,7 @@ impl<'a> EvalCtx<'a> {
                 } => {
                     let mut captured = scope.clone();
                     for (source, runtime, _) in &lambda.captures {
-                        if runtime != source {
+                        if !super::capture_is_one_slot(source, runtime) {
                             if let Some(value) = scope.get(source).cloned() {
                                 captured.insert(runtime.clone(), value);
                             }
@@ -9198,6 +9201,10 @@ impl<'a> EvalCtx<'a> {
                 }
                 self.write_back_place(pool, pool_value, scope)
             }
+            // Not a place: a write-back through a value-producing receiver (a
+            // list literal in `Set.from([1, 2, 3])`, a call result) has nothing
+            // to store into. Reached routinely; see the report on making the
+            // genuinely-unreachable shapes loud instead of silent.
             _ => Ok(()),
         }
     }
