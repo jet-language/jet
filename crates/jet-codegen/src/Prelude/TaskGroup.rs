@@ -488,7 +488,7 @@ pub fn jet_task_select<Task, T, E>(
 }
 
 #[cfg(test)]
-mod tests {
+mod task_group_tests {
     use super::{
         jet_task_select, jet_task_wait_policy, JetTaskDecision, JetTaskGroupRuntime,
         JetTaskSelectMode, JetTaskSelectPolicy, JetTaskWaitInterrupt,

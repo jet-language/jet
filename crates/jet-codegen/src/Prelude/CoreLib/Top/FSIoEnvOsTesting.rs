@@ -860,6 +860,22 @@ fn jet_env_validate_value(value: &str) -> Result<(), jet_std::EnvError> {
     }
 }
 
+// #2003 — this definition is DELIBERATELY separate from the compiler's
+// in-process copy, and it is the only legitimate second one.
+//
+// This fragment is embedded verbatim into every generated program. A generated
+// program is a standalone Rust crate that links no Jet crate, so it cannot call
+// `jet-jit`'s `CoreHost::jit_env_value_raw`, and the fragment cannot be
+// `include!`d into `jet-jit` either: it reaches its table through
+// `jet_env_read()`, which the generated crate defines and the host does not.
+// The host side therefore carries exactly ONE mirror of this lookup —
+// `CoreHost::jit_env_value_raw` — which the resident JIT, the extern "C" heap
+// shims and the interpreter ambient all call. Two definitions total, one per
+// linkage world; adding a third in any engine is an I9 violation.
+//
+// Raw `OsString` on purpose: `NO_COLOR` counts by PRESENCE, so a value that is
+// not valid Unicode must still read as present. `jet_std_env_get` below is the
+// decoding read.
 fn jet_env_value_raw(name: &str) -> Option<std::ffi::OsString> {
     let name = std::ffi::OsStr::new(name);
     jet_env_read()

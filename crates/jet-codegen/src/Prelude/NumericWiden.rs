@@ -42,7 +42,7 @@ pub fn jet_numeric_checked_widen(
 }
 
 #[cfg(test)]
-mod tests {
+mod numeric_widen_tests {
     use super::jet_numeric_checked_widen;
 
     #[test]
