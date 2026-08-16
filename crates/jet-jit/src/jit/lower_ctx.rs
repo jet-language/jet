@@ -10303,9 +10303,15 @@ impl LowerCtx<'_, '_> {
                     }
                     Type::Bool => self.call_host(self.host.struct_get_bool, &[handle, idx]),
                     Type::Char => self.call_host(self.host.struct_get_char, &[handle, idx]),
+                    // A String field must read through the string accessor. Sharing the
+                    // integer arm returns None from record_get_int (it matches only
+                    // JetVal::Int), which unwrap_or(0)s to 0, and the debug renderer then
+                    // treats 0 as a string HANDLE -- so the field printed as heap string
+                    // #0, the first string the runtime allocated, i.e. the entry file
+                    // path. Five sibling sites already select the accessor this way.
+                    Type::String => self.call_host(self.host.struct_get_str, &[handle, idx]),
                     Type::Int | Type::InlineRange { .. }
                     | Type::IntN { .. }
-                    | Type::String
                     | Type::Named(_)
                     | Type::Option(_) => self.call_host(self.host.struct_get_i64, &[handle, idx]),
                     other => {
