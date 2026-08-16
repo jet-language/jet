@@ -2921,7 +2921,6 @@ impl LowerCtx<'_, '_> {
             let index = self
                 .meta
                 .struct_field_index(&type_name, field)
-                .or_else(|| core_struct_field_index(&type_name, field))
                 .ok_or_else(|| format!("jit SharedGuard field `{field}` on `{type_name}`"))?;
             value_ty = self
                 .meta
@@ -10322,7 +10321,6 @@ impl LowerCtx<'_, '_> {
             .meta
             .struct_layout(type_name)
             .map(|(names, tys)| (names.to_vec(), tys.to_vec()))
-            .or_else(|| core_debug_layout(type_name))
             .ok_or_else(|| format!("jit string interp type unsupported: Named({type_name:?})"))?;
         // Lower fields in declaration order. StructuralDebug owns canonical
         // Debug order; this keeps field evaluation source-ordered while each
@@ -11557,24 +11555,25 @@ impl LowerCtx<'_, '_> {
         as_trait: Option<&(String, String)>,
         type_name: &str,
     ) -> Result<Value, String> {
-        let field_names = self
+        // Slot count is the one fact a literal needs, and the Core struct
+        // table is total over it — `struct_layout` is a narrower view that
+        // also demands every field type, which is what used to reject
+        // `TerminalPolicy`, `EncodingCause`, `TextWidth`, `DataLineOptions`
+        // and `AsyncPolicy` here (card 1979).
+        let field_count = self
             .meta
-            .struct_layout(type_name)
-            .map(|(names, _)| names.to_vec())
-            .or_else(|| core_debug_layout(type_name).map(|(names, _)| names))
+            .struct_field_count(type_name)
             .ok_or_else(|| format!("jit struct literal type `{type_name}`"))?;
         let indexed = fields
             .iter()
             .map(|(name, value, _)| {
                 self.meta
                     .struct_field_index(type_name, name)
-                    .or_else(|| core_struct_field_index(type_name, name))
                     .ok_or_else(|| format!("jit field `{name}` on `{type_name}`"))
                     .map(|index| (value, index))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let concrete =
-            self.lower_record_fields(indexed.into_iter(), field_names.len())?;
+        let concrete = self.lower_record_fields(indexed.into_iter(), field_count)?;
         let Some((_, concrete_name)) = as_trait else {
             return Ok(concrete);
         };
@@ -11609,7 +11608,6 @@ impl LowerCtx<'_, '_> {
         let idx = self
             .meta
             .struct_field_index(type_name, field)
-            .or_else(|| core_struct_field_index(type_name, field))
             .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?
             as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
@@ -30395,144 +30393,6 @@ impl LowerCtx<'_, '_> {
         self.transfer_progress_plan(source, output, plan, tail);
         Ok(output)
     }
-}
-
-fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
-    if let Some(fields) = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name) {
-        return fields.iter().position(|(name, _)| *name == field);
-    }
-    let fields: &[&str] = match type_name {
-        "Err" => &["message", "code", "cause"],
-        "Range" => &["start", "end", "exclusive"],
-        "DirEntry" => &["name", "path", "is_dir"],
-        "Stat" => &[
-            "size",
-            "modified_ms",
-            "created_ms",
-            "readonly",
-            "is_file",
-            "is_dir",
-            "is_symlink",
-            "kind",
-        ],
-        "WalkEntry" => &["path", "relative", "is_dir", "depth"],
-        "TempDir" | "TempFile" | "FileLock" => &["path"],
-        "LogField" => &["key", "value", "kind", "redacted"],
-        "LogSpan" => &["id", "name"],
-        "TLSCertificate" => &[
-            "der",
-            "sha256",
-            "spki_sha256",
-            "dns_names",
-            "valid_from_unix_ms",
-            "valid_until_unix_ms",
-            "subject",
-            "issuer",
-        ],
-        "TLSPeerIdentity" => &[
-            "verified_server_name",
-            "leaf",
-            "certificate_chain",
-            "cipher_suite",
-            "tls_version",
-        ],
-        // Mirrors jet_std::ProcessResult field order (Open.rs).
-        "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
-        // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
-        "EncodingLimits" => &[
-            "buffer_bytes",
-            "max_depth",
-            "max_item_bytes",
-            "max_total_bytes",
-            "max_expansion_depth",
-            "max_expansion_bytes",
-        ],
-        "DataLimits" => &[
-            "encoding",
-            "max_groups",
-            "max_sort_rows",
-            "max_join_rows",
-            "max_output_rows",
-        ],
-        "DataStatus" => &[
-            "step",
-            "path",
-            "copy",
-            "ownership",
-            "trust",
-            "fallback",
-            "replacement",
-        ],
-        "DataGroup" => &["key", "count", "sum", "mean"],
-        "DataLineOptions" => &[
-            "title", "x_label", "y_label", "markers", "reference", "style", "color", "legend",
-        ],
-        "DataError" => &[
-            "kind",
-            "operation",
-            "row",
-            "column",
-            "index",
-            "reason",
-            "cause",
-        ],
-        "DataSummary" => &[
-            "count",
-            "sum",
-            "mean",
-            "min",
-            "max",
-            "median",
-            "variance",
-            "stddev",
-        ],
-        "DataTable" | "Table" | "LazyFrame" => &["rows", "missing", "plan"],
-        "Series" | "DataSeries" => &["values", "missing"],
-        "DataColumn" => &["name", "type_name"],
-        "DataJoin" | "Join" => &["left", "right"],
-        "VjpRun" => &["value", "pull", "grads"],
-        "DataPivotCell" => &["row_key", "column_key", "count", "sum", "mean"],
-        "EncodingCause" => &["kind", "os_code", "message"],
-        "EncodingError" => &[
-            "format",
-            "kind",
-            "byte_offset",
-            "line",
-            "column",
-            "path",
-            "reason",
-            "cause",
-        ],
-        "CBORError" => &["kind", "byte_offset", "path", "reason"],
-        "FieldError" => &["path", "reason"],
-        "MigrationStatus" => &["migrated", "from", "steps"],
-        "DecodeResult" => &["value", "migration"],
-        "TextWidth" => &["ambiguous", "controls"],
-        "Claims" => &[
-            "subject",
-            "audience",
-            "issuer",
-            "expires_at",
-            "not_before",
-            "issued_at",
-        ],
-        "Rotation" => &["previous", "current"],
-        _ => return None,
-    };
-    fields.iter().position(|f| *f == field)
-}
-
-fn core_debug_layout(type_name: &str) -> Option<(Vec<String>, Vec<Type>)> {
-    let fields = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name)?;
-    let names = fields
-        .iter()
-        .map(|(name, _)| (*name).to_string())
-        .collect::<Vec<_>>();
-    let types = names
-        .iter()
-        .map(|name| core_struct_field_type(type_name, name))
-        .collect::<Option<Vec<_>>>()?;
-    Some((names, types))
 }
 
 fn structured_record_field_place(place: &TPlace) -> Option<(&TLocal, &str)> {
