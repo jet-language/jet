@@ -94,12 +94,6 @@ pub use Methods::{
     project_rejection,
 };
 
-/// D-DATAFLOW1=A / #778: TIR deopt path for `core.data.csv` reuses the same
-/// EncodingLite CSV splitter as comptime typed decode (no second codec).
-pub fn runtime_csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
-    EncodingLite::csv_parse(text)
-}
-
 /// D-BOUND-HEAD1: typed URL heads validate at comptime with the same URL
 /// kernel that backs the runtime string constructor.
 pub fn validate_url_literal(value: &str) -> Result<(), String> {

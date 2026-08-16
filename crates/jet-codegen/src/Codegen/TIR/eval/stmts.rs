@@ -771,9 +771,12 @@ impl<'a> EvalCtx<'a> {
                     let value = this.new_taskgroup(limit.as_ref(), scope)?;
                     let index = Self::taskgroup_index(&value)
                         .expect("new task group always carries an evaluator index");
+                    // D-TASKBORROW1=A: loans opened inside this block close
+                    // when it joins.
+                    this.open_loan_scope();
                     scope.insert(group.name.clone(), value);
                     let body_result = this.exec_stmts(body, scope);
-                    let close_result = this.close_taskgroup(index);
+                    let close_result = this.close_taskgroup(index, scope);
                     scope.remove(&group.name);
                     match (body_result, close_result) {
                         (Err(error), _) | (Ok(_), Err(error)) => Err(error),
