@@ -2344,6 +2344,16 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
+        // `suppress_partial_move_root_read` means this expression is only the
+        // base of a deeper projection whose complete place the caller checks
+        // (`adjacent.values` in `&adjacent.values[2..3]`, `Expr::Place` in
+        // `CheckerInfer::expr`). An ancestor of a window always overlaps it, so
+        // reporting the base would reject a provably disjoint sibling window —
+        // the nested twin of the root case (`&values[3]` beside `&values[0]`),
+        // which the `Expr::Ident` arm already suppresses. A window at or above
+        // this place still covers the read, so that report stays: `&node.payload`
+        // beside a pin on `node` is a genuine second exclusive window.
+        let base_of_deeper_projection = self.suppress_partial_move_root_read;
         let Some((view, place_name, kind)) = crate::Sema::view_facts_newest_first(&self.flow.views)
             .into_iter()
             .find(|(name, fact)| {
@@ -2351,6 +2361,8 @@ impl<'a> Checker<'a> {
                     && fact.access == ViewAccess::Write
                     && fact.place.overlaps(&place)
                     && fact.invalidated.is_none()
+                    && !(base_of_deeper_projection
+                        && place.projections.len() < fact.place.projections.len())
             })
             .map(|(name, fact)| (name.to_string(), Self::place_name(&fact.place), fact.kind))
         else {
