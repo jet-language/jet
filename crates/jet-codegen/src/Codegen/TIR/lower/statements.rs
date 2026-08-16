@@ -3205,6 +3205,49 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }
                         _ => None,
                     };
+                    // c109 Phase 22: for a `chars`/`lines` form the element type is
+                    // a property of the ITERATION FORM, not of the collection
+                    // expression. `emit_for_in` writes the binding itself — `let
+                    // <var> = __jet_c;` off `(recv).chars()` is a `char`, and every
+                    // line stream binds a `String` — so reading it off the form is
+                    // reading the fact the emitter is about to commit to.
+                    //
+                    // Deriving it from `lowered_coll.ty` cannot work for the line
+                    // forms: sema types `handle.lines()` / `io.stdin().lines()` /
+                    // `child.stdout.lines()` as the loop-source-only markers
+                    // `FileLines` / `StdinLines` / `ProcessLines` (jet-sema
+                    // `CheckerCoreLib/core_types.rs`, `process_ui.rs`), which carry
+                    // no element to read, so the match above answers `None`. The
+                    // loop variable then binds untyped and `lower_expr`'s
+                    // `Expr::Ident` arm substitutes its `Type::Int` fallback — a
+                    // `String` local typed `Int`. Print's integer fast path then
+                    // emits `jet_int_to_string(<String>)` and rustc rejects Jet's
+                    // own output, which is an internal compiler error by I2, never a
+                    // user diagnostic. Sema already declares all three of these loop
+                    // variables `String` (`declare_loop_var`, CheckerCore/
+                    // statements.rs); this is the same fact, said once more where
+                    // codegen reads it.
+                    //
+                    // I9: the resident JIT already carries this exact table —
+                    // `lower_ctx.rs`'s for-in arm derives `elem_ty` from
+                    // `method_kind` (Chars → Char, all three line forms → String)
+                    // and never consults the bound type. Both tiers now read the
+                    // element off the same closed form enum, so neither can drift.
+                    match &method_kind {
+                        Some(TForInMethod::Chars) => coll_elem_ty = Some(Type::Char),
+                        Some(
+                            TForInMethod::LinesFile
+                            | TForInMethod::LinesStdin
+                            | TForInMethod::LinesProcessStream,
+                        ) => coll_elem_ty = Some(Type::String),
+                        // `EncodingReader` already took its item type from the
+                        // reader above; `Iterable` is resolved below, from the hook.
+                        Some(
+                            TForInMethod::EncodingReader { .. }
+                            | TForInMethod::Iterable { .. },
+                        )
+                        | None => {}
+                    }
                     // A list whose elements cannot be cloned is iterated by value: the
                     // loop consumes the collection instead of asking rustc for a
                     // `.cloned()` that does not exist (I2 — that reaches the user as
