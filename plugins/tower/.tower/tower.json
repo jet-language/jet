@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2010,
-    "rev": 37757,
+    "nextNum": 2012,
+    "rev": 37768,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -131411,6 +131411,144 @@
       "created": "2026-08-16T03:48:42.775Z",
       "updated": "2026-08-16T03:48:45.662Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c08cflxy",
+      "num": 2010,
+      "title": "No test exercises a warm run-cache hit",
+      "body": "A second `jet run` of the same file replays the tier-cache artifact, and that path is broken today while the suite stays green -- because nothing in the suite runs the same file twice.\n\nMeasured at 550a16cc9, cache cleared first (~/.cache/jet/run, NOT in-tree):\n\n  jet run examples/features/streams/generators.jet   -> run1 exit 0, 129 bytes, byte-equal to golden\n  jet run examples/features/streams/generators.jet   -> run2 exit 101, internal compiler error\n  jet run examples/features/streams/generators.jet   -> run3 exit 101, same\n\nThe ICE is `index out of bounds: the len is 1685 but the index is 1685` from cranelift-module's get_function_decl(FuncId), reached from jit/tier_cache.rs run_cached_module while resolving a stored relocation whose UserExternalName index is one past the functions the reload re-declares. 1685 is a module-wide FuncId count, not a frame table. So the capture side stores a reference to a function the reload side never declares -- a capture/reload asymmetry, tracked as its own defect.\n\nThe same split reproduces at bda74eae5 and at HEAD~1, so it predates this session's cleanup work entirely.\n\nWhat makes it a coverage hole rather than one bug: every warm `jet run` in real use hits this path, and it is the ordinary case -- a developer runs the same file repeatedly. Yet the suite only ever runs a file once per fixture, so the store leg is exercised and the replay leg never is. cancel_cleanup and shield_commit round-trip fine, which is why this is invisible unless a stem with the asymmetric function set is run twice.\n\nCost already paid: it cost this session a wrong diagnosis. Probing an example three times in a row measures a warm hit and looks exactly like a regression in whatever landed last, which is how I misattributed it before a lane produced a controlled series.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m18-devloop-testing",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Add a test that runs the same program twice through `jet run` and asserts the second run matches the first byte-for-byte, including exit code, on a stem whose artifact is known to round-trip AND one whose function set differs (streams/generators, once its asymmetry is fixed). The assertion is store-then-replay equivalence, which is the actual contract of the cache.\n\nThen decide the scope deliberately: a single stem proves the mechanism, but the asymmetry above shows the bug is stem-shape dependent, so a small matrix across function-set shapes is what would actually have caught it. Say which you chose.\n\nAlso make the cache location discoverable from the test, since it lives outside the tree at ~/.cache/jet/run -- a test that cannot clear it cannot control its own preconditions, and a warm artifact leaking between tests would be worse than no test. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-16",
+          "by": "fable-e3-burndown",
+          "text": "Sharpened by the lane that found the renumbering asymmetry: warm hits ARE tested, but only in tests/run_cache.rs (warm_hit_skips_front_end_and_matches_stdout, warm_runtime_stop_preserves_source_location, phases_zero_on_inprocess_warm_hit), on tiny inline fixtures with no generator, no CLI adapter, and exit 0 throughout. Every other suite points JET_RUN_CACHE_DIR at a fresh per-test directory, so the example corpus and the three-way batteries never warm-hit at all. That is why a second jet run of any generator program was exit-101 while the suite stayed green, and why the exit-status defect on the errors/* examples was invisible. The matrix therefore needs: a generator, a CLI adapter, and at least one fixture that exits non-zero."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A test runs the same program twice through jet run and asserts run2 matches run1 byte-for-byte including exit code",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T04:40:41.294Z"
+        },
+        {
+          "n": 2,
+          "text": "The test controls its own cache precondition rather than inheriting whatever is on the machine",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T04:40:41.722Z"
+        },
+        {
+          "n": 3,
+          "text": "The matrix covers more than one function-set shape, or the single-stem choice is justified",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T04:40:42.159Z"
+        },
+        {
+          "n": 4,
+          "text": "streams/generators specifically passes a warm second run once the capture/reload asymmetry is fixed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T04:40:42.572Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tests",
+        "cache",
+        "coverage",
+        "jit"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T04:40:40.863Z",
+      "updated": "2026-08-16T05:53:41.820Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c06lni1w",
+      "num": 2011,
+      "title": "A failing program exits 0 on a warm run cache hit",
+      "body": "Three shipped examples exit 1 on a cold run and 0 on a warm run cache hit: examples/features/errors/default_err_edge.jet, default_error_conversion.jet and error_context.jet. Identical on HEAD, so pre-existing.\n\nThis is a silent wrong answer of the worst available kind: the program's failure is real, the diagnostic still renders, and the process reports SUCCESS. Anything reading the exit status -- a shell, a CI job, a make rule, an agent -- concludes the program passed. And it only happens on the SECOND run of the same file, which is the ordinary developer case.\n\nExact cause, from the diagnosing lane: run_cached_module rebuilds its ResidentModule with main_returns_result, main_returns_app, main_returns_default_err and main_error_is_packed hard-coded false, and main_error_type None (crates/jet-jit/src/jit/tier_cache.rs:570-574), because the artifact does not carry the error rail at all. So a warm hit loses the knowledge that the entry is fallible and takes the success path.\n\nA capture-site opt-out was tried and WITHDRAWN with a reason worth keeping: every entry reports main_returns_result = true with an error type of Some(Named(\"Err\")), so a predicate that declines artifacts on that basis declines every artifact and disables the run cache wholesale. That is not an acceptable trade.\n\nFound while A/B measuring the tier-cache renumbering fix (49f1a7bd7), not by any test -- see the sibling card on the warm-hit coverage hole, which explains why: warm hits are exercised only by tests/run_cache.rs on tiny inline fixtures that all exit 0, and every other suite points JET_RUN_CACHE_DIR at a fresh per-test directory so the example corpus never warm-hits.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "Carry the error rail in the artifact: FORMAT 3 -> 4. Storing the error type's NAME is sufficient for all four predicates, since each only tests Type::Named -- so one string plus the booleans, not a general type serialization.\n\nBump the format version so an existing FORMAT 3 artifact is refused rather than misread; a stale artifact that silently loses the rail is exactly the bug being fixed, so a reload must not accept one.\n\nThe test that would have caught this is the same-program-twice assertion in the warm-hit coverage card, with a fixture that EXITS NON-ZERO. Make sure the matrix includes a failing entry, because every fixture that currently exercises warm hits exits 0, which is precisely why this was invisible. blockedBy: none",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A program that exits non-zero cold exits with the same status warm, for all three named examples",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T05:53:38.699Z"
+        },
+        {
+          "n": 2,
+          "text": "The artifact carries the error rail and the format version is bumped so a stale artifact is refused rather than misread",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T05:53:39.134Z"
+        },
+        {
+          "n": 3,
+          "text": "The run cache is not disabled wholesale; warm hits still occur for programs that legitimately cache",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T05:53:39.996Z"
+        },
+        {
+          "n": 4,
+          "text": "A warm-hit test covers a fixture that exits non-zero, not only exit-0 fixtures",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T05:53:40.823Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "jit",
+        "cache",
+        "exitcode",
+        "correctness"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T05:53:38.267Z",
+      "updated": "2026-08-16T05:53:40.824Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -174925,6 +175063,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T05:53:41.820Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08cflxy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-16T05:53:40.824Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06lni1w",
+      "note": "#4 A warm-hit test covers a fixture that exits non-zero, not on"
+    },
+    {
+      "at": "2026-08-16T05:53:39.996Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06lni1w",
+      "note": "#3 The run cache is not disabled wholesale; warm hits still occ"
+    },
+    {
+      "at": "2026-08-16T05:53:39.134Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06lni1w",
+      "note": "#2 The artifact carries the error rail and the format version i"
+    },
+    {
+      "at": "2026-08-16T05:53:38.699Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06lni1w",
+      "note": "#1 A program that exits non-zero cold exits with the same statu"
+    },
+    {
+      "at": "2026-08-16T05:53:38.267Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c06lni1w",
+      "note": "A failing program exits 0 on a warm run cache hit"
+    },
+    {
+      "at": "2026-08-16T04:40:42.573Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08cflxy",
+      "note": "#4 streams/generators specifically passes a warm second run onc"
+    },
+    {
+      "at": "2026-08-16T04:40:42.159Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08cflxy",
+      "note": "#3 The matrix covers more than one function-set shape, or the s"
+    },
+    {
+      "at": "2026-08-16T04:40:41.722Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08cflxy",
+      "note": "#2 The test controls its own cache precondition rather than inh"
+    },
+    {
+      "at": "2026-08-16T04:40:41.295Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08cflxy",
+      "note": "#1 A test runs the same program twice through jet run and asser"
+    },
+    {
+      "at": "2026-08-16T04:40:40.863Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c08cflxy",
+      "note": "No test exercises a warm run-cache hit"
+    },
+    {
       "at": "2026-08-16T03:48:45.662Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -178346,83 +178561,6 @@
       "action": "card.update",
       "ref": "c0ihiv43",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:09:09.227Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T07:08:04.741Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T07:07:59.355Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-15T07:07:58.821Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T07:07:58.288Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T07:07:57.753Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T07:07:57.215Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T07:07:56.684Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T07:07:56.149Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pw8xgx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T06:57:50.024Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08ogzrs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T06:57:48.595Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08ogzrs",
-      "note": "#7"
     }
   ],
   "nextNum": 368,

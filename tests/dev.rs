@@ -1567,7 +1567,16 @@ fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() 
     let debug = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle)
         .expect("source debug must retain the impurity gate");
     assert_eq!(debug.code, "E2203");
-    assert!(debug.what.contains("reads or writes files"));
+    // The feature slot became a NOUN PHRASE when the boundary wrapper took over
+    // ownership of the sentence (441b0de6a): both wrappers render "it uses
+    // {feature}", so a verb phrase like "reads or writes files" would produce
+    // "it uses reads or writes files". Re-pinned to the noun phrase rather than
+    // reverting the contract, which is what fixed a spliced two-sentence E2201.
+    assert!(
+        debug.what.contains("a file read or write"),
+        "debug must still name the impure files boundary: {}",
+        debug.what
+    );
     let _ = fs::remove_file(path.with_extension("txt"));
     let _ = fs::remove_file(path);
 }
