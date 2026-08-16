@@ -72,7 +72,11 @@ pub fn phases() -> RunPhases {
     }
 }
 
-fn cache_root() -> PathBuf {
+/// Where warm artifacts live. One statement of the path law, so a caller — a
+/// test especially — asks instead of restating it: `JET_RUN_CACHE_DIR` wins,
+/// then `JET_CACHE_DIR/run`, then `~/.cache/jet/run`. The default is OUTSIDE the
+/// tree, so a test that does not redirect it measures the developer's machine.
+pub fn cache_root() -> PathBuf {
     if let Ok(dir) = std::env::var("JET_RUN_CACHE_DIR") {
         return PathBuf::from(dir);
     }

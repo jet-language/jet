@@ -3,6 +3,9 @@
 //! A hit reloads machine code via `define_function_bytes` and skips Jet
 //! load/parse/check/TIR lowering and Cranelift IR generation. Keying and
 //! WatchService invalidation live in `Source/RunCache.rs`.
+//!
+//! The artifact carries the entry's error rail as well as its code, because a
+//! warm run has no TIR program left to ask whether the entry is fallible.
 
 use cranelift_codegen::binemit::Reloc;
 use cranelift_codegen::ir::types::{self, Type as ClifType};
@@ -14,7 +17,7 @@ use cranelift_codegen::{FinalizedMachReloc, FinalizedRelocTarget};
 use cranelift_codegen::Context;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_foundation::JitBackend::RunOutcome;
+use jet_foundation::{JitBackend::RunOutcome, AST::Type};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -22,7 +25,12 @@ use super::resident::{fresh_runtime, resident_invoke, resident_teardown};
 use super::runtime_host::{new_jit_module, ResidentModule};
 use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 
-const FORMAT: u32 = 3;
+/// On-disk artifact version.
+///
+/// FORMAT 4 added the entry error rail ([`EntryRail`]). A FORMAT 3 artifact is
+/// REFUSED rather than read: it cannot say whether the entry is fallible, so
+/// replaying one renders the error and still exits 0 from a program that failed.
+const FORMAT: u32 = 4;
 
 thread_local! {
     static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
@@ -68,6 +76,46 @@ struct StoredReloc {
 enum StoredTarget {
     User { namespace: u32, index: u32 },
     FuncOffset(u32),
+}
+
+/// The entry's error rail, as the artifact carries it.
+///
+/// The rail is decided once, in `resident::ensure_resident_module`, from the TIR
+/// program, and lives on `ResidentModule`. A warm run never sees the program, so
+/// the artifact carries the same decided values; no engine re-derives them.
+///
+/// The error type travels as a NAME. Every consumer of `main_error_type` only
+/// ever tests `Type::Named` — `resident_invoke` renders a packed enum by name —
+/// so a name is the whole payload. An error type that is not `Named` leaves the
+/// name empty, and both booleans that need a name (`returns_default_err`,
+/// `error_is_packed`) are already false in exactly that case, so the reload
+/// takes the same branch the cold run took.
+struct EntryRail {
+    returns_result: bool,
+    returns_app: bool,
+    returns_default_err: bool,
+    error_is_packed: bool,
+    error_name: Option<String>,
+}
+
+/// Read the rail the cold run already decided, off the live resident module.
+///
+/// `None` means there is no resident module to read, and then there is no
+/// artifact either: an artifact that cannot say whether the entry is fallible is
+/// worse than a cold recompile.
+fn capture_rail() -> Option<EntryRail> {
+    RESIDENT_MODULE.with(|slot| {
+        slot.borrow().as_ref().map(|resident| EntryRail {
+            returns_result: resident.main_returns_result,
+            returns_app: resident.main_returns_app,
+            returns_default_err: resident.main_returns_default_err,
+            error_is_packed: resident.main_error_is_packed,
+            error_name: match &resident.main_error_type {
+                Some(Type::Named(name)) => Some(name.clone()),
+                _ => None,
+            },
+        })
+    })
 }
 
 pub(crate) fn begin_capture() {
@@ -184,8 +232,10 @@ pub(crate) fn publish_capture() {
             })
             .unwrap_or_default()
     });
-    if let Some(fns) = fns {
-        let bytes = encode_module(&fns, &strings);
+    // No rail, no artifact. A stored module that has forgotten whether its entry
+    // is fallible replays as a success on the next run.
+    if let (Some(fns), Some(rail)) = (fns, capture_rail()) {
+        let bytes = encode_module(&rail, &fns, &strings);
         LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = Some(bytes));
     } else {
         LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
@@ -349,9 +399,10 @@ fn decode_sig(module: &JITModule, enc: &EncodedSig) -> Option<Signature> {
     Some(sig)
 }
 
-fn encode_module(fns: &[CapturedFn], strings: &[(usize, String)]) -> Vec<u8> {
+fn encode_module(rail: &EntryRail, fns: &[CapturedFn], strings: &[(usize, String)]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&FORMAT.to_le_bytes());
+    write_rail(&mut out, rail);
     out.extend_from_slice(&(strings.len() as u32).to_le_bytes());
     for (idx, text) in strings {
         out.extend_from_slice(&(*idx as u32).to_le_bytes());
@@ -392,11 +443,54 @@ fn write_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
+fn write_rail(out: &mut Vec<u8>, rail: &EntryRail) {
+    out.push(u8::from(rail.returns_result));
+    out.push(u8::from(rail.returns_app));
+    out.push(u8::from(rail.returns_default_err));
+    out.push(u8::from(rail.error_is_packed));
+    match &rail.error_name {
+        Some(name) => {
+            out.push(1);
+            write_str(out, name);
+        }
+        None => out.push(0),
+    }
+}
+
 fn write_u16_slice(out: &mut Vec<u8>, v: &[u16]) {
     out.extend_from_slice(&(v.len() as u32).to_le_bytes());
     for x in v {
         out.extend_from_slice(&x.to_le_bytes());
     }
+}
+
+fn read_bool(data: &[u8], i: &mut usize) -> Option<bool> {
+    let byte = *data.get(*i)?;
+    *i += 1;
+    match byte {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+fn read_rail(data: &[u8], i: &mut usize) -> Option<EntryRail> {
+    let returns_result = read_bool(data, i)?;
+    let returns_app = read_bool(data, i)?;
+    let returns_default_err = read_bool(data, i)?;
+    let error_is_packed = read_bool(data, i)?;
+    let error_name = if read_bool(data, i)? {
+        Some(read_str(data, i)?)
+    } else {
+        None
+    };
+    Some(EntryRail {
+        returns_result,
+        returns_app,
+        returns_default_err,
+        error_is_packed,
+        error_name,
+    })
 }
 
 fn read_u32(data: &[u8], i: &mut usize) -> Option<u32> {
@@ -435,11 +529,35 @@ fn read_u16_slice(data: &[u8], i: &mut usize) -> Option<Vec<u16>> {
     Some(out)
 }
 
-fn decode_module(data: &[u8]) -> Option<(Vec<(usize, String)>, Vec<CapturedFn>)> {
+/// Decode an artifact, refusing every FORMAT but the current one.
+///
+/// The version gate is load-bearing, not hygiene. A FORMAT 3 artifact carries no
+/// entry error rail, so reading one as if it had a rail forgets that the entry is
+/// fallible: the error still renders and the process exits 0. Refusing returns
+/// `Err`, and `RunCache::try_warm_run` then drops the entry directory and
+/// recompiles cold — correct, only slower.
+fn decode_module(
+    data: &[u8],
+) -> Result<(EntryRail, Vec<(usize, String)>, Vec<CapturedFn>), String> {
     let mut i = 0usize;
-    if read_u32(data, &mut i)? != FORMAT {
-        return None;
+    match read_u32(data, &mut i) {
+        Some(FORMAT) => {}
+        Some(found) => {
+            return Err(format!(
+                "tier-cache: artifact FORMAT {found}, this compiler reads {FORMAT}"
+            ))
+        }
+        None => return Err("tier-cache: artifact has no format word".to_string()),
     }
+    decode_body(data, i).ok_or_else(|| "tier-cache: corrupt artifact".to_string())
+}
+
+fn decode_body(
+    data: &[u8],
+    start: usize,
+) -> Option<(EntryRail, Vec<(usize, String)>, Vec<CapturedFn>)> {
+    let mut i = start;
+    let rail = read_rail(data, &mut i)?;
     let str_n = read_u32(data, &mut i)? as usize;
     let mut strings = Vec::with_capacity(str_n);
     for _ in 0..str_n {
@@ -496,7 +614,7 @@ fn decode_module(data: &[u8]) -> Option<(Vec<(usize, String)>, Vec<CapturedFn>)>
             relocs,
         });
     }
-    Some((strings, fns))
+    Some((rail, strings, fns))
 }
 
 /// Load a previously captured tier-1 module and invoke `__jet_jit_main`.
@@ -504,8 +622,7 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
     if !super::api_debug::cranelift_host_supported() {
         return Err("cranelift host unsupported".into());
     }
-    let (strings, fns) =
-        decode_module(artifact).ok_or_else(|| "tier-cache: corrupt artifact".to_string())?;
+    let (rail, strings, fns) = decode_module(artifact)?;
     jet_rt::__gc::initialize_trace().map_err(|e| e.to_string())?;
     resident_teardown();
     RESIDENT_RUNTIME.with(|slot| {
@@ -567,11 +684,13 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
             module,
             host,
             main_id,
-            main_returns_result: false,
-            main_returns_app: false,
-            main_returns_default_err: false,
-            main_error_type: None,
-            main_error_is_packed: false,
+            // The rail the cold run decided, read back rather than re-derived:
+            // a warm run has no TIR program to ask.
+            main_returns_result: rail.returns_result,
+            main_returns_app: rail.returns_app,
+            main_returns_default_err: rail.returns_default_err,
+            main_error_type: rail.error_name.map(Type::Named),
+            main_error_is_packed: rail.error_is_packed,
         });
     });
     resident_invoke()

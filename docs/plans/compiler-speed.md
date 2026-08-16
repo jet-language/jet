@@ -129,6 +129,12 @@ After D-ONECORE1 / D-LENS-RUN2 (#778) and WatchService (#439), default
 - **Hit (tier-1 native):** reload captured Cranelift machine code
   (`module.bin`) and invoke. Skip load, parse, check, TIR lower, and codegen.
   Trace: `JET_RUN_TRACE=1` prints `[run-cache] hit|store`.
+- **Artifact contents:** machine code, compile-time string slots, and the
+  entry's error rail — whether the entry returns a `Result`, whether the error
+  is the default `Err` or a packed enum, and that error type's name. A warm run
+  has no program left to ask, so the rail travels with the code. The artifact
+  carries a FORMAT version and a reader refuses any other version: an artifact
+  without a rail would render the error and still exit 0.
 - **Miss / interp deopt:** ordinary tiered path; store a module only when a
   full native capture exists. Whole-program interpreter runs stay correct; they
   do not invent a parallel cache.

@@ -342,6 +342,95 @@ fn default_run_stays_jit_module_cache_not_aot() {
     assert!(has_module, "expected module.bin under run cache");
 }
 
+/// #2010 / #2011 — store then replay real example stems: run 2 must match run 1
+/// byte for byte on stdout, stderr AND exit code.
+///
+/// Exit code is the load-bearing column. Every other warm-hit fixture in this
+/// file is a tiny inline program that exits 0, which is exactly why a warm hit
+/// that had forgotten its entry was fallible — rendering the error and still
+/// exiting 0 — stayed invisible for the whole life of the cache.
+///
+/// The matrix is stems, not inline strings, because the shapes that break a
+/// replay are shapes inline fixtures never had: a generator, a `#CLI` typed
+/// entry, an unhandled `Err` at the program edge.
+#[test]
+fn example_stems_replay_identically_on_a_second_run() {
+    let _guard = lock_run_cache_tests();
+    let cache = common::unique_tmp("jet_run_cache_replay");
+    let _ = std::fs::remove_dir_all(&cache);
+
+    // Precondition, not inheritance. Ask the product where its cache root is
+    // rather than restating the path law here, and prove the redirect is in
+    // force — an inherited `~/.cache/jet/run` would let a warm artifact from a
+    // previous run of this machine decide the result.
+    std::env::set_var("JET_RUN_CACHE_DIR", &cache);
+    assert_eq!(
+        jet::RunCache::cache_root(),
+        cache,
+        "JET_RUN_CACHE_DIR must redirect the run-cache root away from the machine's"
+    );
+    std::env::remove_var("JET_RUN_CACHE_DIR");
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // (stem, must warm-hit on the replay, must exit non-zero)
+    let rows: [(&str, bool, bool); 3] = [
+        // A generator: the second run was exit 101, an ICE out of
+        // `get_function_decl`, while every cold run stayed correct.
+        ("examples/features/streams/generators.jet", false, false),
+        // A `#CLI` typed entry, so the run arrives through a CLI adapter.
+        ("examples/features/cli/typed_entry_args.jet", false, false),
+        // The #2011 row: an unhandled default `Err` at the edge exits 1 cold and
+        // exited 0 warm. A replay that drops the error rail prints the same
+        // stderr and succeeds, so only the exit code catches it.
+        ("examples/features/errors/default_err_edge.jet", true, true),
+    ];
+
+    for (stem, must_warm_hit, must_exit_nonzero) in rows {
+        let file = repo.join(stem);
+        assert!(file.is_file(), "matrix row is not a file: {stem}");
+        // One cache directory per row: a leaked artifact is worse than no test.
+        let row_cache = cache.join(stem.replace('/', "_"));
+        let _ = std::fs::remove_dir_all(&row_cache);
+
+        let (cold_code, cold_out, cold_err) = run_jet(&row_cache, &file, Some(&repo), &[]);
+        let (warm_code, warm_out, warm_err) = run_jet(&row_cache, &file, Some(&repo), &[]);
+
+        assert_eq!(
+            cold_code, warm_code,
+            "{stem}: exit code changed on the second run\ncold stderr: {cold_err}\nwarm stderr: {warm_err}"
+        );
+        assert_eq!(
+            cold_out, warm_out,
+            "{stem}: stdout changed on the second run\nwarm stderr: {warm_err}"
+        );
+        assert_eq!(
+            cold_err, warm_err,
+            "{stem}: stderr changed on the second run"
+        );
+
+        if must_exit_nonzero {
+            assert_ne!(
+                cold_code, 0,
+                "{stem}: this row must fail, or it cannot catch a replay that exits 0\nstderr: {cold_err}"
+            );
+        }
+
+        if must_warm_hit {
+            // Identical output is not enough on its own: a refused artifact
+            // recompiles cold and answers correctly from the path under test.
+            // Trace a third run to prove the replay really reloaded the module.
+            let (trace_code, trace_out, trace_err) =
+                run_jet(&row_cache, &file, Some(&repo), &[("JET_RUN_TRACE", "1")]);
+            assert!(
+                trace_err.contains("[run-cache] hit"),
+                "{stem}: expected a warm hit, so the replay path is what ran: {trace_err}"
+            );
+            assert_eq!(trace_code, cold_code, "{stem}: traced replay changed the exit code");
+            assert_eq!(trace_out, cold_out, "{stem}: traced replay changed stdout");
+        }
+    }
+}
+
 #[test]
 fn script_start_budget_fixtures_and_peers() {
     let _guard = lock_run_cache_tests();
