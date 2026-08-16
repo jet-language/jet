@@ -1,4 +1,3 @@
-# Compile-coverage ratchet baseline for Tower card #125 / #778.
 # Format consumed by tests/dev.rs::jit_coverage_audit.
 #
 # This file tracks COMPILE coverage only. compile_covered means TIR lowered and
@@ -21,6 +20,12 @@
 #     covered is a REGRESSION: fix it or file it, never drop the row.
 #   gaps and run_gaps may only SHRINK. A new compile gap is a lowering bug to
 #     fix (AGENTS.md I9), not a row to park here.
+# This file is scoped to the stems the audit could judge, never to the corpus.
+# EXAMPLE_CORPUS_FLOOR and OUT_OF_UNIVERSE_CEILING in tests/dev.rs pin
+# how many stems were measured and how many
+# could not be judged (#1998), so an empty `gaps:` here is not a claim that the
+# corpus has no compile gap. The audit prints the unjudged stems and their
+# diagnostics on every run.
 # Movement is intentional only; update this file, and the floor, in one diff.
 
 compile_covered:
@@ -68,10 +73,12 @@ compile_covered:
   collections/fixed_arrays
   collections/fn_dispatch_map
   collections/index_hook
+  collections/iter_adapters
   collections/iter_hook
   collections/lazy_iter
   collections/list_bounds
   collections/list_remove_bounds
+  collections/list_surface
   collections/lists
   collections/map_key
   collections/map_merge
@@ -111,6 +118,7 @@ compile_covered:
   concurrency/freeze_capture
   concurrency/loop_task_handles
   concurrency/parallel_iter
+  concurrency/pipeline
   concurrency/race_cancel
   concurrency/scheduler_spawn
   concurrency/scoped_borrow_bands
@@ -179,6 +187,7 @@ compile_covered:
   errors/must_use
   errors/or_err
   errors/panic
+  errors/partial_and_notes
   errors/qq_control
   errors/rollback_trait
   errors/stack_overflow
@@ -207,15 +216,19 @@ compile_covered:
   io/dir_entry
   io/env_overlay
   io/files
+  io/files_depth
   io/io_surface
   io/log
   io/log_fatal
   io/log_human
+  io/log_job
+  io/log_structured
   io/no_prelude
   io/os_facts
   io/os_process_control
   io/os_stop_cleanup
   io/path
+  io/process_builder
   io/process_exit_cleanup
   io/progress
   io/scope_guard
@@ -258,6 +271,7 @@ compile_covered:
   memory/copy_verb
   memory/entity_tree
   memory/entity_world
+  memory/expiring_secret
   memory/gc_cyclic
   memory/local_cache
   memory/no_alloc_policy
@@ -277,6 +291,7 @@ compile_covered:
   memory/try_allocation
   memory/uninit
   memory/uninit_buffer
+  memory/unsafe_sentries
   memory/unsafe_sentries_source_off
   memory/view_from_callback
   memory/view_from_param
@@ -354,6 +369,7 @@ compile_covered:
   tooling/data_hostile
   tooling/data_json
   tooling/data_pipeline
+  tooling/data_plot
   tooling/data_schema
   tooling/data_stream_bounds
   tooling/debug
@@ -370,6 +386,7 @@ compile_covered:
   tooling/property_tests
   tooling/provenance_track
   tooling/service_authority
+  tooling/service_runtime
   tooling/service_tree
   tooling/solve_puzzle
   tooling/statement_attributes
@@ -386,6 +403,7 @@ compile_covered:
   types/dimensional_quantities
   types/dimensional_quantities_mass
   types/display_debug
+  types/distinct_types
   types/dot_construction
   types/enum_dot
   types/enum_dot_patterns
@@ -413,7 +431,9 @@ compile_covered:
   types/typed_literal_head
   types/typestate
   types/unit_family
+  types/unit_literals
   types/value_tag_type
+  ui/events
   ui/layout_basic
   ui/loadable
   ui/reactive
@@ -442,9 +462,5 @@ compile_covered:
 
 gaps:
 
-# Run-tier gaps: stems this file calls compile_covered that the corpus gate
-# still records as failing under default `jet run`. This section is empty: the
-# four #1543 comptime stems now pass the run tier and no longer need E0956
-# parking. New rows need a concrete reason and owner; never hide a run-tier
-# failure by moving it out of `compile_covered:`.
 run_gaps:
+
