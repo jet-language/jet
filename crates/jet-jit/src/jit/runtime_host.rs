@@ -4065,6 +4065,37 @@ mod host_fns_tests {
         );
     }
 
+    /// Card 1984: lowering reaches a Core row's resident host only through
+    /// `CoreCallRecord::jit_symbol_candidates`, so an adapter exported under
+    /// any other name is unreachable — `lower_recorded_core_call` misses it,
+    /// falls through, and the whole function silently deopts to the
+    /// interpreter. No output check can see that. `core.files.create_dir_all`
+    /// had no adapter at all (`io/files_depth`), and `core.log.int` /
+    /// `core.log.bool` were exported as `jet_jit_log_*_field`, outside their
+    /// own row's projection (`io/log_structured`).
+    #[test]
+    fn core_rows_project_onto_a_registered_resident_host() {
+        let (_module, host) = new_jit_module().expect("resident host module");
+        for (module, member) in [
+            ("core.files", "create_dir"),
+            ("core.files", "create_dir_all"),
+            ("core.log", "field"),
+            ("core.log", "int"),
+            ("core.log", "bool"),
+        ] {
+            let row = jet_foundation::Syntax::core_call(module, member)
+                .unwrap_or_else(|| panic!("{module}.{member} has no Core row"));
+            let candidates = row.jit_symbol_candidates();
+            assert!(
+                candidates
+                    .iter()
+                    .any(|symbol| host.lookup(symbol).is_some()),
+                "{module}.{member} projects onto {candidates:?}; the resident host \
+                 registers none of them, so every call to it deopts silently"
+            );
+        }
+    }
+
     #[test]
     fn arbitrary_helper_panic_is_ice_not_runtime_stop() {
         let mut runtime = fresh_runtime();

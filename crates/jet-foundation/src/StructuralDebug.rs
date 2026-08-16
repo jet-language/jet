@@ -34,16 +34,31 @@ static ALLOC_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
     ("allocator", false),
 ];
 
+/// The one Core structural-type metadata table. `jet_debug_field_metadata`
+/// is its keyed view and `jet_debug_field_metadata_rows` its enumeration, so
+/// an engine that needs every row (the resident JIT builds its Core struct
+/// layout map from them) reads this table instead of copying the keys into a
+/// second per-engine list.
+static CORE_FIELD_METADATA: &[(&str, &[(&str, bool)])] = &[
+    ("IOContext", IO_CONTEXT_FIELD_METADATA),
+    ("CBOROptions", CBOR_OPTIONS_FIELD_METADATA),
+    ("CBORError", CBOR_ERROR_FIELD_METADATA),
+    ("FieldError", FIELD_ERROR_FIELD_METADATA),
+    ("AllocError", ALLOC_ERROR_FIELD_METADATA),
+];
+
 /// Return shared field metadata for a core structural type.
 pub fn jet_debug_field_metadata(type_name: &str) -> Option<&'static [(&'static str, bool)]> {
-    match type_name {
-        "IOContext" => Some(IO_CONTEXT_FIELD_METADATA),
-        "CBOROptions" => Some(CBOR_OPTIONS_FIELD_METADATA),
-        "CBORError" => Some(CBOR_ERROR_FIELD_METADATA),
-        "FieldError" => Some(FIELD_ERROR_FIELD_METADATA),
-        "AllocError" => Some(ALLOC_ERROR_FIELD_METADATA),
-        _ => None,
-    }
+    CORE_FIELD_METADATA
+        .iter()
+        .find(|(name, _)| *name == type_name)
+        .map(|(_, fields)| *fields)
+}
+
+/// Every row of the table above, in declaration order.
+pub fn jet_debug_field_metadata_rows() -> &'static [(&'static str, &'static [(&'static str, bool)])]
+{
+    CORE_FIELD_METADATA
 }
 
 /// Return canonical developer-facing field order for a structural type.

@@ -1001,6 +1001,18 @@ impl<'a> JitMeta<'a> {
         core_struct_field_index(type_name, field)
     }
 
+    /// How many storage slots one record of this type has.
+    ///
+    /// A struct literal only needs the slot count, so this view stays total
+    /// over the Core table even for the few types whose field types are not
+    /// all known (`struct_layout` still declines those).
+    pub(crate) fn struct_field_count(&self, type_name: &str) -> Option<usize> {
+        if let Some(names) = self.struct_fields.get(type_name) {
+            return Some(names.len());
+        }
+        core_struct_field_names(type_name).map(|names| names.len())
+    }
+
     /// Mangled field names + parallel types for `__jet_Type { __jet_f: … }` Debug show.
     pub(crate) fn struct_layout(&self, type_name: &str) -> Option<(&[String], &[Type])> {
         if let Some(names) = self.struct_fields.get(type_name) {
@@ -1176,22 +1188,38 @@ mod tests {
     }
 }
 
+/// The one declaration-ordered field table for Prelude ("Core") structs.
+///
+/// TIR's `ProgramBundle` carries only user `Item::Struct`s, so every engine
+/// has to get a Core record's shape from somewhere. Keeping a private copy per
+/// lookup site is what let the struct-literal path drift behind the field path
+/// (card 1979: `TerminalPolicy`, `EncodingCause`, `TextWidth`,
+/// `DataLineOptions` and `AsyncPolicy` all resolved a field index while
+/// `struct_layout` had never heard of them). `struct_field_index`,
+/// `struct_field_count` and `struct_layout` are now three views of this table.
+///
+/// Row: (the type-name spellings that share one shape, declaration order).
 /// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
-fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
-    if let Some(fields) = jet_foundation::StructuralDebug::jet_debug_field_metadata(type_name) {
-        return fields.iter().position(|(name, _)| *name == field);
-    }
-    let fields: &[&str] = match type_name {
-        "Err" => &["message", "code", "cause"],
-        "AllocError" => &["requested_bytes", "allocator"],
-        // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
-        // examples define user `Point { x: Int, … }` and core Float would win.
-        "Size" => &["width", "height"],
-        "Rect" => &["x", "y", "width", "height"],
-        "SizeConstraint" => &["min_width", "min_height", "max_width", "max_height"],
-        "UiNode" => &["kind", "role", "label", "width", "height", "color", "children"],
-        "DirEntry" => &["name", "path", "is_dir"],
-        "Stat" => &[
+/// Types whose rows `jet_foundation::StructuralDebug` already owns — it also
+/// owns their redaction policy — are folded in below instead of repeated here.
+static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
+    (&["Err"], &["message", "code", "cause"]),
+    // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
+    // examples define user `Point { x: Int, … }` and core Float would win.
+    (&["Size"], &["width", "height"]),
+    (&["Rect"], &["x", "y", "width", "height"]),
+    (
+        &["SizeConstraint"],
+        &["min_width", "min_height", "max_width", "max_height"],
+    ),
+    (
+        &["UiNode"],
+        &["kind", "role", "label", "width", "height", "color", "children"],
+    ),
+    (&["DirEntry"], &["name", "path", "is_dir"]),
+    (
+        &["Stat"],
+        &[
             "size",
             "modified_ms",
             "created_ms",
@@ -1201,13 +1229,16 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "is_symlink",
             "kind",
         ],
-        "WalkEntry" => &["path", "relative", "is_dir", "depth"],
-        "TempDir" | "TempFile" | "FileLock" => &["path"],
-        "LogField" => &["key", "value", "kind", "redacted"],
-        "LogSpan" => &["id", "name"],
-        "Rng" => &["state"],
-        "TestSuite" | "BenchSuite" => &["iteration", "result"],
-        "TLSCertificate" => &[
+    ),
+    (&["WalkEntry"], &["path", "relative", "is_dir", "depth"]),
+    (&["TempDir", "TempFile", "FileLock"], &["path"]),
+    (&["LogField"], &["key", "value", "kind", "redacted"]),
+    (&["LogSpan"], &["id", "name"]),
+    (&["Rng"], &["state"]),
+    (&["TestSuite", "BenchSuite"], &["iteration", "result"]),
+    (
+        &["TLSCertificate"],
+        &[
             "der",
             "sha256",
             "spki_sha256",
@@ -1217,21 +1248,35 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "subject",
             "issuer",
         ],
-        "TLSPeerIdentity" => &[
+    ),
+    (
+        &["TLSPeerIdentity"],
+        &[
             "verified_server_name",
             "leaf",
             "certificate_chain",
             "cipher_suite",
             "tls_version",
         ],
-        // Mirrors jet_std::ProcessResult field order (Open.rs).
-        "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
-        "TerminalSize" => &["cols", "rows"],
-        "TerminalPolicy" => &["size", "mode"],
-        "ModGrant" => &["read"],
-        "Envelope" => &["from", "recipients"],
-        "RecipientReport" => &["address", "accepted", "code", "message"],
-        "SendReport" => &[
+    ),
+    // Mirrors jet_std::ProcessResult field order (Open.rs).
+    (
+        &["ProcessResult"],
+        &["code", "output", "errors", "success", "signal", "timed_out"],
+    ),
+    (&["TerminalSize"], &["cols", "rows"]),
+    (&["TerminalPolicy"], &["size", "mode"]),
+    // D-EVENT1: jet_std::JetAsyncPolicy (Prelude ReactiveEventWatch.rs).
+    (&["AsyncPolicy"], &["capacity", "overflow"]),
+    (&["ModGrant"], &["read"]),
+    (&["Envelope"], &["from", "recipients"]),
+    (
+        &["RecipientReport"],
+        &["address", "accepted", "code", "message"],
+    ),
+    (
+        &["SendReport"],
+        &[
             "server",
             "accepted",
             "rejected",
@@ -1239,7 +1284,10 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "response",
             "accepted_at",
         ],
-        "Limits" => &[
+    ),
+    (
+        &["Limits"],
+        &[
             "max_reply_line_bytes",
             "max_reply_lines",
             "max_capabilities",
@@ -1247,7 +1295,10 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "max_message_bytes",
             "max_auth_challenge_bytes",
         ],
-        "SMTPConfig" => &[
+    ),
+    (
+        &["SMTPConfig"],
+        &[
             "host",
             "port",
             "security",
@@ -1257,9 +1308,15 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "limits",
             "dkim",
         ],
-        "DkimConfig" => &["domain", "selector", "private_key", "signed_headers"],
-        // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
-        "EncodingLimits" => &[
+    ),
+    (
+        &["DkimConfig"],
+        &["domain", "selector", "private_key", "signed_headers"],
+    ),
+    // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
+    (
+        &["EncodingLimits"],
+        &[
             "buffer_bytes",
             "max_depth",
             "max_item_bytes",
@@ -1267,14 +1324,20 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "max_expansion_depth",
             "max_expansion_bytes",
         ],
-        "DataLimits" => &[
+    ),
+    (
+        &["DataLimits"],
+        &[
             "encoding",
             "max_groups",
             "max_sort_rows",
             "max_join_rows",
             "max_output_rows",
         ],
-        "DataStatus" => &[
+    ),
+    (
+        &["DataStatus"],
+        &[
             "step",
             "path",
             "copy",
@@ -1283,11 +1346,17 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "fallback",
             "replacement",
         ],
-        "DataGroup" => &["key", "count", "sum", "mean"],
-        "DataLineOptions" => &[
+    ),
+    (&["DataGroup"], &["key", "count", "sum", "mean"]),
+    (
+        &["DataLineOptions"],
+        &[
             "title", "x_label", "y_label", "markers", "reference", "style", "color", "legend",
         ],
-        "DataError" => &[
+    ),
+    (
+        &["DataError"],
+        &[
             "kind",
             "operation",
             "row",
@@ -1296,7 +1365,10 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "reason",
             "cause",
         ],
-        "DataSummary" => &[
+    ),
+    (
+        &["DataSummary"],
+        &[
             "count",
             "sum",
             "mean",
@@ -1306,14 +1378,23 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "variance",
             "stddev",
         ],
-        "DataTable" | "Table" | "LazyFrame" => &["rows", "missing", "plan"],
-        "Series" | "DataSeries" => &["values", "missing"],
-        "DataColumn" => &["name", "type_name"],
-        "DataJoin" | "Join" => &["left", "right"],
-        "VjpRun" => &["value", "pull", "grads"],
-        "DataPivotCell" => &["row_key", "column_key", "count", "sum", "mean"],
-        "EncodingCause" => &["kind", "os_code", "message"],
-        "EncodingError" => &[
+    ),
+    (
+        &["DataTable", "Table", "LazyFrame"],
+        &["rows", "missing", "plan"],
+    ),
+    (&["Series", "DataSeries"], &["values", "missing"]),
+    (&["DataColumn"], &["name", "type_name"]),
+    (&["DataJoin", "Join"], &["left", "right"]),
+    (&["VjpRun"], &["value", "pull", "grads"]),
+    (
+        &["DataPivotCell"],
+        &["row_key", "column_key", "count", "sum", "mean"],
+    ),
+    (&["EncodingCause"], &["kind", "os_code", "message"]),
+    (
+        &["EncodingError"],
+        &[
             "format",
             "kind",
             "byte_offset",
@@ -1323,15 +1404,15 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "reason",
             "cause",
         ],
-        "CBORError" => &["kind", "byte_offset", "path", "reason"],
-        // D-VALIDATE1 / D-SERDE2 — path+reason records.
-        "FieldError" => &["path", "reason"],
-        // D-MIGRATE3=A.
-        "MigrationStatus" => &["migrated", "from", "steps"],
-        "DecodeResult" => &["value", "migration"],
-        "TextWidth" => &["ambiguous", "controls"],
-        // D-AUTH-TOKENPOLICY1=A — matches JetAuthClaims / JIT verify_jwt record.
-        "Claims" => &[
+    ),
+    // D-MIGRATE3=A.
+    (&["MigrationStatus"], &["migrated", "from", "steps"]),
+    (&["DecodeResult"], &["value", "migration"]),
+    (&["TextWidth"], &["ambiguous", "controls"]),
+    // D-AUTH-TOKENPOLICY1=A — matches JetAuthClaims / JIT verify_jwt record.
+    (
+        &["Claims"],
+        &[
             "subject",
             "audience",
             "issuer",
@@ -1339,28 +1420,65 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "not_before",
             "issued_at",
         ],
-        "Rotation" => &["previous", "current"],
-        "WatchEvent" => &["domain", "kind", "path", "detail", "pid", "port"],
-        _ => return None,
-    };
-    fields.iter().position(|f| *f == field)
+    ),
+    (&["Rotation"], &["previous", "current"]),
+    (
+        &["WatchEvent"],
+        &["domain", "kind", "path", "detail", "pid", "port"],
+    ),
+];
+
+/// One Prelude struct's shape, resolved once from the table above.
+///
+/// `types` is `None` while some field's type has no `core_struct_field_type`
+/// row (`DecodeResult.value` is the type argument, not a fixed type). Index
+/// and count stay total; the layout consumers — Debug show, clone, patch —
+/// keep failing the same way they did before rather than guessing an ABI.
+struct CoreStructShape {
+    names: Vec<String>,
+    types: Option<Vec<Type>>,
+}
+
+static CORE_STRUCTS: LazyLock<HashMap<&'static str, CoreStructShape>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    for (name, fields) in jet_foundation::StructuralDebug::jet_debug_field_metadata_rows() {
+        let names = fields.iter().map(|(field, _)| *field).collect::<Vec<_>>();
+        map.insert(*name, core_struct_shape(name, &names));
+    }
+    for (spellings, fields) in CORE_STRUCT_FIELDS {
+        for name in *spellings {
+            map.insert(*name, core_struct_shape(name, fields));
+        }
+    }
+    map
+});
+
+fn core_struct_shape(type_name: &str, fields: &[&str]) -> CoreStructShape {
+    CoreStructShape {
+        names: fields.iter().map(|field| (*field).to_string()).collect(),
+        types: fields
+            .iter()
+            .map(|field| core_struct_field_type(type_name, field))
+            .collect::<Option<Vec<Type>>>(),
+    }
+}
+
+/// Declaration-ordered field names of a Prelude struct.
+fn core_struct_field_names(type_name: &str) -> Option<&'static [String]> {
+    CORE_STRUCTS
+        .get(type_name)
+        .map(|shape| shape.names.as_slice())
+}
+
+fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
+    core_struct_field_names(type_name)?
+        .iter()
+        .position(|name| name == field)
 }
 
 fn core_struct_layout(type_name: &str) -> Option<(&'static [String], &'static [Type])> {
-    let layout: &(Vec<String>, Vec<Type>) = match type_name {
-        "AllocError" => &*ALLOC_ERROR_LAYOUT,
-        "TLSCertificate" => &*TLS_CERTIFICATE_LAYOUT,
-        "TLSPeerIdentity" => &*TLS_PEER_IDENTITY_LAYOUT,
-        "FieldError" => &*FIELD_ERROR_LAYOUT,
-        "Envelope" => &*EMAIL_ENVELOPE_LAYOUT,
-        "RecipientReport" => &*EMAIL_RECIPIENT_REPORT_LAYOUT,
-        "SendReport" => &*EMAIL_SEND_REPORT_LAYOUT,
-        "Limits" => &*EMAIL_LIMITS_LAYOUT,
-        "SMTPConfig" => &*EMAIL_SMTP_CONFIG_LAYOUT,
-        "DkimConfig" => &*EMAIL_DKIM_CONFIG_LAYOUT,
-        _ => return None,
-    };
-    Some((layout.0.as_slice(), layout.1.as_slice()))
+    let shape = CORE_STRUCTS.get(type_name)?;
+    Some((shape.names.as_slice(), shape.types.as_ref()?.as_slice()))
 }
 
 /// Sema-known CORE struct field types. TIR `struct_field_type` falls back to
@@ -1450,6 +1568,19 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         "TerminalPolicy" => match field {
             "size" => Some(Type::Named("TerminalSize".into())),
             "mode" => Some(Type::Named("TerminalMode".into())),
+            _ => None,
+        },
+        // jet_std::TextWidth (Prelude Open.rs): two policy enums, both scraped
+        // into the JIT's Prelude enum table by build.rs.
+        "TextWidth" => match field {
+            "ambiguous" => Some(Type::Named("TextWidthAmbiguous".into())),
+            "controls" => Some(Type::Named("TextWidthControls".into())),
+            _ => None,
+        },
+        // D-EVENT1: jet_std::JetAsyncPolicy (Prelude ReactiveEventWatch.rs).
+        "AsyncPolicy" => match field {
+            "capacity" => Some(Type::Int),
+            "overflow" => Some(Type::Named("Overflow".into())),
             _ => None,
         },
         "ModGrant" => match field {
@@ -1679,135 +1810,6 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
         _ => &[],
     }
 }
-
-fn email_layout(fields: &[(&str, Type)]) -> (Vec<String>, Vec<Type>) {
-    fields
-        .iter()
-        .map(|(name, ty)| ((*name).to_string(), ty.clone()))
-        .unzip()
-}
-
-static FIELD_ERROR_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    (
-        vec!["path".to_string(), "reason".to_string()],
-        vec![Type::String, Type::String],
-    )
-});
-
-static ALLOC_ERROR_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    (
-        vec!["requested_bytes".to_string(), "allocator".to_string()],
-        vec![Type::Int, Type::String],
-    )
-});
-
-static TLS_CERTIFICATE_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        (
-            "der",
-            Type::List(Box::new(Type::IntN {
-                signed: false,
-                bits: 8,
-            })),
-        ),
-        (
-            "sha256",
-            Type::List(Box::new(Type::IntN {
-                signed: false,
-                bits: 8,
-            })),
-        ),
-        (
-            "spki_sha256",
-            Type::List(Box::new(Type::IntN {
-                signed: false,
-                bits: 8,
-            })),
-        ),
-        ("dns_names", Type::List(Box::new(Type::String))),
-        ("valid_from_unix_ms", Type::Int),
-        ("valid_until_unix_ms", Type::Int),
-        ("subject", Type::String),
-        ("issuer", Type::String),
-    ])
-});
-
-static TLS_PEER_IDENTITY_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("verified_server_name", Type::String),
-        ("leaf", Type::Named("TLSCertificate".into())),
-        (
-            "certificate_chain",
-            Type::List(Box::new(Type::Named("TLSCertificate".into()))),
-        ),
-        ("cipher_suite", Type::String),
-        ("tls_version", Type::Named("TLSVersion".into())),
-    ])
-});
-
-static EMAIL_ENVELOPE_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("from", Type::Named("Address".into())),
-        ("recipients", Type::List(Box::new(Type::Named("Address".into())))),
-    ])
-});
-static EMAIL_RECIPIENT_REPORT_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("address", Type::Named("Address".into())),
-        ("accepted", Type::Bool),
-        ("code", Type::Int),
-        ("message", Type::String),
-    ])
-});
-static EMAIL_SEND_REPORT_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("server", Type::String),
-        (
-            "accepted",
-            Type::List(Box::new(Type::Named("RecipientReport".into()))),
-        ),
-        (
-            "rejected",
-            Type::List(Box::new(Type::Named("RecipientReport".into()))),
-        ),
-        ("response_code", Type::Int),
-        ("response", Type::String),
-        ("accepted_at", Type::String),
-    ])
-});
-static EMAIL_LIMITS_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("max_reply_line_bytes", Type::Int),
-        ("max_reply_lines", Type::Int),
-        ("max_capabilities", Type::Int),
-        ("max_recipients", Type::Int),
-        ("max_message_bytes", Type::Int),
-        ("max_auth_challenge_bytes", Type::Int),
-    ])
-});
-static EMAIL_SMTP_CONFIG_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("host", Type::String),
-        ("port", Type::Int),
-        ("security", Type::Named("SMTPSecurity".into())),
-        ("auth", Type::Named("SMTPAuth".into())),
-        ("recipient_policy", Type::Named("RecipientPolicy".into())),
-        ("trust", Type::Named("TLSTrust".into())),
-        ("limits", Type::Named("Limits".into())),
-        (
-            "dkim",
-            Type::Option(Box::new(Type::Named("DkimConfig".into()))),
-        ),
-    ])
-});
-static EMAIL_DKIM_CONFIG_LAYOUT: LazyLock<(Vec<String>, Vec<Type>)> = LazyLock::new(|| {
-    email_layout(&[
-        ("domain", Type::String),
-        ("selector", Type::String),
-        ("private_key", Type::Named("Secret".into())),
-        ("signed_headers", Type::List(Box::new(Type::String))),
-    ])
-});
 
 fn email_payload(variant: &str) -> &'static [Type] {
     static ERROR: LazyLock<Vec<Type>> = LazyLock::new(|| {

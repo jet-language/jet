@@ -778,11 +778,17 @@ extern "C" fn jet_jit_log_field(key: i64, value: i64) -> i64 {
     alloc_log_field(clone_string(key), clone_string(value), "string", false)
 }
 
-extern "C" fn jet_jit_log_int_field(key: i64, value: i64) -> i64 {
+// Card 1984: these two are named after the row they marshal, not after the
+// record they build. `CoreCallRecord::jit_symbol_candidates` projects
+// `core.log.int` / `core.log.bool` (Prelude `jet_ring_log_int` /
+// `jet_ring_log_bool`) onto `jet_jit_log_int` / `jet_jit_log_bool`, so the
+// old `_field` spellings were unreachable: lowering asked the host registry
+// for the projected name, missed, and the whole function deopted.
+extern "C" fn jet_jit_log_int(key: i64, value: i64) -> i64 {
     alloc_log_field(clone_string(key), value.to_string(), "int", false)
 }
 
-extern "C" fn jet_jit_log_bool_field(key: i64, value: i8) -> i64 {
+extern "C" fn jet_jit_log_bool(key: i64, value: i8) -> i64 {
     alloc_log_field(
         clone_string(key),
         if value != 0 { "true" } else { "false" }.to_string(),
@@ -926,6 +932,23 @@ extern "C" fn jet_jit_fs_create_dir(path: i64) -> i64 {
     match std::fs::create_dir_all(&p) {
         Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("create_dir {p}: {e}")),
+    }
+}
+
+// Card 1984: `core.files.create_dir_all` had no resident host, so lowering's
+// registry projection missed and `io/files_depth` deopted. The Prelude makes
+// both rows the same operation — `jet_std_fs_create_dir` and
+// `jet_std_fs_create_dir_all` (Prelude/CoreLib/Top/Text.rs) both call
+// `std::fs::create_dir_all` behind the same `FS.Write` fault gate — so this
+// adapter marshals to the same call rather than inventing a second policy.
+extern "C" fn jet_jit_fs_create_dir_all(path: i64) -> i64 {
+    let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
+    match std::fs::create_dir_all(&p) {
+        Ok(()) => result_ok(0),
+        Err(e) => result_err_msg(&format!("create_dir_all {p}: {e}")),
     }
 }
 
@@ -2066,8 +2089,8 @@ host_fns! {
     log_enabled: "jet_jit_log_enabled" => jet_jit_log_enabled: sig_i64_i8;
     log_set_trace_id: "jet_jit_log_set_trace_id" => jet_jit_log_set_trace_id: sig_void_str;
     log_field: "jet_jit_log_field" => jet_jit_log_field: sig_str_str_str;
-    log_int_field: "jet_jit_log_int_field" => jet_jit_log_int_field: sig_str_i64_str;
-    log_bool_field: "jet_jit_log_bool_field" => jet_jit_log_bool_field: sig_str_i8_str;
+    log_int: "jet_jit_log_int" => jet_jit_log_int: sig_str_i64_str;
+    log_bool: "jet_jit_log_bool" => jet_jit_log_bool: sig_str_i8_str;
     log_counter: "jet_jit_log_counter" => jet_jit_log_counter: sig_str_i64_str;
     log_span: "jet_jit_log_span" => jet_jit_log_span: sig_unary_i64;
     log_enter: "jet_jit_log_enter" => jet_jit_log_enter: sig_void_i64;
@@ -2078,6 +2101,7 @@ host_fns! {
     fs_read_bytes: "jet_jit_fs_read_bytes" => jet_jit_fs_read_bytes: sig_unary_i64;
     fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
     fs_create_dir: "jet_jit_fs_create_dir" => jet_jit_fs_create_dir: sig_unary_i64;
+    fs_create_dir_all: "jet_jit_fs_create_dir_all" => jet_jit_fs_create_dir_all: sig_unary_i64;
     fs_list_dir: "jet_jit_fs_list_dir" => jet_jit_fs_list_dir: sig_unary_i64;
     fs_remove_all: "jet_jit_fs_remove_all" => jet_jit_fs_remove_all: sig_unary_i64;
     fs_remove: "jet_jit_fs_remove" => jet_jit_fs_remove: sig_unary_i64;
