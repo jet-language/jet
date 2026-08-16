@@ -1216,6 +1216,12 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
         &["UiNode"],
         &["kind", "role", "label", "width", "height", "color", "children"],
     ),
+    // `Path` is one slot holding its text, the shape `CoreHost::path_record`
+    // allocates and `path_string_from_record` reads back, and the same single
+    // `inner` field the AOT `JetPath` and the interpreter's `Path` CtValue
+    // carry. Registering it here is what makes `~path` (Clone) a record copy
+    // instead of a lowering refusal.
+    (&["Path"], &["inner"]),
     (&["DirEntry"], &["name", "path", "is_dir"]),
     (
         &["Stat"],
@@ -1634,6 +1640,10 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             _ => None,
         },
         // D-LSDIR1 / D-FSOPS1 — CORE FS records omitted from TIR ProgramBundle.
+        "Path" => match field {
+            "inner" => Some(Type::String),
+            _ => None,
+        },
         "DirEntry" => match field {
             "name" | "path" => Some(Type::String),
             "is_dir" => Some(Type::Bool),

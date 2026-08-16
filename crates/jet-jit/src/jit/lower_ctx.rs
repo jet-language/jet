@@ -4351,8 +4351,14 @@ impl LowerCtx<'_, '_> {
                     };
                     let val_ty = self.b.func.dfg.value_type(val);
                     if val_ty != ty {
+                        // A bare "type mismatch" cannot be acted on: the next
+                        // pass needs the declared TIR type, the ABI it asks
+                        // for, and the ABI lowering actually produced.
                         return in_own_frame(|| -> Result<(), String> {
-                            return Err(format!("jit let `{name}` lowering type mismatch"));
+                            return Err(format!(
+                                "jit let `{name}` lowering type mismatch: {:?} wants {ty}, lowered {val_ty}",
+                                init.ty
+                            ));
                         });
                     }
                     let var = self.fresh_var(ty);
@@ -12970,6 +12976,20 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Call { name, args, .. } => {
                 in_own_frame(|| -> Result<Value, String> {
+                    // D-MEMO1=A: `f.cache()` lowers to a call on the reserved
+                    // `MEMO_STATS_CALL_PREFIX` name (a NUL-prefixed spelling no
+                    // user can write), and it projects the one shared Prelude
+                    // memo store rather than naming a `TFunc`. `tiers.rs`
+                    // already deopts every memoized function so the canonical
+                    // TIR evaluator owns that store; say so here instead of
+                    // reporting an unknown symbol whose text carries a raw NUL.
+                    if let Some(function) =
+                        name.strip_prefix(jet_foundation::Syntax::MEMO_STATS_CALL_PREFIX)
+                    {
+                        return Err(format!(
+                            "jit memo stats unsupported: `{function}.cache()` projects the canonical Prelude memo store"
+                        ));
+                    }
                     let func_id = self
                         .func_ids
                         .get(name)
@@ -18961,7 +18981,13 @@ impl LowerCtx<'_, '_> {
                 line,
                 fn_name,
             } => self.lower_try(inner, note.as_deref(), convert, file, *line, fn_name),
-            TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
+            TExprKind::OptField {
+                base,
+                member,
+                flatten,
+            } => in_own_frame(|| -> Result<Value, String> {
+                self.lower_opt_field(base, member, *flatten)
+            }),
             TExprKind::Lambda(lam) => {
                 in_own_frame(|| -> Result<Value, String> {
                     let id = super::functions_compile::lower_callable_lambda(
@@ -19690,6 +19716,35 @@ impl LowerCtx<'_, '_> {
         Err("jit list get_opt status unsupported".to_string())
     }
 
+    /// The one text every builtin-method rejection carries. Arms below return
+    /// it bare (optionally with their own `: reason` suffix); the single
+    /// boundary `lower_builtin_method` names the op and the receiver type, so
+    /// no arm has to repeat that and no two arms can word it differently.
+    const BUILTIN_UNSUPPORTED: &str = "jit builtin method unsupported";
+
+    /// Engine boundary for `TExprKind::BuiltinMethod`. A rejection here is a
+    /// silent interpreter deopt at run time, so the text has to name WHICH
+    /// method on WHICH receiver was refused — a bare "unsupported" cannot be
+    /// acted on. Errors that are not builtin rejections (a sub-expression
+    /// failing, an arity stop) pass through untouched.
+    fn lower_builtin_method(
+        &mut self,
+        recv: &TExpr,
+        op: &TBuiltinOp,
+        args: &[TExpr],
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        self.lower_builtin_method_dispatch(recv, op, args, ret_ty)
+            .map_err(|err| match err.strip_prefix(Self::BUILTIN_UNSUPPORTED) {
+                Some(reason) => format!(
+                    "{}: {op:?} on {:?}{reason}",
+                    Self::BUILTIN_UNSUPPORTED,
+                    recv.ty
+                ),
+                None => err,
+            })
+    }
+
     /// Exhaustive match on `TBuiltinOp` (`TIR/mod.rs`) for `TExprKind::
     /// BuiltinMethod`. The JIT only covers the small hot-path subset (string
     /// len/trim/case, list push/sort/len/get/join) worth a native host-call
@@ -19697,7 +19752,7 @@ impl LowerCtx<'_, '_> {
     /// `_`) below so a new one added to `TIR/mod.rs` fails to compile here —
     /// the AOT emitter (`TIR/emit/expressions.rs`) already handles the full
     /// set, and JIT-unsupported falls through to it per R12.
-    fn lower_builtin_method(
+    fn lower_builtin_method_dispatch(
         &mut self,
         recv: &TExpr,
         op: &TBuiltinOp,
@@ -19963,7 +20018,7 @@ impl LowerCtx<'_, '_> {
                     {
                         Ok(self.call_host(self.host.coll.list_pop, &[recv_val]))
                     } else {
-                        Err(format!("jit builtin method unsupported: Pop on {:?}", recv_ty))
+                        Err(Self::BUILTIN_UNSUPPORTED.to_string())
                     }
                 })
             }
@@ -20251,7 +20306,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::ExtendList
             | TBuiltinOp::ConcatList
             | TBuiltinOp::OrderingThen
-            | TBuiltinOp::OrderingReverse => Err("jit builtin method unsupported".to_string()),
+            | TBuiltinOp::OrderingReverse => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::GetMap => {
                 in_own_frame(|| -> Result<Value, String> {
                     if matches!(
@@ -20275,7 +20330,7 @@ impl LowerCtx<'_, '_> {
                         Ok(self.call_host(host_id, &[recv_val]))
                     } else if matches!(op, TBuiltinOp::First) {
                         let Some(elem) = jit_list_iter_elem_type(&recv_ty) else {
-                            return Err("jit builtin method unsupported".to_string());
+                            return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                         };
                         let host_id = match elem {
                             Type::Int | Type::Char => self.host.coll.iter_first,
@@ -20295,7 +20350,7 @@ impl LowerCtx<'_, '_> {
                         let idx = self.b.ins().isub(len, one);
                         Ok(self.call_host(self.host.coll.list_get_opt, &[recv_val, idx]))
                     } else {
-                        Err("jit builtin method unsupported".to_string())
+                        Err(Self::BUILTIN_UNSUPPORTED.to_string())
                     }
                 })
             }
@@ -20329,13 +20384,13 @@ impl LowerCtx<'_, '_> {
                                     .is_some_and(|t| matches!(t, Type::String))
                         );
                     if !recv_is_str {
-                        return Err("jit builtin method unsupported".to_string());
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     let needle = self.lower_expr(&args[0])?;
                     Ok(self.call_host(self.host.str_contains, &[recv_val, needle]))
                 })
             }
-            TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::IndexOf => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::TrimStart => {
                 in_own_frame(|| -> Result<Value, String> {
                     Ok(self.call_host(self.host.text.trim_start, &[recv_val]))
@@ -20434,25 +20489,25 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.text.split_once, &[recv_val, separator]))
                 })
             }
-            TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Reverse => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Sum { float: false } => {
                 in_own_frame(|| -> Result<Value, String> {
                     if !matches!(
                         jit_list_iter_elem_type(&recv_ty),
                         Some(Type::Int)
                     ) {
-                        return Err("jit builtin method unsupported".to_string());
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     Ok(self.call_host(self.host.coll.list_sum_i64, &[recv_val]))
                 })
             }
-            TBuiltinOp::Sum { float: true } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Sum { float: true } => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Product { float: false } => {
                 in_own_frame(|| -> Result<Value, String> {
                     Ok(self.call_host(self.host.coll.list_product_i64, &[recv_val]))
                 })
             }
-            TBuiltinOp::Product { float: true } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Product { float: true } => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Min { float: false } => {
                 in_own_frame(|| -> Result<Value, String> {
                     Ok(self.call_host(self.host.coll.list_min_i64, &[recv_val]))
@@ -20465,7 +20520,7 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::Min { float: true } | TBuiltinOp::Max { float: true } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    Err("jit builtin method unsupported".to_string())
+                    Err(Self::BUILTIN_UNSUPPORTED.to_string())
                 })
             }
             TBuiltinOp::Flatten => {
@@ -20484,7 +20539,7 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.coll.list_unzip, &[recv_val]))
                 })
             }
-            TBuiltinOp::Clear => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Clear => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Chars => {
                 in_own_frame(|| -> Result<Value, String> {
                     Ok(self.call_host(self.host.str_chars, &[recv_val]))
@@ -20493,7 +20548,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Bytes => {
                 in_own_frame(|| -> Result<Value, String> {
                     if !matches!(&recv_ty, Type::String) {
-                        return Err("jit builtin method unsupported".to_string());
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     Ok(self.call_host(self.host.str_bytes, &[recv_val]))
                 })
@@ -20539,7 +20594,7 @@ impl LowerCtx<'_, '_> {
                         return Ok(self.call_host(host, &[recv_val, needle]));
                     }
                     if !matches!(&recv_ty, Type::String) {
-                        return Err("jit builtin method unsupported".to_string());
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     let needle = self.lower_expr(&args[0])?;
                     let host_id = if matches!(op, TBuiltinOp::StartsWith) {
@@ -20550,11 +20605,11 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(host_id, &[recv_val, needle]))
                 })
             }
-            TBuiltinOp::Repeat => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Repeat => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Slice { .. } => {
                 in_own_frame(|| -> Result<Value, String> {
                     if !matches!(&recv_ty, Type::String) {
-                        return Err("jit builtin method unsupported".to_string());
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     if args.len() != 2 {
                         return Err("jit string slice arity".to_string());
@@ -20595,7 +20650,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Keys | TBuiltinOp::Values => {
                 in_own_frame(|| -> Result<Value, String> {
                     if !matches!(&recv_ty, Type::Map { .. }) {
-                        return Err("jit builtin method unsupported".to_string());
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     let host_id = if matches!(op, TBuiltinOp::Keys) {
                         self.host.coll.map_keys
@@ -20611,11 +20666,11 @@ impl LowerCtx<'_, '_> {
                         let key = self.lower_expr(&args[0])?;
                         Ok(self.call_host(self.host.coll.lru_has, &[recv_val, key]))
                     } else {
-                        Err("jit builtin method unsupported".to_string())
+                        Err(Self::BUILTIN_UNSUPPORTED.to_string())
                     }
                 })
             }
-            TBuiltinOp::ToString => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ToString => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::MatchGroup => {
                 in_own_frame(|| -> Result<Value, String> {
                     // Match.group(n) — same host as THandleOp::RegexMethod { method: "group" }.
@@ -20831,7 +20886,7 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.coll.list_indexes, &[n]))
                 })
             }
-            TBuiltinOp::Indexed { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Indexed { .. } => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Zip {
                 mode,
                 input_count,
@@ -21063,7 +21118,7 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.coll.lru_get, &[recv_val, key]))
                 })
             }
-            TBuiltinOp::LruCapacity => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::LruCapacity => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::LruKeys => {
                 in_own_frame(|| -> Result<Value, String> {
                     Ok(self.call_host(self.host.coll.lru_keys, &[recv_val]))
@@ -22727,6 +22782,116 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(none_block);
         self.b.seal_block(none_block);
         let absent = self.absent_option_value(&body_expr.ty, output_result_abi);
+        self.b.ins().jump(merge, &[absent]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    /// `base?.member` — the same shape `lower_option_map` compiles, with a
+    /// record field read in place of the callback.
+    ///
+    /// TIR stamps this node with the BASE's optional type: `lower/
+    /// expressions.rs` records that the member type "is not load-bearing"
+    /// because AOT emit only formats `.map`/`.and_then` and lets Rust infer
+    /// it. The JIT needs a concrete ABI, so the member's type is resolved
+    /// here from the payload record instead.
+    ///
+    /// Consumers of this value still read the node's declared (base) type, so
+    /// only members carried by the plain one-based i64 Option ABI are lowered.
+    /// A Float, Bool, Char, or IntN member would be packed one way and
+    /// unpacked another — a wrong answer, not a refusal — so it is refused by
+    /// name instead.
+    fn lower_opt_field(
+        &mut self,
+        base: &TExpr,
+        member: &str,
+        flatten: bool,
+    ) -> Result<Value, String> {
+        let base_ty = self.erase_distinct_ty(&base.ty);
+        let Type::Option(payload_ty) = &base_ty else {
+            return Err(format!(
+                "jit optional field chain unsupported: `{member}` on {base_ty:?}"
+            ));
+        };
+        let payload_ty = payload_ty.as_ref().clone();
+        let field_ty = self
+            .concrete_struct_field_ty(&payload_ty, member)
+            .or_else(|| match &payload_ty {
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .find(|(name, _)| name == member)
+                    .map(|(_, ty)| ty.as_ref().clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                format!("jit optional field chain unsupported: `{member}` on {payload_ty:?}")
+            })?;
+        // What the result carries: the member itself, or the member's own
+        // payload when the member is already optional (`flatten` = and_then).
+        let carrier = match (&field_ty, flatten) {
+            (Type::Option(inner), true) => inner.as_ref().clone(),
+            (other, true) => {
+                return Err(format!(
+                    "jit optional field chain unsupported: `{member}` flattens {other:?}"
+                ));
+            }
+            (other, false) => other.clone(),
+        };
+        if matches!(&carrier, Type::IntN { .. })
+            || self.meta.clif_ty(&carrier).or_else(|| clif_ty(&carrier)) != Some(types::I64)
+        {
+            return Err(format!(
+                "jit optional field chain unsupported: `{member}` payload {carrier:?} is not the packed Option ABI"
+            ));
+        }
+        let packed = self.lower_expr(base)?;
+        let result_abi = self.uses_result_option_abi(base);
+        let none_block = self.b.create_block();
+        let some_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        let is_none = if result_abi {
+            let is_some = self.call_host(self.host.result_is_ok, &[packed]);
+            let zero = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().icmp(IntCC::Equal, is_some, zero)
+        } else {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().icmp(IntCC::Equal, packed, zero)
+        };
+        self.b.ins().brif(is_none, none_block, &[], some_block, &[]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let payload = self.unpack_option_payload_with_abi(packed, &payload_ty, result_abi)?;
+        // A reserved generated slot: the payload has no user name to reuse and
+        // the record read below is an ordinary `Field` on that slot.
+        let slot = TLocal::generated("opt_field");
+        let place = slot.rust_name();
+        let read = TExpr {
+            ty: field_ty.clone(),
+            kind: TExprKind::Field {
+                recv: Box::new(TExpr {
+                    ty: payload_ty.clone(),
+                    kind: TExprKind::Local(slot),
+                }),
+                field: member.to_string(),
+                boxed: false,
+            },
+        };
+        let value =
+            self.with_bound_local(&place, payload_ty, payload, |this| this.lower_expr(&read))?;
+        let present = if flatten {
+            value
+        } else {
+            self.pack_option_payload_with_abi(value, &carrier, false)?
+        };
+        self.b.ins().jump(merge, &[present]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        let absent = self.absent_option_value(&carrier, false);
         self.b.ins().jump(merge, &[absent]);
 
         self.b.switch_to_block(merge);
@@ -27188,7 +27353,7 @@ impl LowerCtx<'_, '_> {
         lambda_expr: &TExpr,
     ) -> Result<(Value, Option<Value>), String> {
         let TExprKind::Lambda(lambda) = &lambda_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         let id = super::functions_compile::lower_collection_callable_lambda(
             self.module,
@@ -27265,7 +27430,34 @@ impl LowerCtx<'_, '_> {
         self.emit_trap_check()
     }
 
+    /// The one text every closure-method rejection carries. The helpers below
+    /// return it bare (optionally with their own `: reason` suffix) because a
+    /// helper deep in the iterator pipeline does not carry the op; the single
+    /// boundary `lower_closure_method` names the op and the receiver type.
+    const CLOSURE_UNSUPPORTED: &str = "jit closure method unsupported";
+
+    /// Engine boundary for `TExprKind::ClosureMethod`. A rejection here is a
+    /// silent interpreter deopt at run time, so the text has to name WHICH
+    /// closure method on WHICH receiver was refused. Errors that are not
+    /// closure rejections pass through untouched.
     fn lower_closure_method(
+        &mut self,
+        recv: &TExpr,
+        op: &TClosureOp,
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        self.lower_closure_method_dispatch(recv, op, args)
+            .map_err(|err| match err.strip_prefix(Self::CLOSURE_UNSUPPORTED) {
+                Some(reason) => format!(
+                    "{}: {op:?} on {:?}{reason}",
+                    Self::CLOSURE_UNSUPPORTED,
+                    recv.ty
+                ),
+                None => err,
+            })
+    }
+
+    fn lower_closure_method_dispatch(
         &mut self,
         recv: &TExpr,
         op: &TClosureOp,
@@ -27320,7 +27512,7 @@ impl LowerCtx<'_, '_> {
             TClosureOp::IsSortedBy => self.lower_iter_is_sorted_by(recv, args),
             TClosureOp::ChunkWhile => self.lower_iter_chunk_while(recv, args),
             TClosureOp::CountBy => self.lower_iter_count_by(recv, args),
-            _ => Err("jit closure method unsupported".to_string()),
+            _ => Err(Self::CLOSURE_UNSUPPORTED.to_string()),
         }
     }
 
@@ -27477,15 +27669,15 @@ impl LowerCtx<'_, '_> {
     ) -> Result<(String, &'a TExpr), String> {
         let lam_expr = args
             .first()
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lam) = &lam_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !lam.prep.is_empty() || lam.source_params.len() != 1 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let TLambdaBody::Expr(body) = &lam.executable else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         Ok((TIR::local_place(&lam.source_params[0]), body))
     }
@@ -27496,15 +27688,15 @@ impl LowerCtx<'_, '_> {
     ) -> Result<(String, String, &'a TExpr), String> {
         let lam_expr = args
             .first()
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lam) = &lam_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !lam.prep.is_empty() || lam.source_params.len() != 2 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let TLambdaBody::Expr(body) = &lam.executable else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         Ok((
             TIR::local_place(&lam.source_params[0]),
@@ -27520,12 +27712,12 @@ impl LowerCtx<'_, '_> {
     ) -> Result<(String, String, &'a TLambda), String> {
         let lam_expr = args
             .get(index)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lam) = &lam_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !lam.prep.is_empty() || lam.source_params.len() != 2 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         Ok((
             TIR::local_place(&lam.source_params[0]),
@@ -27541,12 +27733,12 @@ impl LowerCtx<'_, '_> {
     ) -> Result<(String, String, String, &'a TLambda), String> {
         let lam_expr = args
             .get(index)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lam) = &lam_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !lam.prep.is_empty() || lam.source_params.len() != 3 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         Ok((
             TIR::local_place(&lam.source_params[0]),
@@ -27563,22 +27755,22 @@ impl LowerCtx<'_, '_> {
         want_all: bool,
     ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         if self.meta.clif_ty(&elem_ty) != Some(types::I64) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (_, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(&body_expr.ty, Type::Bool) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let lambda_expr = args
             .first()
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lambda) = &lambda_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         let recv_val = self.lower_closure_source(recv)?;
         let (callback, env) = self.lower_collection_callback(lambda_expr)?;
@@ -27902,11 +28094,11 @@ impl LowerCtx<'_, '_> {
 
     fn lower_iter_dedup_by(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         if !matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(body_expr.ty, Type::Int) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
@@ -27992,11 +28184,11 @@ impl LowerCtx<'_, '_> {
 
     fn lower_iter_is_sorted_by(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         if !matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(body_expr.ty, Type::Int) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
@@ -28091,11 +28283,11 @@ impl LowerCtx<'_, '_> {
 
     fn lower_iter_chunk_while(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         if !matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (previous_place, current_place, body_expr) = self.closure_binary_lambda(args)?;
         if !matches!(body_expr.ty, Type::Bool) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
@@ -28232,12 +28424,12 @@ impl LowerCtx<'_, '_> {
         is_filter: bool,
     ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(
             &elem_ty,
             Type::Int | Type::String | Type::Named(_)
         ) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_closure_source(recv)?;
@@ -28334,27 +28526,27 @@ impl LowerCtx<'_, '_> {
         map_mut: bool,
     ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(
             &elem_ty,
             Type::Int | Type::String | Type::Named(_)
         ) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         if self.meta.clif_ty(&elem_ty) != Some(types::I64) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (_, body_expr) = self.closure_unary_lambda(args)?;
         let lambda_expr = args
             .first()
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lambda) = &lambda_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         let recv_val = self.lower_closure_source(recv)?;
         let host = if is_filter {
             if !matches!(self.erase_distinct_ty(&body_expr.ty), Type::Bool) {
-                return Err("jit closure method unsupported".to_string());
+                return Err(Self::CLOSURE_UNSUPPORTED.to_string());
             }
             self.host.coll.list_closure_filter
         } else {
@@ -28388,7 +28580,7 @@ impl LowerCtx<'_, '_> {
                         self.host.coll.list_closure_map
                     }
                 }
-                _ => return Err("jit closure method unsupported".to_string()),
+                _ => return Err(Self::CLOSURE_UNSUPPORTED.to_string()),
             }
         };
         let (callback, env) = self.lower_collection_callback(lambda_expr)?;
@@ -28410,27 +28602,27 @@ impl LowerCtx<'_, '_> {
         mutable: bool,
     ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(
             &elem_ty,
             Type::Int | Type::String | Type::Named(_)
         ) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         if self.meta.clif_ty(&elem_ty) != Some(types::I64) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let lam_expr = args
             .first()
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let TExprKind::Lambda(lam) = &lam_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !lam.prep.is_empty() || lam.source_params.len() != 1 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         if lam.ret.is_some() {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let recv_val = self.lower_closure_source(recv)?;
         let recv_val = self.collect_progress(recv_val);
@@ -29372,9 +29564,9 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
     ) -> Result<Value, String> {
         let elem_ty = jit_list_iter_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::String) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let Type::Result { ok, .. } = &body_expr.ty else {
@@ -29474,9 +29666,9 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
     ) -> Result<Value, String> {
         let elem_ty = jit_closure_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::String | Type::Named(_)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(body_expr.ty, Type::Int) {
@@ -29552,9 +29744,9 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
     ) -> Result<Value, String> {
         let elem_ty = jit_closure_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (left_place, right_place, body_expr) = self.closure_binary_lambda(args)?;
         if !matches!(
@@ -29763,9 +29955,9 @@ impl LowerCtx<'_, '_> {
         is_skip: bool,
     ) -> Result<Value, String> {
         let elem_ty = jit_list_iter_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
@@ -29872,19 +30064,19 @@ impl LowerCtx<'_, '_> {
     fn lower_iter_fold(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
             .or_else(|| jit_list_iter_elem_type(&recv.ty))
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int | Type::Named(_)) || args.len() < 2 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let seed = self.lower_expr(&args[0])?;
         let TExprKind::Lambda(lam) = &args[1].kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !lam.prep.is_empty() || lam.source_params.len() != 2 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let TLambdaBody::Expr(body_expr) = &lam.executable else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         let acc_place = TIR::local_place(&lam.source_params[0]);
         let elem_place = TIR::local_place(&lam.source_params[1]);
@@ -29947,9 +30139,9 @@ impl LowerCtx<'_, '_> {
     /// Serial para_partition → `(false_, true_)` record (order-preserving).
     fn lower_para_partition(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         let elem_ty = jit_closure_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
@@ -30034,29 +30226,29 @@ impl LowerCtx<'_, '_> {
     /// Serial para_fold: call seed once, fold with step (single chunk; merge unused).
     fn lower_para_fold(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         let elem_ty = jit_closure_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int | Type::Named(_)) || args.len() != 3 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let TExprKind::Lambda(seed_lam) = &args[0].kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !seed_lam.prep.is_empty() || !seed_lam.source_params.is_empty() {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let TLambdaBody::Expr(seed_body) = &seed_lam.executable else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         let seed = self.lower_expr(seed_body)?;
 
         let TExprKind::Lambda(step_lam) = &args[1].kind else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         if !step_lam.prep.is_empty() || step_lam.source_params.len() != 2 {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let TLambdaBody::Expr(step_body) = &step_lam.executable else {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         };
         let acc_place = TIR::local_place(&step_lam.source_params[0]);
         let elem_place = TIR::local_place(&step_lam.source_params[1]);
@@ -30117,9 +30309,9 @@ impl LowerCtx<'_, '_> {
 
     fn lower_iter_position(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         let elem_ty = jit_list_iter_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::Int) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
@@ -30210,13 +30402,13 @@ impl LowerCtx<'_, '_> {
         is_max: bool,
     ) -> Result<Value, String> {
         let elem_ty = jit_list_iter_elem_type(&recv.ty)
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         if !matches!(elem_ty, Type::String) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(body_expr.ty, Type::Int) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let recv_val = self.lower_expr(recv)?;
         let recv_val = self.collect_progress(recv_val);
@@ -30309,11 +30501,11 @@ impl LowerCtx<'_, '_> {
         let scalar_source = matches!(jit_closure_elem_type_for(&recv.ty), Some(Type::Int));
         let nested_source = jit_list_of_int_list_type(&recv.ty);
         if !scalar_source && !nested_source {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(&body_expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::Int)) {
-            return Err("jit closure method unsupported".to_string());
+            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let recv_val = self.lower_closure_source(recv)?;
         let coll_var = self.fresh_var(types::I64);
