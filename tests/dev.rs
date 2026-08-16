@@ -9905,12 +9905,40 @@ fn cranelift_covers_string_print() {
     );
 }
 
-/// c125 Phase 2: Float list values use the shared JetArena list path.
+/// c125 Phase 2 / #1995: Float list values use the shared JetArena list path.
+///
+/// This was an `assert_cranelift_deopts_on_gap` case for as long as `xs[1..2]`
+/// on a `[Float]` reached the int-only `jet_jit_list_slice`, which cloned
+/// through `clone_int_list` and `.expect`ed inside its own `extern "C"` frame
+/// — aborting the process. 9623985d0 made the window element-kind preserving,
+/// which CLOSED that gap: the tier now compiles this whole body natively, so
+/// it correctly declines to deopt. The assertion follows the coverage.
+///
+/// The tier assertions are the point, not decoration. This defect class is
+/// silent — Cranelift declines a function, the tier deopts, and the program
+/// still prints the right answer — so an output-only check would pass again
+/// the moment the gap re-opened. `jit_executed_for_test` proves the resident
+/// engine ran it, and the deopt/fallback pair proves no arm of it went back
+/// to the interpreter.
 #[test]
 fn cranelift_covers_float_lists() {
-    assert_cranelift_deopts_on_gap(
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    // The interpreter baseline inside the helper runs on `InterpreterBackend`,
+    // which never touches these thread-local flags, so resetting here is safe.
+    jet_jit::reset_jit_trace_for_test();
+    assert_cranelift_matches_interpreter(
         "fn run() {\n    xs := [Float].{ 1.5, 2.5 }\n    xs.push(3.5)\n    print(xs.len())\n    print(xs[0])\n    xs[1] = 4.5\n    print(xs[1])\n    mid :: xs[1..2]\n    print(mid[0])\n}\n",
         "float_lists",
+    );
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "float_lists must reach the resident Cranelift tier"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "float_lists must stay native: a deopt here means the float list gap re-opened"
     );
 }
 
@@ -9994,14 +10022,21 @@ fn cranelift_hot_swap_preserves_live_state_inner() {
     );
 }
 
-/// c125 P0 regression guard: a runtime panic under the default JIT backend
+/// c125 P0 regression guard: a runtime stop under the default JIT backend
 /// (list index OOB here; the same trapped-flag mechanism covers checked-arith
-/// overflow and the two concurrency panic sites) must report a clean E0953 —
-/// not kill the resident process. The next hot-reload iteration in the SAME
+/// overflow and the two concurrency panic sites) must report cleanly — not
+/// kill the resident process. The next hot-reload iteration in the SAME
 /// process must then run cleanly, proving the trap didn't leak into the next
 /// run's heap and the process is still alive to serve it. Before the fix,
 /// every one of these host shims called `std::process::exit(70)` directly,
 /// which took the whole `jet dev` server down with it.
+///
+/// The reported shape is `Ran { exit_code: 70 }` carrying the registered
+/// `Stop [E3010]`, NOT `Problems`. #1483 (0a291f5bb) retired the old
+/// `Problems(E0953)` route precisely because a live-program trap is not a
+/// comptime build failure; `jit_1216_adversarial_regressions` and
+/// `uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path` pin the same
+/// contract for the same OOB shape, and AOT `jet_panic` agrees (I9).
 #[test]
 fn cranelift_trap_then_hot_swap_continues() {
     // Session-scoped boundary; see `cranelift_hot_swap_preserves_live_state`.
@@ -10037,16 +10072,35 @@ fn cranelift_trap_then_hot_swap_continues_inner() {
 
     let mut backend = CraneliftBackend::new();
     match backend.run(&panics, false) {
-        RunOutcome::Problems(diags) => {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(
+                exit_code, 70,
+                "a list index OOB is a runtime stop: out={stdout} err={stderr}"
+            );
+            // Empty stdout is the proof the trap actually fired: the only way
+            // to skip the `print` is `emit_trap_check` cutting the run at the
+            // indexing. A missed trap would have printed the host's `0`.
             assert!(
-                diags.iter().any(|d| d.code == "E0953"),
-                "expected E0953 for list index OOB, got {:?}",
-                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+                stdout.is_empty(),
+                "the trap must cut the run before `print`, got stdout {stdout:?}"
+            );
+            assert!(
+                stderr.contains("Stop [E3010]"),
+                "expected the registered E3010 bounds stop, got {stderr:?}"
+            );
+            assert!(
+                !stderr.contains("E0953") && !stderr.contains("comptime"),
+                "a live-program trap must not wear the comptime voice (#1483): {stderr}"
             );
         }
-        RunOutcome::Ran { stdout, .. } => {
-            panic!("expected the list index OOB to trap, got stdout {stdout:?}")
-        }
+        RunOutcome::Problems(diags) => panic!(
+            "a live-program trap is a runtime stop, not a build diagnostic (#1483): {:?}",
+            diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        ),
     }
 
     // Same resident process (thread-local module/runtime), next hot-reload

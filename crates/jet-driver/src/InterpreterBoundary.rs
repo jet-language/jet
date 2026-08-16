@@ -4,7 +4,9 @@
 //! Keeping the pure AST walk in the driver prevents either product from
 //! depending on the root host or inventing a second boundary vocabulary.
 
-use crate::AST::{core_import_maps, Expr, ImportKind, Item, ProgramBundle, Stmt};
+use crate::AST::{
+    core_import_maps, AccessConvention, CallArg, Expr, ImportKind, Item, ProgramBundle, Stmt,
+};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{HashMap, HashSet};
 
@@ -41,18 +43,24 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
 
 fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary> {
     let has_typed_cli = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
+    // Whether the TIR evaluator runs a callee's frame depends on that callee's
+    // own body, not on which module the call site sits in, so this set spans
+    // the bundle: a `pub fn` imported unqualified and called bare is the same
+    // interpretable frame as a local one. `inline_foreign` bodies are excluded
+    // — those frames belong to the FFI bridge, which performs no writeback.
+    let interpreted_functions: HashSet<&str> = bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.items.iter())
+        .filter_map(|item| match item {
+            Item::Func(function) if function.inline_foreign.is_none() => {
+                Some(function.name.as_str())
+            }
+            _ => None,
+        })
+        .collect();
     for module in &bundle.modules {
         let (core_modules, core_items) = core_import_maps(&module.imports);
-        let interpreted_functions: HashSet<&str> = module
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Func(function) if function.inline_foreign.is_none() => {
-                    Some(function.name.as_str())
-                }
-                _ => None,
-            })
-            .collect();
         for import in &module.imports {
             if let ImportKind::Module(name, span) = &import.kind {
                 if let Some(feature) = native_module_feature(name, debug_impure) {
@@ -106,7 +114,7 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                         }
                     }
                     if let Some(boundary) =
-                        scan_stmts_for_mut_arg(&function.body, &interpreted_functions)
+                        scan_stmts_for_mut_arg(&function.body, &interpreted_functions, &core_items)
                     {
                         return Some(boundary);
                     }
@@ -206,65 +214,124 @@ fn is_interpreter_supported_process_leaf(module: &str, item: &str) -> bool {
 fn scan_stmts_for_mut_arg(
     stmts: &[Stmt],
     interpreted_functions: &HashSet<&str>,
+    core_items: &HashMap<String, String>,
 ) -> Option<Boundary> {
     stmts
         .iter()
-        .find_map(|stmt| scan_stmt_for_mut_arg(stmt, interpreted_functions))
+        .find_map(|stmt| scan_stmt_for_mut_arg(stmt, interpreted_functions, core_items))
 }
 
 fn scan_stmt_for_mut_arg(
     stmt: &Stmt,
     interpreted_functions: &HashSet<&str>,
+    core_items: &HashMap<String, String>,
 ) -> Option<Boundary> {
     match stmt {
         Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
-            expr_mut_arg(expr, interpreted_functions)
+            expr_mut_arg(expr, interpreted_functions, core_items)
         }
-        Stmt::Val(binding) => expr_mut_arg(&binding.init, interpreted_functions),
-        Stmt::Assign { value, .. } => expr_mut_arg(value, interpreted_functions),
-        Stmt::Return(Some(expr), _) => expr_mut_arg(expr, interpreted_functions),
+        Stmt::Val(binding) => expr_mut_arg(&binding.init, interpreted_functions, core_items),
+        Stmt::Assign { value, .. } => expr_mut_arg(value, interpreted_functions, core_items),
+        Stmt::Return(Some(expr), _) => expr_mut_arg(expr, interpreted_functions, core_items),
         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. } => {
-            expr_mut_arg(cond, interpreted_functions)
-                .or_else(|| scan_stmts_for_mut_arg(body, interpreted_functions))
+            expr_mut_arg(cond, interpreted_functions, core_items)
+                .or_else(|| scan_stmts_for_mut_arg(body, interpreted_functions, core_items))
         }
         Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
-            scan_stmts_for_mut_arg(body, interpreted_functions)
+            scan_stmts_for_mut_arg(body, interpreted_functions, core_items)
         }
-        Stmt::Switch { arms, else_body, .. } => arms.iter()
-            .find_map(|arm| scan_stmts_for_mut_arg(&arm.body, interpreted_functions))
-            .or_else(|| else_body.as_ref().and_then(|body| {
-                scan_stmts_for_mut_arg(body, interpreted_functions)
-            })),
+        Stmt::Switch { arms, else_body, .. } => arms
+            .iter()
+            .find_map(|arm| scan_stmts_for_mut_arg(&arm.body, interpreted_functions, core_items))
+            .or_else(|| {
+                else_body.as_ref().and_then(|body| {
+                    scan_stmts_for_mut_arg(body, interpreted_functions, core_items)
+                })
+            }),
         _ => None,
     }
 }
 
-fn expr_mut_arg(expr: &Expr, interpreted_functions: &HashSet<&str>) -> Option<Boundary> {
-    // Writeback for `&ident` args is implemented in the TIR evaluator for both
-    // direct calls and method calls (D-DET shuffle / Clock+Rng injection).
+/// Does the TIR evaluator itself run the frame this direct call names?
+///
+/// `&ident` writeback is a property of the CALLEE, not of the argument: the
+/// evaluator copies the argument back into the caller's environment slot after
+/// the callee frame returns, so it can only do that for a frame it executes.
+/// Two callees qualify — a function declared in this module whose body is Jet
+/// (`interpreted_functions`, which already excludes `inline_foreign`), and a
+/// selectively imported Core leaf, whose writeback is the shared Prelude's
+/// (`rng.shuffle(&deck)` and friends, #1217). Anything else — an unresolved
+/// name, or a same-module function whose body is `#C`/foreign — is a frame the
+/// evaluator does not run, so writeback there is silently dropped.
+fn direct_call_writeback_is_interpreted(
+    name: &str,
+    interpreted_functions: &HashSet<&str>,
+    core_items: &HashMap<String, String>,
+) -> bool {
+    interpreted_functions.contains(name) || core_items.contains_key(name)
+}
+
+fn expr_mut_arg(
+    expr: &Expr,
+    interpreted_functions: &HashSet<&str>,
+    core_items: &HashMap<String, String>,
+) -> Option<Boundary> {
+    // Method and call-value forms never open. A module-qualified Core call
+    // reaches the AST as `Expr::MethodCall { receiver: Ident(alias), .. }` (the
+    // same shape `process_edge_boundary` matches above), and its writeback is
+    // interpreted; S47 makes a `&`/`^` function direct-call-only, so a Write
+    // argument through a function value is not constructible at all. Opening
+    // either arm would only produce false boundaries.
+    fn unwritten_arg(
+        arg: &CallArg,
+        interpreted_functions: &HashSet<&str>,
+        core_items: &HashMap<String, String>,
+    ) -> Option<Boundary> {
+        if matches!(arg.convention, AccessConvention::Write) && matches!(arg.expr, Expr::Ident(..)) {
+            return Some(Boundary {
+                feature: "passes a `&` argument to a function (writeback isn't interpreted yet)"
+                    .to_string(),
+                span: Some(arg.span),
+            });
+        }
+        expr_mut_arg(&arg.expr, interpreted_functions, core_items)
+    }
     match expr {
+        Expr::Call(call)
+            if direct_call_writeback_is_interpreted(
+                call.name.as_str(),
+                interpreted_functions,
+                core_items,
+            ) =>
+        {
+            call.args
+                .iter()
+                .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions, core_items))
+        }
         Expr::Call(call) => call
             .args
             .iter()
-            .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions)),
-        Expr::MethodCall { receiver, args, .. } => expr_mut_arg(receiver, interpreted_functions)
-            .or_else(|| {
+            .find_map(|arg| unwritten_arg(arg, interpreted_functions, core_items)),
+        Expr::MethodCall { receiver, args, .. } => {
+            expr_mut_arg(receiver, interpreted_functions, core_items).or_else(|| {
                 args.iter()
-                    .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions))
-            }),
-        Expr::CallValue { callee, args, .. } => expr_mut_arg(callee, interpreted_functions)
-            .or_else(|| {
+                    .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions, core_items))
+            })
+        }
+        Expr::CallValue { callee, args, .. } => {
+            expr_mut_arg(callee, interpreted_functions, core_items).or_else(|| {
                 args.iter()
-                    .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions))
-            }),
+                    .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions, core_items))
+            })
+        }
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _)
         | Expr::Place(inner, _, _)
-        | Expr::Field(inner, _, _) => expr_mut_arg(inner, interpreted_functions),
-        Expr::Binary(_, left, right, _) => expr_mut_arg(left, interpreted_functions)
-            .or_else(|| expr_mut_arg(right, interpreted_functions)),
-        Expr::Index { base, index, .. } => expr_mut_arg(base, interpreted_functions)
-            .or_else(|| expr_mut_arg(index, interpreted_functions)),
+        | Expr::Field(inner, _, _) => expr_mut_arg(inner, interpreted_functions, core_items),
+        Expr::Binary(_, left, right, _) => expr_mut_arg(left, interpreted_functions, core_items)
+            .or_else(|| expr_mut_arg(right, interpreted_functions, core_items)),
+        Expr::Index { base, index, .. } => expr_mut_arg(base, interpreted_functions, core_items)
+            .or_else(|| expr_mut_arg(index, interpreted_functions, core_items)),
         _ => None,
     }
 }

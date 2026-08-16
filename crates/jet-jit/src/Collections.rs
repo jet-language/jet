@@ -1319,12 +1319,35 @@ extern "C" fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, line: u32) -
 /// live defect of this encoding, independent of the map carrier above; fixing
 /// it means moving this producer to the arena carrier and updating the
 /// `GetList` arm of `uses_result_option_abi` with it.
+///
+/// #1995 sibling: the carrier is *kind*-sensitive, not int-only. Its gates are
+/// float-capable — `TBuiltinOp::GetList` (`jit/safety.rs`, `jit_list_native_type`
+/// minus `IntN`) and `TBuiltinOp::Last` (same gate) both admit a `[Float]`, and
+/// both lower straight to this host. `list_get_int` answers `None` for a
+/// `JetVal::Float`, so reading only through it made every `[Float].get(i)` and
+/// `[Float].last()` decode as absent: a silent wrong answer on the native tier,
+/// with no trap and no deopt to reveal it. The consumer already knows better —
+/// `lower_ctx.rs::unpack_option_payload_with_abi` bitcasts `packed - 1` to
+/// `f64` for a float payload, and the sibling producer `jet_jit_list_pop`
+/// already packs `f64::to_bits() + 1`. This producer now agrees with both.
 extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
-            jet_foundation::ice!(None, "jit list get_opt: bad handle");
+            // An impossible handle is an engine fault, not a program stop, and
+            // panicking here would abort: this is an `extern "C"` frame and
+            // cranelift-jit registers no unwind info for its callers (#1997).
+            rt.set_host_fault("jit list get_opt: bad list handle");
+            return 0;
         }
-        rt.heap.list_get_int(list, idx).map(|v| v + 1).unwrap_or(0)
+        if let Some(value) = rt.heap.list_get_int(list, idx) {
+            return value.wrapping_add(1);
+        }
+        // `list_get_float` is strict (`JetVal::Float` only), so the two reads
+        // are disjoint and the int carrier keeps its exact prior encoding.
+        if let Some(value) = rt.heap.list_get_float(list, idx) {
+            return (value.to_bits() as i64).wrapping_add(1);
+        }
+        0
     })
 }
 
@@ -1592,23 +1615,43 @@ extern "C" fn jet_jit_range_equal(
     ) as i8
 }
 
+/// Element-kind preserving join (#1995 sibling).
+///
+/// The gate is float-capable: `TBuiltinOp::JoinSep` (`jit/safety.rs`) admits
+/// any `jit_list_native_type` receiver, and `lower_ctx.rs` lowers every one of
+/// them straight to this host. `clone_int_list` answers `None` on the first
+/// non-`Int` element, and the `ice!` behind it panicked inside this `extern
+/// "C"` frame — which aborts the process rather than reporting, because
+/// cranelift-jit registers no unwind information for the JIT frames below
+/// (#1997). Walk the arena per index instead, so a `[Float]` shows through the
+/// same shared renderer `print` uses.
 extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let Some(xs) = rt.heap.clone_int_list(list) else {
-            jet_foundation::ice!(None, "list join received an invalid list");
+        let Some(len) = rt.heap.list_len(list) else {
+            rt.set_host_fault("jit list join: bad list handle");
+            return 0;
         };
         let Some(sep) = rt.heap.clone_string(sep_id) else {
-            jet_foundation::ice!(None, "list join received an invalid separator");
+            rt.set_host_fault("jit list join: bad separator handle");
+            return 0;
         };
         // Match AOT JoinSep: `iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(sep)`.
         // String elements are heap handles; Int (and other non-string carriers) show as
-        // decimal — never trap. AOT already accepts `[Int].join(",")`.
-        let parts: Vec<String> = xs
-            .iter()
-            .map(|id| {
-                rt.heap
-                    .clone_string(*id)
-                    .unwrap_or_else(|| id.to_string())
+        // decimal — never trap. AOT already accepts `[Int].join(",")`. Float elements
+        // are `JetVal::Float`, shown by the same `jet_rt::display_f64` the JIT's
+        // `print` host uses, so the two agree by construction.
+        let parts: Vec<String> = (0..len)
+            .map(|index| {
+                if let Some(id) = rt.heap.list_get_int(list, index) {
+                    return rt
+                        .heap
+                        .clone_string(id)
+                        .unwrap_or_else(|| id.to_string());
+                }
+                if let Some(value) = rt.heap.list_get_float(list, index) {
+                    return jet_rt::display_f64(value);
+                }
+                String::new()
             })
             .collect();
         let joined = parts.join(&sep);

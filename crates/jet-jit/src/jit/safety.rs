@@ -967,7 +967,6 @@ fn resident_safe_expr_work_item<'a>(
         )),
         TExprKind::DistinctConvert { arg, .. }
         | TExprKind::DistinctRaw(arg)
-        | TExprKind::UnitConvert { arg, .. }
         | TExprKind::Drop(arg)
         | TExprKind::MaterializeView(arg)
         | TExprKind::Present(arg)
@@ -975,6 +974,21 @@ fn resident_safe_expr_work_item<'a>(
         | TExprKind::Err(arg)
         | TExprKind::ResourceNew(arg)
         | TExprKind::Clone(arg) => Some((true, vec![arg])),
+        // A measured unit scale (`UnitScaleProvenance::Measured`) makes TIR
+        // carry `relative_uncertainty`, and AOT then wraps the converted value
+        // through `jet_measurement_kernel_from_relative` so the result is a
+        // Measurement pair, not a number (`emit/expressions.rs` UnitConvert).
+        // `LowerCtx`'s UnitConvert arm destructures `arg, scale, offset,
+        // rounding, fallible, ..` and never reads that field, so admitting it
+        // here hands back a bare f64 where the program's type is a
+        // Measurement — a wrong answer, not a stop. This arm SHADOWS
+        // `resident_safe_expr_recursive`, which already carried the gate; the
+        // two must state one law (the D-CHAINCMP1 lesson).
+        TExprKind::UnitConvert {
+            arg,
+            relative_uncertainty,
+            ..
+        } => Some((relative_uncertainty.is_none(), vec![arg])),
         TExprKind::Deref(arg) | TExprKind::RawOf(arg) => Some((false, vec![arg])),
         TExprKind::Borrow { place, .. } => Some((true, vec![place])),
         TExprKind::Unary { op, operand } => Some((
@@ -988,8 +1002,24 @@ fn resident_safe_expr_work_item<'a>(
             rhs,
             ..
         } => {
+            // `ProcessResult.signal` is a PACKED `Option<Int>` (0 = absent,
+            // else payload + 1) whose TIR type is erased to Int, so a plain
+            // machine compare reads the packed word and answers wrongly. The
+            // resident lowering covers exactly the both-sides Eq/Ne shape, so
+            // gate on the field shape rather than on the reported type — the
+            // same law `resident_safe_expr_recursive` states, which this arm
+            // shadows.
+            let packed_signal = is_packed_process_signal(lhs) || is_packed_process_signal(rhs);
             let gate = (if matches!(op, BinOp::And | BinOp::Or) {
                 matches!(&lhs.ty, Type::Bool) && matches!(&rhs.ty, Type::Bool)
+            } else if packed_signal {
+                matches!(op, BinOp::Eq | BinOp::Ne)
+                    && is_packed_process_signal(lhs)
+                    && is_packed_process_signal(rhs)
+            } else if matches!(&lhs.ty, Type::Option(_)) || matches!(&rhs.ty, Type::Option(_)) {
+                // `lower_binary` has presence-then-payload rows for
+                // `(Option, Eq | Ne)` and none for arithmetic on an Option.
+                matches!(op, BinOp::Eq | BinOp::Ne)
             } else if *overflow {
                 (intish_ty(&lhs.ty) || reactive_get_intish(lhs))
                     && (intish_ty(&rhs.ty) || reactive_get_intish(rhs))
@@ -2086,8 +2116,15 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
             }
+            // An Option operand: `LowerCtx::lower_binary` carries
+            // presence-then-payload rows for `(Option, Eq | Ne)` only (added
+            // with the Union rows for derived Equatable on `String?` fields).
+            // Arithmetic on an Option has no row, so keep it out rather than
+            // letting it reach a machine op on the carrier word.
             if matches!(&lhs.ty, Type::Option(_)) || matches!(&rhs.ty, Type::Option(_)) {
-                return false;
+                return matches!(op, BinOp::Eq | BinOp::Ne)
+                    && resident_safe_expr(lhs, callees)
+                    && resident_safe_expr(rhs, callees);
             }
             if *overflow {
                 let lhs_int = intish_ty(&lhs.ty) || reactive_get_intish(lhs);
@@ -4028,18 +4065,37 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && step.as_ref().is_none_or(|step| resident_safe_stmt(step, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
+        // D-RANGE-VALUE1=A: `source` is `Some` for `loop n, <Range value>`.
+        // TIR fills `start`/`end` with `IntLit(0)` PLACEHOLDERS in that form
+        // (`lower/statements.rs`, the `Type::Named(Range)` collection branch),
+        // and the resident lowering reads the real bounds out of `source`
+        // through `LowerCtx::lower_range_expr`, ignoring both placeholders. So
+        // gating `start`/`end` unconditionally let two literal zeros stand in
+        // as proof for a `source` the walker never visited at all — the same
+        // shape as reading a per-comparison hook off an operand index
+        // (D-CHAINCMP1). Gate whichever pair actually supplies the bounds.
         TStmt::Range {
+            source,
             start,
             end,
             step,
             body,
             ..
         } => {
-            matches!(&start.ty, Type::Int)
-                && matches!(&end.ty, Type::Int)
+            let bounds = match source {
+                Some(source) => {
+                    matches!(&source.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+                        && resident_safe_expr(source, callees)
+                }
+                None => {
+                    matches!(&start.ty, Type::Int)
+                        && matches!(&end.ty, Type::Int)
+                        && resident_safe_expr(start, callees)
+                        && resident_safe_expr(end, callees)
+                }
+            };
+            bounds
                 && step.is_none()
-                && resident_safe_expr(start, callees)
-                && resident_safe_expr(end, callees)
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Break(_) | TStmt::Continue(_) => true,
