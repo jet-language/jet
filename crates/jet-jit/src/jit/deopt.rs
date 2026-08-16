@@ -56,6 +56,29 @@ pub(crate) fn install_deopt_program(program: &JitProgram, deopt_names: &[String]
     DEOPT_MEMOS.with(|s| *s.borrow_mut() = Some(TIR::new_memo_state()));
 }
 
+/// D-MEMO1=A / I9: `f.cache()` is a projection of the ONE Prelude memo store,
+/// never a second cache. `tiers.rs` deopts every memoized function, so the
+/// evaluator fills the `MemoState` installed above and the resident tier has to
+/// read that same `Arc` back. `bound` is the function's ratified bound, used
+/// only when the store has no entry yet — exactly what the evaluator's own
+/// `memo_stats` does with `JetMemo::with_bound`, so an untouched function
+/// reports zeroed counters against its declared bound on both tiers.
+pub(crate) fn deopt_memo_stats(
+    name: &str,
+    bound: Option<usize>,
+) -> jet_codegen::memo::JetMemoStats {
+    let memos = DEOPT_MEMOS
+        .with(|state| state.borrow().clone())
+        .unwrap_or_else(TIR::new_memo_state);
+    let mut memos = memos
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    memos
+        .entry(name.to_string())
+        .or_insert_with(|| jet_codegen::memo::JetMemo::with_bound(bound))
+        .stats()
+}
+
 pub(crate) fn register_native_fn(name: String, code: *const u8, tir: &TFunc) {
     NATIVE_FNS.with(|s| {
         s.borrow_mut().insert(

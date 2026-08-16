@@ -6453,9 +6453,27 @@ fn lower_method_call_impl(
                     });
                 }
             }
-            let lookup_type_name = type_name
-                .rsplit_once('.')
-                .map_or(type_name.as_str(), |(_, leaf)| leaf);
+            // A module-qualified receiver (`mymod.Thing.new()`) registers its
+            // methods under the bare leaf, so the leaf is the right key there.
+            // But D-PROTO1/D-PROTO2 declare `Payment.Client` — the dot is part
+            // of the type's own name, and `register_method` keyed its surface by
+            // that full spelling. Stripping unconditionally missed both
+            // `method_sigs` and `method_rets`, so `instantiate_method_ret` fell
+            // through to `unit_type()` and every dotted-handle static call was
+            // stamped `Unit`. Engines that need an ABI then read the wrong
+            // carrier: the resident tier stored `Payment.Client.client()` in an
+            // i8 slot and refused the next `^handle` argument, which wants the
+            // i64 handle. Ask the one method table which spelling it knows.
+            let dotted_key = (type_name.clone(), method.to_string());
+            let lookup_type_name = if cx.method_sigs.contains_key(&dotted_key)
+                || cx.method_rets.contains_key(&dotted_key)
+            {
+                type_name.as_str()
+            } else {
+                type_name
+                    .rsplit_once('.')
+                    .map_or(type_name.as_str(), |(_, leaf)| leaf)
+            };
             let sig = cx
                 .method_sigs
                 .get(&(lookup_type_name.to_string(), method.to_string()))

@@ -110,8 +110,13 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) raw_slots: HashMap<String, StackSlot>,
     pub(crate) allocator_view_names: HashSet<String>,
     pub(crate) preserve_allocator_view: bool,
-    /// Pointer values minted from real local stack slots; synthetic place
-    /// identities are deliberately absent so volatile access declines them.
+    /// Values that are genuine machine addresses: a pointer minted from a real
+    /// stack slot in this frame (`RawOf`, `address_of` on a bare local) or an
+    /// address the program itself named as an integer literal (S58
+    /// `mem.Ptr<T>.from_addr`). Synthetic place identities are deliberately
+    /// absent — the `address_of` arm fabricates a stable non-zero identity for
+    /// a place with no stable address, and that word is not an address — so
+    /// `Deref`, the raw store, and volatile access decline them.
     pub(crate) real_address_values: HashSet<Value>,
     pub(crate) func_ids: &'a HashMap<String, FuncId>,
     pub(crate) spawn_site: &'a mut usize,
@@ -13033,15 +13038,31 @@ impl LowerCtx<'_, '_> {
                     // `MEMO_STATS_CALL_PREFIX` name (a NUL-prefixed spelling no
                     // user can write), and it projects the one shared Prelude
                     // memo store rather than naming a `TFunc`. `tiers.rs`
-                    // already deopts every memoized function so the canonical
-                    // TIR evaluator owns that store; say so here instead of
-                    // reporting an unknown symbol whose text carries a raw NUL.
+                    // deopts every memoized function, so the canonical TIR
+                    // evaluator fills that store — and this tier reads the same
+                    // `Arc` back through one host (I9) instead of declining and
+                    // silently interpreting the whole enclosing function.
                     if let Some(function) =
                         name.strip_prefix(jet_foundation::Syntax::MEMO_STATS_CALL_PREFIX)
                     {
-                        return Err(format!(
-                            "jit memo stats unsupported: `{function}.cache()` projects the canonical Prelude memo store"
-                        ));
+                        let Some(bound) = self.meta.memo_bound(function) else {
+                            return Err(format!(
+                                "jit memo stats names `{function}`, which is not a memoized function"
+                            ));
+                        };
+                        let name_handle = self.runtime.heap.alloc_string(function.to_string());
+                        let name_value = self.b.ins().iconst(types::I64, name_handle);
+                        // `bound: none` has no numeric bound; a negative word
+                        // spells that absence across the C ABI.
+                        let bound_value = self.b.ins().iconst(
+                            types::I64,
+                            bound
+                                .and_then(|bound| i64::try_from(bound).ok())
+                                .unwrap_or(-1),
+                        );
+                        return Ok(
+                            self.call_host(self.host.memo_stats, &[name_value, bound_value])
+                        );
                     }
                     let func_id = self
                         .func_ids
@@ -18677,7 +18698,45 @@ impl LowerCtx<'_, '_> {
                     Ok(self.call_host(self.host.layout.from_const, &[f]))
                 })
             }
-            TExprKind::PtrFromAddr { addr, .. } => self.lower_expr(addr),
+            TExprKind::PtrFromAddr { addr, .. } => {
+                in_own_frame(|| -> Result<Value, String> {
+                    // Card #1985, second half. S58 says the pointer *is* the
+                    // supplied address (`addr as usize as *mut T`), so it is a
+                    // real machine address exactly when the operand is one, and
+                    // an address the program wrote as an integer literal is
+                    // provably that. `mem.Ptr<Int>.from_addr(1)` names address
+                    // 1; naming an address with no allocation behind it is the
+                    // whole point of the stem, and the shared Prelude sentry
+                    // kernel is what reports R0801 for it (D-MEM-SENTRY1) —
+                    // which is also why `safety.rs` keeps every `core.mem` call
+                    // on canonical TIR. This tier only has to stop reporting a
+                    // pointer it lowered itself as an unsupported construct.
+                    //
+                    // The literal has to survive lowering as its own word: an
+                    // `Int` past the inline range becomes a tagged arena handle
+                    // (`IntLit` above), and a tag is not an address. Asking
+                    // `int_from_i64` is asking the one rule that decides it
+                    // rather than restating its range here.
+                    //
+                    // The guards are unchanged and NOT relaxed. Every other
+                    // operand stays unrecorded, including the stable non-zero
+                    // identity the `address_of` arm fabricates for a place with
+                    // no stable address — that word is not an address at all,
+                    // and `Deref` / `volatile_read` / `volatile_write` / the raw
+                    // store keep declining it exactly as before.
+                    let literal_address = match &addr.kind {
+                        TExprKind::IntLit(value, _) => {
+                            self.runtime.heap.int_from_i64(*value) == *value
+                        }
+                        _ => false,
+                    };
+                    let pointer = self.lower_expr(addr)?;
+                    if literal_address {
+                        self.real_address_values.insert(pointer);
+                    }
+                    Ok(pointer)
+                })
+            }
             TExprKind::RawOf(inner) => {
                 in_own_frame(|| -> Result<Value, String> {
                     if self.unsafe_depth == 0 {
