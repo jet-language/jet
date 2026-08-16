@@ -26731,6 +26731,20 @@ impl LowerCtx<'_, '_> {
                     equal
                 }
             }
+            // Auto-derived `Comparable` orders each field with `<` then `>`
+            // (`Sema/Registration/Derives.rs::struct_derive_items`), so an
+            // optional field reaches the resident tier as `T? < T?`. AOT emits
+            // the plain Rust operator here (`Codegen/TIR/emit/expressions.rs`
+            // `op.rust_spell()`), so the law is Rust's `Option: PartialOrd`:
+            // `None` sorts before `Some(_)`, then the payloads decide.
+            (
+                Type::Option(inner),
+                BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge,
+            ) => {
+                let left_result = self.uses_result_option_abi(lhs);
+                let right_result = self.uses_result_option_abi(rhs);
+                self.lower_option_order(op, inner, l, r, left_result, right_result)?
+            }
             // D-UNIONTYPE1=A: `A | B` is one compiler-generated enum, so a
             // derived `equal` over a union field is same-arm-then-payload — the
             // law AOT gets from that enum's `PartialEq`. Same `String` caveat as
@@ -26881,6 +26895,167 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(done);
         self.b.seal_block(done);
         Ok(self.b.block_params(done)[0])
+    }
+
+    /// Rust's `Option: PartialOrd` — `None` sorts before `Some(_)`, so two
+    /// present sides compare their payloads and every other case is decided by
+    /// the presence flags alone: `<` is left-absent-and-right-present, `>` is
+    /// the mirror, and `<=` / `>=` also admit the both-absent equal case, which
+    /// collapses to "left is absent" / "right is absent". Each side names its
+    /// own carrier because the operand expressions choose it independently,
+    /// exactly as `lower_option_eq` does.
+    fn lower_option_order(
+        &mut self,
+        op: BinOp,
+        inner: &Type,
+        l: Value,
+        r: Value,
+        left_result: bool,
+        right_result: bool,
+    ) -> Result<Value, String> {
+        let left_present = self.option_present_flag(l, inner, left_result);
+        let right_present = self.option_present_flag(r, inner, right_result);
+        let both_present = self.b.ins().band(left_present, right_present);
+        let one = self.b.ins().iconst(types::I8, 1);
+        let presence_only = match op {
+            BinOp::Lt => {
+                let left_absent = self.b.ins().isub(one, left_present);
+                self.b.ins().band(left_absent, right_present)
+            }
+            BinOp::Gt => {
+                let right_absent = self.b.ins().isub(one, right_present);
+                self.b.ins().band(left_present, right_absent)
+            }
+            BinOp::Le => self.b.ins().isub(one, left_present),
+            BinOp::Ge => self.b.ins().isub(one, right_present),
+            other => return Err(format!("jit option ordering op unsupported: {other:?}")),
+        };
+
+        let payload_block = self.b.create_block();
+        let presence_block = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.append_block_param(done, types::I8);
+        self.b
+            .ins()
+            .brif(both_present, payload_block, &[], presence_block, &[]);
+
+        // At most one side present: the payload never participates.
+        self.b.switch_to_block(presence_block);
+        self.b.seal_block(presence_block);
+        self.b.ins().jump(done, &[presence_only]);
+
+        self.b.switch_to_block(payload_block);
+        self.b.seal_block(payload_block);
+        let left_payload = if left_result {
+            self.result_payload(l, inner)?
+        } else {
+            self.unpack_option_payload(l, inner)?
+        };
+        let right_payload = if right_result {
+            self.result_payload(r, inner)?
+        } else {
+            self.unpack_option_payload(r, inner)?
+        };
+        let ordered = self.lower_value_order(op, inner, left_payload, right_payload)?;
+        self.b.ins().jump(done, &[ordered]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        Ok(self.b.block_params(done)[0])
+    }
+
+    /// Value-level ordering for one operand type. This is the same law the
+    /// `lower_binary` table encodes for a top-level `<`, `>`, `<=`, `>=`; the
+    /// `Option` row needs it again on a payload that is already an SSA value,
+    /// the way `lower_value_eq` re-states the equality rows.
+    fn lower_value_order(
+        &mut self,
+        op: BinOp,
+        ty: &Type,
+        l: Value,
+        r: Value,
+    ) -> Result<Value, String> {
+        let ty = self.erase_distinct_ty(ty);
+        Ok(match &ty {
+            // `Bool` (`false < true`), `Char` (code point) and unsigned `IntN`
+            // order their carrier unsigned; `Int` and signed `IntN` are signed.
+            Type::Int | Type::IntN { .. } | Type::Char | Type::Bool => {
+                let signed = matches!(&ty, Type::Int | Type::IntN { signed: true, .. });
+                let cc = match (op, signed) {
+                    (BinOp::Lt, true) => IntCC::SignedLessThan,
+                    (BinOp::Gt, true) => IntCC::SignedGreaterThan,
+                    (BinOp::Le, true) => IntCC::SignedLessThanOrEqual,
+                    (BinOp::Ge, true) => IntCC::SignedGreaterThanOrEqual,
+                    (BinOp::Lt, false) => IntCC::UnsignedLessThan,
+                    (BinOp::Gt, false) => IntCC::UnsignedGreaterThan,
+                    (BinOp::Le, false) => IntCC::UnsignedLessThanOrEqual,
+                    (BinOp::Ge, false) => IntCC::UnsignedGreaterThanOrEqual,
+                    (other, _) => {
+                        return Err(format!("jit value ordering op unsupported: {other:?}"));
+                    }
+                };
+                self.bool_from_icmp(cc, l, r)
+            }
+            // Float keeps the IEEE predicate so a NaN payload stays false for
+            // every one of the four operators, as it is under AOT's Rust `<`.
+            Type::Float | Type::Float32 => {
+                let cc = match op {
+                    BinOp::Lt => FloatCC::LessThan,
+                    BinOp::Gt => FloatCC::GreaterThan,
+                    BinOp::Le => FloatCC::LessThanOrEqual,
+                    BinOp::Ge => FloatCC::GreaterThanOrEqual,
+                    other => {
+                        return Err(format!("jit value ordering op unsupported: {other:?}"));
+                    }
+                };
+                self.bool_from_fcmp(cc, l, r)
+            }
+            // The same Prelude text comparison kernel the top-level `String`
+            // ordering row calls; the host only marshals string handles.
+            Type::String => {
+                let method = self.b.ins().iconst(types::I64, 7);
+                let ordering = self.call_host(self.host.text.string_method, &[l, method, r]);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let cc = match op {
+                    BinOp::Lt => IntCC::SignedLessThan,
+                    BinOp::Gt => IntCC::SignedGreaterThan,
+                    BinOp::Le => IntCC::SignedLessThanOrEqual,
+                    BinOp::Ge => IntCC::SignedGreaterThanOrEqual,
+                    other => {
+                        return Err(format!("jit value ordering op unsupported: {other:?}"));
+                    }
+                };
+                self.bool_from_icmp(cc, ordering, zero)
+            }
+            // Ordering tag from the list host: 0 less, 1 equal, 2 greater,
+            // 3 incomparable — the encoding the top-level list ordering row
+            // rebuilds its operator from.
+            Type::List(elem) | Type::FixedList { elem, .. } => {
+                let host = match self.erase_distinct_ty(elem) {
+                    Type::String => self.host.coll.list_order_str,
+                    Type::Float | Type::Float32 => self.host.coll.list_order_f64,
+                    _ => self.host.coll.list_order,
+                };
+                let ordering = self.call_host(host, &[l, r]);
+                let strict_tag: i64 = match op {
+                    BinOp::Lt | BinOp::Le => 0,
+                    BinOp::Gt | BinOp::Ge => 2,
+                    other => {
+                        return Err(format!("jit value ordering op unsupported: {other:?}"));
+                    }
+                };
+                let strict_tag = self.b.ins().iconst(types::I8, strict_tag);
+                let strict = self.bool_from_icmp(IntCC::Equal, ordering, strict_tag);
+                if matches!(op, BinOp::Lt | BinOp::Gt) {
+                    strict
+                } else {
+                    let equal_tag = self.b.ins().iconst(types::I8, 1);
+                    let equal = self.bool_from_icmp(IntCC::Equal, ordering, equal_tag);
+                    self.b.ins().bor(strict, equal)
+                }
+            }
+            other => return Err(format!("jit value ordering unsupported: {other:?}")),
+        })
     }
 
     /// D-UNIONTYPE1=A: a union value is one compiler-generated enum, so equal is
