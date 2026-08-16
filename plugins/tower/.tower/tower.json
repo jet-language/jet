@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2024,
-    "rev": 37920,
+    "nextNum": 2025,
+    "rev": 37928,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e6"
       ]
     },
-    "completionCursor": "2026-08-16T14:03:54.025Z"
+    "completionCursor": "2026-08-16T18:22:11.621Z"
   },
   "epochs": [
     {
@@ -130060,7 +130060,7 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:37.394Z",
-      "updated": "2026-08-15T18:58:39.949Z",
+      "updated": "2026-08-16T23:48:25.794Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -132471,6 +132471,76 @@
       "needsAcceptance": false,
       "created": "2026-08-16T14:38:08.489Z",
       "updated": "2026-08-16T14:38:11.154Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0m7k8pa",
+      "num": 2024,
+      "title": "Three newly-compiling stems diverge on the pure-interpreter tier",
+      "body": "Measured at 8989126c0 by `cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate`. Three stems fail the gate's pure-interpreter arm:\n\n  serde/encoding_stream_types: pure-interpreter must match AOT stdout/stderr/exit\n  tooling/data_plot:           pure-interpreter must match AOT stdout/stderr/exit\n  types/unit_literals:         pure-interpreter must match AOT stdout/stderr/exit\n\nAll three were compile GAPS until this session and are now compile-covered on the resident JIT (coverage rose 415 -> 430 -> 440). That is why these divergences are visible only now: while a stem could not compile, the gate never reached its interpreter comparison for that stem, so the interpreter arm was scoped to a smaller set without saying so. This is the same shape as the audit's universe hole on #1998, one gate further out.\n\nNote what this is NOT. The owning F-series cards (#1979 for encoding_stream_types and data_plot, #1982 for unit_literals) state criterion 4 as \"byte-identical output on AOT and on the default jet run\". The default `jet run` tier is the resident JIT, not the pure interpreter, so those criteria can be met while this defect stands. Per I9, however, every applicable tier must preserve one meaning, so this is a real gap rather than a wording escape.\n\nTwo of the three are print/show surfaces that other lanes just touched: encoding_stream_types reaches an EncodingError show path through the dotted import-alias spelling, and unit_literals reaches Duration show, whose text was moved into a shared Prelude kernel (jet_duration_kernel_show) that AOT's impl JetShow now calls. data_plot builds a DataLineOptions record. So the first hypothesis is that the interpreter renders one of these through its own path rather than the shared Prelude symbol.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Get the actual diff per stem first: the gate prints AOT and interpreter output side by side, so run the gate and read the three comparisons before forming a theory.\n\nThen per stem, establish whether the interpreter re-derives a rendering or policy fact that the Prelude owns. Per I9 the interpreter ambient and the TIR evaluator are marshalling adapters; a divergence in printed bytes is almost always a second renderer. This session has already found four instances of exactly that shape: a stubbed json decoder plus a duplicate csv ladder, a host terminal path, a per-tier env lookup, and Duration show text living only in AOT.\n\nDo not fix by editing a golden or by relaxing the gate's interpreter arm. If a stem's interpreter output is the CORRECT one and AOT is wrong, say so explicitly with evidence rather than assuming AOT is the oracle.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The AOT-versus-interpreter diff is recorded per stem, so the defect is described by observed bytes rather than by theory",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T23:57:09.274Z"
+        },
+        {
+          "n": 2,
+          "text": "serde/encoding_stream_types, tooling/data_plot and types/unit_literals each produce byte-identical stdout, stderr and exit code on AOT, default jet run and the pure interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T23:57:09.726Z"
+        },
+        {
+          "n": 3,
+          "text": "Any rendering or policy re-derived in the interpreter is deleted and replaced by a call to the same Prelude symbol AOT embeds (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T23:57:10.153Z"
+        },
+        {
+          "n": 4,
+          "text": "No golden is edited to match a tier and the gate's interpreter arm is not relaxed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T23:57:10.597Z"
+        },
+        {
+          "n": 5,
+          "text": "example_corpus_strict_jit_aot_differential_gate reports no classification failure for these three stems",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-16T23:57:11.022Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-16T23:57:08.816Z",
+      "updated": "2026-08-16T23:57:11.023Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -174294,6 +174364,98 @@
       "created": "2026-08-15T19:08:26.746Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-15"
+    },
+    {
+      "id": "D-SOA-TIER1",
+      "cardId": "c0m0jmc6",
+      "group": "runtime",
+      "title": "How the dev tiers run a columnar list",
+      "gist": "How `jet run` and the interpreter read a struct stored as columns.",
+      "lesson": "A columnar struct is stored one array per field instead of one record per item. This is a memory layout choice, and its ratified promise is that the code you write does not change. Today only the compiled build can read that layout. The fast dev loop and the interpreter cannot, so they quietly fall back to slower execution. This choice decides how they read it.",
+      "explainer": "",
+      "story": "Priya writes a particle simulation and marks her struct columnar for speed. She runs it with `jet run` while editing, and it works. She never learns that the fast path silently gave up, because the answer is correct either way. Her edit loop is slower than it should be, and no message says why.",
+      "inWild": "#[Codable, Layout(columnar)]\nstruct Particle {\n    x: Float\n    y: Float\n    mass: Float\n}\n\nfn total_mass(ps: [Particle]) => Float {\n    sum := 0.0\n    loop p, ps -> sum += p.mass\n    return sum\n}\n\nfn run() {\n    ps := [Particle].{\n        Particle.{x: 0.0, y: 0.0, mass: 1.0},\n        Particle.{x: 1.0, y: 2.0, mass: 3.0},\n    }\n    print(total_mass(ps))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One shared column store in the Prelude",
+          "detail": "The Prelude owns the column store and the read that pulls one item out of it. Every tier calls that same code. The compiled build stops generating its own private layout. Gain: one meaning for columnar on every tier, and the fast loop keeps working. Loss: the compiled build gives up a layout tuned per struct, so its speed may drop a little.",
+          "technical": "Add a Prelude struct-of-arrays object holding one typed column per field, plus one gather symbol taking a column set and an index and returning the record. AOT emit, the Cranelift host and the interpreter ambient all marshal into that symbol. Retire the per-struct generated `__jet_<S>_columns` type and its `from_aos` and `gather_at` helpers from `crates/jet-codegen/src/Codegen/Items.rs:496-622`.",
+          "code": "// Nothing in this program changes. All three tiers now agree.\nfn total_mass(ps: [Particle]) => Float {\n    sum := 0.0\n    loop p, ps -> sum += p.mass\n    return sum\n}\n\n// jet run          -> 4.0\n// jet run --release -> 4.0\n// jet dev           -> 4.0, and the fast path is used"
+        },
+        {
+          "key": "B",
+          "name": "Teach the other tiers to read the generated layout",
+          "detail": "The compiled build keeps generating its own layout per struct. The fast loop and the interpreter learn to read that same shape. Gain: the compiled build keeps its tuned layout and its current speed. Loss: the shape is described in two places, so the two can drift apart. A drift shows up as a wrong number, not as an error.",
+          "technical": "Publish the generated column layout as a described record shape the JIT and the evaluator can look up, then add a gather in each engine that walks it. The layout stays authored by codegen, so the engines depend on a generated artifact rather than a shared symbol.",
+          "code": "// Nothing in this program changes.\n// Each tier reads the layout the compiled build generated.\n\n// Risk this option accepts: if the generated shape gains a field\n// and one reader is not updated, that reader reads the wrong column\n// and prints a wrong mass instead of failing."
+        },
+        {
+          "key": "C",
+          "name": "Convert to plain records when a tier cannot read columns",
+          "detail": "When the fast loop meets a columnar list, it copies it into ordinary records once, then runs normally. Gain: small change, and every tier gives the right answer with no shared store to build. Loss: the copy costs time and memory on entry, so a large list may be slower than the plain layout the user was trying to beat.",
+          "technical": "Materialize the columnar list into array-of-structs form at the tier boundary, then lower the loop with the existing list path. Requires no new shared symbol and no engine-side column reader.",
+          "code": "// Nothing in this program changes.\n// jet run copies ps into plain records first, then loops.\n\n// A 10 million item list pays for a full copy before the first read."
+        },
+        {
+          "key": "D",
+          "name": "Write down that columnar is compiled-build only",
+          "detail": "Keep today's behaviour and record it as a deliberate limit. The fast loop drops to slower execution for columnar code, and says so. Gain: no new machinery, and the honest limit is visible instead of silent. Loss: a ratified feature works on one tier only, and the fast loop stays slow for the exact code that asked for speed.",
+          "technical": "A named tier-parity carve-out naming columnar layout as compiled-build only, plus a message when a tier declines it so the fallback is not silent. This is the only option that needs an invariant carve-out.",
+          "code": "// jet run examples/features/lowlevel/layout_columnar.jet\n// note: a columnar layout runs on the compiled build only.\n//       this program ran on the slower path.\n// 4.0"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust has no built-in columnar layout. Libraries build it, and every reader uses the library's own accessor rather than its own copy of the shape.",
+          "code": "// soa_derive crate\n#[derive(StructOfArray)]\nstruct Particle { x: f32, y: f32, mass: f32 }\nfor p in particles.iter() { sum += p.mass; }"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig ships a multi-array in its standard library. One type owns the columns and hands out an item, so callers never address a column directly.",
+          "code": "var list: std.MultiArrayList(Particle) = .{};\nconst p = list.get(i);"
+        },
+        {
+          "lang": "Apache Arrow",
+          "note": "Arrow makes the column layout an open format with one specification. Many languages read the same bytes, and none writes its own private version.",
+          "code": "batch.column(2).as_any().downcast_ref::<Float64Array>()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One store and one read give columnar a single meaning, so all three tiers answer alike by construction rather than by matching effort. It also removes the reason a tier declines the layout, which is what makes the fast loop slow for the code that asked for speed.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It writes the layout down twice. A drift between the two readers prints a wrong number instead of failing, which is the exact failure this project has been digging out all epoch."
+          },
+          {
+            "key": "C",
+            "reason": "The copy taxes the case columnar exists to speed up. A user who chose the layout for large data pays most."
+          },
+          {
+            "key": "D",
+            "reason": "It keeps a ratified feature working on one tier. It also needs an invariant carve-out, which is a cost the other options do not ask for."
+          }
+        ],
+        "tradeoff": "A shared store may be slower than a layout tuned for one struct, so the compiled build could lose a little speed. That is acceptable because a correct fast loop on every tier is worth more. A tuned path can be added later behind the same shared read."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a shared Prelude store against teaching each engine to read the generated layout. It recommended the shared store because one store cannot disagree with itself.",
+        "boilOcean": "The breadth review added converting to plain records on entry, and writing the limit down as compiled-build only. It also tested deleting the layout feature, which was dropped because the layout is already ratified and shipped.",
+        "hybrid": "The hybrid review tested a shared store plus a tuned path for the compiled build. It was folded into the recommendation as a later addition, because a tuned path behind one shared read stays one mechanism.",
+        "cooperative": "The cooperative review strengthened the copy-on-entry option with a size limit and a cache. It still taxes large data, which is the case the layout exists to serve.",
+        "adversarial": "The adversarial review added a field to the struct and asked which option prints a wrong number. Only the two-readers option can, so the shared store remains the recommendation."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-16T23:48:25.792Z"
     }
   ],
   "questions": [
@@ -175985,6 +176147,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-16T23:57:11.023Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m7k8pa",
+      "note": "#5 example_corpus_strict_jit_aot_differential_gate reports no c"
+    },
+    {
+      "at": "2026-08-16T23:57:10.597Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m7k8pa",
+      "note": "#4 No golden is edited to match a tier and the gate's interpret"
+    },
+    {
+      "at": "2026-08-16T23:57:10.154Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m7k8pa",
+      "note": "#3 Any rendering or policy re-derived in the interpreter is del"
+    },
+    {
+      "at": "2026-08-16T23:57:09.727Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m7k8pa",
+      "note": "#2 serde/encoding_stream_types, tooling/data_plot and types/uni"
+    },
+    {
+      "at": "2026-08-16T23:57:09.274Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0m7k8pa",
+      "note": "#1 The AOT-versus-interpreter diff is recorded per stem, so the"
+    },
+    {
+      "at": "2026-08-16T23:57:08.816Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0m7k8pa",
+      "note": "Three newly-compiling stems diverge on the pure-interpreter tier"
+    },
+    {
+      "at": "2026-08-16T23:48:25.794Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-SOA-TIER1",
+      "note": "How the dev tiers run a columnar list"
+    },
+    {
+      "at": "2026-08-16T18:22:11.621Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-16T18:22:11.621Z"
+    },
     {
       "at": "2026-08-16T17:13:53.552Z",
       "by": "fable-e3-burndown",
@@ -179428,62 +179646,6 @@
       "action": "card.criteria-meet",
       "ref": "c0199z6h",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-15T15:12:55.010Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0199z6h",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T14:38:39.332Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wo4jnm",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T14:38:38.734Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T14:38:38.317Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T14:38:37.903Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T14:38:37.483Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T14:38:37.059Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T14:38:36.649Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wo4jnm",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
