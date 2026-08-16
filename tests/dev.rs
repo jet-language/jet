@@ -559,44 +559,135 @@ fn typechecked_example_stems() -> Vec<String> {
         .collect()
 }
 
-/// Observe which type-checked examples `try_compile_bundle` accepts, once per
-/// test binary.
+/// The one-line `CODE: message` reason a stem carries when the compile oracle
+/// could not judge it.
 ///
-/// `(covered, gaps)` is a pure function of the example corpus and the compiler,
-/// and producing it compiles the whole corpus (~80s in CI). Both ratchet entry
+/// #1998: the reason is DERIVED from the compiler's own diagnostic, never
+/// declared here, so the out-of-universe list can never become an allowlist. A
+/// stem leaves the oracle only for as long as the compiler still says why.
+fn first_diagnostic_summary(diagnostics: &[jet::Diagnostics::Diagnostic]) -> String {
+    let first = diagnostics
+        .iter()
+        .find(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .or_else(|| diagnostics.first());
+    match first {
+        Some(d) => format!("{}: {}", d.code, d.what.replace('\n', " ")),
+        None => "failed without a diagnostic".to_string(),
+    }
+}
+
+/// What the in-process compile oracle can say about one example stem.
+///
+/// #1998: there used to be a fourth outcome with no name. A stem whose
+/// in-process `Loader` or `Sema` pass failed fell out of the loop on a bare
+/// `continue`, so it joined neither set, and the audit then reported `gaps: 0`
+/// over a denominator it never stated. The fourth outcome is named here and the
+/// match on it is exhaustive, so a stem can no longer leave the audit silently.
+enum JitCompileVerdict {
+    /// The JIT lowerer accepted the bundle.
+    Covered,
+    /// The lowerer rejected the bundle: a live I9 compile gap, and its reason.
+    Gap(String),
+    /// The harness never reached the lowerer, so this run judged nothing about
+    /// the stem. Carries the diagnostic that stopped it.
+    OutOfUniverse(String),
+}
+
+/// The audit's whole answer, together with the denominator it was measured over.
+///
+/// The three lists partition `corpus` exactly; `observe_jit_coverage` asserts it.
+#[derive(Clone)]
+struct JitCoverage {
+    /// Every stem `topic_jet_files` yielded — the audit's universe.
+    corpus: usize,
+    covered: Vec<String>,
+    gaps: Vec<String>,
+    /// `stem: where: CODE: message`, one row per stem the oracle could not
+    /// judge. Shrink-only: each row is a defect to fix, never a skip to accept.
+    out_of_universe: Vec<String>,
+}
+
+/// Observe which examples `try_compile_bundle` accepts, once per test binary.
+///
+/// The answer is a pure function of the example corpus and the compiler, and
+/// producing it compiles the whole corpus (~80s in CI). Both ratchet entry
 /// points want the same answer, so pay for it once.
-fn collect_jit_coverage() -> (Vec<String>, Vec<String>) {
-    static COVERAGE: LazyLock<(Vec<String>, Vec<String>)> = LazyLock::new(observe_jit_coverage);
+fn collect_jit_coverage() -> JitCoverage {
+    static COVERAGE: LazyLock<JitCoverage> = LazyLock::new(observe_jit_coverage);
     (*COVERAGE).clone()
 }
 
-fn observe_jit_coverage() -> (Vec<String>, Vec<String>) {
+fn observe_jit_coverage() -> JitCoverage {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // `topic_jet_files` yields `read_dir` order, which is the host filesystem's
+    // and not the corpus's. This walk compiles every bundle into one process, so
+    // an order-dependent verdict would make the ledger a property of the machine
+    // that dumped it. Sort the walk, exactly as `all_example_stems` already does.
+    let mut paths = topic_jet_files(&root);
+    paths.sort();
+    let corpus = paths.len();
     let mut covered = Vec::new();
     let mut gaps = Vec::new();
-    for path in topic_jet_files(&root) {
-        let file = path.to_string_lossy();
-        let mut bundle = match jet::Loader::load_entry(&file) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-        let errors: Vec<_> = diags
-            .into_iter()
-            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-            .collect();
-        if !errors.is_empty() {
-            continue;
-        }
+    let mut out_of_universe = Vec::new();
+    for path in paths {
         let stem = stem_of(&root, &path);
-        match jet_jit::try_compile_bundle(&bundle) {
-            Ok(()) => covered.push(stem),
-            Err(reason) => gaps.push(format!("{stem}: {reason}")),
+        match classify_jit_compile(&path) {
+            JitCompileVerdict::Covered => covered.push(stem),
+            JitCompileVerdict::Gap(reason) => gaps.push(format!("{stem}: {reason}")),
+            JitCompileVerdict::OutOfUniverse(reason) => {
+                out_of_universe.push(format!("{stem}: {reason}"));
+            }
         }
     }
     covered.sort();
     gaps.sort();
-    (covered, gaps)
+    out_of_universe.sort();
+    assert_eq!(
+        covered.len() + gaps.len() + out_of_universe.len(),
+        corpus,
+        "the compile oracle lost a stem: {corpus} discovered, {} covered, {} gap(s), {} \
+         outside the universe. Every discovered stem lands in exactly one bucket (#1998)",
+        covered.len(),
+        gaps.len(),
+        out_of_universe.len()
+    );
+    JitCoverage {
+        corpus,
+        covered,
+        gaps,
+        out_of_universe,
+    }
+}
+
+/// Put one example in front of the JIT lowerer, or say what stopped it.
+fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
+    let file = path.to_string_lossy();
+    // #1998: this arm was `Err(_) => continue`, which dropped the stem.
+    let mut bundle = match jet::Loader::load_entry(&file) {
+        Ok(bundle) => bundle,
+        Err(diagnostics) => {
+            return JitCompileVerdict::OutOfUniverse(format!(
+                "loader: {}",
+                first_diagnostic_summary(&diagnostics)
+            ));
+        }
+    };
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    // #1998: this arm was `if !errors.is_empty() { continue }`, same drop.
+    if !errors.is_empty() {
+        return JitCompileVerdict::OutOfUniverse(format!(
+            "sema: {}",
+            first_diagnostic_summary(&errors)
+        ));
+    }
+    match jet_jit::try_compile_bundle(&bundle) {
+        Ok(()) => JitCompileVerdict::Covered,
+        Err(reason) => JitCompileVerdict::Gap(reason),
+    }
 }
 
 fn parse_jit_gap_manifest() -> (Vec<String>, Vec<String>, Vec<String>) {
@@ -8514,13 +8605,55 @@ fn resident_jit_safe_string_method_chain() {
     );
 }
 
+/// State the universe the compile audit measured, every time it reports.
+///
+/// #1998: `gaps: 0` is only ever a claim about the stems the in-process harness
+/// could put in front of the lowerer. Printing how many stems it could NOT, in
+/// the same breath, is what stops the zero from being quoted on its own.
+fn report_jit_universe(
+    corpus: usize,
+    covered: &[String],
+    gaps: &[String],
+    out_of_universe: &[String],
+) {
+    eprintln!(
+        "jit compile-coverage universe: {corpus} example stem(s) = {} compile-covered + {} \
+         compile gap(s) + {} outside this oracle",
+        covered.len(),
+        gaps.len(),
+        out_of_universe.len()
+    );
+    if out_of_universe.is_empty() {
+        eprintln!("jit stems outside this oracle: none — the audit judged the whole corpus");
+        return;
+    }
+    eprintln!(
+        "jit stems outside this oracle ({}): the {} gap row(s) are scoped to the {} stem(s) \
+         this oracle could judge, NOT to the {corpus}-stem corpus (#1998)",
+        out_of_universe.len(),
+        gaps.len(),
+        covered.len() + gaps.len()
+    );
+    for row in out_of_universe {
+        eprintln!("  {row}");
+    }
+}
+
 /// The one compile-coverage ratchet (#125 / #778, hole closed by #1663).
 ///
-/// Audits which type-checked examples compile through the JIT lowerer against
+/// Audits which examples compile through the JIT lowerer against
 /// `tests/jit_gaps.txt`, directionally: `compile_covered:` may only grow, `gaps:`
 /// and `run_gaps:` may only shrink. Moving the ratchet takes two edits in one
 /// diff — the rows in the ledger, and `COMPILE_COVERED_FLOOR` below, which is
 /// pinned here precisely because it must live outside the file it guards.
+///
+/// #1998 closed the hole under all of that: the audit now states its own
+/// denominator. `EXAMPLE_CORPUS_FLOOR` pins how many stems it measured and
+/// `OUT_OF_UNIVERSE_CEILING` pins how many of them it could not judge, both
+/// outside the ledger for the same reason the coverage floor is. Before that,
+/// a stem that failed the in-process `Loader`/`Sema` pass joined neither
+/// `compile_covered:` nor `gaps:`, so `gaps: 0` meant "no gaps among the stems
+/// that happened to load" and never said how many did not.
 ///
 /// This is the only copy of that law. `jit_try_compile_manifest_matches` used to
 /// assert the same two sets from a second hand-maintained comparison, which is
@@ -8532,7 +8665,12 @@ fn jit_coverage_audit() {
 }
 
 fn jit_coverage_audit_inner() {
-    let (covered, gaps) = collect_jit_coverage();
+    let JitCoverage {
+        corpus,
+        covered,
+        gaps,
+        out_of_universe,
+    } = collect_jit_coverage();
     if std::env::var("JET_DUMP_JIT_GAPS").as_deref() == Ok("1") {
         // #1509: this writer regenerates the whole file, so it must carry the
         // `run_gaps:` ratchet across. Rewriting the file without it would delete
@@ -8562,6 +8700,12 @@ fn jit_coverage_audit_inner() {
              #     covered is a REGRESSION: fix it or file it, never drop the row.\n\
              #   gaps and run_gaps may only SHRINK. A new compile gap is a lowering bug to\n\
              #     fix (AGENTS.md I9), not a row to park here.\n\
+             # This file is scoped to the stems the audit could judge, never to the corpus.\n\
+             # EXAMPLE_CORPUS_FLOOR and OUT_OF_UNIVERSE_CEILING in\n\
+             # tests/dev.rs::jit_coverage_audit pin how many stems were measured and how many\n\
+             # could not be judged (#1998), so an empty `gaps:` here is not a claim that the\n\
+             # corpus has no compile gap. The audit prints the unjudged stems and their\n\
+             # diagnostics on every run.\n\
              # Movement is intentional only; update this file, and the floor, in one diff.\n\
              \n\
              compile_covered:\n",
@@ -8585,6 +8729,9 @@ fn jit_coverage_audit_inner() {
             )
             .expect("write tests/jit_gaps.txt");
         }
+        // #1998: a regeneration states the denominator too, so the operator who
+        // moves the ratchet sees which stems the new ledger does not speak for.
+        report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
         return;
     }
     let (expected_covered, expected_gaps, run_gaps, _) = parse_jit_gap_manifest_full();
@@ -8593,15 +8740,59 @@ fn jit_coverage_audit_inner() {
         expected_gaps.len(),
         run_gaps.len()
     );
+    report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
     eprintln!("jit compile-covered ({}):", covered.len());
     for s in &covered {
         eprintln!("  {s}");
     }
-    eprintln!("jit gaps ({}):", gaps.len());
+    // #1998: never print a bare `gaps: N`. The count is over the stems this
+    // oracle could judge, and the line says so wherever it is quoted.
+    eprintln!(
+        "jit gaps ({} of {} stem(s) judged; {} stem(s) unjudged):",
+        gaps.len(),
+        covered.len() + gaps.len(),
+        out_of_universe.len()
+    );
     for g in &gaps {
         eprintln!("  {g}");
     }
     print_jit_op_report();
+
+    // #1998: `COMPILE_COVERED_FLOOR` pins how much of the corpus compiles.
+    // These two pin the corpus itself, so coverage can no longer be greened by a
+    // stem quietly leaving the denominator — the hole that let `gaps: 0` stand
+    // while 81 stems were never judged at all. Both live outside
+    // `tests/jit_gaps.txt`, for the same reason the coverage floor does.
+    //
+    // A floor, because examples get added: deleting one, or making
+    // `topic_jet_files` stop seeing one, must lower a reviewed constant.
+    const EXAMPLE_CORPUS_FLOOR: usize = 496;
+    assert!(
+        corpus >= EXAMPLE_CORPUS_FLOOR,
+        "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem \
+         leaving `examples/features/<topic>/` shrinks every claim this audit makes: restore \
+         it, or lower the floor in the same diff as the deletion."
+    );
+
+    // Shrink-only, exactly like GAPS_CEILING and RUN_GAPS_CEILING. Every row is
+    // a stem this oracle is blind to, so every row is a defect to fix — build
+    // the context the harness is missing, or fix the frontend the stem trips —
+    // never a skip to accept. The rows are derived from the compiler's own
+    // diagnostics at audit time, so this is a counted ceiling and not an
+    // allowlist: no stem can be written out of the universe by hand.
+    const OUT_OF_UNIVERSE_CEILING: usize = 81;
+    assert!(
+        out_of_universe.len() <= OUT_OF_UNIVERSE_CEILING,
+        "{} stem(s) sit outside the compile oracle (ceiling {OUT_OF_UNIVERSE_CEILING}); this \
+         count may only fall:\n{}",
+        out_of_universe.len(),
+        out_of_universe.join("\n")
+    );
+    assert!(
+        !out_of_universe.is_empty() || OUT_OF_UNIVERSE_CEILING == 0,
+        "the oracle now judges the whole corpus: set OUT_OF_UNIVERSE_CEILING to 0 in the same \
+         diff, so the universe hole cannot reopen unnoticed"
+    );
     // #1663: this ledger has been hand-falsified three times, in both
     // directions, because one blob equality could not say which way a set
     // moved. Compare each section directionally and name the direction that
@@ -9207,14 +9398,15 @@ fn ledger_cross_check_holds() {
 /// Compile coverage is pinned for `serde/serde_generic` alone. `compile_covered:`
 /// is not a wish list — `jit_coverage_audit` compares it to the OBSERVED set in
 /// both directions (#1663), so a row the audit does not observe fails as a
-/// REGRESSION. `serde/encoding_breadth` is observed neither way:
-/// `observe_jit_coverage` skips a stem whose in-process Loader/Sema pass errors,
-/// and this stem is one of those (#1998, the audit's universe hole). Pinning it
-/// "must remain compile-covered" therefore demanded a row that `jit_coverage_audit`
-/// rejects — the pin could only be satisfied by falsifying the ledger it guards.
-/// Dropping that one claim loses no cover: the audit's GREW assertion adds the row
-/// the moment the stem enters the universe, and its REGRESSED assertion pins it
-/// there afterwards.
+/// REGRESSION. `serde/encoding_breadth` was observed neither way: before #1998
+/// the audit dropped a stem whose in-process Loader/Sema pass errored, and this
+/// stem was one of them. Pinning it "must remain compile-covered" therefore
+/// demanded a row that `jit_coverage_audit` rejects — the pin could only be
+/// satisfied by falsifying the ledger it guards. The audit now records such a
+/// stem in its `out_of_universe` list with the diagnostic that stopped it, so
+/// the reason this claim is not made is readable from one audit run. Dropping
+/// the claim loses no cover: the audit's GREW assertion adds the row the moment
+/// the stem enters the universe, and its REGRESSED assertion pins it afterwards.
 #[test]
 fn serde_jit_parity_manifest_pins() {
     let (compile_covered, gaps, run_gaps, _) = parse_jit_gap_manifest_full();
@@ -9526,6 +9718,39 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             records.len(),
             all_example_stems().len(),
             "corpus gate must classify every discovered example"
+        );
+        // #1998: the blob compare below reports the first diverging record, so a
+        // manifest row naming an example that does not exist reads exactly like
+        // an example whose class changed. That is how the nonexistent stem
+        // `tooling/data_line` held a battery down for ten days. Name the two
+        // failures apart, and name them before the blob compare runs.
+        let discovered: std::collections::HashSet<String> =
+            all_example_stems().into_iter().collect();
+        let ghosts: Vec<&str> = expected
+            .iter()
+            .filter(|record| !discovered.contains(&record.stem))
+            .map(|record| record.stem.as_str())
+            .collect();
+        assert!(
+            ghosts.is_empty(),
+            "tests/jit_corpus_gate.txt names {} stem(s) with no \
+             examples/features/<topic>/<name>.jet file: {ghosts:?}. A nonexistent stem is a \
+             stale row to delete, never a classification that failed.",
+            ghosts.len()
+        );
+        let listed: std::collections::HashSet<&str> =
+            expected.iter().map(|record| record.stem.as_str()).collect();
+        let unlisted: Vec<&str> = records
+            .iter()
+            .map(|record| record.stem.as_str())
+            .filter(|stem| !listed.contains(stem))
+            .collect();
+        assert!(
+            unlisted.is_empty(),
+            "{} example(s) appear in NO section of tests/jit_corpus_gate.txt, breaking that \
+             file's own invariant that every top-level example appears in exactly one: \
+             {unlisted:?}. Regenerate the manifest; a missing row is not a class change.",
+            unlisted.len()
         );
     }
     // Hard floor: run_tier_broken must stay empty. A regression that moves an
