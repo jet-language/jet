@@ -517,7 +517,11 @@ pub(crate) fn resident_run_fresh(
     compiled?;
     let outcome = resident_invoke();
     if outcome.is_ok() {
-        super::tier_cache::publish_capture();
+        // Only a plan with an empty deopt list reaches this entry, so the whole
+        // program is the tier roster. The artifact carries it because a warm
+        // replay has no plan of its own to report to `--trace-tiers`.
+        let native_fns: Vec<&str> = program.funcs.iter().map(|f| f.name.as_str()).collect();
+        super::tier_cache::publish_capture(&native_fns);
     } else {
         super::tier_cache::abort_capture();
     }
