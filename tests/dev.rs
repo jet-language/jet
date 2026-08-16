@@ -9233,9 +9233,7 @@ fn serde_jit_parity_manifest_pins() {
     // A claim about the observed set, so it is made only for the stem the audit
     // can see. `serde/encoding_breadth` is outside that universe (#1998).
     assert!(
-        compile_covered
-            .iter()
-            .any(|row| row == "serde/serde_generic"),
+        compile_covered.iter().any(|row| row == "serde/serde_generic"),
         "serde/serde_generic must remain compile-covered"
     );
 }
