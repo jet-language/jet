@@ -8923,7 +8923,7 @@ fn jit_coverage_audit_inner() {
     // row (aec11ad74 dropped `types/unit_literals` while it was a live gap).
     // Pin the row count outside the file: a deletion now has to lower a
     // reviewed constant, exactly like RUN_GAPS_CEILING.
-    const COMPILE_COVERED_FLOOR: usize = 430;
+    const COMPILE_COVERED_FLOOR: usize = 440;
     let recorded_count = expected_covered.len();
     assert_eq!(
         recorded_count, COMPILE_COVERED_FLOOR,
