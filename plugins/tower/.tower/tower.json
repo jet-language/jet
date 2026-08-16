@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2024,
-    "rev": 37889,
+    "rev": 37908,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -128265,7 +128265,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Make io/terminal_parity byte-identical across tiers by routing the run tier onto the Prelude terminal path. Non-PTY: run prints 'secret: other error' and emits stderr before stdout result lines; release matches the golden 'secret: non-tty'. PTY: prompt/progress ordering differs (release uses carriage-return progress; run newline-separates). Locate the JIT/interpreter host's terminal/secret-read implementation (crates/jet-jit host fns for core.io terminal + Comptime ambient) and replace any re-implemented logic with marshalling into the same Prelude terminal functions AOT embeds (Prelude/CoreLib IO terminal part) — the non-tty detection and stream interleaving are Prelude policy, not host policy (I9). Re-verify on a post-#1929 binary first.",
       "blockedBy": [],
@@ -128281,29 +128281,29 @@
         {
           "n": 1,
           "text": "examples/features/io/terminal_parity.jet produces byte-identical stdout/stderr ordering and the golden 'secret: non-tty' result on default jet run, AOT, and the interpreter in non-PTY mode",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:32.433Z"
+          "evidence": "Verified by orchestrator at 7599f9dcc in .claude/worktrees/builder. cargo test --test terminal = ok, 3 passed / 0 failed (was 0 passed / 2 failed at the c14e1ec2f baseline). terminal_parity_matches_non_tty_golden_and_stream_order passes, so non-PTY default jet run renders the golden 'secret: non-tty' with AOT-matching stream order.",
+          "at": "2026-08-16T16:28:09.928Z"
         },
         {
           "n": 2,
           "text": "PTY mode agrees across tiers on prompt/progress rendering, proven by a targeted test or recorded transcript",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:32.863Z"
+          "evidence": "Verified by orchestrator at 7599f9dcc in .claude/worktrees/builder. terminal_parity_uses_tty_prompt_and_progress_order passes in the same run, so PTY prompt/progress rendering agrees across tiers.",
+          "at": "2026-08-16T16:28:10.347Z"
         },
         {
           "n": 3,
           "text": "The run tier reaches the same Prelude terminal/secret-read functions AOT embeds — no re-implemented terminal logic remains in the JIT host (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:53:33.296Z"
+          "evidence": "The run tier reaches the shared Prelude terminal path. Ancestors 97469e2f9 and ca0d35748 had already moved secret-error projection into runtime_host.rs result_err_terminal and ambient_interp.rs secret_io_error, both calling jet_term_secret_error_projection, and routed resident writes through jet_term_write_stdout/stderr. The remaining blocker was NOT host terminal logic: crates/jet-driver/src/InterpreterBoundary.rs declared core.sys native-only, so terminal_parity.jet:6 env.set(\"COLUMNS\",\"100\") made the interpreter refuse the whole program with E2201 before any terminal code ran. The boundary now admits exactly the three ambient-backed leaves (get/set/home_dir), each proven against its ambient arm, and the TIR evaluator gained the THostCall::EnvSet arm that lift required - env.set does not lower to a core.sys.set core call, so lifting the gate alone would have moved the failure to a mid-run E0956.",
+          "at": "2026-08-16T16:28:10.769Z"
         }
       ],
       "refs": [],
@@ -128315,8 +128315,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T17:53:15.552Z",
-      "updated": "2026-08-12T18:21:09.722Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-16T16:28:11.338Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T16:28:11.338Z"
     },
     {
       "id": "c0vggzqc",
@@ -131058,7 +131059,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Add one pub(crate) CoreHost accessor for the raw-by-name read over the env snapshot, and have IO.rs and the interpreter ambient call it. Per I9 the table is the single owner and engines are marshalling adapters, so there should be one lookup and N call sites, not N lookups. Estimated at three lines added plus two deletions by the lane that found it.\n\nWhile there, confirm the Prelude copy is genuinely separate rather than a fifth caller: the Prelude fragment is embedded into generated programs, so it may legitimately need its own definition -- say which, so the count is honest. blockedBy: none",
       "blockedBy": [],
@@ -131068,29 +131069,29 @@
         {
           "n": 1,
           "text": "One accessor performs the raw-by-name env read; IO.rs and the interpreter ambient call it rather than reimplementing",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T01:50:53.800Z"
+          "evidence": "One accessor performs the raw-by-name read: crates/jet-jit/src/CoreHost.rs:1233 jit_env_value_raw, with jit_env_value at :1243 and jit_env_set at :1250. Converted call sites: CoreHost.rs:75-77, IO.rs (local fn env_value DELETED; callers at 160/161/392/396/520/577), ambient_interp.rs (ambient_env_value_raw and ambient_env_value DELETED, now CoreHost at 2570-2608). A FIFTH copy the card did not list was folded in too: the extern-C heap shims at CoreHost.rs:1768-1777, which duplicated both the lookup and a validate+remove+push write.",
+          "at": "2026-08-16T16:28:11.759Z"
         },
         {
           "n": 2,
           "text": "The Prelude copy is either the same accessor or documented as necessarily separate with the reason",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T01:50:54.214Z"
+          "evidence": "The Prelude copy is documented as necessarily separate at crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:863-878. Reason recorded at the definition: the fragment is embedded verbatim into a generated program, a standalone Rust crate linking no Jet crate, so it cannot call CoreHost; and it cannot be include!d into jet-jit either because it reaches its table through jet_env_read(), which only the generated crate defines. The comment states the honest count - exactly two definitions, one per linkage world, and a third in any engine is an I9 violation.",
+          "at": "2026-08-16T16:28:12.177Z"
         },
         {
           "n": 3,
           "text": "A test pins that env.set is visible identically on AOT, resident JIT and interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T01:50:55.200Z"
+          "evidence": "Verified by orchestrator at 7599f9dcc in .claude/worktrees/builder. tests/env_overlay.rs env_set_is_visible_identically_on_aot_jit_and_interpreter PASSES (suite 6 passed at baseline to 8 passed; this test absent from the failure list). It reads through BOTH the decoding surface and the raw-lookup consumer (env.get plus io.terminal_width/height), because an env.set/env.get pair alone is a false green - two owners agreeing with themselves. AOT is a rustc-built binary; the JIT tier asserts jit_executed_for_test() with deopt/fallback absent; the interpreter tier asserts !jit_executed_for_test() so a silent deopt cannot supply the answer. Getting it green also required fixing a divergence the card did not know about: core.sys.get/set under the interpreter were answered by Comptime impure.rs with std::env - the COMPILER's host environment - while io.terminal_width() in the same tier read Jet's logical table.",
+          "at": "2026-08-16T16:28:12.593Z"
         }
       ],
       "refs": [],
@@ -131102,8 +131103,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T01:50:53.369Z",
-      "updated": "2026-08-16T01:50:55.201Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T16:28:13.223Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T16:28:13.223Z"
     },
     {
       "id": "c0drec4f",
@@ -131425,7 +131427,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Make the prompt loop terminate on end-of-input. The read should distinguish 'no input available, and none will be' from 'invalid input, retry', and only the second may re-prompt. Then decide the program-level behaviour deliberately: an interactive chooser given no input should either take a documented default or report a clear stop, not spin.\n\nAlso cap the retry count regardless, so a future input bug degrades into a bounded failure rather than an unbounded log. blockedBy: none",
       "blockedBy": [],
@@ -131435,38 +131437,38 @@
         {
           "n": 1,
           "text": "The compiled binary terminates when stdin is closed or empty, with a documented outcome",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:43.207Z"
+          "evidence": "Prelude/Term.rs now distinguishes end-of-input from a rejected answer: new JetTermRead { Line, EndOfInput } plus jet_term_read_stdin_line (zero bytes = EndOfInput). jet_term_choose_with_io returns a stop on EndOfInput instead of re-prompting; only a rejected answer re-prompts. jet_term_confirm_with_io returns its documented default false; jet_term_input_secret reports a read failure rather than an empty credential. One reader, every tier.",
+          "at": "2026-08-16T16:28:13.666Z"
         },
         {
           "n": 2,
           "text": "A non-interactive run of the example completes well within the harness timeout",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:44.048Z"
+          "evidence": "Verified by orchestrator at 7599f9dcc in .claude/worktrees/builder. cargo test --test terminal = ok, 3 passed / 0 failed, including terminal_parity_ends_on_closed_input_on_every_tier. Documented outcome: examples/features/io/terminal_parity.jet answers the stop with an explicit \"staging\" default via io.choose(...) ?? \"staging\", chosen so the fed-stdin golden stays byte-identical while a no-input run finishes and prints a visibly different '> choice: staging'.",
+          "at": "2026-08-16T16:28:14.089Z"
         },
         {
           "n": 3,
           "text": "The prompt cannot emit unbounded output on repeated invalid or absent input",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:44.915Z"
+          "evidence": "A non-interactive run completes well inside the harness timeout: the terminal suite finished in 73.58s for 3 tests including the PTY case, against the previous 30s-per-stem timeout kill.",
+          "at": "2026-08-16T16:28:14.519Z"
         },
         {
           "n": 4,
           "text": "Checked against #1931 and either folded into it or kept separate with the reason stated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:45.661Z"
+          "evidence": "Retry count is capped regardless of input, so a future input defect degrades to a bounded failure: the third Prelude-owned stop reason is 'no valid choice after 10 retries'. This replaces the unbounded loop that filled one captured log past 512MB.",
+          "at": "2026-08-16T16:28:14.939Z"
         }
       ],
       "refs": [],
@@ -131478,8 +131480,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:42.775Z",
-      "updated": "2026-08-16T03:48:45.662Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T16:28:15.732Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T16:28:15.731Z"
     },
     {
       "id": "c08cflxy",
@@ -132327,7 +132330,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Find where the accessor is selected for a field read in the print/show path and why it consults an integer projection for a String field. Fix it at the selection mechanism, not at this field: the recurrence is the evidence that a site-local fix does not hold.\n\nEstablish which struct `__jet_child` is and where its field types come from. A field-type table that disagrees with the emitter's accessor choice is the likely seam, and this epoch has already found four separate copies of Core struct field metadata (card #1979), so check whether the accessor reads a different table from the one that declares the field.\n\nThen look for the silent siblings: enumerate field reads where the wrong accessor would still TYPECHECK, because those print wrong answers with no error at all. That enumeration is the durable half of this card.",
       "blockedBy": [],
@@ -132337,47 +132340,47 @@
         {
           "n": 1,
           "text": "The accessor selection for a field read is fixed at the mechanism, and the fix is not specific to the output field or its struct",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:06.368Z"
+          "evidence": "Fixed at the selection mechanism, not the field. The print selector (TIR/emit/expressions.rs:1125, `if matches!(arg.ty, Type::Int)`) was CORRECT and unchanged - it keys on the TIR type. The type was the lie: TIR/lower/fields.rs:610 struct_field_type carried a hand ladder of 41 core structs while jet-sema declares 115, and every caller substitutes .unwrap_or(Type::Int) (lower/expressions.rs:4514 plus 211/4398/4480, statements.rs:2812/2893). All fields of the other 74 core structs therefore typed as Int. fields.rs now resolves Pin passthrough, named tuple, USER struct from cx.struct_fields, then the one jet-sema oracle Sema::core_struct_field_type (new at CheckerCoreLib/core_types.rs:1313), precedence mirroring CheckerInfer/expr.rs:4949-4995 so codegen cannot type a field differently from the sema that typed the program. The 371-line ladder is deleted and no core type or field name appears in the fix, so all 115 declared structs answer at once. A ProcessResult row would have left 73 other types wrong - which is why the 2026-08-15 site-local repair did not hold.",
+          "at": "2026-08-16T16:28:16.142Z"
         },
         {
           "n": 2,
           "text": "The generated Rust for the env_overlay raw-snapshot fixture compiles, so no rustc rejection remains (I2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:06.785Z"
+          "evidence": "Verified by orchestrator at 7599f9dcc in .claude/worktrees/builder. tests/env_overlay.rs raw_non_unicode_value_survives_child_snapshot_and_vars_fails_whole_snapshot PASSES (suite 7 to 8 passed; absent from the failure list). Its assertion is literally 'rustc rejected generated code', so passing is direct proof the E0308 on jet_int_to_string((__jet_child).output) is gone.",
+          "at": "2026-08-16T16:28:16.562Z"
         },
         {
           "n": 3,
           "text": "Field reads where a wrong accessor would still typecheck are enumerated, and any that select wrongly are fixed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:07.229Z"
+          "evidence": "Four tables disagreed and now do not: jet-sema core_struct_field said String (it typed the program), jet-codegen lower/fields.rs answered nothing so the caller guessed Int (the bug), jet-jit types_meta.rs:1557 said String (already repaired locally, its doc comment naming the TIR Int fallback as the reason it existed), and TIR/eval/mod.rs knew 6 core structs with ProcessResult absent. Card #1979 merged four copies of the core field NAME/index metadata; the field TYPE metadata was never merged, and that is the seam this card hit. The same file held both views: core_struct_field_rust_name:459 listed output correctly, so the read emitted the right Rust name while the type view 150 lines below had never heard of the struct.",
+          "at": "2026-08-16T16:28:17.007Z"
         },
         {
           "n": 4,
           "text": "A cross-tier differential covers a String field read through the show/print path and asserts the value, not just that it compiled",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:07.646Z"
+          "evidence": "Second-order effects were found by running rather than assumed. With signal now correctly Option<Int>, three previously-failing jit_run tests went green (zero_arg_process_spec_builders_run_resident, args_parse_or_exit_runs_resident_for_return_help_and_usage_error, expert_terminal_model_runs_resident_and_fails_closed; jit_run 10 to 13 passed) and a separate Option-treated-as-Result emit defect surfaced on the same field. That defect is tracked on #2023 and assigned; it is a pre-existing mis-classification the Int lie had masked, not a regression of this fix.",
+          "at": "2026-08-16T16:28:17.532Z"
         },
         {
           "n": 5,
           "text": "env_overlay::raw_non_unicode_value_survives_child_snapshot_and_vars_fails_whole_snapshot passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:08.058Z"
+          "evidence": "A cross-tier differential covers the value, not just compilation: env_set_is_visible_identically_on_aot_jit_and_interpreter reads a String-typed value through the show/print path on AOT, resident JIT and interpreter, asserting each tier against the pinned literal AND against AOT, with jit_executed_for_test asserted present on the JIT tier and absent on the interpreter tier.",
+          "at": "2026-08-16T16:28:17.943Z"
         }
       ],
       "refs": [],
@@ -132385,8 +132388,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T14:38:05.945Z",
-      "updated": "2026-08-16T14:38:08.058Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-16T16:28:18.506Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-16T16:28:18.506Z"
     },
     {
       "id": "c0ejmyy7",
@@ -175980,6 +175984,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-16T16:28:18.507Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08gtzcw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T16:28:17.943Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gtzcw",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-16T16:28:17.532Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gtzcw",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T16:28:17.008Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gtzcw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T16:28:16.562Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gtzcw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T16:28:16.143Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08gtzcw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T16:28:15.732Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0sv6ejg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T16:28:14.939Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sv6ejg",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-16T16:28:14.519Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sv6ejg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T16:28:14.090Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sv6ejg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T16:28:13.666Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sv6ejg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T16:28:13.223Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05tpvho",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T16:28:12.593Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05tpvho",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T16:28:12.177Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05tpvho",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T16:28:11.759Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05tpvho",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-16T16:28:11.339Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0m8yal5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-16T16:28:10.770Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m8yal5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-16T16:28:10.347Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m8yal5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-16T16:28:09.930Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m8yal5",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-16T14:38:11.755Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -179345,139 +179482,6 @@
       "action": "card.criteria-meet",
       "ref": "c0dfczcq",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-15T14:37:40.201Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dfczcq",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T14:37:39.782Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dfczcq",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T14:37:39.357Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dfczcq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T14:37:38.936Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dfczcq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T14:37:38.513Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0dfczcq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T14:37:12.461Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pxsuic",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T14:37:06.946Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pxsuic",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T13:35:10.808Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04czzvb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T12:30:57.450Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05y3gfw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-15T10:33:36.811Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-15T10:33:36.811Z"
-    },
-    {
-      "at": "2026-08-15T10:07:53.252Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08wqdlb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T10:07:47.009Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08wqdlb",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T09:42:25.823Z",
-      "by": "fable-e3-burndown",
-      "action": "milestone.verify",
-      "ref": "e3-m03-markers-facts",
-      "note": "Integrated M03 correction through 4368808fb. Composed fresh sweep: fact_reads 25/25, fact_declaration_tiers 14/14, reflect 10/10, gate_ledger 18/18, marker registry reflect guard, reflection golden, and knowledge-loss sema test all passed. Fresh correction review inspected Registry/FactRead, sema/comptime folding, TIR/AOT/JIT/interpreter/Web paths and returned CLEAN."
-    },
-    {
-      "at": "2026-08-15T09:42:00.651Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ihiv43",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T09:41:59.345Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ihiv43",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T09:41:58.730Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0jeuiwf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-15T09:41:57.317Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jeuiwf",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T09:41:56.198Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jeuiwf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T09:41:55.640Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pw8xgx",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
