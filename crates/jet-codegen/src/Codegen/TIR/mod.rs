@@ -4536,6 +4536,9 @@ pub enum TNumericOp {
 /// receiver-type branch (Map vs list vs trait-object list) and the Fn-vs-FnMut
 /// branch (off the lambda arg's `needs_fn_mut` meta) are decided ONCE at lowering;
 /// the variant encodes the chosen form so emit only formats.
+// Debug names the variant in engine rejection text: a JIT refusal is a silent
+// interpreter deopt, so the message must say WHICH closure method was refused.
+#[derive(Debug)]
 pub enum TClosureOp {
     /// Prove two indexes before lending their mutable views to one callback.
     EditDisjoint,
@@ -4766,6 +4769,9 @@ pub enum TZipFillMode {
     Columns,
 }
 
+// Debug names the variant in engine rejection text: a JIT refusal is a silent
+// interpreter deopt, so the message must say WHICH builtin method was refused.
+#[derive(Debug)]
 pub enum TBuiltinOp {
     /// `len` on a `String` → `jet_char_len(&(recv))` (char count, not byte len).
     LenString,

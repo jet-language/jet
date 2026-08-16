@@ -1319,6 +1319,12 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
         &["UiNode"],
         &["kind", "role", "label", "width", "height", "color", "children"],
     ),
+    // `Path` is one slot holding its text, the shape `CoreHost::path_record`
+    // allocates and `path_string_from_record` reads back, and the same single
+    // `inner` field the AOT `JetPath` and the interpreter's `Path` CtValue
+    // carry. Registering it here is what makes `~path` (Clone) a record copy
+    // instead of a lowering refusal.
+    (&["Path"], &["inner"]),
     (&["DirEntry"], &["name", "path", "is_dir"]),
     (
         &["Stat"],
@@ -1626,6 +1632,18 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
         },
         "Rotation" => match field {
             "previous" | "current" => Some(Type::Named("KeyRef".into())),
+            _ => None,
+        },
+        // `Path` is one slot holding its text: the shape `CoreHost::path_record`
+        // allocates and `path_string_from_record` reads back, and the same single
+        // field the AOT `JetPath` and the interpreter's `Path` CtValue carry.
+        // Registering it here is what makes `~path` (Clone) a record copy instead
+        // of a lowering refusal. It stays LOCAL rather than moving into the sema
+        // declaring table on purpose: `Path` is opaque to users, so teaching sema
+        // the field would make `path.inner` a legal user field read, which is a
+        // surface change no decision ratifies. Same reason as the rows below.
+        "Path" => match field {
+            "inner" => Some(Type::String),
             _ => None,
         },
         // D-DATAFRAME1=A: `Table<T>`/`Series<T>`/`LazyFrame<T>` are opaque core
