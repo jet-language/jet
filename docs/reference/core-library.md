@@ -1033,7 +1033,7 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `take(n)` | `[U8] ? IOError` | Read up to `n` raw bytes from stdin |
 | `buffered()` | `StdinHandle` | Same buffered stdin handle as `stdin()` (Jet buffers by default) |
 | `confirm(prompt)` | `Bool` | Ask yes or no; show `[y/N]` and use no for a bare Enter |
-| `choose(prompt, items)` | `String ? IOError` | Number the strings and re-prompt until the user makes a valid choice |
+| `choose(prompt, items)` | `String ? IOError` | Number the strings and ask again for a rejected answer, up to ten retries; a closed stdin or a spent retry budget returns `InvalidInput` |
 | `input_secret(prompt)` | `String ? IOError` | Read one line without echo; return an error when stdin is not a terminal |
 | `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
 | `print(value…)` | nothing | Print each value on its own line |
@@ -1062,6 +1062,13 @@ falls back to an echoed read when stdin is redirected. `buffered()` is an
 alias of `stdin()` — Jet already buffers stdin. `core.term` still owns
 `live { ... }` and `term.read_key()` for direct raw-key input; it is the
 shipped raw-mode/key-event bridge under D-TERM1.
+
+Prompts always end. `confirm` answers no, and `choose` returns an
+`InvalidInput` error, when stdin is closed or empty — no prompt repeats itself
+without end, so a piped run, a test harness, and a CI job all finish.
+`choose` also stops with `InvalidInput` after ten rejected answers, and
+`input_secret` reports a read error when the terminal closes before the secret
+arrives.
 
 `jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
 program arguments (`process.argv()` sees them, argv[1..]); plain positional words

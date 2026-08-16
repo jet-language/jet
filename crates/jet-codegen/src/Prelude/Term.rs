@@ -215,6 +215,39 @@ pub(crate) fn jet_term_style_force(style: &str, text: &str) -> String {
     code.map_or_else(|| text.to_string(), |code| format!("\x1b[{code}m{text}\x1b[0m"))
 }
 
+// D-IO-PROMPT1=A: one prompt reader for every tier. A read that returns no
+// bytes means the stream is closed and will never answer again, which is a
+// different fact from an answer this kernel can reject and ask about a second
+// time. Only a rejected answer may re-prompt. Engines marshal this outcome;
+// they never re-derive it, so no engine can spin where another one stops.
+pub(crate) enum JetTermRead {
+    Line(String),
+    EndOfInput,
+}
+
+pub(crate) fn jet_term_read_stdin_line() -> std::io::Result<JetTermRead> {
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line)? == 0 {
+        return Ok(JetTermRead::EndOfInput);
+    }
+    jet_term_trim_line(&mut line);
+    Ok(JetTermRead::Line(line))
+}
+
+/// The `io.input` text surface answers with a String, and a closed stream
+/// answers with an empty line there. Prompt loops need the sharper fact above,
+/// so both surfaces stay on this one reader.
+pub(crate) fn jet_term_read_text(read: JetTermRead) -> String {
+    match read {
+        JetTermRead::Line(line) => line,
+        JetTermRead::EndOfInput => String::new(),
+    }
+}
+
+pub(crate) fn jet_term_secret_closed_error() -> &'static str {
+    "the input stream closed before the secret arrived"
+}
+
 pub(crate) fn jet_term_secret_preflight(
     stdin_is_terminal: bool,
     stdout_is_terminal: bool,
@@ -227,7 +260,7 @@ pub(crate) fn jet_term_secret_preflight(
 pub(crate) fn jet_term_input_secret(
     prompt: &str,
     mut write: impl FnMut(&str) -> Result<(), String>,
-    mut read: impl FnMut() -> Result<String, String>,
+    mut read: impl FnMut() -> Result<JetTermRead, String>,
 ) -> Result<String, JetTermSecretError> {
     jet_term_secret_preflight(
         jet_term_stdin_is_terminal(),
@@ -242,9 +275,15 @@ pub(crate) fn jet_term_input_secret(
     let secret = read().map_err(JetTermSecretError::Read);
     drop(guard);
     let _ = write("\n");
-    let mut secret = secret?;
-    jet_term_trim_line(&mut secret);
-    Ok(secret)
+    // A terminal that closes before the secret arrives is a read failure, not
+    // an empty secret: `Ok("")` would hand the caller a credential nobody
+    // typed.
+    match secret? {
+        JetTermRead::Line(secret) => Ok(secret),
+        JetTermRead::EndOfInput => Err(JetTermSecretError::Read(
+            jet_term_secret_closed_error().to_string(),
+        )),
+    }
 }
 
 struct JetTermModeGuard;
@@ -262,12 +301,15 @@ pub(crate) fn jet_term_confirm_prompt(prompt: &str) -> String {
 pub(crate) fn jet_term_confirm_with_io<E>(
     prompt: &str,
     mut write: impl FnMut(&str) -> Result<(), E>,
-    mut read: impl FnMut() -> Result<String, E>,
+    mut read: impl FnMut() -> Result<JetTermRead, E>,
 ) -> bool {
     let prompt = jet_term_confirm_prompt(prompt);
-    let answer = write(&prompt)
-        .and_then(|_| read())
-        .unwrap_or_default();
+    // The safe default answers for a stream that says nothing, so a piped or
+    // closed input ends the prompt instead of holding the program.
+    let answer = match write(&prompt).and_then(|_| read()) {
+        Ok(JetTermRead::Line(line)) => line,
+        Ok(JetTermRead::EndOfInput) | Err(_) => return false,
+    };
     matches!(
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
@@ -286,19 +328,43 @@ pub(crate) fn jet_term_choose_invalid(item_count: usize) -> String {
     format!("Enter a number from 1 to {item_count}.\n")
 }
 
+/// D-IO-PROMPT1=A: a rejected answer may be asked about again, but not without
+/// end. Ten retries is the whole budget for one `choose` call, so a reader that
+/// keeps answering with nonsense stops with one reported error instead of an
+/// unbounded prompt log.
+pub(crate) const JET_TERM_CHOOSE_RETRY_LIMIT: usize = 10;
+
+pub(crate) fn jet_term_choose_empty_error() -> &'static str {
+    "choose needs at least one item"
+}
+
+pub(crate) fn jet_term_choose_closed_error() -> &'static str {
+    "the input stream closed before a choice arrived"
+}
+
+pub(crate) fn jet_term_choose_retry_error() -> String {
+    format!("no valid choice after {JET_TERM_CHOOSE_RETRY_LIMIT} retries")
+}
+
+/// `stop` builds the caller's error type from one Prelude-owned reason, so the
+/// empty-item, closed-stream, and retry-budget stops are one mechanism rather
+/// than three per-engine spellings.
 pub(crate) fn jet_term_choose_with_io<E>(
     prompt: &str,
     items: &[String],
     mut write: impl FnMut(&str) -> Result<(), E>,
-    mut read: impl FnMut() -> Result<String, E>,
-    empty_error: impl FnOnce() -> E,
+    mut read: impl FnMut() -> Result<JetTermRead, E>,
+    stop: impl Fn(&str) -> E,
 ) -> Result<String, E> {
     if items.is_empty() {
-        return Err(empty_error());
+        return Err(stop(jet_term_choose_empty_error()));
     }
     write(&jet_term_choose_menu(prompt, items))?;
-    loop {
-        let answer = write("> ").and_then(|_| read())?;
+    for _ in 0..=JET_TERM_CHOOSE_RETRY_LIMIT {
+        let answer = match write("> ").and_then(|_| read())? {
+            JetTermRead::Line(answer) => answer,
+            JetTermRead::EndOfInput => return Err(stop(jet_term_choose_closed_error())),
+        };
         if let Ok(index) = answer.trim().parse::<usize>() {
             if let Some(item) = index.checked_sub(1).and_then(|index| items.get(index)) {
                 return Ok(item.clone());
@@ -306,10 +372,7 @@ pub(crate) fn jet_term_choose_with_io<E>(
         }
         write(&jet_term_choose_invalid(items.len()))?;
     }
-}
-
-pub(crate) fn jet_term_choose_empty_error() -> &'static str {
-    "choose needs at least one item"
+    Err(stop(&jet_term_choose_retry_error()))
 }
 
 pub(crate) fn jet_term_trim_line(line: &mut String) {

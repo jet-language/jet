@@ -371,6 +371,22 @@ fn jet_std_io_args() -> Vec<String> {
 // `include!` the same Prelude source (I9); still in scope here via the
 // shared crate-root closure both files get concatenated into for AOT.
 
+// #2009: one prompt read for every tier. `jet_std_io_input` keeps the text
+// surface for `io.input`; the prompt kernels need the closed-stream fact, and
+// both come from the same Prelude reader.
+fn jet_std_io_prompt_read() -> Result<JetTermRead, jet_std::IOError> {
+    if jet_fault_should_fail("IO.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            "fault injected: IO.Read",
+        ));
+    }
+    jet_term_read_stdin_line().map_err(|e| {
+        jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e)
+    })
+}
+
 // D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
 fn jet_std_io_confirm(prompt: &String) -> bool {
     jet_term_confirm_with_io(
@@ -393,7 +409,7 @@ fn jet_std_io_confirm(prompt: &String) -> bool {
             jet_term_write_stdout(text, true)
                 .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
         },
-        || jet_std_io_input(None),
+        jet_std_io_prompt_read,
     )
 }
 
@@ -419,13 +435,13 @@ fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet
             jet_term_write_stdout(text, true)
                 .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
         },
-        || jet_std_io_input(None),
-        || {
+        jet_std_io_prompt_read,
+        |message| {
             jet_std::IOError::InvalidInput(jet_std::IOContext::new(
                 jet_std::IOOperation::Read,
                 Some("stdin".to_string()),
                 None,
-                Some(jet_term_choose_empty_error().to_string()),
+                Some(message.to_string()),
             ))
         },
     )
@@ -463,11 +479,7 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
             if jet_fault_should_fail("IO.Read") {
                 return Err("fault injected: IO.Read".to_string());
             }
-            let mut secret = String::new();
-            std::io::stdin()
-                .read_line(&mut secret)
-                .map(|_| secret)
-                .map_err(|error| error.to_string())
+            jet_term_read_stdin_line().map_err(|error| error.to_string())
         },
     )
     .map_err(jet_std_io_secret_error)

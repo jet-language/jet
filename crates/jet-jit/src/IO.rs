@@ -32,7 +32,7 @@ mod progress_semantics {
 mod io_line_stream {
     use crate::fault_injection::jet_fault_should_fail;
 
-    use super::term_prelude::jet_term_write_stdout;
+    use super::term_prelude::{jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout};
 
     #[allow(dead_code)]
     mod jet_std {
@@ -199,16 +199,14 @@ fn write_prompt_with_sink(
     Ok(())
 }
 
-fn read_line() -> Result<String, String> {
+// I9: the JIT host marshals the prompt read and never re-encodes it. The
+// closed-stream fact and the trailing-newline trim are the Prelude's, exactly
+// as AOT embeds them, so no tier can spin where another one stops.
+fn read_prompt_line() -> Result<term_prelude::JetTermRead, String> {
     if crate::fault_injection::jet_fault_should_fail("IO.Read") {
         return Err("fault injected: IO.Read".to_string());
     }
-    let mut line = String::new();
-    std::io::stdin()
-        .read_line(&mut line)
-        .map_err(|error| format!("read stdin: {error}"))?;
-    term_prelude::jet_term_trim_line(&mut line);
-    Ok(line)
+    term_prelude::jet_term_read_stdin_line().map_err(|error| format!("read stdin: {error}"))
 }
 
 pub(crate) fn prompt_input(prompt: Option<&str>) -> Result<String, String> {
@@ -216,7 +214,7 @@ pub(crate) fn prompt_input(prompt: Option<&str>) -> Result<String, String> {
     if let Some(prompt) = prompt {
         write_prompt_with_sink(prompt, &mut sink)?;
     }
-    read_line()
+    Ok(term_prelude::jet_term_read_text(read_prompt_line()?))
 }
 
 pub(crate) fn prompt_confirm(prompt: &str) -> bool {
@@ -231,7 +229,7 @@ pub(crate) fn prompt_confirm_with_sink(
     term_prelude::jet_term_confirm_with_io(
         prompt,
         |text| write_prompt_with_sink(text, &mut sink),
-        read_line,
+        read_prompt_line,
     )
 }
 
@@ -249,8 +247,8 @@ pub(crate) fn prompt_choose_with_sink(
         prompt,
         values,
         |text| write_prompt_with_sink(text, &mut sink),
-        read_line,
-        || term_prelude::jet_term_choose_empty_error().to_string(),
+        read_prompt_line,
+        |message| message.to_string(),
     )
 }
 
@@ -268,7 +266,7 @@ pub(crate) fn prompt_input_secret_with_sink(
     term_prelude::jet_term_input_secret(
         prompt,
         |text| write_prompt_with_sink(text, &mut sink),
-        read_line,
+        read_prompt_line,
     )
 }
 
