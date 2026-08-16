@@ -882,6 +882,37 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// The condition for a binding-free `Matches` head, shared by the statement
+    /// `if` and the value-position `if`-expression so the two cannot disagree
+    /// about how to read a discriminant. The carrier follows the enum, exactly
+    /// as `TStmt::EnumMatch` selects it per arm: a record-carried value keeps
+    /// its discriminant in field 0, not in the low byte of the word.
+    fn lower_matches_condition(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+    ) -> Result<Value, String> {
+        let enum_name = pattern
+            .enum_type
+            .as_deref()
+            .or_else(|| user_type_name(&subj.ty));
+        let heap = enum_name
+            .zip(pattern.variant())
+            .is_some_and(|(enum_name, variant)| self.meta.enum_uses_heap(enum_name, variant));
+        let value = self.lower_expr(subj)?;
+        self.lower_pattern_condition(value, &pattern.pattern, enum_name, heap)
+    }
+
+    /// A variant head that destructures at least one payload slot into a local.
+    /// Such a head is an if-let, not a bare condition.
+    fn pattern_binds_payload(pattern: &TPattern) -> bool {
+        matches!(
+            &pattern.pattern,
+            Pattern::Variant { bindings, .. }
+                if bindings.iter().any(|slot| slot.as_bind().is_some())
+        )
+    }
+
     fn pattern_binding(pattern: &Pattern) -> Option<(&str, &[PatSlot])> {
         match pattern {
             Pattern::Variant {
@@ -1177,23 +1208,9 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().bor(shifted, disc_v))
             }
             // F64 payloads cannot share one i64 with the disc byte: `shl 8`
-            // drops the sign/exponent byte and corrupts the float. Heap-box
-            // instead: record [disc:i64, payload:f64], return the handle.
-            Some(types::F64) => {
-                let n = self.b.ins().iconst(types::I64, 2);
-                let handle = self.call_host(self.host.struct_new, &[n]);
-                let zero = self.b.ins().iconst(types::I64, 0);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let set_i = self
-                    .module
-                    .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                self.b.ins().call(set_i, &[handle, zero, disc_v]);
-                let set_f = self
-                    .module
-                    .declare_func_in_func(self.host.struct_set_f64, self.b.func);
-                self.b.ins().call(set_f, &[handle, one, payload]);
-                Ok(handle)
-            }
+            // drops the sign/exponent byte and corrupts the float. The record
+            // carrier keeps the float in its own slot.
+            Some(types::F64) => self.pack_enum_record(disc, Some((payload, payload_ty))),
             Some(types::I8) => {
                 let widened = self.b.ins().uextend(types::I64, payload);
                 let shifted = self.b.ins().ishl_imm(widened, 8);
@@ -1208,6 +1225,59 @@ impl LowerCtx<'_, '_> {
                 "jit enum payload type unsupported: {payload_ty:?} ({other:?})"
             )),
         }
+    }
+
+    /// The record carrier: `[disc:i64, payload…]` in a host struct.
+    /// `unpack_enum_heap_payload_at` reads slot `index + 1` back, so slot 0 is
+    /// always the discriminant and the sole payload always lands in slot 1.
+    fn pack_enum_record(
+        &mut self,
+        disc: i64,
+        payload: Option<(Value, &Type)>,
+    ) -> Result<Value, String> {
+        let handle = self.new_record(1 + usize::from(payload.is_some()));
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let disc_v = self.b.ins().iconst(types::I64, disc);
+        self.b.ins().call(set_i, &[handle, zero, disc_v]);
+        let Some((payload, payload_ty)) = payload else {
+            return Ok(handle);
+        };
+        let one = self.b.ins().iconst(types::I64, 1);
+        if Self::is_string_abi_ty(payload_ty) {
+            let set_s = self
+                .module
+                .declare_func_in_func(self.host.struct_set_str, self.b.func);
+            self.b.ins().call(set_s, &[handle, one, payload]);
+            return Ok(handle);
+        }
+        match self.meta.clif_ty(payload_ty) {
+            Some(types::F64) => {
+                let set_f = self
+                    .module
+                    .declare_func_in_func(self.host.struct_set_f64, self.b.func);
+                self.b.ins().call(set_f, &[handle, one, payload]);
+            }
+            Some(types::I64) => {
+                self.b.ins().call(set_i, &[handle, one, payload]);
+            }
+            Some(types::I8) => {
+                let widened = self.b.ins().uextend(types::I64, payload);
+                self.b.ins().call(set_i, &[handle, one, widened]);
+            }
+            Some(types::I32) => {
+                let widened = self.b.ins().sextend(types::I64, payload);
+                self.b.ins().call(set_i, &[handle, one, widened]);
+            }
+            other => {
+                return Err(format!(
+                    "jit enum payload type unsupported: {payload_ty:?} ({other:?})"
+                ))
+            }
+        }
+        Ok(handle)
     }
 
     fn pack_auth_error(&mut self, disc: i64, payload: Option<Value>) -> Value {
@@ -1254,24 +1324,6 @@ impl LowerCtx<'_, '_> {
                 "jit enum payload type unsupported: {payload_ty:?} ({other:?})"
             )),
         }
-    }
-
-    /// True when this enum variant uses a heap record for its payload.
-    fn enum_variant_uses_heap(&self, enum_name: &str, variant: &str) -> bool {
-        if matches!(
-            enum_name,
-            "AuthError" | "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "EmailError"
-        ) {
-            return true;
-        }
-        self.meta
-            .enum_variant_payload_types(enum_name, variant)
-            .is_some_and(|types| {
-                types.len() > 1
-                    || types
-                        .first()
-                        .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
-            })
     }
 
     fn is_datatree_value_ty(ty: &Type) -> bool {
@@ -5237,7 +5289,7 @@ impl LowerCtx<'_, '_> {
                             return Ok(());
                         }
                         TIfCond::Matches { pattern, subj } => {
-                            if matches!(&pattern.pattern, Pattern::Variant { bindings, .. } if bindings.iter().any(|slot| slot.as_bind().is_some())) {
+                            if Self::pattern_binds_payload(pattern) {
                                 if Self::is_datatree_value_ty(&subj.ty) {
                                     self.lower_datatree_if_let(
                                         pattern,
@@ -5255,12 +5307,7 @@ impl LowerCtx<'_, '_> {
                                 }
                                 return Ok(());
                             }
-                            let value = self.lower_expr(subj)?;
-                            let enum_name = pattern
-                                .enum_type
-                                .as_deref()
-                                .or_else(|| user_type_name(&subj.ty));
-                            self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)?
+                            self.lower_matches_condition(pattern, subj)?
                         }
                     };
                     if self.dead {
@@ -6205,7 +6252,7 @@ impl LowerCtx<'_, '_> {
                         let heap = enum_name
                             .zip(arm.pattern.variant())
                             .is_some_and(|(enum_name, variant)| {
-                                self.enum_variant_uses_heap(enum_name, variant)
+                                self.meta.enum_uses_heap(enum_name, variant)
                             });
                         let then_block = self.b.create_block();
                         let next = self.b.create_block();
@@ -12052,6 +12099,9 @@ impl LowerCtx<'_, '_> {
             if type_name == "AuthError" {
                 return Ok(self.pack_auth_error(disc, None));
             }
+            if self.meta.enum_uses_heap(type_name, variant) {
+                return self.pack_enum_record(disc, None);
+            }
             return Ok(self.b.ins().iconst(types::I64, disc));
         }
         if args.len() == 1 && args[0].0.is_none() {
@@ -12059,6 +12109,9 @@ impl LowerCtx<'_, '_> {
             let payload = self.lower_ct_value(&args[0].1)?;
             if type_name == "AuthError" {
                 return Ok(self.pack_auth_error(disc, Some(payload)));
+            }
+            if self.meta.enum_uses_heap(type_name, variant) {
+                return self.pack_enum_record(disc, Some((payload, &payload_ty)));
             }
             return self.pack_enum_scalar(disc, payload, &payload_ty);
         }
@@ -13086,12 +13139,22 @@ impl LowerCtx<'_, '_> {
                             return Err("jit if-expression is-none unsupported".to_string())
                         }
                         TIfCond::Matches { pattern, subj } => {
-                            let value = self.lower_expr(subj)?;
-                            let enum_name = pattern
-                                .enum_type
-                                .as_deref()
-                                .or_else(|| user_type_name(&subj.ty));
-                            self.lower_pattern_condition(value, &pattern.pattern, enum_name, false)?
+                            // Same route as the statement arm: a head that
+                            // destructures a payload slot is an if-let, because
+                            // the branch body reads the bindings the condition
+                            // alone would drop.
+                            if Self::pattern_binds_payload(pattern) {
+                                return self.lower_if_let_expr(
+                                    pattern,
+                                    subj,
+                                    then_body,
+                                    then_value,
+                                    else_body,
+                                    else_value,
+                                    &expr.ty,
+                                );
+                            }
+                            self.lower_matches_condition(pattern, subj)?
                         }
                     };
                     if self.dead {
@@ -18144,6 +18207,11 @@ impl LowerCtx<'_, '_> {
                             self.pack_datatree_enum(disc, None)
                         } else if enum_type == "AuthError" {
                             Ok(self.pack_auth_error(disc, None))
+                        } else if self.meta.enum_uses_heap(enum_type, variant) {
+                            // The enum's other variants ride the record, so a
+                            // payload-free variant rides it too: every
+                            // discriminant test reads one carrier.
+                            self.pack_enum_record(disc, None)
                         } else {
                             Ok(self.b.ins().iconst(types::I64, disc))
                         }
@@ -18159,6 +18227,8 @@ impl LowerCtx<'_, '_> {
                             self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
                         } else if enum_type == "AuthError" {
                             Ok(self.pack_auth_error(disc, Some(payload)))
+                        } else if self.meta.enum_uses_heap(enum_type, variant) {
+                            self.pack_enum_record(disc, Some((payload, &payload_ty)))
                         } else {
                             self.pack_enum_scalar(disc, payload, &payload_ty)
                         }
@@ -27299,7 +27369,9 @@ impl LowerCtx<'_, '_> {
             TClosureOp::ParaMap => self.lower_native_iter_map_filter(recv, args, false, false),
             TClosureOp::Filter => self.lower_native_iter_map_filter(recv, args, true, true),
             TClosureOp::ParaFilter => self.lower_native_iter_map_filter(recv, args, true, true),
-            TClosureOp::ParaPartition { .. } => self.lower_para_partition(recv, args),
+            TClosureOp::Partition { .. } | TClosureOp::ParaPartition { .. } => {
+                self.lower_partition(recv, args)
+            }
             TClosureOp::ParaFold => self.lower_para_fold(recv, args),
             TClosureOp::Each => self.lower_iter_each(recv, args, false),
             TClosureOp::EachMut => self.lower_iter_each(recv, args, true),
@@ -28779,7 +28851,7 @@ impl LowerCtx<'_, '_> {
             .as_deref()
             .or_else(|| user_type_name(&subj.ty))
             .ok_or("jit enum if-let missing type")?;
-        let heap = self.enum_variant_uses_heap(enum_name, variant);
+        let heap = self.meta.enum_uses_heap(enum_name, variant);
         let subject = self.lower_expr(subj)?;
         let ret_ty = clif_ty(result_ty).ok_or("jit if-expr result type unsupported")?;
         let then_block = self.b.create_block();
@@ -28888,7 +28960,7 @@ impl LowerCtx<'_, '_> {
             .as_deref()
             .or_else(|| user_type_name(&subj.ty))
             .ok_or("jit enum if-let missing type")?;
-        let heap = self.enum_variant_uses_heap(enum_name, variant);
+        let heap = self.meta.enum_uses_heap(enum_name, variant);
         let subject = self.lower_expr(subj)?;
         let then_block = self.b.create_block();
         let else_block = self.b.create_block();
@@ -29944,8 +30016,9 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.use_var(acc_var))
     }
 
-    /// Serial para_partition → `(false_, true_)` record (order-preserving).
-    fn lower_para_partition(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+    /// Serial `partition` / `para_partition` → `(false_, true_)` record.
+    /// Order-preserving: the elements keep their source order in both halves.
+    fn lower_partition(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
         let elem_ty = jit_closure_elem_type(&recv.ty)
             .ok_or_else(|| "jit closure method unsupported".to_string())?;
         if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {

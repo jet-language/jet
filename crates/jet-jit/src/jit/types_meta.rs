@@ -1146,6 +1146,52 @@ impl<'a> JitMeta<'a> {
         true
     }
 
+    /// The record carrier: the value is a host struct handle laid out as
+    /// `[disc:i64, payload…]` instead of one i64 with the payload packed beside
+    /// the disc byte. `pack_enum_record` writes it and
+    /// `unpack_enum_heap_payload_at` reads it back.
+    ///
+    /// For a SOURCE enum this is one fact about the WHOLE enum, never about one
+    /// variant. A discriminant test cannot know which variant the value holds,
+    /// so every value of that type has to be read the same way. Answering per
+    /// variant made `Shape.Empty` a bare integer while `Shape.Circle(1.0)` was a
+    /// record handle, so the `.Empty` arm read the low byte of a handle and the
+    /// `.Circle` arm read field 0 of the integer 2 — a wrong answer with no
+    /// diagnostic.
+    ///
+    /// Prelude, foreign and generated `__JetUnion_*` enums keep the per-variant
+    /// answer: the host (or `pack_enum_scalar` at the union sites) fixes each
+    /// variant's shape and the JIT only marshals what it is handed.
+    pub(crate) fn enum_uses_heap(&self, enum_name: &str, variant: &str) -> bool {
+        if matches!(
+            enum_name,
+            "AuthError" | "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "EmailError"
+        ) {
+            return true;
+        }
+        let declared = self
+            .enum_variants
+            .get(enum_name)
+            .filter(|_| !enum_name.starts_with("__JetUnion_"))
+            .filter(|_| !PRELUDE_ENUM_VARIANTS.contains_key(enum_name));
+        let Some(declared) = declared else {
+            return self.variant_uses_record(enum_name, variant);
+        };
+        declared.iter().any(|candidate| {
+            self.variant_uses_record(enum_name, jet_foundation::Syntax::generated_suffix(candidate))
+        })
+    }
+
+    /// One variant's payload needs the record carrier: a float cannot share an
+    /// i64 with the disc byte (`shl 8` drops its sign/exponent byte), and a
+    /// second slot has nowhere to live beside the first.
+    fn variant_uses_record(&self, enum_name: &str, variant: &str) -> bool {
+        self.enum_variant_payload_types(enum_name, variant)
+            .is_some_and(|types| {
+                types.len() > 1 || matches!(types.first(), Some(Type::Float | Type::Float32))
+            })
+    }
+
     pub(crate) fn enum_variant_names(&self, name: &str) -> Option<&[String]> {
         PRELUDE_ENUM_VARIANTS
             .get(name)
