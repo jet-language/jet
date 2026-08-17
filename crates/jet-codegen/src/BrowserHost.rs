@@ -14,12 +14,6 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
-/// D-FAIL-CONV2=A: the included error fragments render their failure text
-/// through this seam, the same one AOT output supplies.
-trait JetDisplay {
-    fn jet_display(&self) -> String;
-}
-
 fn jet_deadline_remaining_ms() -> Option<i64> {
     None
 }

@@ -1,67 +1,12 @@
 //! One compiler-owned opening of the readable Core prelude.
 
-use crate::AST::{ImportDecl, ImportKind, Item, ProgramBundle};
+use crate::AST::{ImportDecl, ImportKind, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
 use std::collections::{BTreeSet, HashMap};
 
 const INTERNAL_PREFIX: &str = "__jet_prelude_";
-
-/// D-FAIL-CONV2=A: open the standard library's own error family onto the default
-/// `Err`. The declarations are ordinary Jet source in
-/// `Prelude/Errors.jet`, loaded the same way `Prelude/Units.jet` ships the
-/// dimension catalog, so sema, codegen, the Cranelift hosts, and the interpreter
-/// all receive one `impl <CoreError> => Err` per family member and lower it
-/// through the existing D-ERR-CONV rail (I8/I9 — no second conversion
-/// mechanism, no per-engine rule).
-///
-/// A module that declares its own conversion for the same pair keeps it: the
-/// shipped one is skipped rather than duplicated, so a package can still say how
-/// its program reports a Core failure and E2405 never fires on the injection.
-///
-/// Two files receive nothing. A `#NoPrelude` file opted out of every readable
-/// Core name (D-PRELUDEX1). A `policy no_alloc` file cannot use the default `Err`
-/// at all, because that report carries an owned message, so there is no target to
-/// open the family onto.
-pub(crate) fn inject_error_conversions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-    const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
-    let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
-    let shipped = match crate::Parser::parse(&tokens) {
-        Ok(program) => program
-            .items
-            .into_iter()
-            .filter_map(|item| match item {
-                Item::ErrorConv(conversion) => Some(conversion),
-                _ => None,
-            })
-            .collect::<Vec<_>>(),
-        Err(mut parse_diagnostics) => {
-            diagnostics.append(&mut parse_diagnostics);
-            return diagnostics;
-        }
-    };
-    for module in &mut bundle.modules {
-        if module.no_prelude || module.no_alloc_policy.is_some() {
-            continue;
-        }
-        for conversion in &shipped {
-            let declared_locally = module.items.iter().any(|item| {
-                matches!(
-                    item,
-                    Item::ErrorConv(local)
-                        if local.from_ty == conversion.from_ty
-                            && local.to_ty == conversion.to_ty
-                )
-            });
-            if declared_locally {
-                continue;
-            }
-            module.items.push(Item::ErrorConv(conversion.clone()));
-        }
-    }
-    diagnostics
-}
 
 /// Inject the prelude's Core module aliases once at file scope. The import
 /// nodes are compiler-owned so codegen, JIT, and interpreter all receive the

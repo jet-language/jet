@@ -11,7 +11,7 @@ use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod runtime {
     use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
-    use crate::{JetDisplay, JetShow};
+    use crate::JetShow;
 
     pub mod jet_std {
         #[derive(Clone, Debug)]

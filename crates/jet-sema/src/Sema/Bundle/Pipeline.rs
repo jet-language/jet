@@ -399,11 +399,6 @@ fn check_bundle_opts_for_output_inner(
     default_entry_return(bundle);
     diags.extend(inject_units_prelude(bundle));
     super::super::Prelude::inject(bundle);
-    // D-FAIL-CONV2=A: the standard library's own error family reaches the
-    // default `Err` through one shipped declaration per member, on the same
-    // D-ERR-CONV rail a user declaration uses. Inject before registration and
-    // body checking so `?` sees the conversion exactly as a source-written one.
-    diags.extend(super::super::Prelude::inject_error_conversions(bundle));
     diags.extend(super::super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `@if @build.os == {

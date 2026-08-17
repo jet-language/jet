@@ -1064,10 +1064,7 @@ Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
 `impl Source => Target { … }` converts a `Source` error into `Target`, including
 the default `Err` target; `?` applies it automatically. A conversion into
 `Err` may name a foreign source type, while typed targets keep the orphan rule
-(S28). The standard library already declares that rail for its own error family
-(D-FAIL-CONV2), so `fn run() ?` passes a library failure up with `?` and
-declares nothing; a program's own error type still declares its own conversion.
-`E2402` fires when `?` would need an undeclared conversion; `E2405`
+(S28). `E2402` fires when `?` would need an undeclared conversion; `E2405`
 fires on duplicate declarations; `E2406` fires on typed-target orphan-rule
 violations.
 

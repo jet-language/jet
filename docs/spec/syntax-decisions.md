@@ -1332,20 +1332,6 @@ source type; typed targets keep E2406's orphan rule. This amends D-ERR2 and
 D-LIB3. E2402 and E2406 teach the one rail and their registered UI snapshots
 follow it.
 
-**D-FAIL-CONV2=A — the standard library declares the conversion for its own
-error family** *(ratified 2026-08-17, card #2018)*: the standard library ships
-one `impl <CoreError> => Err` for each member of its own error family, on
-D-FAIL-CONV1's single rail. A program can write `fn run() ?` and pass a
-library failure up with `?` and declare nothing. `Prelude/Errors.jet` holds the
-declarations and every tier lowers that one source. Family membership is
-derived: the Prelude registers the type printable, a Core signature returns it in
-the error position of a `T ? E` result, and showing it is not prohibited.
-`CryptoError` and `TaskFailure` are outside the family. This amends
-D-FAIL-CONV1 for the library's own types only; a program's own error type still
-needs its own declaration, and naming the failure
-(`fn run() ? JSONError`) stays correct. The accepted cost is that one conversion
-is invisible in the program text.
-
 **D-FAIL-CTX1=A — notes ride `?` and the journey is automatic** *(ratified
 2026-08-06, card #1532)*: a postfix `?` may carry a string note. Each `?` hop
 joins the failure journey on every tier, whether it has a note or not. Notes
