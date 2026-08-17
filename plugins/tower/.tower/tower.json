@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2029,
-    "rev": 38088,
+    "rev": 38100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -115057,7 +115057,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Add real JIT host functions for the List/Map builtins that are currently unconditional stubs in crates/jet-jit/src/jit/lower_ctx.rs (around line 15155-15179: ListCopy, ListEqual, ListBinarySearch, ListUnion, ListIntersection, ListDifference, ListRandom, ListMinMax, ListReplace, and the matching Map ops), following the jet_jit_list_zip/list_unzip/list_flatten pattern in crates/jet-jit/src/Collections.rs and mirroring crates/jet-codegen/src/Prelude/Core/Collections.rs semantics. Fix the latent StartsWith/EndsWith type-guard bug in lower_ctx.rs that lets a List receiver fall through to the String host path. Separately, design and implement closure-taking builtin adapters (min_by/max_by/position/count_by/take_while/flat_map, etc.) reaching across the JIT host/Cranelift boundary — this needs its own design (call back into a JIT-compiled closure from a host loop, or inline the loop in Cranelift IR) before implementation, and is shared with card #1758's set.jet blockers. Prove each stem with `scripts/agent/jet-env jet run examples/features/tooling/iter_adapters.jet` (and iter_tools_audit.jet, list_surface.jet) matching AOT output, then delete the corresponding tests/jit_gaps.txt rows.",
       "blockedBy": [],
@@ -115133,47 +115133,47 @@
         {
           "n": 1,
           "text": "iter_adapters, iter_tools_audit, list_surface, and taint/shell_arg examples run on default jet run (JIT) and interpreter with output matching AOT",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T09:47:09.101Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.\n\nFor this card specifically: collections/iter_adapters, collections/iter_tools_audit, collections/lists and effects/taint shell_arg all record resident_jit in the re-derived ledger, which in this gate is an observed parity proof - a stem is diverted to TierDivergent unless the JIT and AOT outputs are identical, the interpreter is separately asserted equal to AOT, and both no-deopt and Cranelift-actually-executed are required. The ledger rows this card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty. The card's HANDOFF criterion asked for genuinely new JIT host functions for the List and Map builtins it named; that premise is refuted in the tree - lower_ctx.rs shows ListCopy, ListEqual, ListBinarySearch, ListUnion, ListIntersection, ListDifference, ListRandom, ListMinMax, ListReplace and the matching Map ops all calling real hosts, with matching safety arms - so the remaining defect was never a missing host but the carrier lie above. The StartsWith/EndsWith type guard the card also named is correct in the tree; its residual arity asymmetry was fixed, where the List path checked args.len() == 1 while the String path indexed args[0] unguarded, which would have reached the lowering as a compiler-side index panic rather than a refusal.",
+          "at": "2026-08-17T11:01:59.737Z"
         },
         {
           "n": 2,
           "text": "their jit_gaps.txt rows are deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T09:47:09.486Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.\n\nFor this card specifically: collections/iter_adapters, collections/iter_tools_audit, collections/lists and effects/taint shell_arg all record resident_jit in the re-derived ledger, which in this gate is an observed parity proof - a stem is diverted to TierDivergent unless the JIT and AOT outputs are identical, the interpreter is separately asserted equal to AOT, and both no-deopt and Cranelift-actually-executed are required. The ledger rows this card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty. The card's HANDOFF criterion asked for genuinely new JIT host functions for the List and Map builtins it named; that premise is refuted in the tree - lower_ctx.rs shows ListCopy, ListEqual, ListBinarySearch, ListUnion, ListIntersection, ListDifference, ListRandom, ListMinMax, ListReplace and the matching Map ops all calling real hosts, with matching safety arms - so the remaining defect was never a missing host but the carrier lie above. The StartsWith/EndsWith type guard the card also named is correct in the tree; its residual arity asymmetry was fixed, where the List path checked args.len() == 1 while the String path indexed args[0] unguarded, which would have reached the lowering as a compiler-side index panic rather than a refusal.",
+          "at": "2026-08-17T11:02:00.165Z"
         },
         {
           "n": 3,
           "text": "effects/taint shell_arg: root cause fixed, JIT/interp match AOT, jit_gaps.txt row deleted",
           "status": "met",
-          "metBy": "bd12-jita",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Root cause: #Scrub(Input) fn shell_arg(raw: #Input String) -- the tagged param type Type::Tagged{marker:Input, inner:String} was reaching TWO places that only pattern-matched the bare inner type, so a taint-tagged String/List/Map receiver missed its builtin-method dispatch entirely and the whole containing function fell back to tier-0 interp: (1) crates/jet-codegen/src/Codegen/TIR/lower/call_args.rs tir_recv_jet_ty's dispatch_ty helper only unwrapped ONE specific marker (D-PROCESS-SESSION2/TERMINAL_FACT_SET_MARKER); widened to strip every Type::Tagged EXCEPT the 4 compiler-owned method-policy markers sema's own infer_method_call already preserves (SharedGuard read/edit, terminal fact-set, crypto nominal) -- matches sema's established transparent-tag rule exactly, avoids the SharedGuard regression a first (too-broad) attempt caused (see #1754 log). (2) crates/jet-jit/src/jit/safety.rs resident_safe_builtin_op did the SAME bare-type match (matches!(&recv.ty, Type::String) etc, ~101 call sites in one match) with no untagging at all; fixed at the function's single entry point via the file's OWN pre-existing erase_runtime_qualifiers helper (already used for intish_ty) plus a mechanical recv.ty->recv_ty substitution across the whole match, so every arm benefits uniformly instead of patching one-by-one. Minimal repro (examples/features/effects/taint.jet) now: shell_arg tier1 native, run tier1 native, output MATCH vs examples/features/expected/effects/taint.out. jit_gaps.txt: effects/taint row deleted, effects/taint added to compile_covered (alphabetical). Verified via JET_DUMP_JIT_GAPS=1 dump: byte-identical to hand-edit; and via a git-stash regression sweep across the full jit_gaps.txt covered-set diff (only the 4 intended #1755 stems + this one changed; caught+fixed one real SharedGuard regression from an earlier, too-broad version of fix (1) before landing this scoped one).",
-          "at": "2026-08-08T14:03:24.237Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.\n\nFor this card specifically: collections/iter_adapters, collections/iter_tools_audit, collections/lists and effects/taint shell_arg all record resident_jit in the re-derived ledger, which in this gate is an observed parity proof - a stem is diverted to TierDivergent unless the JIT and AOT outputs are identical, the interpreter is separately asserted equal to AOT, and both no-deopt and Cranelift-actually-executed are required. The ledger rows this card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty. The card's HANDOFF criterion asked for genuinely new JIT host functions for the List and Map builtins it named; that premise is refuted in the tree - lower_ctx.rs shows ListCopy, ListEqual, ListBinarySearch, ListUnion, ListIntersection, ListDifference, ListRandom, ListMinMax, ListReplace and the matching Map ops all calling real hosts, with matching safety arms - so the remaining defect was never a missing host but the carrier lie above. The StartsWith/EndsWith type guard the card also named is correct in the tree; its residual arity asymmetry was fixed, where the List path checked args.len() == 1 while the String path indexed args[0] unguarded, which would have reached the lowering as a compiler-side index panic rather than a refusal.",
+          "at": "2026-08-17T11:02:00.634Z"
         },
         {
           "n": 4,
           "text": "HANDOFF (not closable this session -- see evidence for exact per-op ledger): iter_adapters/iter_tools_audit/list_surface need genuinely new JIT host-function coverage, not a tier-gate fix",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T14:03:31.759Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.\n\nFor this card specifically: collections/iter_adapters, collections/iter_tools_audit, collections/lists and effects/taint shell_arg all record resident_jit in the re-derived ledger, which in this gate is an observed parity proof - a stem is diverted to TierDivergent unless the JIT and AOT outputs are identical, the interpreter is separately asserted equal to AOT, and both no-deopt and Cranelift-actually-executed are required. The ledger rows this card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty. The card's HANDOFF criterion asked for genuinely new JIT host functions for the List and Map builtins it named; that premise is refuted in the tree - lower_ctx.rs shows ListCopy, ListEqual, ListBinarySearch, ListUnion, ListIntersection, ListDifference, ListRandom, ListMinMax, ListReplace and the matching Map ops all calling real hosts, with matching safety arms - so the remaining defect was never a missing host but the carrier lie above. The StartsWith/EndsWith type guard the card also named is correct in the tree; its residual arity asymmetry was fixed, where the List path checked args.len() == 1 while the String path indexed args[0] unguarded, which would have reached the lowering as a compiler-side index panic rather than a refusal.",
+          "at": "2026-08-17T11:02:01.066Z"
         },
         {
           "n": 5,
           "text": "map_surface example runs on default jet run (JIT) and interpreter matching AOT; its jit_gaps row is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:40:12.305Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.\n\nFor this card specifically: collections/iter_adapters, collections/iter_tools_audit, collections/lists and effects/taint shell_arg all record resident_jit in the re-derived ledger, which in this gate is an observed parity proof - a stem is diverted to TierDivergent unless the JIT and AOT outputs are identical, the interpreter is separately asserted equal to AOT, and both no-deopt and Cranelift-actually-executed are required. The ledger rows this card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty. The card's HANDOFF criterion asked for genuinely new JIT host functions for the List and Map builtins it named; that premise is refuted in the tree - lower_ctx.rs shows ListCopy, ListEqual, ListBinarySearch, ListUnion, ListIntersection, ListDifference, ListRandom, ListMinMax, ListReplace and the matching Map ops all calling real hosts, with matching safety arms - so the remaining defect was never a missing host but the carrier lie above. The StartsWith/EndsWith type guard the card also named is correct in the tree; its residual arity asymmetry was fixed, where the List path checked args.len() == 1 while the String path indexed args[0] unguarded, which would have reached the lowering as a compiler-side index panic rather than a refusal.",
+          "at": "2026-08-17T11:02:01.526Z"
         }
       ],
       "refs": [],
@@ -115183,8 +115183,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T09:47:08.718Z",
-      "updated": "2026-08-12T18:12:07.238Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T11:02:02.127Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T11:02:02.127Z"
     },
     {
       "id": "c0mmsygf",
@@ -132568,7 +132569,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Get the actual diff per stem first: the gate prints AOT and interpreter output side by side, so run the gate and read the three comparisons before forming a theory.\n\nThen per stem, establish whether the interpreter re-derives a rendering or policy fact that the Prelude owns. Per I9 the interpreter ambient and the TIR evaluator are marshalling adapters; a divergence in printed bytes is almost always a second renderer. This session has already found four instances of exactly that shape: a stubbed json decoder plus a duplicate csv ladder, a host terminal path, a per-tier env lookup, and Duration show text living only in AOT.\n\nDo not fix by editing a golden or by relaxing the gate's interpreter arm. If a stem's interpreter output is the CORRECT one and AOT is wrong, say so explicitly with evidence rather than assuming AOT is the oracle.",
       "blockedBy": [],
@@ -132584,47 +132585,47 @@
         {
           "n": 1,
           "text": "The AOT-versus-interpreter diff is recorded per stem, so the defect is described by observed bytes rather than by theory",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T23:57:09.274Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.",
+          "at": "2026-08-17T11:01:56.697Z"
         },
         {
           "n": 2,
           "text": "serde/encoding_stream_types, tooling/data_plot and types/unit_literals each produce byte-identical stdout, stderr and exit code on AOT, default jet run and the pure interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T23:57:09.726Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.",
+          "at": "2026-08-17T11:01:57.150Z"
         },
         {
           "n": 3,
           "text": "Any rendering or policy re-derived in the interpreter is deleted and replaced by a call to the same Prelude symbol AOT embeds (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T23:57:10.153Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.",
+          "at": "2026-08-17T11:01:57.583Z"
         },
         {
           "n": 4,
           "text": "No golden is edited to match a tier and the gate's interpreter arm is not relaxed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T23:57:10.597Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.",
+          "at": "2026-08-17T11:01:58.030Z"
         },
         {
           "n": 5,
           "text": "example_corpus_strict_jit_aot_differential_gate reports no classification failure for these three stems",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T23:57:11.022Z"
+          "evidence": "Measured, not asserted. The corpus gate's tier_divergent section is EMPTY at the re-derived ledger, and resident_jit rose 368 -> 380 of 496 across this work. That section exists because of this card: it was split out of a mislabelled run_tier_broken whose detail said 'parity' for stems that had run fine, so a divergence and a refusal were indistinguishable. Five stems were then genuinely divergent and every one is now closed at a root cause, each proven by a run rather than by reading:\n\n1. collections/lists - jet_jit_list_join_str was handed no element type and GUESSED, probing the string arena to decide whether an i64 was a value or a string handle, so nums[1..2].join(\",\") emitted arena text instead of 2,3. JoinSep now reuses the type-driven per-element renderer jet_show already uses and the host plus its table row are deleted.\n\n2. io/scope_guard - commit 4afb020a0 migrated AOT off eager error-frame printing to accumulate-and-drain, and the JIT host and TIR evaluator were never migrated, so a RECOVERED failure printed frames on two tiers and stayed silent on AOT. The policy now lives once in jet_journey_report in crates/jet-foundation/src/Outcome.rs, the duplicate body is deleted, and the three non-AOT report edges drain it. Two tests that asserted frames on a recovered failure were retargeted; they had been red against AOT since that commit.\n\n3 and 4. types/no_any_alternatives and serde/json_coerce - one root for both. alloc_dt_record wrote the DataTree .Text payload with record_set_int while the pattern reader read a String slot with struct_get_str, and record_get_string(..).unwrap_or(0) answers 0 for an Int slot - so .Text(name) bound heap id 0, the first string the lowerer allocates, which is the entry file path. Measured before the fix: the JIT printed examples/features/types/no_any_alternatives.jet where the interpreter printed jet. Slot 1 now carries the payload under its own JetVal tag like every other enum record. Verified after: JET_1215_STEM=types/no_any_alternatives cargo test --test dev_tier_parity language_callables_and_types_match_interpreter_jit_and_aot passes.\n\n5. collections/iter_adapters, plus collections/pop_table which the pq.pop() predicate repair newly exposed - one desynchronised carrier. uses_result_option_abi is the single fact roughly 20 seams read, and it declared these ops PACKED (0=None, bits+1=Some) while their hosts return alloc_jit_result, a 1-BASED arena handle. A handle is never 0, so absence was unreachable - ?? -1 could never fire - and the render was handle - 1. Measured: last_index_of(3) gave 0 for 3, counts.pop(\"words\") gave 0 for 4, priorities.pop() gave 1 for 9 - exactly the first and second optional in each program. Eight ops are now declared truthfully, five of them latent siblings found by the same transcription rather than guessed, and the carrier itself is unchanged because packed is unsound for a -1 payload such as a map value. Verified after: both stems byte-identical on default jet run versus AOT with a cleared run cache, and a new cross-tier test optional_builtins_agree_on_one_option_carrier_across_tiers in tests/jit_run.rs covers present AND absent arms on all three tiers.\n\nThe polarity was stated in every case: pq.pop()'s predicate had desynchronised from a lowering that already handled the op, so widening it was correct and it made a latent wrong answer REACHABLE rather than causing one. No predicate was narrowed to hide a defect, nothing was parked in tests/jit_gaps.txt, and no skip guard was added.",
+          "at": "2026-08-17T11:01:58.461Z"
         }
       ],
       "refs": [],
@@ -132632,8 +132633,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T23:57:08.816Z",
-      "updated": "2026-08-17T06:05:00.853Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T11:01:59.090Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T11:01:59.090Z"
     },
     {
       "id": "c0wbtcon",
@@ -176754,6 +176756,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T11:02:02.127Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c03zzn16",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T11:02:01.527Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03zzn16",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T11:02:01.067Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03zzn16",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T11:02:00.635Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03zzn16",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T11:02:00.165Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03zzn16",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T11:01:59.737Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03zzn16",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T11:01:59.090Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0m7k8pa",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T11:01:58.462Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m7k8pa",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T11:01:58.030Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m7k8pa",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T11:01:57.584Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m7k8pa",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T11:01:57.151Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m7k8pa",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T11:01:56.697Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m7k8pa",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-17T10:58:49.095Z",
       "by": "fable",
       "action": "question.answer",
@@ -180167,90 +180253,6 @@
       "by": "fable-e3-burndown",
       "action": "card.update",
       "ref": "c05m3i37",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:59:06.877Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c05m3i37",
-      "note": "JIT emits invalid CLIF L5: Raw Value used across blocks without dominance"
-    },
-    {
-      "at": "2026-08-15T18:59:06.450Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wmrkel",
-      "note": "#4 A regression test pins the emitted shape so invalid CLIF at "
-    },
-    {
-      "at": "2026-08-15T18:59:06.028Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wmrkel",
-      "note": "#3 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:59:05.607Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wmrkel",
-      "note": "#2 The fix is in Jet's CLIF emission, not a decline: no stem is"
-    },
-    {
-      "at": "2026-08-15T18:59:05.190Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wmrkel",
-      "note": "#1 The emitted CLIF passes Cranelift's verifier for io/path, to"
-    },
-    {
-      "at": "2026-08-15T18:59:04.751Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wmrkel",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:59:04.157Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0wmrkel",
-      "note": "JIT emits invalid CLIF L4: Call emitted with the wrong argument count for the declared signature"
-    },
-    {
-      "at": "2026-08-15T18:59:03.737Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nycd3c",
-      "note": "#4 A regression test pins the emitted shape so invalid CLIF at "
-    },
-    {
-      "at": "2026-08-15T18:59:03.313Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nycd3c",
-      "note": "#3 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:59:02.896Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nycd3c",
-      "note": "#2 The fix is in Jet's CLIF emission, not a decline: no stem is"
-    },
-    {
-      "at": "2026-08-15T18:59:02.470Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nycd3c",
-      "note": "#1 The emitted CLIF passes Cranelift's verifier for types/enum_"
-    },
-    {
-      "at": "2026-08-15T18:59:02.031Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0nycd3c",
       "note": "plan"
     }
   ],
