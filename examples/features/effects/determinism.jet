@@ -35,7 +35,7 @@ fn coin_and_card(rng: &Rng) =[]=> String {
     return "flip={flip} card={drawn}"
 }
 
-fn run() {
+fn run() ? {
     clock := Clock.new(1000)
     rng := random.rng(42)
     print(roll_at(clock, &rng))
@@ -50,8 +50,8 @@ fn run() {
     // `wait`. Type-owned unit methods mint checked runtime durations.
     print("now={clock.now()}")
     print("advanced={clock.advance(5000)}")
-    span :: Duration.seconds(2) ?? panic("duration")
-    span_ms :: span.in(.Milliseconds) ?? panic("duration read")
+    span :: Duration.seconds(2) ?? return Err("duration")
+    span_ms :: span.in(.Milliseconds) ?? return Err("duration read")
     print("span={span_ms}ms waited={clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.

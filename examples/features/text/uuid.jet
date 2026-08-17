@@ -3,7 +3,7 @@
 use core.crypto.uuid as uuid
 use core.time as time
 
-fn run() {
+fn run() ? {
     // v4 is non-deterministic — check shape only
     id :: uuid.v4()
     print(id.len() == 36)
@@ -16,7 +16,7 @@ fn run() {
     // version nibble is '7' (inclusive slice — same start and end)
     print(id7.slice(14, 14) == "7")
     // parse validates and lowercases; a malformed string is an error.
-    normalized :: uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? panic("parse failed")
+    normalized :: uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? return Err("parse failed")
     print(normalized)
     malformed :: uuid.parse("not-a-uuid")
     if malformed == {
@@ -26,8 +26,8 @@ fn run() {
     // v5 is deterministic: same namespace + name always yields the same UUID
     // (RFC 4122 Appendix B test vector: DNS namespace + "python.org").
     dns_namespace :: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-    v5a :: uuid.v5(dns_namespace, "python.org") ?? panic("v5 failed")
-    v5b :: uuid.v5(dns_namespace, "python.org") ?? panic("v5 failed")
+    v5a :: uuid.v5(dns_namespace, "python.org") ?? return Err("v5 failed")
+    v5b :: uuid.v5(dns_namespace, "python.org") ?? return Err("v5 failed")
     print(v5a == v5b)
     print(v5a)
 }

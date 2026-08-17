@@ -1,13 +1,13 @@
 // D-CORE-COMPRESS1=A / D-CODECS1: canonical zstd stream codec.
 use core.archive.zstd as zs
 
-fn run() {
+fn run() ? {
     original :: [U8].{72, 101, 108, 108, 111}  // ASCII "Hello"
     compressed :: zs.compress(original)
     // A zstd frame carries a magic number + header; expect at least a few bytes.
     print(compressed.len() > 0)
     // Round-trip: decompress must recover the original bytes exactly.
-    restored :: zs.decompress(compressed) ?? panic("bad zstd")
+    restored :: zs.decompress(compressed) ?? return Err("bad zstd")
     print(restored.len() == original.len())
     print(restored == original)
     // Decompress failure path: corrupt input returns err.

@@ -7,9 +7,9 @@ struct Ticket {
     minutes: Float
 }
 
-fn run() {
+fn run() ? {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0"
-    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    rows :: data.csv<Ticket>(raw) ?? return Err("bad csv")
     table :: data.table(rows)
     cols :: data.schema(table)
     loop c, cols -> print("{c.name}:{c.type_name}")

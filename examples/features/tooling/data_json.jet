@@ -15,9 +15,9 @@ struct Box<T> {
     value: T
 }
 
-fn run() {
+fn run() ? {
     raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]"
-    rows :: data.json<Ticket>(raw) ?? panic("bad json")
+    rows :: data.json<Ticket>(raw) ?? return Err("bad json")
     table :: data.table(rows)
     cols :: data.schema(table)
     loop c, cols -> print("{c.name}:{c.type_name}")

@@ -7,15 +7,15 @@
 // plain block (I3).
 use core.files as fs
 
-fn run() {
+fn run() ? {
     path :: "/tmp/jet_scap_grant.txt"
     // Filesystem + console authority is granted only for the extent of this
     // block. Like `#Caps`, the block is bounded to the granted set — every effect
     // used inside (`FS` for the file work, `IO` for `print`) must be granted, or
     // it has no capability (E0712). The handle `caps` may not escape (E0711).
     #Grant(caps: FS, IO) {
-        fs.write(path, "granted\nthen revoked") ?? panic("write failed")
-        text :: fs.read(path) ?? panic("read failed")
+        fs.write(path, "granted\nthen revoked") ?? return Err("write failed")
+        text :: fs.read(path) ?? return Err("read failed")
         print(text.to_upper())
     }
     // Outside the grant the capability is revoked — ordinary code resumes.

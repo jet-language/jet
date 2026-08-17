@@ -21,18 +21,18 @@ fn copy_upper(src: String, dst: String) => Int ? IOError {
     return Ok(n)
 }
 
-fn run() {
+fn run() ? {
     src :: Path.from("/tmp").join("jet_m7_src.txt").to_string()
     dst :: Path.from("/tmp").join("jet_m7_dst.txt").to_string()
     // Write test data via whole-file helper (D-IO3: kept as sugar).
     wrote :: fs.write(src, "alpha\nbeta\ngamma")
     // Stream-copy with uppercase transform — bounded memory.
-    copied :: copy_upper(src, dst) ?? panic("copy failed")
+    copied :: copy_upper(src, dst) ?? return Err("copy failed")
     // Verify: read destination and print.
-    result :: fs.read(dst) ?? panic("read failed")
+    result :: fs.read(dst) ?? return Err("read failed")
     print(result)
     // Count lines streaming.
-    n :: count_lines(src) ?? panic("count failed")
+    n :: count_lines(src) ?? return Err("count failed")
     print("lines: {n}")
     // std.path helpers.
     print(Path.from("/home/user/file.txt").parent())

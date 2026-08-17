@@ -7,7 +7,7 @@ use core.crypto.random as crypto_rand
 use core.crypto as crypto
 use core.crypto.expert as expert
 
-fn run() {
+fn run() ? {
     // PRNG bytes: simulation, testing, shuffles.
     noise :: random.bytes(8)
     print("prng bytes: {noise.len()}")
@@ -26,8 +26,8 @@ fn run() {
     info :: [U8].{ 7, 8 }
     rungs_agree := false
     #Unsafe("compare the typed and raw HKDF rungs") {
-        raw :: expert.hkdf_sha256_raw(ikm, salt, info, 16) ?? panic("raw hkdf")
-        typed :: crypto.hkdf_sha256(crypto.Secret.from_bytes(ikm), salt, info, 16) ?? panic("typed hkdf")
+        raw :: expert.hkdf_sha256_raw(ikm, salt, info, 16) ?? return Err("raw hkdf")
+        typed :: crypto.hkdf_sha256(crypto.Secret.from_bytes(ikm), salt, info, 16) ?? return Err("typed hkdf")
         rungs_agree = crypto.constant_time_equal(typed, raw)
     }
     print("crypto rungs agree: {rungs_agree}")

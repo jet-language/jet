@@ -2,7 +2,7 @@
 use core.sync as sync
 use app
 
-fn run() {
+fn run() ? {
     // Two replicas edit the same document while apart, then merge.  A text
     // CRDT keeps both edits and reaches one document, in either merge order.
     base :: sync.text_new("r1", "hello world")
@@ -31,7 +31,7 @@ fn run() {
     l :: sync.list_push(l1, "r2", "b")
     print(sync.list_show(l))
 
-    policy :: sync.policy_new("tickets", "owner == user") ?? panic("policy")
+    policy :: sync.policy_new("tickets", "owner == user") ?? return Err("policy")
     print(sync.policy_show(policy))
     print("allow:{sync.policy_allows(policy, "alice", "alice")}")
     print("deny:{sync.policy_allows(policy, "alice", "bob")}")
