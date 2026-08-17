@@ -605,6 +605,23 @@ pub const ENV_TEST_VERB: &str = "test";
 pub const ENV_SYNC_VERB: &str = "sync";
 /// D-ENV-PROFILE1=C: disclose the selected preset and typed environment facts.
 pub const ENV_INFO_VERB: &str = "info";
+/// D-JOB-NAME2=B (ratified 2026-08-17, card #1448): the two headings the
+/// `jet env info` entry list splits into. The project's own `#Job` functions
+/// print under `jobs`, so this surface uses the same word as the rest of the
+/// job surface; entries the environment model supplies through its lifecycle
+/// hooks print under `checks`. Splitting them is the load-bearing half — a
+/// reader can tell an entry they wrote from an entry the environment supplied
+/// (option A, renaming the merged list, was rejected for keeping two kinds of
+/// thing under one heading).
+///
+/// I8: one spelling each. Both the human heading and the machine key read
+/// these constants, so the two renderings cannot desynchronise. This is the
+/// env report's list only — it is unrelated to `KW_CONC_TASK`, the `task`
+/// concurrency keyword (D-CONC-SCHED1), and to the per-integration `tasks`
+/// disclosure field of the typed integration projection.
+pub const ENV_REPORT_JOBS_KEY: &str = "jobs";
+/// D-JOB-NAME2=B: see `ENV_REPORT_JOBS_KEY`.
+pub const ENV_REPORT_CHECKS_KEY: &str = "checks";
 /// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
 /// auto-activation (and drop any active env) in the current shell.
 /// Documented in docs/reference/environment.md.

@@ -1708,8 +1708,22 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .iter()
         .map(|reference| reference.raw.as_str())
         .collect::<Vec<_>>();
+    // D-JOB-NAME2=B (card #1448): the report used to print one `tasks` list
+    // holding two different kinds of thing, so a reader could not tell an entry
+    // they wrote from an entry the environment supplied. Split it by author.
+    //
+    // `jobs` is the project's own work: the `#Job fn` entries in the project
+    // file, plus the ones an `env.jet` lifecycle hook names. A `HookAction::Task`
+    // always names a checked `#Job fn`, so those names are the reader's own and
+    // dedup into the same list — `jobs` therefore holds exactly what the old
+    // merged list held, under the word the rest of the job surface uses.
+    //
+    // `checks` is what the environment model supplies: the `checks:` hook
+    // records in `env.jet`, the trust-gated command form (a vault check, an
+    // Android SDK check). These are named by the hook, not by a `#Job`, so they
+    // could never appear in `jobs` — which is why they get their own heading.
     let entry = find_project_entry(&plan.project_root);
-    let mut tasks = list_project_jobs(&entry);
+    let mut jobs = list_project_jobs(&entry);
     for hook in plan
         .environment
         .lifecycle
@@ -1718,11 +1732,21 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .chain(plan.environment.lifecycle.checks.iter())
     {
         if let ModuleEval::HookAction::Task(name) = &hook.action {
-            tasks.push(name.clone());
+            jobs.push(name.clone());
         }
     }
-    tasks.sort();
-    tasks.dedup();
+    jobs.sort();
+    jobs.dedup();
+    let mut checks = plan
+        .environment
+        .lifecycle
+        .checks
+        .iter()
+        .filter(|hook| matches!(hook.action, ModuleEval::HookAction::Command(_)))
+        .map(|hook| hook.name.clone())
+        .collect::<Vec<_>>();
+    checks.sort();
+    checks.dedup();
     let mut variable_sources: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut add_variable = |name: &str, source: String| {
         let sources = variable_sources.entry(name.to_string()).or_default();
@@ -2006,7 +2030,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"tasks\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
+            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"{}\":[{}],\"{}\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
             crate::JSON::quote(preset),
             quote_list(&selected_presets.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_presets.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2034,7 +2058,13 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             language_projections,
             quote_list(&packages),
             services,
-            quote_list(&tasks.iter().map(String::as_str).collect::<Vec<_>>()),
+            // D-JOB-NAME2=B: both keys always appear, so a consumer reads the
+            // one it means instead of guessing from a merged list. The key text
+            // comes from `Syntax`, the same constant the human heading uses.
+            Syntax::ENV_REPORT_CHECKS_KEY,
+            quote_list(&checks.iter().map(String::as_str).collect::<Vec<_>>()),
+            Syntax::ENV_REPORT_JOBS_KEY,
+            quote_list(&jobs.iter().map(String::as_str).collect::<Vec<_>>()),
             variables,
             quote_list(&files),
             dotenv.join(","),
@@ -2136,9 +2166,17 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         "services: {}",
         if services.is_empty() { "<none>".to_string() } else { services.join(", ") }
     ));
+    // D-JOB-NAME2=B: two headings, each reading the same `Syntax` constant the
+    // machine key reads, so the human and machine renderings carry one split.
     theme.detail(&format!(
-        "tasks: {}",
-        if tasks.is_empty() { "<none>".to_string() } else { tasks.join(", ") }
+        "{}: {}",
+        Syntax::ENV_REPORT_CHECKS_KEY,
+        if checks.is_empty() { "<none>".to_string() } else { checks.join(", ") }
+    ));
+    theme.detail(&format!(
+        "{}: {}",
+        Syntax::ENV_REPORT_JOBS_KEY,
+        if jobs.is_empty() { "<none>".to_string() } else { jobs.join(", ") }
     ));
     let variables = variable_sources
         .iter()
