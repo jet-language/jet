@@ -67,6 +67,24 @@ pub(crate) fn core_enum_equal_type(name: &str) -> bool {
             // refusing it, which took the whole enclosing function off the
             // resident tier.
             | "Range"
+            // D-CORESURF-SMALL1 puts TLSVersion in `auto_equatable`
+            // (jet-foundation `Traits.rs`), so sema rewrites
+            // `peer.tls_version != .Tls13` into the same `Equatable.equal`
+            // method shape (CheckerInfer `binary.rs`) — and TLSVersion is a
+            // shared Prelude enum, not a user item with a registered method
+            // signature, so only this predicate can admit it. Every other link
+            // already exists: this same predicate gates the lowering arm that
+            // builds `TExprKind::Binary{Eq}` (`lower/method_calls.rs`), AOT
+            // emits `==` on `JetTLSVersion`, which derives `Eq`/`PartialEq`
+            // (`Prelude/CoreLib/Top/NetHTTP.rs`), the interpreter compares the
+            // `CtValue::Enum` whose variant spelling comes from that same
+            // Prelude renderer (`net_http_hosts.rs`
+            // `tls_peer_identity_value`), and the Cranelift host encodes the
+            // tag in registry order (`tls_version_bits`: Tls12, Tls13 — the
+            // order `register_core_net_tls_enums` publishes). Without this row
+            // the whole enclosing function missed the TIR subset, and
+            // `emit_func` raised the I2 coverage ICE instead of compiling.
+            | "TLSVersion"
     )
 }
 
