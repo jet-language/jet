@@ -56,10 +56,10 @@ echo "failed" >"$REPORT_DIR/result.txt"
 
 set +e
 START_NS="$(date +%s%N 2>/dev/null || echo 0)"
-cargo test --test dev example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture \
+cargo test --test dev_corpus_gate example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture \
   2>&1 | tee "$REPORT_DIR/gate.log"
 GATE_STATUS=${PIPESTATUS[0]}
-cargo test --test dev jit_try_compile_manifest_matches -- --exact --nocapture \
+cargo test --test dev_corpus jit_try_compile_manifest_matches -- --exact --nocapture \
   2>&1 | tee -a "$REPORT_DIR/gate.log"
 RATCHET_STATUS=${PIPESTATUS[0]}
 END_NS="$(date +%s%N 2>/dev/null || echo 0)"

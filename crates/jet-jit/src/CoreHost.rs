@@ -3,7 +3,7 @@
 //! mirrors AOT helpers in the CoreLib prelude (`jet_std_os_*`, `jet_ring_log_*`,
 //! `jet_std_math_*`, `jet_std_fs_*`, `jet_std_path_*`, `jet_std_env_*`,
 //! `jet_std_process_*`) — thin std wrappers, not a third algorithm.
-//! parity: guard tests/dev.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
+//! parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
 
 use super::runtime_host::{contract_kernel, jit_result_parts};
 use super::Concurrency;
@@ -571,7 +571,7 @@ fn jit_log_json_escape(s: &str) -> String {
 }
 
 /// Mirrors AOT `unix_to_ymdhms` in RingCsvLogTimeCrypto.rs.
-/// parity: guard tests/dev.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
+/// parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
 fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
     let mut days = secs / 86400;
     let time_of_day = (secs % 86400).unsigned_abs();
