@@ -3439,15 +3439,6 @@ const AOT_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[
          has no oracle to compare the tiers against",
     ),
     (
-        "lowlevel/layout_columnar",
-        "AOT compile or run failed",
-        "#2016 masking #1988: the AOT build or run fails, so the gate never \
-         reaches the run tier that stops on E0956 (no Cranelift host is built \
-         for the construct, and the TIR evaluator it deopts into does not cover \
-         it either). Repairing the AOT build moves this row to \
-         RUN_TIER_BROKEN_HELD_OUT, where #1988 is still owed",
-    ),
-    (
         "operators/spaceship",
         "AOT compile or run failed",
         "#2016: the optimized AOT build or run of the example fails, so the gate \
