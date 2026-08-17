@@ -3601,7 +3601,16 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(recv_ty))
                 && args.is_empty()
         }
-        TBuiltinOp::Pop => {
+        // `pq.pop()` resolves to `PriorityQueuePop`, not `Pop`, since
+        // e7fdc84a5 split the verb (`resolve_builtin_op`, TIR
+        // `lower/builtins.rs`). Lowering kept the pair together —
+        // `LowerCtx::lower_builtin_method_dispatch` matches
+        // `TBuiltinOp::Pop | TBuiltinOp::PriorityQueuePop` and routes a
+        // `PriorityQueue` receiver to `priority_queue_pop`
+        // (`lower_ctx.rs`) — but this predicate did not, so the
+        // `PriorityQueue` receiver named on the next line became
+        // unreachable and every `pq.pop()` fell to the `_ => false` floor.
+        TBuiltinOp::Pop | TBuiltinOp::PriorityQueuePop => {
             (matches!(recv_ty, Type::Apply { name, .. } if name == "PriorityQueue")
                 || jit_list_native_type(recv_ty)
                 || matches!(recv_ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task")))

@@ -103,6 +103,10 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "collections/index_hook",
         "collections/iter_hook",
         "collections/iter_tools_audit",
+        // The `[2,3].join(",")` element-renderer divergence in this stem was
+        // caught only by the corpus-wide gate, because no per-stem battery
+        // named it. Named here so the next such regression fails by name.
+        "collections/lists",
         "memory/arena",
         "memory/arena_parse",
         "memory/arena_regions",

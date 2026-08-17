@@ -1802,6 +1802,22 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         return;
     }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    // Same single build-fact snapshot the corpus gate seeds before sema (see
+    // `corpus_gate_record`) and that `compile_with_path` gives the AOT oracle.
+    // Without it this harness builds a DIFFERENT bundle from the gate, so the
+    // two differential oracles disagree on every `@build.*` read and the
+    // weaker one silently passes (I9: engines marshal one snapshot).
+    jet::Driver::seed_build_facts(&mut bundle, "dev", false, &std::collections::BTreeMap::new())
+        .unwrap_or_else(|diags| {
+            panic!(
+                "`{stem}` build facts should seed: {}",
+                diags
+                    .iter()
+                    .map(|d| format!("{}: {}", d.code, d.what))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        });
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .into_iter()
