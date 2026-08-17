@@ -89,6 +89,15 @@ fn bad_file(tag: &str) -> PathBuf {
 }
 
 /// Replace machine-specific temp paths so snapshots are portable.
+///
+/// A diagnostic may render the entry as an absolute path, as a path relative to
+/// the temp root, or as the bare file name, and which one it picks is not this
+/// helper's business — its only job is to make the snapshot host-independent.
+/// Only the first two were normalized, so a diagnostic that rendered the bare
+/// name left a real machine-independent string that simply did not match the
+/// `BAD.jet` convention every other fixture in this suite uses, and the test
+/// read as a failure in the compiler rather than in the scrubber. This target
+/// sits outside every routine set (#2025), so nobody saw it.
 fn scrub(s: &str, file: &Path) -> String {
     let mut scrubbed = s.replace(&file.display().to_string(), "BAD.jet");
     let temp_dir = std::env::temp_dir();
@@ -96,6 +105,9 @@ fn scrub(s: &str, file: &Path) -> String {
         if let Ok(relative) = file.strip_prefix(temp_root) {
             scrubbed = scrubbed.replace(&relative.display().to_string(), "BAD.jet");
         }
+    }
+    if let Some(name) = file.file_name().and_then(|n| n.to_str()) {
+        scrubbed = scrubbed.replace(name, "BAD.jet");
     }
     scrubbed
 }
