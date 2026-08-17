@@ -1768,8 +1768,9 @@ fn emit_tir_stmt(
                             if stride_wrapper { out.push_str(&format!("{}}}\n", pad)); }
                             return;
                         }
-                        // D-SOA1: a columnar list iterates `iter_aos()` (owned S, no
-                        // `.cloned()`); a plain list iterates `iter().cloned()`.
+                        // D-SOA1: a columnar list iterates `iter_aos()` (owned records
+                        // pulled out of the shared column store, no `.cloned()`); a plain
+                        // list iterates `iter().cloned()`.
                         // D-ONCE-WORD1 / D-CONC-STREAM1: a `Stream<T>` iterates BY
                         // VALUE directly; its shared Prelude owns task cancellation.
                         let iter_form = if *by_value {

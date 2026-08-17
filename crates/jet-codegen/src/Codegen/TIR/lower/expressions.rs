@@ -4416,10 +4416,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         }
                     }
                 }
-                // D-SOA1: a fused `xs[i].field` where `xs` is a columnar list reads the
-                // field's column directly (`jet_index_vec(&(base).__jet_<field>, i, …)`),
-                // the cache-friendly path — no whole-`S` gather. The result is the same
-                // owned, bounds-checked field value the AoS form would produce.
+                // D-SOA1 / D-SOA-TIER1=A: a fused `xs[i].field` where `xs` is a
+                // columnar list reads that field's column directly through the
+                // shared store — the cache-friendly path, no whole-`S` gather.
+                // The result is the same owned, bounds-checked field value the
+                // array-of-structs form would produce.
                 if let Expr::Index {
                     base,
                     index,
@@ -4431,18 +4432,38 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         let base_t = lower_expr(base, cx, env);
                         if let Type::List(elem) = &base_t.ty {
                             if cx.columnar_list_type(elem).is_some() {
-                                let field_ty = struct_field_type(cx, elem, member).unwrap_or(Type::Int);
-                                let index_t = lower_expr(index, cx, env);
-                                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-                                return TExpr {
-                                    ty: field_ty,
-                                    kind: TExprKind::ColumnarColumnRead {
-                                        base: Box::new(base_t),
-                                        index: Box::new(index_t),
-                                        column_rust: mangle(member).to_string(),
-                                        line,
-                                    },
+                                // The column index comes from the ONE stored-field
+                                // order every tier reads, so a fused read and the
+                                // emitted column set can never disagree. A member
+                                // that is not a stored column (a computed field)
+                                // is not a fused read at all and falls through to
+                                // the ordinary getter path below.
+                                let column = match elem.as_ref() {
+                                    Type::Named(elem_name) => {
+                                        cx.columnar_column_index(elem_name, member)
+                                    }
+                                    _ => None,
                                 };
+                                if let Some(column) = column {
+                                    let field_ty =
+                                        struct_field_type(cx, elem, member).unwrap_or(Type::Int);
+                                    let index_t = lower_expr(index, cx, env);
+                                    let line =
+                                        crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                                    return TExpr {
+                                        ty: field_ty,
+                                        kind: TExprKind::ColumnarColumnRead {
+                                            base: Box::new(base_t),
+                                            index: Box::new(index_t),
+                                            column,
+                                            accessor:
+                                                crate::Codegen::Items::columnar_cell_accessor(
+                                                    member,
+                                                ),
+                                            line,
+                                        },
+                                    };
+                                }
                             }
                         }
                     }

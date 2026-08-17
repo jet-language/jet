@@ -3358,9 +3358,10 @@ pub enum TStmt {
         /// D-LOOP-ADVANCE2=A source stride, evaluated once before the first pull.
         step: Option<TExpr>,
         method_kind: Option<TForInMethod>,
-        /// D-SOA1: the collection is a `#layout(columnar)` list — iterate via
-        /// `({coll}).iter_aos()` (yields owned gathered `S`) instead of
-        /// `({coll}).iter().cloned()`. Always `false` for the map/method forms.
+        /// D-SOA1 / D-SOA-TIER1=A: the collection is a `#layout(columnar)` list —
+        /// iterate the gathered record view (`iter_aos()`, owned `S` pulled out of
+        /// the shared column store) instead of `iter().cloned()`. Always `false`
+        /// for the map/method forms.
         columnar: bool,
         /// D-ONCE-WORD1 / D-CONC-STREAM1: the collection is a `Stream<T>` —
         /// iterate it directly BY VALUE; the shared Stream Prelude owns the
@@ -3940,29 +3941,37 @@ pub enum TExprKind {
     ListSpread {
         parts: Vec<ListSpreadPart>,
     },
-    /// D-SOA1: a list literal whose element is a `#layout(columnar)` struct `S`.
-    /// Lowers to `__jet_<S>_columns::from_aos(vec![…])` — the elements build the
-    /// array-of-structs, then `from_aos` distributes them across the columns.
-    /// `columns_ty` is the resolved `__jet_<S>_columns` Rust path.
+    /// D-SOA1 / D-SOA-TIER1=A: a list literal whose element is a
+    /// `#layout(columnar)` struct `S`. The elements build the array-of-structs,
+    /// then the shared column store scatters them across the columns.
+    /// `columns_ty` is the resolved `[S]` Rust type — the Prelude-owned
+    /// `JetColumnList<S>`, never a per-struct storage type.
     ColumnarListLit {
         columns_ty: String,
         elems: Vec<TExpr>,
     },
-    /// D-SOA1: index-read `xs[i]` on a columnar list — gathers the logical `S`
-    /// from the columns at `i` (bounds-checked, same panic as `jet_index_vec`).
-    /// Lowers to `(base).gather_at(i, file, line)`.
+    /// D-SOA1 / D-SOA-TIER1=A: index-read `xs[i]` on a columnar list — pulls the
+    /// logical `S` out of the columns at `i` through THE shared gather read,
+    /// bounds-checked with the same list stop an array-of-structs `xs[i]` uses.
     ColumnarGather {
         base: Box<TExpr>,
         index: Box<TExpr>,
         line: usize,
     },
-    /// D-SOA1: a fused `xs[i].field` field-read on a columnar list — reads
-    /// directly from the field's column (`jet_index_vec(&(base).__jet_<field>, i,
-    /// …)`), the cache-friendly fast path (no whole-`S` gather).
+    /// D-SOA1 / D-SOA-TIER1=A: a fused `xs[i].field` field-read on a columnar
+    /// list — one cell straight out of that field's column, with no whole-`S`
+    /// gather. This is the cache-friendly fast path.
+    ///
+    /// `column` is the field's position in declaration order among STORED
+    /// fields, which is exactly the column order the store was built with
+    /// (a computed field is never a column, D-FIELDPOL1). `accessor` unwraps
+    /// that column's cell back to the field's own type; every tier resolves the
+    /// same column index, and only the accessor is engine-specific.
     ColumnarColumnRead {
         base: Box<TExpr>,
         index: Box<TExpr>,
-        column_rust: String,
+        column: usize,
+        accessor: String,
         line: usize,
     },
     /// c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). The generated

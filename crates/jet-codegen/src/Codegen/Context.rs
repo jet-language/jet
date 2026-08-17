@@ -161,9 +161,10 @@ pub(crate) struct Cx {
     /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
     /// the runtime step functions + `jet_decode_traced` chain-walker.
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
-    /// D-SOA1: struct names declared `#layout(columnar)`. A `[S]` of such a
-    /// struct lowers to the generated `__jet_<S>_columns` struct-of-arrays type;
-    /// `rust_type` maps the list type and the list ops route to its inherent API.
+    /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
+    /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
+    /// shared column store; `rust_type` maps the list type and the list ops route
+    /// to that facade's surface.
     pub(crate) columnar: HashSet<String>,
     pub(crate) auto_printable: HashSet<String>,
     pub(crate) auto_debug: HashSet<String>,
@@ -1576,22 +1577,31 @@ impl Cx {
         self.columnar.contains(name)
     }
 
-    /// D-SOA1: if `inner` is a `#layout(columnar)` struct type, the Rust path of
-    /// its generated struct-of-arrays type (`__jet_<S>_columns`, module-prefixed
-    /// like the struct itself). `None` for any non-columnar element.
+    /// D-SOA-TIER1=A: if `inner` is a `#layout(columnar)` struct type, the Rust
+    /// type of a `[inner]` collection — the Prelude-owned `JetColumnList<S>`
+    /// over THE shared column store. `None` for any non-columnar element.
+    ///
+    /// There is deliberately no per-struct storage type here any more: the
+    /// layout, the row bookkeeping and the gather read are Prelude source, and
+    /// codegen emits only the `JetRow` marshalling adapter for `S`.
     pub(crate) fn columnar_list_type(&self, inner: &Type) -> Option<String> {
         if let Type::Named(name) = inner {
             if self.is_columnar_struct(name) {
-                let columns = jet_foundation::Names::mangle_path(&format!("{name}_columns"));
-                return Some(if self.foreign_types.contains_key(name.as_str()) {
-                    let rust_mod = &self.foreign_types[name.as_str()];
-                    format!("{}{}::{columns}", self.root_prefix, rust_mod)
-                } else {
-                    columns
-                });
+                return Some(format!("JetColumnList<{}>", self.rust_type(inner)));
             }
         }
         None
+    }
+
+    /// D-SOA-TIER1=A: the column index of `field` on columnar struct `name` —
+    /// its position in declaration order among STORED fields, which is exactly
+    /// the column order the store was built with. A computed field is never a
+    /// column (D-FIELDPOL1) and `struct_fields` already excludes it.
+    pub(crate) fn columnar_column_index(&self, name: &str, field: &str) -> Option<usize> {
+        self.struct_fields
+            .get(name)?
+            .iter()
+            .position(|(candidate, _)| candidate == field)
     }
 
     /// D-TYPEALIAS1 / D-ALIAS-OP1=B: expand `alias Name<T> :: …` applications to their target type.
@@ -1695,8 +1705,8 @@ impl Cx {
             Type::Named(name) if self.checked_text_heads.contains(name) => "String".to_string(),
             Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
             Type::Char => "char".to_string(),
-            // D-SOA1: a `[S]` of a `#layout(columnar)` struct lowers to the
-            // generated struct-of-arrays type `__jet_<S>_columns`, not `Vec<S>`.
+            // D-SOA1 / D-SOA-TIER1=A: a `[S]` of a `#layout(columnar)` struct
+            // lowers to the Prelude `JetColumnList<S>`, not `Vec<S>`.
             Type::List(inner) if self.columnar_list_type(inner).is_some() => {
                 self.columnar_list_type(inner).unwrap()
             }

@@ -79,6 +79,18 @@ pub mod fixed_list {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::jet_list_bounds_message;
 }
+/// D-SOA-TIER1=A: THE shared struct-of-arrays column store and the one gather
+/// read, shared verbatim with emitted AOT code. The interpreter ambient and the
+/// Cranelift host reach a columnar list only through this source, so no engine
+/// carries its own layout, row bookkeeping, or bounds policy (I9).
+pub mod columns {
+    include!("Prelude/Core/Columns.rs");
+    // Items are order-independent; the imports trail the include so a file that
+    // opens with an inner doc comment still compiles as a module. The read reuses
+    // the shared fixed-list bounds stop rather than wording its own.
+    #[allow(unused_imports)]
+    pub use super::fixed_list::{jet_fixed_list_index, JetFixedListIndexError};
+}
 /// D-FLOAT-ORIGIN: tracked-float provenance rendering shared by all tiers.
 pub mod float_provenance {
     include!("Prelude/Core/FloatProvenance.rs");

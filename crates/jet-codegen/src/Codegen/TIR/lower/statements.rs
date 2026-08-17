@@ -2468,8 +2468,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
                     // with an Int placeholder element type (no element to infer from), so it
                     // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
-                    // columnar empty constructor `__jet_<S>_columns::from_aos(vec![])` using
-                    // the binding's declared type.
+                    // columnar empty constructor (`JetColumnList<S>::from_aos(vec![])`, one
+                    // empty column per stored field) using the binding's declared type.
                     if let Some(decl @ Type::List(inner)) = b.ty.as_ref().map(Type::without_user_tags) {
                         if let Some(columns_ty) = cx.columnar_list_type(inner) {
                             if matches!(&init.kind, TExprKind::ListLit(es) if es.is_empty()) {
@@ -3319,8 +3319,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }
                     }
                     // D-SOA1: a single-binding loop over a columnar list iterates the
-                    // gathered AoS view (`iter_aos`), not `Vec::iter` (which the columns
-                    // type doesn't expose).
+                    // gathered record view (`iter_aos`), pulling each record out of the
+                    // shared column store, not `Vec::iter` (the facade holds columns).
                     let columnar = var2.is_none()
                         && method_kind.is_none()
                         && coll_elem_ty
