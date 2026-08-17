@@ -783,49 +783,6 @@ fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
     }
 }
 
-/// `true` when `jet_net_error_surface_parts` gives this ordinal the nested `DNS`
-/// payload instead of a detail record. An engine holding only the marshalled
-/// bits asks here instead of keeping its own copy of the surface shape.
-fn jet_net_error_surface_payload_is_dns(ordinal: i64) -> bool {
-    ordinal == 14
-}
-
-/// The inverse of `jet_net_error_surface_parts`: rebuild the surface variant
-/// from the marshalled ordinal and the one string its rendering reads, then
-/// render it through the single `JetShow`/`JetDisplay` impl above.
-///
-/// `JetShow for JetNetError` reads exactly `detail.message` (or the DNS value),
-/// so the rebuilt detail carries that string and leaves the diagnostic-only
-/// fields empty; `dns_ordinal` is the nested `JetNetDnsError` ordinal and is
-/// negative for a detail variant.
-///
-/// D-FAIL-CONV2=A / I9: a resident tier that holds the packed carrier renders
-/// `{err}` by calling this, so the wording lives once — in the `JetShow` impl —
-/// and no engine reformats a network failure locally.
-fn jet_net_error_surface_show(ordinal: i64, dns_ordinal: i64, text: &str) -> String {
-    let detail = || jet_net_detail("", None, None, text.to_string(), None);
-    let error = match ordinal {
-        0 => JetNetError::InvalidInput(detail()),
-        1 => JetNetError::PermissionDenied(detail()),
-        2 => JetNetError::AddressInUse(detail()),
-        3 => JetNetError::AddressUnavailable(detail()),
-        4 => JetNetError::ConnectionRefused(detail()),
-        5 => JetNetError::ConnectionReset(detail()),
-        6 => JetNetError::NotConnected(detail()),
-        7 => JetNetError::Closed(detail()),
-        8 => JetNetError::Timeout(detail()),
-        9 => JetNetError::Cancelled(detail()),
-        10 => JetNetError::Unsupported(detail()),
-        11 => JetNetError::TLS(detail()),
-        12 => JetNetError::Protocol(detail()),
-        14 if dns_ordinal == 0 => JetNetError::DNS(JetNetDnsError::NotFound(text.to_string())),
-        14 => JetNetError::DNS(JetNetDnsError::Failure(text.to_string())),
-        // 13 and any ordinal this Prelude does not mint.
-        _ => JetNetError::Other(detail()),
-    };
-    <JetNetError as JetDisplay>::jet_display(&error)
-}
-
 fn jet_net_tcp_stream(inner: std::net::TcpStream) -> Result<JetTCPStream, JetNetError> {
     inner
         .set_nonblocking(true)

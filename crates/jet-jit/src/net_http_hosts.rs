@@ -275,39 +275,6 @@ fn http_err(e: JetHTTPError) -> i64 {
     result_err_bits(marshal_http_error(e).0)
 }
 
-/// D-FAIL-CONV2=A: render the packed `HTTPError` carrier `marshal_http_error`
-/// produced. The text comes from the Prelude's own display — the symbol AOT
-/// emits for `{err}` — so this host only unpacks bits (I9).
-fn jet_jit_http_error_show(packed: i64) -> i64 {
-    let ordinal = packed & 0xff;
-    let payload = packed >> 8;
-    let text = if jet_http_error_surface_payload_is_text(ordinal) {
-        clone_string(payload)
-    } else {
-        String::new()
-    };
-    alloc_string(jet_http_error_surface_show(ordinal, payload, &text))
-}
-
-/// D-FAIL-CONV2=A: render the packed `NetError` carrier `marshal_net_error`
-/// produced. A detail variant keeps its message in field 3 of the record
-/// `net_error_detail_handle` wrote; the DNS variant packs its nested ordinal
-/// beside a string handle. The text itself comes from the Prelude (I9).
-fn jet_jit_net_error_show(packed: i64) -> i64 {
-    let ordinal = packed & 0xff;
-    let payload = packed >> 8;
-    let (dns_ordinal, text) = if jet_net_error_surface_payload_is_dns(ordinal) {
-        (payload & 0xff, clone_string(payload >> 8))
-    } else {
-        let message = Concurrency::with_runtime_mut(|rt| -> Option<String> {
-            let handle = rt.heap.record_get_string(payload, 3)?;
-            rt.heap.clone_string(handle)
-        });
-        (-1, message.unwrap_or_default())
-    };
-    alloc_string(jet_net_error_surface_show(ordinal, dns_ordinal, &text))
-}
-
 fn option_string(s: Option<String>) -> i64 {
     match s {
         None => 0,
@@ -2687,8 +2654,6 @@ host_fns! {
     http_body_copy_to: "jet_jit_http_body_copy_to" => jet_jit_http_body_copy_to: sig3;
     http_nominal_static: "jet_jit_http_nominal_static" => jet_jit_http_nominal_static: sig7;
     http_nominal_show: "jet_jit_http_nominal_show" => jet_jit_http_nominal_show: sig1;
-    http_error_show: "jet_jit_http_error_show" => jet_jit_http_error_show: sig1;
-    net_error_show: "jet_jit_net_error_show" => jet_jit_net_error_show: sig1;
     http_json_response: "jet_jit_http_json_response" => jet_jit_http_json_response: sig2;
     http_static_files: "jet_jit_http_static_files" => jet_jit_http_static_files: sig6;
     http_cors_policy: "jet_jit_http_cors_policy" => jet_jit_http_cors_policy: sig7;
