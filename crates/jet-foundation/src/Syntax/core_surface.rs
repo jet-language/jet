@@ -260,16 +260,16 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 /// D-CAP2/S4's `copy` verb).
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
-pub const WRITE_CAPABILITY_LABEL: &str = "the write-capability marker `&`";
-pub const MOVE_CAPABILITY_LABEL: &str = "the move-capability marker `^`";
+pub const WRITE_ACCESS_LABEL: &str = "the write-access marker `&`";
+pub const MOVE_MARKER_LABEL: &str = "the move marker `^`";
 
-pub fn capability_label(sigil: &str) -> &'static str {
+pub fn access_label(sigil: &str) -> &'static str {
     if sigil == SIGIL_WRITE {
-        WRITE_CAPABILITY_LABEL
+        WRITE_ACCESS_LABEL
     } else if sigil == SIGIL_MOVE {
-        MOVE_CAPABILITY_LABEL
+        MOVE_MARKER_LABEL
     } else {
-        "the capability marker"
+        "the access marker"
     }
 }
 

@@ -2143,9 +2143,9 @@ impl<'a> Checker<'a> {
         let (code, why, fix) = if info.param_conv.is_some() {
             (
                 "E0205",
-                "an unmarked parameter gives read access only; a write window needs the write-capability marker `&`".to_string(),
+                "an unmarked parameter gives read access only; a write window needs the write-access marker `&`".to_string(),
                 format!(
-                    "change the parameter to `{}: {}{}` with the write-capability marker `&`",
+                    "change the parameter to `{}: {}{}` with the write-access marker `&`",
                     root,
                     Syntax::SIGIL_WRITE,
                     info.ty.name()
@@ -2231,7 +2231,7 @@ impl<'a> Checker<'a> {
                             Syntax::KW_SELF
                         ),
                         format!(
-                            "declare the enclosing method with the write-capability marker `&`: `{}{}`",
+                            "declare the enclosing method with the write-access marker `&`: `{}{}`",
                             Syntax::SIGIL_WRITE,
                             Syntax::KW_SELF
                         ),
@@ -2239,7 +2239,7 @@ impl<'a> Checker<'a> {
                 } else {
                     (
                         format!(
-                            "cannot write to `{}` — it does not have the write-capability marker `&`; required before calling `.{}()`",
+                            "cannot write to `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
                             root, method
                         ),
                         format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
@@ -2248,7 +2248,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0202",
                     what,
-                    "this method edits the value it's called on; the write-capability marker `&` is required"
+                    "this method edits the value it's called on; the write-access marker `&` is required"
                         .to_string(),
                     fix,
                     Some(span),
@@ -3656,7 +3656,7 @@ impl<'a> Checker<'a> {
                 "E2305",
                 "returned view paths disagree about read or write access".to_string(),
                 "one public output slot cannot sometimes be a read view and sometimes be an exclusive write view".to_string(),
-                "return the same view capability on every path".to_string(),
+                "return the same view access on every path".to_string(),
                 Some(span),
             ));
             return;
@@ -4108,7 +4108,7 @@ impl<'a> Checker<'a> {
             "E0205",
             "cannot edit through this read-only `SharedGuard` view".to_string(),
             "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access".to_string(),
-            "keep the edit at the acquisition site, or pass the guard to a helper with the write-capability marker `&`, such as `&guard: SharedGuard<T>`".to_string(),
+            "keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`".to_string(),
             Some(span),
         ));
         true
@@ -4242,12 +4242,12 @@ impl<'a> Checker<'a> {
                 });
         if indexes_list {
             format!(
-                "change the helper to accept a list window, then pass a range write window with the write-capability marker `&`, such as `{}xs[a..b]`",
+                "change the helper to accept a list window, then pass a range write window with the write-access marker `&`, such as `{}xs[a..b]`",
                 Syntax::SIGIL_WRITE,
             )
         } else {
             format!(
-                "bind the value first: `x {} ...` then pass `{}x` with the write-capability marker `&`",
+                "bind the value first: `x {} ...` then pass `{}x` with the write-access marker `&`",
                 Syntax::SIGIL_BIND_MUT,
                 Syntax::SIGIL_WRITE,
             )
@@ -5302,7 +5302,7 @@ impl<'a> Checker<'a> {
             .as_ref()
             .map(Type::show)
             .unwrap_or_else(|| "[Task<T>]".to_string());
-        let why = "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move-capability marker `^`"
+        let why = "each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`"
             .to_string();
         // Infer may wrap an owning field/index read in `Copy`; report against
         // the underlying place so the fix names the projection, not a clone.
@@ -5325,7 +5325,7 @@ impl<'a> Checker<'a> {
                 });
                 let fix = if is_param && is_task_list {
                     format!(
-                        "take the list with the move-capability marker `^`: `{name}: {}{list_ty}`, or collect the work in a canonical `task.all` or `task.group` block",
+                        "take the list with the move marker `^`: `{name}: {}{list_ty}`, or collect the work in a canonical `task.all` or `task.group` block",
                         Syntax::SIGIL_MOVE
                     )
                 } else if is_task_list {
@@ -5376,7 +5376,7 @@ impl<'a> Checker<'a> {
                         ),
                         "this function has read access only and does not own the value".to_string(),
                         format!(
-                            "call it on a copy, or take ownership with the move-capability marker `^`: `{}: {}{}`",
+                            "call it on a copy, or take ownership with the move marker `^`: `{}: {}{}`",
                             name,
                             Syntax::SIGIL_MOVE,
                             info.ty.name()
@@ -5407,14 +5407,14 @@ impl<'a> Checker<'a> {
     ) -> Diagnostic {
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so the move-capability marker `^` (`{}{name}`) would break that later use — write the copy marker `~` (`{}{name}`) to pass a copy, or reorder so this call is `{name}`'s last use and write the move-capability marker `^` (`{}{name}`)",
+                "`{name}` is used again after this call, so the move marker `^` (`{}{name}`) would break that later use — write the copy marker `~` (`{}{name}`) to pass a copy, or reorder so this call is `{name}`'s last use and write the move marker `^` (`{}{name}`)",
                 Syntax::SIGIL_MOVE,
                 Syntax::SIGIL_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write the move-capability marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or the copy marker `~` (`{}{name}`) to keep a copy",
+                "write the move marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or the copy marker `~` (`{}{name}`) to keep a copy",
                 Syntax::SIGIL_MOVE,
                 Syntax::SIGIL_COPY,
             )
@@ -5538,15 +5538,15 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0201",
                             format!(
-                                "`{}` needs the move-capability marker `^` here — this value can't be copied",
+                                "`{}` needs the move marker `^` here — this value can't be copied",
                                 call_name,
                             ),
                             format!(
-                                "parameter {} takes ownership through the move-capability marker `^`; passing `{}` without that marker would have to copy it, but this type can't be copied",
+                                "parameter {} takes ownership through the move marker `^`; passing `{}` without that marker would have to copy it, but this type can't be copied",
                                 idx + 1,
                                 name
                             ),
-                            format!("write the move-capability marker `^` (`{}{}`) to move ownership to `{}`", Syntax::SIGIL_MOVE, name, call_name),
+                            format!("write the move marker `^` (`{}{}`) to move ownership to `{}`", Syntax::SIGIL_MOVE, name, call_name),
                             Some(*span),
                         ));
                     }
@@ -5591,8 +5591,8 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(Diagnostic::error(
                 "E0202",
-                "the write-capability marker `&` needs a plain named binding after it".to_string(),
-                "write access from the write-capability marker `&` can only be granted to a named binding, not an expression"
+                "the write-access marker `&` needs a plain named binding after it".to_string(),
+                "write access from the write-access marker `&` can only be granted to a named binding, not an expression"
                     .to_string(),
                 self.non_name_write_argument_fix(&arg.expr),
                 Some(arg.span),
@@ -5619,14 +5619,14 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0201",
                             format!(
-                                "`{call_name}` needs the move-capability marker `^` here — this value can't be copied"
+                                "`{call_name}` needs the move marker `^` here — this value can't be copied"
                             ),
                             format!(
-                                "parameter {} takes ownership through the move-capability marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied",
+                                "parameter {} takes ownership through the move marker `^`; passing `{name}` without that marker would have to copy it, but this type can't be copied",
                                 index + 1
                             ),
                             format!(
-                                "write the move-capability marker `^` (`{}{name}`) to move ownership to `{call_name}`",
+                                "write the move marker `^` (`{}{name}`) to move ownership to `{call_name}`",
                                 Syntax::SIGIL_MOVE
                             ),
                             Some(*span),
@@ -5646,13 +5646,13 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         format!(
-                            "parameter `{name}` requires the write-capability marker `&` at the call site"
+                            "parameter `{name}` requires the write-access marker `&` at the call site"
                         ),
                         format!(
-                            "`{call_name}` needs to edit this value with the write-capability marker `&`; passing it without that marker grants only read access"
+                            "`{call_name}` needs to edit this value with the write-access marker `&`; passing it without that marker grants only read access"
                         ),
                         format!(
-                            "write the write-capability marker `&` (`{}{name}`) when calling `{call_name}`",
+                            "write the write-access marker `&` (`{}{name}`) when calling `{call_name}`",
                             Syntax::SIGIL_WRITE
                         ),
                         Some(*span),
@@ -5693,9 +5693,9 @@ impl<'a> Checker<'a> {
             (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
                 self.diags.push(Diagnostic::error(
                     "E0203",
-                    "a value was passed with the move-capability marker `^` to a parameter that does not consume".to_string(),
-                    "only parameters declared with the move-capability marker `^` accept a moved value at the call site".to_string(),
-                    "remove the move-capability marker `^`, or declare the parameter with that marker to take ownership".to_string(),
+                    "a value was passed with the move marker `^` to a parameter that does not consume".to_string(),
+                    "only parameters declared with the move marker `^` accept a moved value at the call site".to_string(),
+                    "remove the move marker `^`, or declare the parameter with that marker to take ownership".to_string(),
                     Some(arg.span),
                 ));
             }
@@ -6559,7 +6559,7 @@ pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
         format!("`{}` still owes `consume`", name),
         "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
         format!(
-            "consume it exactly once: move it to a parameter with the move-capability marker `^`, or `return` it — or write `#{}(\"reason\") {{ consume({}) }}` to discard it deliberately",
+            "consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#{}(\"reason\") {{ consume({}) }}` to discard it deliberately",
             Syntax::KW_UNSAFE, name
         ),
         Some(span),
@@ -6641,7 +6641,7 @@ pub(crate) fn e0142_aliased(name: &str, call: &str, span: Span) -> Diagnostic {
             call
         ),
         format!(
-            "move it with the move-capability marker `^` (`{}{}`) to give it away, or rework the call so it takes ownership through that marker",
+            "move it with the move marker `^` (`{}{}`) to give it away, or rework the call so it takes ownership through that marker",
             Syntax::SIGIL_MOVE,
             name,
         ),

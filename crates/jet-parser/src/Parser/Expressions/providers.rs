@@ -80,17 +80,17 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0018",
                             format!(
-                                "the {} is written `{}`, not `{}`",
-                                Syntax::WRITE_CAPABILITY_LABEL,
+                                "{} is written `{}`, not `{}`",
+                                Syntax::WRITE_ACCESS_LABEL,
                                 Syntax::SIGIL_WRITE,
                                 Syntax::FOREIGN_WRITE
                             ),
                             "Jet has exactly one spelling for each thing, so all code reads the same"
                                 .to_string(),
                             format!(
-                                "replace `{}` with the {} (`{}`)",
+                                "replace `{}` with {} (`{}`)",
                                 Syntax::FOREIGN_WRITE,
-                                Syntax::WRITE_CAPABILITY_LABEL,
+                                Syntax::WRITE_ACCESS_LABEL,
                                 Syntax::SIGIL_WRITE
                             ),
                             Some(span),
@@ -142,11 +142,11 @@ impl<'a> Parser<'a> {
         ) {
             self.diags.push(Diagnostic::error(
                 code,
-                format!("`{}` is now {} (`{}`)", keyword, Syntax::capability_label(sigil), sigil),
-                "capability is written with a sigil on the type, not a word — so all \
+                format!("`{}` is now {} (`{}`)", keyword, Syntax::access_label(sigil), sigil),
+                "access is written with a sigil on the type, not a word — so all \
                  code reads the same"
                     .to_string(),
-                format!("write {} (`{}`) in place of `{}`", Syntax::capability_label(sigil), sigil, keyword),
+                format!("write {} (`{}`) in place of `{}`", Syntax::access_label(sigil), sigil, keyword),
                 Some(span),
             ));
         }

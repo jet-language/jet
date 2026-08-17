@@ -2673,10 +2673,10 @@ impl<'a> Checker<'a> {
                     "E0120",
                     format!("`{name}` was not moved here, so its contents cannot be taken apart"),
                     format!(
-                        "`{name}` grants read-only access to `{ty}`, so its non-copyable parts cannot be taken apart with the move-capability marker `^`"
+                        "`{name}` grants read-only access to `{ty}`, so its non-copyable parts cannot be taken apart with the move marker `^`"
                     ),
                     format!(
-                        "change the parameter to `{name}: {}{ty}` with the move-capability marker `^`, or inspect it without binding its contents",
+                        "change the parameter to `{name}: {}{ty}` with the move marker `^`, or inspect it without binding its contents",
                         Syntax::SIGIL_MOVE
                     ),
                     Some(*name_span),

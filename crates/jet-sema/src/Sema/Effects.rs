@@ -1160,7 +1160,7 @@ pub fn check_callback_bounds(
 
 /// D-REPLAY1: `#Replayable` functions may not reach ambient
 /// Time/Rand/Net/IO. Deterministic handles (`Clock.new(seed)`,
-/// `random.rng(seed)`, mockable capability objects) stay valid because they do
+/// `random.rng(seed)`, mockable input objects) stay valid because they do
 /// not enter the ambient Core-call effect graph.
 pub fn check_replayable_effects(
     items: &[crate::AST::Item],
@@ -1240,7 +1240,7 @@ pub fn e0725(fn_name: &str, effects: &EffectSet, span: Span) -> Diagnostic {
         ),
         "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
             .to_string(),
-        "inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function"
+        "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function"
             .to_string(),
         Some(span),
     )
@@ -1676,11 +1676,11 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0712",
         format!(
-            "this `#{}` region uses the effect `{}`, which it has no capability for",
+            "this `#{}` region uses the effect `{}`, which it has no authority for",
             crate::Syntax::KW_GRANT, over_list
         ),
         format!(
-            "`#{}(…)` grants only {}; an effect reached inside — even through a call — needs a capability in scope to perform it",
+            "`#{}(…)` grants only {}; an effect reached inside — even through a call — needs authority in scope to perform it",
             crate::Syntax::KW_GRANT, caps_list
         ),
         format!(
@@ -1691,16 +1691,16 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
     )
 }
 
-/// E0711 (D-SCAP1): the capability handle bound by a `#Grant(…)` region escapes
+/// E0711 (D-SCAP1): the `Authority` handle bound by a `#Grant(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
 /// value. The capability is revoked at scope end (RAII, S63), so a reference that
 /// outlives the block would name a revoked authority.
 pub fn e0711(handle: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0711",
-        format!("the capability `{}` can't escape its `#{}` block", handle, crate::Syntax::KW_GRANT),
+        format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, crate::Syntax::KW_GRANT),
         format!(
-            "`#{}(…)` revokes the capability at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
+            "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
             crate::Syntax::KW_GRANT, handle
         ),
         format!("use `{}` only inside the `#{}` block, or perform the work there", handle, crate::Syntax::KW_GRANT),

@@ -221,7 +221,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
 fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     // #1691 retired the jet.* internal module keys: callers always pass the
     // canonical `core.*` name, so no normalization step remains.
-    // D-DET1: the deterministic capability constructors carry NO ambient effect —
+    // D-DET1: the deterministic input constructors carry NO ambient effect —
     // `Clock.new(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
     // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
     // the resulting handle (`clock.now()` / `rng.int(…)`) is a method call on a

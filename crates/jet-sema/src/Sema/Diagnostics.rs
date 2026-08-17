@@ -6,7 +6,7 @@ pub(crate) use crate::Syntax::edit_distance;
 use crate::AST::{BinOp, Expr, Pattern, Stmt, StrPart, Type, TypedLitBody, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
-pub(crate) const WRITE_CAPABILITY_MARKER: &str = Syntax::WRITE_CAPABILITY_LABEL;
+pub(crate) const WRITE_ACCESS_MARKER: &str = Syntax::WRITE_ACCESS_LABEL;
 
 /// Shared registered-diagnostic renderer for execution adapters. Codegen and
 /// the interpreter may supply source-derived values, but row lookup and
@@ -345,9 +345,9 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
             "`{}` is being changed in this call, so it can't be used again here",
             name
         ),
-        "while something is being changed through the write-capability marker `&`, nobody else may be looking at it".to_string(),
+        "while something is being changed through the write-access marker `&`, nobody else may be looking at it".to_string(),
         format!(
-            "pass the write-capability marker `&` (`{}{}`) only once, or copy first with `{}{}`",
+            "pass the write-access marker `&` (`{}{}`) only once, or copy first with `{}{}`",
             Syntax::SIGIL_WRITE,
             name,
             Syntax::SIGIL_COPY,
@@ -1231,7 +1231,7 @@ pub(crate) fn is_displayable(
 }
 
 /// D-CAPBUNDLE1: an operation used on a nominal `distinct` type whose
-/// capability bundles don't grant it. `operation` names the thing that was
+/// operation bundles don't grant it. `operation` names the thing that was
 /// attempted ("string interpolation", …), `needed_bundle` is the `#Bundle`
 /// spelling that would grant it, and `granted` lists the bundles already
 /// present on the type (empty when the type is still fully inert).
@@ -1243,7 +1243,7 @@ pub(crate) fn e0138(
     span: Span,
 ) -> Diagnostic {
     let has = if granted.is_empty() {
-        "no capability bundles".to_string()
+        "no operation bundles".to_string()
     } else {
         format!("only {}", granted.join(", "))
     };
@@ -1251,7 +1251,7 @@ pub(crate) fn e0138(
         "E0138",
         format!("`{type_name}` doesn't support {operation}"),
         format!(
-            "a nominal type only gets the operations its capability bundles grant; `{type_name}` has {has}"
+            "a nominal type only gets the operations its operation bundles grant; `{type_name}` has {has}"
         ),
         format!(
             "add `{needed_bundle}` before the declaration, or convert to the base type first"

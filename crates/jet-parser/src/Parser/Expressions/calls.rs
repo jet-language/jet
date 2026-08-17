@@ -82,8 +82,8 @@ impl<'a> Parser<'a> {
                     if convention != AccessConvention::Read {
                         self.diags.push(Diagnostic::error(
                             "E0029",
-                            "this argument has two capability markers".to_string(),
-                            "an argument's access capability is written once, on the value"
+                            "this argument has two access markers".to_string(),
+                            "an argument's access marker is written once, on the value"
                                 .to_string(),
                             "keep the sigil after the label and remove the other".to_string(),
                             Some(span),

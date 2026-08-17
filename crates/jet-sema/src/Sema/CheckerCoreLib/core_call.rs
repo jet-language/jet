@@ -1218,7 +1218,7 @@ impl<'a> Checker<'a> {
                     if args.len() != params.len() { self.diags.push(wrong_core_arity(name, params.len(), args.len(), span)); }
                     for (i, ((convention, ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
                         if *convention == AccessConvention::Move {
-                            if arg.convention != AccessConvention::Move { self.diags.push(Diagnostic::error("E0201", format!("argument {} to `{name}` transfers ownership through the move-capability marker `^`", i + 1), "this vault operation consumes its single-use authority value".to_string(), format!("write the move-capability marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE), Some(arg.span))); }
+                            if arg.convention != AccessConvention::Move { self.diags.push(Diagnostic::error("E0201", format!("argument {} to `{name}` transfers ownership through the move marker `^`", i + 1), "this vault operation consumes its single-use authority value".to_string(), format!("write the move marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE), Some(arg.span))); }
                             self.expect_core_arg_moving(name, i, ty, arg);
                         } else { self.expect_core_arg(name, i, ty, arg); }
                     }
@@ -1415,8 +1415,8 @@ impl<'a> Checker<'a> {
                             format!("`{}.{}` expects {} to {} arguments, got {}", module_short_name(module), name, min, max, args.len()),
                             "the file handle is required; limits, XML options, and canonical mode use safe defaults when omitted".to_string(),
                             if module == "core.encoding.xml" {
-                                format!("write `xml.{name}(^file)`, `xml.{name}(^file, limits)`, or `xml.{name}(^file, limits, options)` with the move-capability marker `^`")
-                            } else if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)` with the move-capability marker `^`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)` with the move-capability marker `^`".to_string() } else { format!("write `{}.writer(^file)` or `{}.writer(^file, limits)` with the move-capability marker `^`", module_short_name(module), module_short_name(module)) },
+                                format!("write `xml.{name}(^file)`, `xml.{name}(^file, limits)`, or `xml.{name}(^file, limits, options)` with the move marker `^`")
+                            } else if name == "reader" { format!("write `{}.reader(^file)` or `{}.reader(^file, limits)` with the move marker `^`", module_short_name(module), module_short_name(module)) } else if module == "core.encoding.json" { "write `json.writer(^file)`, `json.writer(^file, limits)`, or `json.writer(^file, limits, canonical)` with the move marker `^`".to_string() } else { format!("write `{}.writer(^file)` or `{}.writer(^file, limits)` with the move marker `^`", module_short_name(module), module_short_name(module)) },
                             Some(span),
                         ));
                     }
@@ -1426,9 +1426,9 @@ impl<'a> Checker<'a> {
                             if arg.convention != AccessConvention::Move {
                                 self.diags.push(Diagnostic::error(
                                     "E0201",
-                                    format!("argument {} to `{}` transfers ownership through the move-capability marker `^`", i + 1, name),
+                                    format!("argument {} to `{}` transfers ownership through the move marker `^`", i + 1, name),
                                     "this standard library constructor retains the consumed handle".to_string(),
-                                    format!("write the move-capability marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE),
+                                    format!("write the move marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE),
                                     Some(arg.span),
                                 ));
                             }
@@ -2221,13 +2221,13 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0218",
                             format!(
-                                "`{}` needs a write window made with the write-capability marker `&` into the place being pinned",
+                                "`{}` needs a write window made with the write-access marker `&` into the place being pinned",
                                 Syntax::MEM_PIN
                             ),
-                            "a pin promises one storage location will not move, so it has to name that location with the write-capability marker `&` instead of a copied value"
+                            "a pin promises one storage location will not move, so it has to name that location with the write-access marker `&` instead of a copied value"
                                 .to_string(),
                             format!(
-                                "write `mem.{}({}place)` with the write-capability marker `&`",
+                                "write `mem.{}({}place)` with the write-access marker `&`",
                                 Syntax::MEM_PIN,
                                 Syntax::SIGIL_WRITE
                             ),
@@ -3114,9 +3114,9 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             "`shuffle` edits its list in place".to_string(),
-                            "the write-capability marker `&` is required; pass the list with that marker"
+                            "the write-access marker `&` is required; pass the list with that marker"
                                 .to_string(),
-                            "write `random.shuffle(&xs)` with the write-capability marker `&`".to_string(),
+                            "write `random.shuffle(&xs)` with the write-access marker `&`".to_string(),
                             Some(arg.span),
                         ));
                     }
@@ -4981,9 +4981,9 @@ impl<'a> Checker<'a> {
                     if arg.convention != AccessConvention::Move {
                         self.diags.push(Diagnostic::error(
                             "E0201",
-                            format!("argument {} to `{}` transfers ownership through the move-capability marker `^`", i + 1, name),
+                            format!("argument {} to `{}` transfers ownership through the move marker `^`", i + 1, name),
                             "this standard library constructor retains the consumed handle".to_string(),
-                            format!("write the move-capability marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE),
+                            format!("write the move marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE),
                             Some(arg.span),
                         ));
                     }
@@ -4994,12 +4994,12 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         format!(
-                            "argument {} to `{}` requires the write-capability marker `&`",
+                            "argument {} to `{}` requires the write-access marker `&`",
                             i + 1,
                             name
                         ),
                         "this standard library call edits that value in place".to_string(),
-                        format!("write the write-capability marker `&`: `{}value` for this argument", Syntax::SIGIL_WRITE),
+                        format!("write the write-access marker `&`: `{}value` for this argument", Syntax::SIGIL_WRITE),
                         Some(arg.span),
                     ));
                 }

@@ -2284,7 +2284,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0311",
                     format!("`{method}` is forbidden on secret-bearing `{shown}`"),
-                    "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display capability".to_string(),
+                    "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display operation".to_string(),
                     "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `#Unsafe` region when raw bytes are required".to_string(),
                     Some(span),
                 ));
@@ -3458,7 +3458,7 @@ impl<'a> Checker<'a> {
                             if method == "new" {
                                 "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
                             } else {
-                                "write `fixed :: mem.Fixed.over(&bytes)` with the write-capability marker `&`".to_string()
+                                "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`".to_string()
                             },
                             Some(span),
                         ));
@@ -3527,7 +3527,7 @@ impl<'a> Checker<'a> {
                                 "E0103",
                                 "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
                                 "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
-                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-capability marker `&`".to_string(),
+                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`".to_string(),
                                 Some(args[0].expr.span()),
                             ));
                         }
@@ -4779,12 +4779,12 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0120",
                                 format!(
-                                    "`{}` was not moved here, so `.{}()` cannot take it with the move-capability marker `^`",
+                                    "`{}` was not moved here, so `.{}()` cannot take it with the move marker `^`",
                                     n, method
                                 ),
-                                "this function has read access only and does not own the value; the move-capability marker `^` is required".to_string(),
+                                "this function has read access only and does not own the value; the move marker `^` is required".to_string(),
                                 format!(
-                                    "call it on a copy: `({}{}).{}(...)` — or take ownership with the move-capability marker `^`: `{}: {}{}`",
+                                    "call it on a copy: `({}{}).{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
                                     Syntax::SIGIL_COPY,
                                     n,
                                     method,

@@ -304,7 +304,7 @@ impl TraitRegistry {
                 Item::ErrorConv(ec) => {
                     self.register_error_conv(&ec.from_ty, &ec.to_ty, ec.from_span, diags);
                 }
-                // D-CAPBUNDLE1: a distinct type's capability bundles re-expose
+                // D-CAPBUNDLE1: a distinct type's operation bundles re-expose
                 // base operations while keeping nominal identity (I8: reuse the
                 // existing Display/derive machinery rather than a second
                 // mechanism). `#Numeric` arithmetic is a separate, older gate

@@ -6,10 +6,10 @@ Error [E-WEB-TARGET-BROWSER]: `run` is pinned to Wasm but uses the `Browser` eff
  Why: the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly
  Fix: remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls
 
-Error [E-APP-TARGET-CAPABILITY]: App capability `.csr` needs target `JS`, but the resolved target is `Wasm`.
+Error [E-APP-TARGET-FEATURE]: App feature `.csr` needs target `JS`, but the resolved target is `Wasm`.
   --> tests/ui/app_capability_target.jet:4:30
     |
   4 | fn run() => App :: web.app().csr()
     |                              ^^^
- Why: App is one type across targets, but each capability must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9).
- Fix: Choose a build target that supports `.csr` (for example `#Target(JS)` for browser capabilities or a native target for server capabilities), or remove that capability.
+ Why: App is one type across targets, but each feature must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9).
+ Fix: Choose a build target that supports `.csr` (for example `#Target(JS)` for browser features or a native target for server features), or remove that feature.

@@ -308,7 +308,7 @@ fn skip_bad(lines: [String]) {
 // ============================================================================
 // TRAITS, GENERICS & DISPATCH
 // ============================================================================
-// Named capabilities, not Go-structural (S28). Two equivalent impl spellings.
+// Named traits, not Go-structural (S28). Two equivalent impl spellings.
 
 trait Shape2 {
     fn area(self) => Float
@@ -492,7 +492,7 @@ fn announce(label: String, n: Int) =[IO]=> {    // upper bound: may use IO
 fn run_all(cb: fn(Int) =[]=> Int) { }      // lever 1: param-type effect bound
 fn map_each(f: fn(Int) => Int) =[via f]=> { }   // lever 2: callback pass-through
 
-// Scoped capability: granted into a lexical scope, revoked at scope end (D-SCAP1).
+// Scoped authority: granted into a lexical scope, revoked at scope end (D-SCAP1).
 fn with_fs() {
     #Grant(caps: FS) {
         // FS effect authorized only inside this block
@@ -508,7 +508,7 @@ fn with_fs() {
 
 use core.mem
 
-// Access-capability sigils ride the type (D-MEM1): `&T` write, `^T` take/move,
+// Access sigils ride the type (D-MEM1): `&T` write, `^T` take/move,
 // bare `T` read (the default; no sigil). Call site & receivers mirror them.
 fn damage(p: &Player, amount: Int) {           // &  = exclusive write
     p.hp = p.hp - amount

@@ -659,8 +659,8 @@ fn check_app_body(body: &[Stmt], target: &str, diags: &mut Vec<Diagnostic>) {
                 return;
             }
             diags.push(Diagnostic::from_row(
-                "E-APP-TARGET-CAPABILITY",
-                &[("capability", method.as_str()), ("required", required), ("target", target)],
+                "E-APP-TARGET-FEATURE",
+                &[("feature", method.as_str()), ("required", required), ("target", target)],
                 Some(*method_span),
             ));
         });

@@ -1461,7 +1461,7 @@ A terminal session needs a native PTY or ConPTY. On Unix, `run()` and
 expose its one combined byte stream through `stdout`; `stderr` is empty because
 a PTY has no second output stream. The child session uses the requested size
 and mode, and `TerminalSession.resize` changes the PTY window size. The stable
-capability keys are `terminal`, `resize`, and `raw`. Unsupported targets fail
+fact keys are `terminal`, `resize`, and `raw`. Unsupported targets fail
 closed with an `IOError` instead of silently falling back to pipes.
 
 `pipeline()` keeps ordinary pipe edges. A terminal-backed spec cannot be a
@@ -1701,7 +1701,7 @@ nonces, tokens, salts, and anything security-sensitive.
 | `weighted_pick(xs, weights)` | `T?` | Weighted element; None for length mismatch or no positive weights |
 | `sample(xs, k)` | `[T]` | Up to `k` distinct elements without replacement |
 | `shuffle(&xs)` | nothing | Randomly reorder a list in place |
-| `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
+| `rng(seed)` | `Rng` | A **deterministic** RNG seeded by `seed` (D-DET1) |
 | `split(seed)` | `Rng` | Derive a deterministic child stream from the ambient stream plus `seed` |
 | `bytes(n)` | `[U8]` | PRNG bytes for fixtures/simulation; not cryptographic |
 
@@ -1997,8 +1997,8 @@ fn run() {
 | `sleep(duration: Duration)` | nothing | Block for the duration (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
-| `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
-| `Clock.system()` | `Clock` | An explicit monotonic production clock capability; carries the `Time` effect |
+| `clock(seed)` | `Clock` | A **deterministic** clock starting at `seed` ms (D-DET1) |
+| `Clock.system()` | `Clock` | An explicit monotonic production clock; carries the `Time` effect |
 | `Duration.nanoseconds/microseconds/milliseconds/seconds/minutes/hours(n)` | `Duration ? RangeError` | Checked runtime elapsed-time span (D-TIMERES1=A: nanosecond count) |
 | `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
 
@@ -2684,7 +2684,7 @@ shared budget evaluator owns samples, baselines, confidence, reports, and CI
 outcomes; `core.testing` has no separate benchmark evaluator.
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `benchmark`, `fail`, `main`,
-`run`, `runtests`, `skip`, and `stop` all ask for the same capability
+`run`, `runtests`, `skip`, and `stop` all ask for the same behavior
 `#Test`/`#Bench` markers plus `jet test`/`jet bench` above already give —
 defining, running, skipping, and failing a test — spelled as a marker
 instead of a module function call (D-TESTKIT1).
@@ -2872,7 +2872,7 @@ fn run() {
 | `backend.on_event(ui.key_event("Tab"))` | `EventResult` | advance the backend's interactive focus order |
 | `ui.reactive_render(() => { ... })` | — | repaint from signals read by the body |
 
-Backend capability is explicit rather than silently emulated:
+Backend support is explicit rather than silently emulated:
 
 | Backend | Tree / layout / paint | Focus + accessible names | Native window | Hot reload / package |
 |---------|-----------------------|--------------------------|---------------|----------------------|
@@ -2892,7 +2892,7 @@ a handler slot on the node. At paint/mount, each backend binds that slot to a
 stable identity: author `key` when set, otherwise the render path
 (D-UI-NODE-ID1=C). A click looks up the slot in O(1) and runs it
 (D-UI-EVT-DISP1=E). Only click/activate is portable; hover and other rich
-events require an explicit capability module (D-UI-EVT-SET1=D). GTK, DOM, and
+events require an explicit feature module (D-UI-EVT-SET1=D). GTK, DOM, and
 TUI share this mechanism — there is no second click API (I8).
 
 ---
@@ -3543,7 +3543,7 @@ that parameterized surface (`query` / `query_one` / `execute` / `begin` /
 `commit` / `rollback`). `DBConnection` opens the connection and establishes a
 typed `DBScope`; only the scope implements row operations. Call sites can take
 `T: Driver` without naming SQLite, while the policy and user stay attached to
-the capability. Cleanup stays on `Close` via `close(...)`.
+the driver. Cleanup stays on `Close` via `close(...)`.
 
 | API | Returns | Notes |
 |-----|---------|-------|
@@ -3572,8 +3572,8 @@ from the portable `Driver` surface every backend goes through.
 D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns one
 ranked Tensor operation family. Tensor views retain the owner allocation and
 strides; `vec` and `matrix` are rank-1 / rank-2 aliases over that substrate.
-This slice registers one CPU capability. Its receipt records backend, version,
-profile, cache, and closed capabilities. `Auto` selects that CPU capability,
+This slice registers one CPU backend. Its receipt records backend, version,
+profile, cache, and closed features. `Auto` selects that CPU backend,
 records the choice, and never fabricates an accelerator or changes precision.
 Experts can pin CPU explicitly.
 
@@ -3661,11 +3661,11 @@ requirements reject non-scalar outputs. Gradient receipts inherit the primal
 placement and profile.
 
 `D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` publishes a stable backend,
-version, profile, cache identity, and closed capability list in placement
+version, profile, cache identity, and closed feature list in placement
 receipts. General operations report their actual `F64Strict+Reproducible`
 profile by default and retain `F32Strict+Reproducible` when their inputs carry
 that explicit profile; the tiled path reports real F32 arithmetic and ordered
-reduction. The ratified production profile and provider capabilities remain
+reduction. The ratified production profile and provider features remain
 gated, and unsupported requests fail before launch.
 
 `D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a
@@ -3722,7 +3722,7 @@ by `retry(id)` after a process restart. The ordinary tree remains the bounded
 local delivery path.
 
 Snapshot and EventLog state also require an explicit injected authority. The
-adapter receives a typed store capability plus its schema and version. The
+adapter receives a typed store authority plus its schema and version. The
 store is checked before the adapter starts and has the same meaning in AOT and
 ambient execution; no process-global path is consulted.
 

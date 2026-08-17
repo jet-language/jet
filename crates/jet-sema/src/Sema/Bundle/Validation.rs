@@ -1362,7 +1362,7 @@ pub(crate) fn check_module_bodies(
                         diags.push(Diagnostic::error(
                             "E2305",
                             format!("implementations of `{}.{}` disagree about returned view slots", trait_name, method.name),
-                            "dynamic dispatch can union possible owners, but every implementation must return the same view-bearing shape and access capability"
+                            "dynamic dispatch can union possible owners, but every implementation must return the same view-bearing shape and access marker"
                                 .to_string(),
                             "return the same read or write view slots in every implementation"
                                 .to_string(),

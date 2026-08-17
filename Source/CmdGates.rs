@@ -161,7 +161,7 @@ fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]
                 "package",
                 "package.jet",
                 &format!("build:{effect}"),
-                "package build capability",
+                "package build authority",
                 provenance,
             ));
         }
@@ -205,7 +205,7 @@ fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]
                 "package",
                 jet::Syntax::UNIFIED_LOCK_FILE,
                 &format!("build:{subject}"),
-                &format!("workspace capabilities: {}", effects.join(",")),
+                &format!("workspace authority: {}", effects.join(",")),
                 vec![format!("{}:workspace.build-grants", jet::Syntax::UNIFIED_LOCK_FILE)],
             ));
         }
@@ -316,7 +316,7 @@ fn append_invocation_flags(ledger: &mut GateLedger, args: &[String]) {
                 "build",
                 "command line",
                 argument,
-                "build capability allowance",
+                "build authority allowance",
                 vec!["command line".to_string()],
             ));
         } else if argument.starts_with("--deny-")

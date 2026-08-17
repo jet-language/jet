@@ -78,7 +78,7 @@ Suggested learning order:
 | `math/` | numeric floor — libm, checked/saturating/wrapping integer families |
 | `modules/` | imports, module files/dirs, packages, visibility, re-export |
 | `comptime/` | comptime blocks, splice, reflect, embed, doctests |
-| `effects/` | capability sigils, taint, pure, effect prohibition, grants |
+| `effects/` | access sigils, taint, pure, effect prohibition, grants |
 | `memory/` | ownership, arenas, stored refs, rawptr, uninit, zero-copy, GC |
 | `serde/` | json/csv/toml/yaml, derives, schema migrations, fidelity |
 | `io/` | cli, files, stdin, paths, logging, terminal |

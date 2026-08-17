@@ -307,10 +307,10 @@ use std::collections::HashSet;
                                 "`{}` was not moved here, so it cannot be captured by {}",
                                 name, destination
                             ),
-                            "this function can access the parameter, but it does not own the value; capture requires the move-capability marker `^`"
+                            "this function can access the parameter, but it does not own the value; capture requires the move marker `^`"
                                 .to_string(),
                             format!(
-                                "make the parameter owned with the move-capability marker `^`: `{}: {}{}`",
+                                "make the parameter owned with the move marker `^`: `{}: {}{}`",
                                 name,
                                 Syntax::SIGIL_MOVE,
                                 cap_ty.name()
@@ -709,13 +709,13 @@ use std::collections::HashSet;
                                 self.diags.push(Diagnostic::error(
                                     "E0120",
                                     format!(
-                                        "`{}` was not moved here, so the lambda cannot take it with the move-capability marker `^`",
+                                        "`{}` was not moved here, so the lambda cannot take it with the move marker `^`",
                                         name
                                     ),
-                                    "this function has read access only and does not own the value; the move-capability marker `^` is required"
+                                    "this function has read access only and does not own the value; the move marker `^` is required"
                                         .to_string(),
                                     format!(
-                                        "take ownership in this function with the move-capability marker `^`: `{}: {}{}`",
+                                        "take ownership in this function with the move marker `^`: `{}: {}{}`",
                                         name,
                                         Syntax::SIGIL_MOVE,
                                         info.ty.name()

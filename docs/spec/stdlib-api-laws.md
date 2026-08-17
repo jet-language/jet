@@ -99,7 +99,7 @@ or source-qualified spelling for the same conversion.
 - Before adding a new API, search for an existing one that covers the same semantic
   job. If one exists, extend or document it; do not add a second spelling.
 - Convenience shorthand methods are acceptable if they compose existing primitives
-  without adding new capability (e.g. `slice.first()` over `slice[0]?`).
+  without adding new behavior (e.g. `slice.first()` over `slice[0]?`).
 
 ### Print family (D-ONCE-PRINT1=A)
 
@@ -139,7 +139,7 @@ Required evidence: <example, diagnostic snapshot, and focused proof>
 - [ ] `L1` Naming is plain English, predicate-prefixed, and uses S66 acronyms.
 - [ ] `L2` Fallibility is in the return type; panic is only for programmer error.
 - [ ] `L3` View, ownership, and mutation are explicit.
-- [ ] `L4` All capability markers and effects are declared.
+- [ ] `L4` All access markers and effects are declared.
 - [ ] `L5` Non-obvious allocation is budgeted and the streaming form is present.
 - [ ] `L6` Every error path has the required diagnostic copy and UI snapshot.
 - [ ] `L7` A golden-tested example exists under `examples/features/`.
