@@ -3700,7 +3700,7 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
 /// `COMPILE_COVERED_FLOOR` does: a hand-edit cannot green the ledger by deleting
 /// the row that fails. A row that LEAVES is either a deleted example — lower this
 /// in the same diff as the deletion — or the defect this pins.
-const CORPUS_GATE_ROW_FLOOR: usize = 374;
+const CORPUS_GATE_ROW_FLOOR: usize = 496;
 
 /// How many examples the gate ledger is still allowed to say nothing about (#2013).
 ///
@@ -3710,7 +3710,7 @@ const CORPUS_GATE_ROW_FLOOR: usize = 374;
 /// corpus walk on every run and never an allowlist, so a new example without a
 /// row raises it and fails. Burn it down with a regeneration run; raising it is
 /// not a fix.
-const CORPUS_GATE_UNCLASSIFIED_CEILING: usize = 122;
+const CORPUS_GATE_UNCLASSIFIED_CEILING: usize = 0;
 
 /// How many stems the corpus gate may exclude outright (#2016 / #1998 / #2013).
 ///
