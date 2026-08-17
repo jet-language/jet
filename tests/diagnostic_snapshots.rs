@@ -12,7 +12,18 @@
 //!     JET_UI_FILTER=tests/ui/NAME.jet UPDATE_EXPECT=tests/ui/NAME.jet \
 //!       cargo test --test diagnostic_snapshots ui_snapshots
 //!
-//! `UPDATE_EXPECT=1` remains the explicit bless-all mode for a reviewed sweep.
+//! A reviewed sweep still exists, but `UPDATE_EXPECT=1` now demands
+//! `UPDATE_EXPECT_REASON="<the compiler change that justifies it>"`. Card #2026
+//! measured a blanket sweep (6fd88282b) that rewrote 122 fixtures while
+//! touching zero crate source: a contract rewrite with no author. The reason
+//! names the author.
+//!
+//! Blessing may add or reword a diagnostic; it may never silently drop one.
+//! `write_blessed_snapshot` refuses a write that lowers a fixture's rendered
+//! diagnostic count unless `UPDATE_EXPECT_SHRINK=<fixture>` names that exact
+//! fixture. 6fd88282b dropped five live `E0209` rows from
+//! tests/ui/core_consuming_borrowed_field.stderr that way, and the snapshot
+//! then asserted five clones codegen still inserts.
 //!
 //! Never bless a snapshot you haven't read against the typed diagnostic row.
 //! These files are the product: the error messages ARE the language's UX.
@@ -516,7 +527,7 @@ fn ui_snapshots() {
             path.with_extension("stderr")
         };
         if should_update(&update, &shown_path) {
-            fs::write(&expect_path, &actual).unwrap();
+            write_blessed_snapshot(&expect_path, &shown_path, &actual);
         } else {
             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
             if actual != expected {
@@ -861,7 +872,7 @@ fn lint_snapshots() {
         let actual = jet::render_diagnostics(&shown_path, &src, &out.lints);
         let expect_path = path.with_extension("warn");
         if should_update(&update, &shown_path) {
-            fs::write(&expect_path, &actual).unwrap();
+            write_blessed_snapshot(&expect_path, &shown_path, &actual);
         } else {
             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
             if actual != expected {
@@ -897,12 +908,80 @@ enum UpdateSelector {
     One(String),
 }
 
+/// `UPDATE_EXPECT=1` is the reviewed sweep; card #2026 made it name its author.
+/// A sweep is the only bless that can rewrite a fixture nobody read, so it
+/// carries `UPDATE_EXPECT_REASON` — the compiler change that justifies the new
+/// output. 6fd88282b had none: zero crate source changed and 122 contracts moved.
 fn update_selector() -> UpdateSelector {
     match std::env::var("UPDATE_EXPECT") {
         Err(_) => UpdateSelector::None,
-        Ok(value) if value == "1" => UpdateSelector::All,
+        Ok(value) if value.trim() == "1" => {
+            assert!(
+                bless_reason().is_some(),
+                "UPDATE_EXPECT=1 rewrites every fixture, so it must name the compiler change \
+                 that justifies the new output:\n    \
+                 UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" UPDATE_EXPECT=1 …\n\
+                 To bless one reviewed fixture instead, use \
+                 JET_UI_FILTER=<canonical-relative-name> UPDATE_EXPECT=<same-name>."
+            );
+            UpdateSelector::All
+        }
         Ok(value) => UpdateSelector::One(normalize_fixture_selector("UPDATE_EXPECT", &value)),
     }
+}
+
+/// The recorded justification for this bless, if the author gave one.
+fn bless_reason() -> Option<String> {
+    let reason = std::env::var("UPDATE_EXPECT_REASON").ok()?;
+    let reason = reason.trim().to_string();
+    (reason.len() >= 8).then_some(reason)
+}
+
+/// Rendered diagnostics in one snapshot. `jet::render_diagnostics` opens every
+/// report with its severity word and registered code at column 0 (`Error [`,
+/// `Warning [`, `Stop [`), so counting those lines counts the contracts the
+/// fixture asserts.
+fn rendered_diagnostic_count(rendered: &str) -> usize {
+    rendered
+        .lines()
+        .filter(|line| {
+            line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [")
+        })
+        .count()
+}
+
+/// The one write path for a blessed snapshot, scoped or swept (I8).
+///
+/// Shrink-only: a bless may add or reword a diagnostic, because that records
+/// real drift, but a diagnostic that DISAPPEARS is a defect the compiler now
+/// accepts in silence, and the snapshot would assert the silence. Dropping one
+/// therefore needs `UPDATE_EXPECT_SHRINK=<fixture>` naming this exact fixture
+/// plus the reason — per fixture, so no sweep can shed a diagnostic in passing.
+fn write_blessed_snapshot(expect_path: &Path, shown_path: &str, actual: &str) {
+    let previous = fs::read_to_string(expect_path).unwrap_or_default();
+    let before = rendered_diagnostic_count(&previous);
+    let after = rendered_diagnostic_count(actual);
+    if after < before {
+        let named = std::env::var("UPDATE_EXPECT_SHRINK")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .is_some_and(|value| !value.is_empty() && shown_path.contains(&value));
+        let reason = bless_reason();
+        assert!(
+            named && reason.is_some(),
+            "refusing to bless {shown_path}: its diagnostic count would fall {before} -> {after}. \
+             A disappearing diagnostic is a defect the compiler accepts in silence, so name the \
+             change that retired it:\n    \
+             UPDATE_EXPECT_SHRINK={shown_path} \
+             UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" …\n\
+             If nothing retired it, the diagnostic still fires and this snapshot is the bug."
+        );
+        eprintln!(
+            "blessed shrink {shown_path}: {before} -> {after} diagnostics — {}",
+            reason.unwrap_or_default()
+        );
+    }
+    fs::write(expect_path, actual).unwrap();
 }
 
 fn validate_scoped_update<'a>(update: &UpdateSelector, paths: impl Iterator<Item = &'a str>) {
