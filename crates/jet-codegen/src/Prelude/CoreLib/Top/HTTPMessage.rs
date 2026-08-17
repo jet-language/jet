@@ -241,6 +241,14 @@ impl JetShow for JetHTTPError {
     }
 }
 
+// D-FAIL-CONV2=A: one display hook backs both the shipped `impl HTTPError => Err`
+// and user interpolation.
+impl JetDisplay for JetHTTPError {
+    fn jet_display(&self) -> String {
+        <Self as JetShow>::jet_show(self)
+    }
+}
+
 struct JetHTTPBodyCloser {
     closed: std::sync::atomic::AtomicBool,
     close: Box<dyn Fn() + Send + Sync>,

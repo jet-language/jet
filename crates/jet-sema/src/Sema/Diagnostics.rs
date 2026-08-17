@@ -1119,6 +1119,38 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "Period"
             | "Zone"
             | "ZonedDateTime"
+    ) || is_core_error_family_type(name)
+}
+
+/// D-FAIL-CONV2=A: the standard library's own error family. Membership is
+/// derived, not chosen: a Core error type is a member when the Prelude registers
+/// it printable (`TraitRegistry::register_synthetic_display_debug`), a Core
+/// signature returns it in the error position of a `T ? E` result, and showing it
+/// is not prohibited. `Prelude/Errors.jet` declares one `impl <member> => Err`
+/// for exactly this list, and the Prelude owns each member's failure text, so the
+/// family renders through the same display hook every other shown Core type uses.
+///
+/// Outside the family on purpose: `CryptoError` (secret-bearing — E0915 forbids
+/// flattening it into a message), `TaskFailure` (D-FAIL-CARRIER1 owns
+/// cancellation and deadline reporting), `[FieldError]` (a list, not one named
+/// type), and component types no Core call fails with (`DataErrorKind`,
+/// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDnsError`).
+pub(crate) fn is_core_error_family_type(name: &str) -> bool {
+    matches!(
+        name,
+        "BrowserError"
+            | "DBError"
+            | "DataError"
+            | "EncodingError"
+            | "EnvError"
+            | "HTTPError"
+            | "IOError"
+            | "JSONError"
+            | "NetError"
+            | "RangeError"
+            | "TextError"
+            | "UTF8Error"
+            | "WsError"
     )
 }
 

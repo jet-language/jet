@@ -2340,6 +2340,29 @@
             self.message.clone()
         }
     }
+    // D-FAIL-CONV2=A: each core error family member renders its failure text
+    // through one display hook, so the shipped `impl <member> => Err` and user
+    // interpolation cannot disagree.
+    impl super::JetDisplay for EnvError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for UTF8Error {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for RangeError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for TextError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for ProcessResult {
         fn jet_show(&self) -> String {
             format!("{:?}", self)
@@ -2461,6 +2484,13 @@
     impl super::JetShow for JSONError {
         fn jet_show(&self) -> String {
             format!("line {}: {}", self.line, self.message)
+        }
+    }
+    // D-FAIL-CONV2=A: the shipped `impl JSONError => Err` renders the library's
+    // own failure text through the same display hook user interpolation uses.
+    impl super::JetDisplay for JSONError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
         }
     }
     impl super::JetShow for JSON {
