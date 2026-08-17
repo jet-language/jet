@@ -858,7 +858,7 @@ fn parse_jit_gap_manifest_full() -> (Vec<String>, Vec<String>, Vec<String>, Vec<
     let mut gaps = Vec::new();
     let mut run_gaps = Vec::new();
     let mut parity_divergences = Vec::new();
-    for raw in include_str!("jit_gaps.txt").lines() {
+    for raw in include_str!("../jit_gaps.txt").lines() {
         let line = raw.trim_end();
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -3632,7 +3632,7 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
 
     let mut section = Section::None;
     let mut records = Vec::new();
-    for raw in include_str!("jit_corpus_gate.txt").lines() {
+    for raw in include_str!("../jit_corpus_gate.txt").lines() {
         let trimmed = raw.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
