@@ -2346,6 +2346,22 @@ fn jet_jit_iter_zip_family(
     common_fill: i64,
     column_fills: i64,
 ) -> i64 {
+    let out = zip_family_rows(plan_id, column_handles, common_fill, column_fills);
+    // The sidecar reads list lengths itself, so it runs outside the runtime
+    // borrow the row builder holds.
+    let columns = Concurrency::with_runtime_mut(|rt| {
+        rt.heap.clone_int_list(column_handles).unwrap_or_default()
+    });
+    crate::IO::progress_transfer_zip_state(&columns, out);
+    out
+}
+
+fn zip_family_rows(
+    plan_id: i64,
+    column_handles: i64,
+    common_fill: i64,
+    column_fills: i64,
+) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
         let Some(plan_id) = usize::try_from(plan_id).ok() else {
