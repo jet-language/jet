@@ -3304,26 +3304,6 @@ const AOT_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[
          so the oracle disagrees with the golden and cannot arbitrate the tiers",
     ),
     (
-        "tooling/service_authority",
-        "AOT compile or run failed",
-        "#2016: rustc rejects the GENERATED crate with E0252 — two Prelude \
-         fragments each emit `use std::time::{Duration, ...}` into one file. \
-         That is an I2 internal compiler error, and this section is where it \
-         became visible",
-    ),
-    (
-        "tooling/service_runtime",
-        "AOT compile or run failed",
-        "#2016: the optimized AOT build or run of the example fails, so the gate \
-         has no oracle to compare the tiers against",
-    ),
-    (
-        "tooling/service_tree",
-        "AOT compile or run failed",
-        "#2016: the optimized AOT build or run of the example fails, so the gate \
-         has no oracle to compare the tiers against",
-    ),
-    (
         "types/typed_literal_head",
         "AOT compile or run failed",
         "#2016: the optimized AOT build or run of the example fails, so the gate \

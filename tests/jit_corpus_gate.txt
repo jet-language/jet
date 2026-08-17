@@ -5,6 +5,10 @@
 # examples whose default jet run REFUSES to run. Record stem + diagnostic code only.
 # tier_divergent is the other half: it ran under both tiers and the observables
 # differ. Record stem + the diverging stream(s) only.
+# aot_broken may only shrink too (#2016): the AOT oracle failed to build or exited
+# non-zero, so NO tier comparison ran for the stem. expected_exit means one thing
+# and one thing only — the golden itself expects a non-zero exit. oracle_unavailable
+# is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.
 #
 # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
 # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
@@ -82,13 +86,14 @@ gate_excluded:
 
 non_runnable:
 
+oracle_unavailable:
+
 expected_exit:
   collections/list_bounds: golden expects non-zero exit
   collections/list_remove_bounds: golden expects non-zero exit
   collections/map_key: golden expects non-zero exit
   concurrency/all_failfast: golden expects non-zero exit
   concurrency/deadline_context: golden expects non-zero exit
-  devloop/schedule_every: AOT compile or run failed
   errors/default_err_edge: golden expects non-zero exit
   errors/default_error_conversion: golden expects non-zero exit
   errors/env_divisor_trap: golden expects non-zero exit
@@ -98,18 +103,18 @@ expected_exit:
   errors/todo_stop: golden expects non-zero exit
   errors/u8_divide_zero: golden expects non-zero exit
   io/log_fatal: golden expects non-zero exit
-  lowlevel/layout_columnar: AOT compile or run failed
   memory/pool_stale_id: golden expects non-zero exit
   memory/unsafe_sentries: golden expects non-zero exit
   memory/unsafe_sentries_provenance: golden expects non-zero exit
+  tooling/panic_report: golden expects non-zero exit
+
+aot_broken:
+  devloop/schedule_every: AOT compile or run failed
+  lowlevel/layout_columnar: AOT compile or run failed
   operators/spaceship: AOT compile or run failed
   reflection/reflect-value: AOT exit 70
   serde/hand_codec: AOT exit 1
   streams/generators: AOT exit 1
-  tooling/panic_report: golden expects non-zero exit
-  tooling/service_authority: AOT compile or run failed
-  tooling/service_runtime: AOT compile or run failed
-  tooling/service_tree: AOT compile or run failed
   types/typed_literal_head: AOT compile or run failed
 
 resident_jit:
@@ -155,6 +160,7 @@ resident_jit:
   collections/index_hook
   collections/iter_hook
   collections/lazy_iter
+  collections/lists
   collections/map_merge
   collections/member_spread
   collections/queue
@@ -285,6 +291,7 @@ resident_jit:
   io/process_builder
   io/process_exit_cleanup
   io/progress
+  io/scope_guard
   io/stdin_filter
   io/stream
   io/terminal
@@ -418,6 +425,9 @@ resident_jit:
   tooling/para_map_crossover_bench
   tooling/property_tests
   tooling/provenance_track
+  tooling/service_authority
+  tooling/service_runtime
+  tooling/service_tree
   tooling/solve_puzzle
   tooling/sync_crdt
   tooling/test_members
@@ -525,8 +535,6 @@ run_tier_broken:
 
 tier_divergent:
   collections/iter_adapters: stdout
-  collections/lists: stdout
-  io/scope_guard: stderr
   serde/json_coerce: stdout
   types/no_any_alternatives: stdout
 
