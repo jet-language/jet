@@ -3622,8 +3622,25 @@ fn run() { print(perf.fidelity()) }"#;
     }
 }
 
+/// The AST boundary must not intercept a raw-memory `#Unsafe` region, and the
+/// canonical TIR evaluator must then EXECUTE it: `Ptr.from_addr` and postfix
+/// `p.*` both have evaluator arms (`eval/exprs.rs` `TExprKind::PtrFromAddr` /
+/// `TExprKind::Deref`), so a provenance-less address is not a coverage gap.
+///
+/// D-MEM-SENTRY1 fixes what it IS: a located R0801 program-side stop at exit
+/// 70 (I2), identical on every tier — `tests/tir_unsafe_and_runtime.rs`
+/// `sentry_faults_are_tier_parity` pins the same contract for the forced
+/// interpreter, the default JIT, and AOT. The earlier expectation here (an
+/// E2201 whose text carried `PtrFromAddr`) named a TIR lowering-failure reason
+/// string (`lower/expressions.rs` `expr_kind_name`), and since card #2001 no
+/// lowering reason reaches E2201 at all: `run_bundle_at_stage` keeps E2201 only
+/// for the two no-entry reasons and sends every other one down the ICE rail.
+/// So that combination is unproducible by design. This asserts the shipped
+/// outcome instead, and pins strictly more of it: the outcome kind, the exit
+/// status, an empty stdout (the deref never printed), and the R0801 code, gate
+/// reason, provenance detail and obligation clause.
 #[test]
-fn unsafe_blocks_reach_the_canonical_tir_interpreter_boundary() {
+fn unsafe_blocks_are_evaluated_by_canonical_tir_with_live_sentries() {
     let raw = jet::Loader::load_entry(&example_path("memory/rawptr"))
         .expect("rawptr example should load");
     assert!(
@@ -3648,13 +3665,35 @@ fn unsafe_blocks_reach_the_canonical_tir_interpreter_boundary() {
         "the AST boundary must not intercept an unsupported unsafe operation"
     );
     match dev_iteration(&unsupported_file, false, true) {
-        RunOutcome::Problems(diags) => assert!(
-            diags.iter().any(|diag| {
-                diag.code == "E2201" && diag.what.contains("PtrFromAddr")
-            }),
-            "unsupported unsafe operation must stop at canonical TIR: {diags:?}"
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(
+                exit_code, 70,
+                "a raw read with no allocation provenance is a program-side stop: {stderr}"
+            );
+            assert!(
+                stdout.is_empty(),
+                "the refused deref must not have printed: {stdout:?}"
+            );
+            for marker in [
+                "Runtime fault [R0801]",
+                "mapped address is valid and aligned",
+                "no live allocation contains this address",
+                "obligation `valid_ptr` was not met on this run",
+            ] {
+                assert!(
+                    stderr.contains(marker),
+                    "interpreter sentry report is missing `{marker}`: {stderr}"
+                );
+            }
+        }
+        outcome => panic!(
+            "a sema-approved #Unsafe region must be evaluated by canonical TIR, \
+             not refused at a boundary: {outcome:?}"
         ),
-        outcome => panic!("unsupported unsafe operation unexpectedly ran: {outcome:?}"),
     }
 }
 
