@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2025,
-    "rev": 37997,
+    "nextNum": 2026,
+    "rev": 38003,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132560,6 +132560,76 @@
       "created": "2026-08-16T23:57:08.816Z",
       "updated": "2026-08-16T23:57:11.023Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0wbtcon",
+      "num": 2025,
+      "title": "golden and ban_bare_panic are red and outside every routine set",
+      "body": "Two more test targets sit outside the routine verification set and are red on pre-existing defects. Measured at 15b9f7b2e by `cargo test --no-fail-fast --test golden --test ban_bare_panic`.\n\n**1. ban_bare_panic::compiler_crates_ban_bare_panic_outside_allowlist** fails with bare `panic!` outside the ice!/vetted allowlist (I2, card #453):\n\n  crates/jet-foundation/src/Registry.rs: 22 bare panic! (allowlisted 0)\n  crates/jet-foundation/src/Policy/MarkerSource.rs: 10 (allowlisted 0)\n  crates/jet-foundation/src/Diagnostics.rs: 9 (allowlisted 2)\n  crates/jet-foundation/src/Outcome.rs: 1 (allowlisted 0)\n  crates/jet-foundation/src/AST/types.rs: 1 (allowlisted 0)\n\n**2. golden::examples_compile_and_run** fails at tests/golden.rs:400 with \"generated Rust for <stem> contains `unsafe` outside vetted memory helpers\" for many stems including basics/bare_lambda_param and basics/closures - i.e. the simplest examples in the corpus, so this is broad rather than feature-specific.\n\nBoth are PRE-EXISTING, established rather than assumed: every file ban_bare_panic names is untouched since c14e1ec2f, tests/ban_bare_panic.rs itself is untouched, the three golden.rs hunks changed this session do not touch the unsafe check, and a diff of every Prelude and jet-foundation change this session contains ZERO added lines with `unsafe`.\n\nWhy this keeps happening is the point of the card. Card #2023 recorded that five jit_run failures sat unrecorded for a whole session because the 2026-08-15 handoff measured `--test dev` only and jit_run was not in the routine set. These are the third and fourth targets found the same way. Card #2020 owns making the dev suite itself reach a complete measurement; this card owns the targets that are not in any set at all.\n\nNote the I2 stakes on the second one: generated Rust carrying `unsafe` outside vetted helpers is a safety-surface claim about every compiled program, not a test-harness nit.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m18-devloop-testing",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Treat these as two independent defects plus one process gap.\n\nFor ban_bare_panic: each bare panic! in those five files is either an internal compiler error, in which case it becomes ice!(span, ...) and gets a span, or it is genuinely unreachable, in which case it joins ALLOWLIST with a written reason. Registry.rs at 22 is the bulk and likely one shape repeated, so classify before converting. Per I2 an ICE must carry a diagnostic path rather than a bare abort.\n\nFor the golden unsafe check: establish first whether generated Rust genuinely contains unsafe outside the vetted set, or whether the vetted-helper list has drifted behind a Prelude rename. This session renamed six Prelude test modules and moved several kernels, so a stale allowlist is a real possibility - but do not assume it, because the honest alternative is a real I1 surface.\n\nFor the process gap: name a routine set that includes every test target, and make membership enforceable rather than remembered. A target no one runs is a target that will rot, and this is now the fourth instance.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every bare panic! in the five named jet-foundation files is either converted to ice! with a span or allowlisted with a written reason, and ban_bare_panic passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T01:20:10.353Z"
+        },
+        {
+          "n": 2,
+          "text": "The golden unsafe finding is resolved at its true cause: either generated Rust stops carrying unsafe outside vetted helpers, or the vetted-helper list is corrected with the drift named",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T01:20:10.771Z"
+        },
+        {
+          "n": 3,
+          "text": "golden::examples_compile_and_run passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T01:20:11.216Z"
+        },
+        {
+          "n": 4,
+          "text": "A routine verification set exists that includes every test target, and membership is enforced rather than remembered",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T01:20:11.627Z"
+        },
+        {
+          "n": 5,
+          "text": "No target can be red and unrecorded: the set's own test fails if a target is missing from it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T01:20:12.044Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T01:20:09.905Z",
+      "updated": "2026-08-17T01:20:12.044Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -176249,6 +176319,48 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T01:20:12.044Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0wbtcon",
+      "note": "#5 No target can be red and unrecorded: the set's own test fail"
+    },
+    {
+      "at": "2026-08-17T01:20:11.627Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0wbtcon",
+      "note": "#4 A routine verification set exists that includes every test t"
+    },
+    {
+      "at": "2026-08-17T01:20:11.216Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0wbtcon",
+      "note": "#3 golden::examples_compile_and_run passes"
+    },
+    {
+      "at": "2026-08-17T01:20:10.772Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0wbtcon",
+      "note": "#2 The golden unsafe finding is resolved at its true cause: eit"
+    },
+    {
+      "at": "2026-08-17T01:20:10.353Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0wbtcon",
+      "note": "#1 Every bare panic! in the five named jet-foundation files is "
+    },
+    {
+      "at": "2026-08-17T01:20:09.905Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0wbtcon",
+      "note": "golden and ban_bare_panic are red and outside every routine set"
+    },
+    {
       "at": "2026-08-17T01:14:19.477Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -179705,48 +179817,6 @@
       "action": "card.criteria-add",
       "ref": "c014nejk",
       "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:57:20.985Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c014nejk",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:57:20.565Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c014nejk",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:57:20.101Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c014nejk",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:57:19.498Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c014nejk",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-15T18:56:49.469Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c014nejk",
-      "note": "JIT parity F1: TIR-subset registry short-circuit kills rows that opt out of a direct AOT symbol"
-    },
-    {
-      "at": "2026-08-15T18:56:48.935Z",
-      "by": "fable-e3-burndown",
-      "action": "card.delete",
-      "ref": "c05im8f9",
-      "note": "probe card add shape"
     }
   ],
   "nextNum": 368,
