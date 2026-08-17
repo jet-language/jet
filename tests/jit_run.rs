@@ -952,3 +952,124 @@ fn iter_adapter_latches_emit_dominating_clif() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// Three optional-returning builtins answered the resident tier with a small
+/// wrong integer where AOT answered the real value: `last_index_of` gave `0` for
+/// `3` (`examples/features/collections/iter_adapters`), `map.pop(key)` gave `0`
+/// for `4`, and `pq.pop()` gave `1` for `9` (`collections/pop_table`). One cause:
+/// each host answers with the result-arena Option carrier (`option_i64`, a
+/// 1-based `rt.results` handle) while `LowerCtx::uses_result_option_abi` — the one
+/// fact every seam reads — did not declare it, so every consumer decoded the
+/// packed word `0 = None, bits + 1 = Some` instead. A handle is never zero, so
+/// `?? -1` could not fire either, and the printed answer was `handle - 1`: hence
+/// `0` for the first optional in a program and `1` for the second.
+///
+/// `PriorityQueuePop` is the interesting one. It had an arm until e7fdc84a5 split
+/// the `pop` verb into its own op; the lowering and the safety predicate were
+/// migrated and this third table was not, so the fix that admitted `pq.pop()` to
+/// the resident tier immediately exposed the stale carrier.
+///
+/// The absent arm of each is here too, because it is the half a wrong carrier can
+/// never get right: a 1-based handle is never zero, so the old decode could not
+/// reach `None` at all.
+#[test]
+fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_option_carrier");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("option_carrier.jet");
+    fs::write(
+        &file,
+        r#"fn run() {
+    repeats :: [5, 3, 1, 3, 9]
+    print(repeats.last_index_of(3))
+    print(repeats.last_index_of(7))
+    counts := [String:Int].{ "words": 4 }
+    print(counts.pop("words") ?? -1)
+    print(counts.pop("words") ?? -1)
+    priorities := PriorityQueue.from([2, 9, 4])
+    print(priorities.pop() ?? -1)
+    single := PriorityQueue.from([1])
+    print(single.pop() ?? -1)
+    print(single.pop() ?? -1)
+}
+"#,
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "fixture must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("fixture must compile in the resident JIT: {error}"));
+
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT option-carrier fixture failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    let expected = String::from_utf8_lossy(&aot.stdout).into_owned();
+    assert_eq!(
+        expected, "3\nnull\n4\n-1\n9\n1\n-1\n",
+        "AOT option-carrier observable drifted"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default resident JIT rejected the option-carrier fixture: {diags:?}")
+        }
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "the fixture must execute native resident JIT code, not a silent deopt"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "the fixture must not deopt or fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected the option-carrier fixture: {diags:?}")
+        }
+    };
+
+    let reference = (expected, String::new(), 0);
+    assert_eq!(
+        resident, reference,
+        "resident JIT option-carrier observable drifted"
+    );
+    assert_eq!(
+        interpreted, reference,
+        "interpreter option-carrier observable drifted"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -589,6 +589,12 @@ mod collection_semantics {
     }
 }
 
+/// Result-arena Option ABI: a 1-based `rt.results` handle carrying `(ok, bits)`.
+/// `LowerCtx::uses_result_option_abi` is the ONE fact that says which host
+/// answers this way, and it enumerates the ops explicitly. A host that reaches
+/// for this helper without an arm in that predicate hands a handle to a consumer
+/// that decodes it as `option_packed`, and a 1-based handle is never zero, so the
+/// miss reads as `Some(handle - 1)` — a wrong answer, never a refusal.
 fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
     crate::runtime_host::alloc_jit_result(
         rt,
@@ -608,7 +614,10 @@ fn alloc_error_result(
     crate::runtime_host::alloc_jit_result(rt, false, record as u64)
 }
 
-/// Packed Option ABI for `Option(Int)`: 0 = None, value+1 = Some.
+/// Packed Option ABI for `Option(Int)`: 0 = None, value+1 = Some. This is what
+/// `uses_result_option_abi`'s `_ => false` default assumes, so it is the carrier
+/// for every Option-returning host with no arm in that predicate. Sound only for
+/// payloads that are never `-1` (indices, lengths, arena handles).
 fn option_packed(value: Option<i64>) -> i64 {
     match value {
         Some(v) => v.wrapping_add(1),
