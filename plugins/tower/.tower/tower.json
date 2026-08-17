@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2026,
-    "rev": 38021,
+    "rev": 38022,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132073,6 +132073,11 @@
         {
           "at": "2026-08-17",
           "by": "fable-e3-burndown",
+          "text": "D-FAIL-CONV2=A IMPLEMENTED AND REVERTED THREE TIMES; the ruling is right, the injection STRATEGY is wrong. Work preserved on branch bd-conv and tag e3-conv-rail at fc523963f, three commits, buildable. What landed and is correct: one Prelude/Errors.jet declaring 13 impl <CoreError> => Err on the existing D-ERR-CONV rail; inject_error_conversions in Sema/Prelude.rs mirroring the Prelude/Units.jet shape, called from Bundle/Pipeline.rs before registration, skipping NoPrelude and no_alloc modules and yielding to any user-declared pair; a derived family with a stated 3-part criterion (BrowserError DBError DataError EncodingError EnvError HTTPError IOError JSONError NetError RangeError TextError UTF8Error WsError) recorded as is_core_error_family_type; CryptoError excluded by law because a secret-bearing type must not flatten into a message (E0915) and TaskFailure excluded because D-FAIL-CARRIER1 owns it; a new example plus golden for I5; the JIT interpolation fall-through routed to lower_jet_show_value (the same route print takes) with a CoreErrorCarrier table; core_alias_leaf taught the family so the dotted import-alias spelling resolves; and the display seam spelled crate::JetDisplay so it resolves both in a generated program, where the fragment is the crate root, and in jet-jit, where it is included at depth 0. THE DEFECT IS BLAST RADIUS, measured three times: attempt 1 took dev from 138 passed / 8 failed to 68 / 78 because the JIT could not interpolate a Named error type; attempt 2 failed to compile jet-jit on the display seam; attempt 3 built clean and still gave 87 / 59. Cause: every module receives all 13 conversion functions whether it needs them or not, so any defect in any one of them breaks every program. DIRECTION FOR THE NEXT ATTEMPT: make the injection DEMAND-DRIVEN - inject only the conversions a module actually exercises, determined from the error types its own ? operators can produce, so blast radius scales with use instead of being total. That also removes the 13-dead-functions-per-module cost the first lane flagged. This needs a worker with build access to iterate compile-test-fix; three source-only rounds could not converge because each defect was only visible after a 6-minute build."
+        },
+        {
+          "at": "2026-08-17",
+          "by": "fable-e3-burndown",
           "text": "CORROBORATED from a second direction at b3c8235cc. A lane working the json_coerce failure independently reached the same root cause and quantified the family: the re-derived corpus gate ledger shows E2402 rows for roughly 20 more corpus stems on the identical unmigrated D-FAIL-CONV1 pattern (serde/json, serde/encoding, net/dns_lookup and siblings). It also proved the decode surface itself is NOT at fault: the ledger row for serde/json_coerce reads E2402 rather than E1004, and that row was re-derived AFTER the untyped-decode arm landed, so json.decode(raw) does type as DataTree ? JSONError and the failure is purely the missing conversion from JSONError into the default Err. One example was migrated as the ratified explicit form to prove the shape works: examples/features/serde/json_coerce.jet now declares fn run() ? JSONError and the ledger records it as 'parity', i.e. agreeing across all three tiers. That is option B of ballot D-FAIL-CONV2 demonstrated on one stem. The remaining ~20 stay unmigrated pending the owner's choice, because doing them per-example is what this card's criterion 4 forbids."
         },
         {
@@ -132169,7 +132174,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:54:01.076Z",
-      "updated": "2026-08-17T06:05:01.483Z",
+      "updated": "2026-08-17T07:59:13.941Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -176550,6 +176555,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T07:59:13.941Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dr8aqt",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-17T06:05:01.484Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -180041,13 +180053,6 @@
       "action": "card.criteria-add",
       "ref": "c0ufm0hy",
       "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:12.791Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ufm0hy",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
     }
   ],
   "nextNum": 368,
