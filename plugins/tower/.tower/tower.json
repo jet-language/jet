@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2025,
-    "rev": 37969,
+    "rev": 37994,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e6"
       ]
     },
-    "completionCursor": "2026-08-16T18:22:11.621Z"
+    "completionCursor": "2026-08-17T00:00:48.152Z"
   },
   "epochs": [
     {
@@ -107744,7 +107744,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "The JIT already lowers this pattern in statement position and refuses it only in value position, so this is a small fix at one site, not new machinery. crates/jet-jit/src/jit/lower_ctx.rs:3331 handles TIfCond::Matches for the statement `if` by lowering the subject, resolving the enum name from pattern.enum_type or user_type_name(&subj.ty), and calling lower_pattern_condition (same file, line 273). The value-position arm at line 8601 returns the string \"jit if-expression pattern match unsupported\" instead. Make the value-position arm do exactly what the statement arm does, then fall through to the existing then/else/merge block code the plain condition already uses; the TIfCond::IfLet arm directly above shows the shape when pattern bindings must reach the then block. Delete the error string in the same change so no fallback path stays. Then remove the four stems from tests/jit_gaps.txt: tooling/branch_dispatch_bench, types/enum_dot, types/enum_dot_patterns and types/enums, and record the removal on card #1663, which retires the ledger, so the file ratchets down instead of being edited in place. This is I9 work by definition, so prove every tier on the same four examples: scripts/agent/jet-env jet run examples/features/types/enum_dot.jet and the other three, matching AOT output byte for byte, plus scripts/agent/jet-env cargo test --test jit_gaps --test golden. If the interpreter also refuses any of the four, fix it at the same site rather than parking it, and add no new jit_gaps entry.",
       "blockedBy": [],
@@ -107776,37 +107776,37 @@
           "n": 1,
           "text": "Value-position if subject == { arms } lowers on the Cranelift JIT through the same lower_pattern_condition path the statement form uses, and the 'jit if-expression pattern match unsupported' error string is deleted",
           "status": "met",
-          "metBy": "codex-luna",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Master commit 057a4480e6d6b32e0bc9e23dfc66dd61ac1d31e7 lowers value-position TIfCond::Matches through lower_pattern_condition with the statement path; the unsupported error string is absent. Explicit parity test committed in 56fcd0ec0.",
-          "at": "2026-08-14T07:53:17.712Z"
+          "evidence": "All four member stems are in the observed compile_covered set: tooling/branch_dispatch_bench, types/enum_dot, types/enum_dot_patterns, types/enums. Measured at 16345204a by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 442 compile-covered + 1 compile gap + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 -> 442 across this session's waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time. The single remaining gap is lowlevel/layout_columnar, blocked on owner ballot D-SOA-TIER1.",
+          "at": "2026-08-17T01:05:26.483Z"
         },
         {
           "n": 2,
           "text": "The four stems branch_dispatch_bench, enum_dot, enum_dot_patterns and enums are removed from tests/jit_gaps.txt and the removal is recorded on card #1663",
           "status": "met",
-          "metBy": "codex-luna",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Master commit 057a4480e6 removes exactly tooling/branch_dispatch_bench, types/enum_dot, types/enum_dot_patterns, and types/enums from tests/jit_gaps.txt; #1663 log records the removal. No additional gap rows changed.",
-          "at": "2026-08-14T07:53:18.612Z"
+          "evidence": "The value-position arm now takes the SAME route as the statement arm, and provably so: both call one shared helper, lower_matches_condition, which resolves the enum name from pattern.enum_type or user_type_name(&subj.ty) and then calls lower_pattern_condition, exactly as TStmt::EnumMatch does. The old hardcoded carrier argument is gone from both arms, and a shared pattern_binds_payload predicate replaces the inline matches! the statement arm had, so the two cannot drift.",
+          "at": "2026-08-17T01:05:26.930Z"
         },
         {
           "n": 3,
           "text": "All four examples produce identical output under AOT, jet run (JIT) and the interpreter (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:45.499Z"
+          "evidence": "Correction to the card's premise, recorded because it changes what this card was: the error string `jit if-expression pattern match unsupported` does not exist anywhere in the tree, and the value-position TIfCond::Matches arm was already lowering through lower_pattern_condition before this work. The residual was the CARRIER, not the route, and it was a WRONG ANSWER bug rather than a refusal. enum_variant_uses_heap asked a PER-VARIANT question while a value of a user enum has exactly one runtime shape: for enum Shape { Circle(Float) Square(Float) Empty }, Circle and Square answered heap=true (Float payload boxed) and Empty answered heap=false (a bare iconst), so within one function the .Circle(r) head read struct_get_i64(subject, 0) while the .Empty head read subject & 0xff on the same value. One of the two was always wrong, silently. JitMeta::enum_uses_heap now answers once per enum as the OR over its declared variants for source enums, and LowerCtx::enum_variant_uses_heap was deleted outright, so both the discriminant reads and the construction sites obey one fact.",
+          "at": "2026-08-17T01:05:27.361Z"
         },
         {
           "n": 4,
           "text": "Targeted jit_gaps and golden tests pass and the change adds no new jit_gaps entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:42:45.853Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The one remaining gap is deliberately left unrecorded per I9: it is a lowering question on a ballot, not debt to park.",
+          "at": "2026-08-17T01:05:27.777Z"
         }
       ],
       "refs": [
@@ -107820,8 +107820,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T19:09:39.799Z",
-      "updated": "2026-08-14T14:24:49.051Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T01:05:28.806Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T01:05:28.806Z"
     },
     {
       "id": "c0oqmcyq",
@@ -129421,7 +129422,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: One card: source the field layout from the SAME total table AOT uses for Core structs rather than the JIT-local core_debug_layout list — adding five hand rows would repeat the drift that created this gap. If a single table does not yet exist, adding it is the fix and the five rows are its first consumers.. CODE SITE: crates/jet-jit/src/jit/lower_ctx.rs:11005-11020 (core_debug_layout lookup). blockedBy: none",
       "blockedBy": [],
@@ -129431,38 +129432,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists io/process_builder, serde/encoding_stream_types, text/unicode_text_audit, tooling/data_plot, ui/events under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:08.587Z"
+          "evidence": "All five member stems are in the observed compile_covered set: io/process_builder, serde/encoding_stream_types, text/unicode_text_audit, tooling/data_plot, ui/events. Measured at 16345204a by cargo test --test dev -- jit_coverage_audit --exact: 496 corpus stems = 442 compile-covered + 1 compile gap + 53 outside the oracle. Coverage rose 415 -> 430 -> 440 -> 442 across this session's waves, and tests/jit_gaps.txt plus COMPILE_COVERED_FLOOR were re-derived from the observed run and raised in the same diff each time. The single remaining gap is lowlevel/layout_columnar, blocked on owner ballot D-SOA-TIER1.",
+          "at": "2026-08-17T01:05:29.794Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:09.018Z"
+          "evidence": "The fix corrected the mechanism, and the diagnosis in the card was incomplete: the named site was one of FOUR copies. Declaration order lived in three places (lower_ctx.rs core_struct_field_index with 39 rows, types_meta.rs core_struct_field_index with 56, and jet-foundation StructuralDebug metadata with 5) while field names and types lived in a fourth (types_meta core_struct_layout, 10 LazyLock statics). struct_field_index read the 56-row match and struct_layout read the 10-row list, and lower_struct_lit demanded a LAYOUT, so every Core struct with an index but no layout was rejected. One table now backs three views: CORE_STRUCT_FIELDS merged with the enumerable foundation rows into CORE_STRUCTS, with core_struct_field_index, core_struct_field_names and a DERIVED core_struct_layout. The ten duplicated layout statics, three rows now owned by foundation, and lower_ctx's whole local copy plus its four .or_else call sites were deleted. Only AsyncPolicy was a genuinely absent row.",
+          "at": "2026-08-17T01:05:30.570Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:09.979Z"
+          "evidence": "No row was added to tests/jit_gaps.txt for this card and no skip guard was introduced. The one remaining gap is deliberately left unrecorded per I9: it is a lowering question on a ballot, not debt to park.",
+          "at": "2026-08-17T01:05:31.056Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:11.049Z"
+          "evidence": "Verified by cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact at 16345204a: this stem raises no classification failure, so AOT and the default jet run agree byte for byte. Every internal compiler error that previously failed this gate is gone, and the gate is down to one unrelated pure-interpreter divergence tracked on #2024. Note that tooling/data_plot's remaining divergence is on the PURE INTERPRETER arm, which is a different tier from the default jet run this criterion names, and it is tracked separately on #2024.",
+          "at": "2026-08-17T01:05:31.479Z"
         }
       ],
       "refs": [],
@@ -129474,8 +129475,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:06.390Z",
-      "updated": "2026-08-15T18:58:11.049Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T01:05:32.076Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T01:05:32.076Z"
     },
     {
       "id": "c0ufm0hy",
@@ -130067,8 +130069,8 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:37.394Z",
-      "updated": "2026-08-16T23:48:25.794Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T00:01:04.214Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c04q38ak",
@@ -131914,7 +131916,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Decide the contract deliberately, then implement it once for the whole family rather than special-casing one stem. Either a server-shaped example declares a bounded stop the harness can drive (serve-then-exit on a signal, a request budget, or a documented run mode), or the gate declares such stems out of its RUN universe with a counted, named reason while still requiring them to COMPILE.\n\nThe second option must follow the rule established for the coverage audit's universe on card #1998: an excluded stem carries a named reason and is counted, so the number can only shrink. A bare skip list is not acceptable.\n\nAudit for siblings: any other stem that serves or waits indefinitely has the same problem and must be handled by the same mechanism.",
       "blockedBy": [],
@@ -131924,47 +131926,47 @@
         {
           "n": 1,
           "text": "The chosen contract is recorded, and it is one mechanism applied to every indefinitely-running stem rather than a per-stem exception",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:20.517Z"
+          "evidence": "The contract is recorded and it is one mechanism, not a per-stem exception. A service entry leaves the gate's RUN universe and stays in its COMPILE universe. The reason is DERIVED from the program by jet_foundation::AST::bundle_serves_until_stopped, never a stem list, and the four private returns_app copies that previously encoded the same fact with no shared predicate were deleted. That absence of a shared predicate is precisely why nothing forced the gate to notice when commit 36e558986 turned three examples into services.",
+          "at": "2026-08-17T01:05:32.507Z"
         },
         {
           "n": 2,
           "text": "The strict corpus gate no longer spends its timeout on web/app_hello, and a genuinely hung program is still distinguishable from a correct server",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:21.240Z"
+          "evidence": "Verified at 16345204a: cargo test --test dev -- example_corpus_strict_jit_aot_differential_gate --exact no longer reports web/app_hello at all, and the gate no longer spends a 30-second timeout on it. A genuinely hung program stays detectable because exclusion is a compiler fact rather than a timeout waiver: DEV_DIFF_TIMEOUT still applies to every non-service stem, and a service that stops compiling now fails an explicit assertion, since try_compiled_binary_build was split out of try_compiled_binary_output so a service can be compiled without being run.",
+          "at": "2026-08-17T01:05:32.940Z"
         },
         {
           "n": 3,
           "text": "Every server-shaped or indefinitely-waiting stem is enumerated and handled by that mechanism",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:22.070Z"
+          "evidence": "The whole family was enumerated rather than left to the next timeout. Three stems return App and were all in the run universe: web/app_hello, web/web_app and web/app_typed_args. Only app_hello ever reported, because all three race a fixed port 8080 and the losers die E3001 instead of hanging. Already-excluded siblings with their own named reasons: net/http_server plus five http_server_* and socket_echo (network service), game/raylib_window, ui/ui_native_linux, lowlevel/cross. Confirmed genuinely bounded and correctly left in the run universe: net/http_readiness, http_rest_service, http_routes, http_server_limits, http_web_defaults, ws_echo, http_client, http_get. Flagged as a latent host-dependent hang, bounded only by stdin EOF rather than by the program: io/stdin_filter and io/io_surface.",
+          "at": "2026-08-17T01:05:33.415Z"
         },
         {
           "n": 4,
           "text": "If any stem is excluded from the run universe, the exclusion is counted and carries a named reason, and the stem is still required to compile",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:23.153Z"
+          "evidence": "The exclusion is counted and shrink-only, following the rule card #1998 established: CORPUS_GATE_EXCLUDED_CEILING = 12 in tests/dev.rs asserts that GateExcluded records may only decrease, with the message telling a future reader to drive the stem instead of excluding it. A bare skip list is what let stems leave a universe unnoticed, so a ceiling makes leaving cost a reviewed edit. The stem is still required to compile.",
+          "at": "2026-08-17T01:05:33.941Z"
         },
         {
           "n": 5,
           "text": "example_corpus_strict_jit_aot_differential_gate reaches its own assertion without a timeout kill",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:24.043Z"
+          "evidence": "example_corpus_strict_jit_aot_differential_gate reaches its own assertion with no timeout kill. The three-way differential battery holds services back by the same derived predicate rather than by a hardcoded stem name, so a fourth service example is classified instead of being discovered by a timeout.",
+          "at": "2026-08-17T01:05:34.452Z"
         }
       ],
       "refs": [],
@@ -131972,8 +131974,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:37:03.255Z",
-      "updated": "2026-08-16T12:37:24.043Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T01:05:35.059Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T01:05:35.059Z"
     },
     {
       "id": "c0zkvjon",
@@ -132411,7 +132414,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Group by cause before fixing. Row 2's release half is a generated-Rust rejection already carded (the String-through-integer-accessor defect); confirm whether fixing that closes row 2 and possibly row 3, since both compare a default lens against an AOT lens.\n\nRows 1 and 5 are gate polarity questions of the kind this epoch has repeatedly found: does the gate wrongly refuse, or can lowering genuinely not follow? E0956 (\"compile-time only\") on the expert terminal model, and a deopt where host calls are expected, are both \"the engine refuses something it may well handle\". Establish which polarity each is, and never loosen a predicate without showing the lowering exists.\n\nRow 4's exit-1-instead-of-0 needs the actual diagnostic; a usage-error path returning the wrong status is a user-visible contract bug.",
       "blockedBy": [],
@@ -132421,56 +132424,56 @@
         {
           "n": 1,
           "text": "Each of the five failures has a named root cause, grouped by shared cause rather than fixed one test at a time",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:08.931Z"
+          "evidence": "All five failures are resolved and grouped by shared cause rather than fixed one test at a time. Verified at 16345204a: cargo test --test jit_run = ok, 15 passed / 0 failed, against 10 passed / 5 failed at the c14e1ec2f baseline.",
+          "at": "2026-08-17T01:05:35.500Z"
         },
         {
           "n": 2,
           "text": "The process spec builders lower to host calls on the resident JIT rather than deopting, or the refusal is proven correct and the test's expectation is the thing that was wrong",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:09.356Z"
+          "evidence": "Rows 1, 2, 3 and 5 shared ONE cause and were closed by fixing it once, upstream: jet-codegen's struct_field_type had no ProcessResult arm, so every ProcessResult field read typed as Type::Int via .unwrap_or(Type::Int). AOT then emitted rustc-invalid Rust, while the JIT papered over it with three site-local hatches, so wherever a hatch was missing the resident gate refused and the function deopted. That is now one jet-sema oracle for all 115 declared core structs, and the dead hatches were deleted. This lane confirmed the shared cause with the owning lane over IRC before touching anything and wrote no parallel fix.",
+          "at": "2026-08-17T01:05:36.102Z"
         },
         {
           "n": 3,
           "text": "The default and release lenses agree for arg_process_spec_builders_reach_the_child and process_run_checked_matches_default_and_aot_lenses, with no rustc rejection of generated code (I2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:09.793Z"
+          "evidence": "The default and release lenses agree with no rustc rejection of generated code. Fixing the field types exposed a second, separate defect on the same field which was also closed: Prelude Open.rs declared `pub signal: Option<i64>`, a raw Rust Option, while sema declares it Option<Int> whose one Rust spelling is JetOutcome<i64, JetAbsent>, so pattern lowering emitted Ok/Err arms over an Option. A blast-radius audit of every sema-declared optional core field against its Prelude declaration found exactly one other struct with the same defect, JetAuthClaims on four fields plus AuthError.WrongIssuer.actual, already reachable by existing tests, and fixed it in the same change.",
+          "at": "2026-08-17T01:05:36.518Z"
         },
         {
           "n": 4,
           "text": "args_parse_or_exit_runs_resident_for_return_help_and_usage_error exits 0, and the exit-status contract for help and usage errors is stated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:10.243Z"
+          "evidence": "args_parse_or_exit_runs_resident_for_return_help_and_usage_error passes. Its cause was neither a gate nor a lowering defect but a stale test fixture from the Core surface cutover: the fixture called process.argv() without `use core.process as process`.",
+          "at": "2026-08-17T01:05:36.958Z"
         },
         {
           "n": 5,
           "text": "expert_terminal_model_runs_resident_and_fails_closed runs under default jet run with no E0956",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:10.697Z"
+          "evidence": "expert_terminal_model_runs_resident_and_fails_closed passes with no E0956. Cause: the interpreter boundary had no ProcessChild.terminal field and no TerminalSession.resize arm, so the terminal session was not marshalled at tier 0.",
+          "at": "2026-08-17T01:05:37.409Z"
         },
         {
           "n": 6,
           "text": "cargo test --test jit_run reports zero failures, and the target is added to a routine set so five red rows cannot sit unrecorded again",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:38:11.153Z"
+          "evidence": "cargo test --test jit_run reports zero failures. On the routine-set point this card raised: the reason five red rows sat unrecorded for a whole session is that the 2026-08-15 handoff measured --test dev only, and jit_run was not in that set. This session added jit_run to the orchestrator's standing verification union alongside run_cache, run_interpret, terminal and env_overlay, and card #2020 owns making the dev suite itself reach a complete measurement.",
+          "at": "2026-08-17T01:05:37.842Z"
         }
       ],
       "refs": [],
@@ -132478,8 +132481,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T14:38:08.489Z",
-      "updated": "2026-08-16T14:38:11.154Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T01:05:38.507Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T01:05:38.507Z"
     },
     {
       "id": "c0m7k8pa",
@@ -174462,8 +174466,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-16T23:48:25.792Z"
+      "status": "ratified",
+      "created": "2026-08-16T23:48:25.792Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-17"
     }
   ],
   "questions": [
@@ -176155,6 +176161,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-17T01:05:38.508Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ejmyy7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T01:05:37.843Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ejmyy7",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-17T01:05:37.410Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ejmyy7",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T01:05:36.959Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ejmyy7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T01:05:36.519Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ejmyy7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T01:05:36.102Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ejmyy7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T01:05:35.501Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ejmyy7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T01:05:35.060Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0sujl09",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T01:05:34.453Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sujl09",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T01:05:33.941Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sujl09",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T01:05:33.415Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sujl09",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T01:05:32.941Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sujl09",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T01:05:32.508Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sujl09",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T01:05:32.077Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0d9tenn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T01:05:31.480Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d9tenn",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T01:05:31.057Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d9tenn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T01:05:30.571Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d9tenn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T01:05:29.794Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d9tenn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T01:05:28.806Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0j53cyj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T01:05:27.777Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0j53cyj",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T01:05:27.361Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0j53cyj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T01:05:26.931Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0j53cyj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T01:05:26.483Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0j53cyj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T00:01:04.214Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SOA-TIER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-17T00:00:48.153Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-17T00:00:48.152Z"
+    },
     {
       "at": "2026-08-16T23:59:34.973Z",
       "by": "fable-e3-burndown",
@@ -179479,181 +179660,6 @@
       "action": "done.clear",
       "ref": null,
       "note": "2026-08-15T17:54:45.331Z"
-    },
-    {
-      "at": "2026-08-15T17:05:04.745Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0nnh6tu",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T17:05:04.125Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T17:05:03.663Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T17:05:03.235Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T17:05:02.800Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T17:05:02.371Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T17:05:01.953Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T17:05:01.531Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T17:05:01.112Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T17:05:00.689Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nnh6tu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T17:04:40.536Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c04ku6ov",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T17:04:39.795Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-15T17:04:38.811Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T17:04:37.939Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-15T17:04:37.502Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T17:04:37.083Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T17:04:36.665Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-15T17:04:36.253Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-15T17:04:35.836Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T17:04:35.407Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04ku6ov",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T17:04:11.910Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wk4xnv",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-15T17:04:11.317Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-15T17:04:10.887Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-15T17:04:10.463Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-15T17:04:10.038Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wk4xnv",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
