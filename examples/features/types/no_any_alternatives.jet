@@ -23,8 +23,7 @@ fn run() ? {
     print(echo("typed"))
     maybe :: Val("present")
     if maybe == .Val(s) -> print(s)
-    parsed :: json.parse("{{\"name\":\"jet\"}}") ?? return Err("bad json")
-    data :: DataTree.{parsed}
+    data :: DataTree.{json.parse("{{\"name\":\"jet\"}}") ?? return Err("bad json")}
     if data == .Object(entries) {
         if entries["name"] == .Text(name) -> print(name)
     }
