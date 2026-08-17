@@ -659,7 +659,10 @@ impl<'a> Checker<'a> {
             candidates
                 .into_iter()
                 .map(|candidate| (edit_distance(name, &candidate), candidate))
-                .filter(|(distance, _)| *distance <= 2)
+                // Distance 0 is the rejected tag itself: a tag that is visible
+                // here but failed the declaration lookup must not be handed back
+                // as the fix for its own rejection (#2002).
+                .filter(|(distance, _)| *distance > 0 && *distance <= 2)
                 .min_by(|a, b| a.cmp(b))
                 .map(|(_, candidate)| candidate)
         }

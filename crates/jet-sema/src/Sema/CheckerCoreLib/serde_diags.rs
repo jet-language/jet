@@ -86,6 +86,21 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
         );
     }
     let items = core_module_items(module);
+    // #2002: the module DOES expose `name`. Claiming it has no such item, and
+    // then "suggesting" that same name back, is two false statements produced by
+    // one table disagreement: the item list says the name is public while the
+    // position this call came from has no arm for it. Say what is true instead —
+    // the item exists, this position did not resolve it, and the list-member
+    // import (D-CORE-USELIST1=A) is a spelling that reaches it.
+    if items.iter().any(|item| item == name) {
+        return Diagnostic::error(
+            "E1004",
+            format!("`{module}` exposes `{name}`, but not in this position"),
+            "standard library modules expose a fixed set of public items, each reachable only where its surface declares".to_string(),
+            format!("import it directly with `use {module}.[{name}]`"),
+            Some(span),
+        );
+    }
     let mut fix = if items.is_empty() {
         "import a specific core module, like `import core.files as fs;`".to_string()
     } else {

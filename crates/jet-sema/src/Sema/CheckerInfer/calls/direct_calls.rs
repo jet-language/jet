@@ -1037,7 +1037,12 @@ impl<'a> Checker<'a> {
                     .chain(prelude_cands.iter().copied())
                 {
                     let d = edit_distance(&call.name, cand);
-                    if d <= 2 && !candidates.iter().any(|(known, _)| *known == cand) {
+                    // Distance 0 is the rejected spelling itself: suggesting it
+                    // (and the `with_edit` that rewrites the call to the same
+                    // text) would tell the reader to write what just failed to
+                    // resolve (#2002). This keeps the unique-minimum policy
+                    // below; only the echo is dropped.
+                    if d > 0 && d <= 2 && !candidates.iter().any(|(known, _)| *known == cand) {
                         candidates.push((cand, d));
                     }
                 }

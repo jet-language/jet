@@ -1,6 +1,6 @@
 use crate::AST::{Expr, IncDecOp, LValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Diagnostics::{computed_field_not_settable, edit_distance, expr_root_ident};
+use crate::Sema::Diagnostics::{computed_field_not_settable, expr_root_ident, suggest_field};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 impl<'a> Checker<'a> {
@@ -70,21 +70,18 @@ impl<'a> Checker<'a> {
             if let Some(module) = unique_core_module_for_alias(name) {
                 fix = format!("add `use {module} as {name}`");
             }
-            let mut best: Option<(String, usize)> = None;
+            // I8: one suggester. `suggest_field` is the same distance-≤2
+            // nearest-candidate pick this used to inline, and it refuses a
+            // candidate equal to `name` — a visible-but-unresolvable name must
+            // not be echoed back as the fix for its own failed lookup (#2002).
             let candidates: Vec<String> = self
                 .visible_names()
                 .into_iter()
                 .chain(self.consts.keys().cloned())
                 .collect();
-            for cand in candidates {
-                let d = edit_distance(name, &cand);
-                if d <= 2 && best.as_ref().map_or(true, |(_, bd)| d < *bd) {
-                    best = Some((cand, d));
-                }
+            if let Some(cand) = suggest_field(name, &candidates) {
+                fix = format!("did you mean `{}`?", cand);
             }
-        if let Some((cand, _)) = best {
-            fix = format!("did you mean `{}`?", cand);
-        }
         self.diags.push(Diagnostic::error(
                 "E0107",
                 format!("nothing named `{}` exists here", name),

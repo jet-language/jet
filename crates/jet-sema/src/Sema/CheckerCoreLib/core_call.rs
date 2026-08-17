@@ -9,7 +9,7 @@ use crate::Sema::SendCrossing;
 use crate::Syntax;
 use jet_foundation::Effects::is_nondeterministic_core;
 use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
-use super::core_types::{decode_error_ty, u8_ty, unit_ty};
+use super::core_types::{decode_error_ty, json_error_ty, json_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
     freestanding_hint, is_freestanding_forbidden, module_short_name,
@@ -1543,6 +1543,27 @@ impl<'a> Checker<'a> {
                         }
                     }
                     return Some(Type::String);
+                }
+                // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
+                // dynamic decode — same `Data ? JSONError` shape as `parse`, with
+                // string→number/bool coercions surfaced as log lines
+                // (docs/reference/core-library.md, `jet_std_json_decode_lenient`
+                // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
+                // in `is_polymorphic_core_special`, so its `core_fixed_sig` row is
+                // never consulted; without this arm the call fell through to
+                // `unknown_core_item` and E1004 claimed `core.encoding.json` has no
+                // item `decode` while suggesting `decode`.
+                ("core.encoding.json", "decode") if type_args.is_empty() => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::String, arg);
+                    }
+                    for arg in args.iter_mut().skip(1) {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(result_ty(json_ty(), json_error_ty()));
                 }
                 (
                     "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"

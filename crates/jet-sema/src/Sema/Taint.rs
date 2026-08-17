@@ -1135,7 +1135,8 @@ pub fn collect_tag_facts(
         candidates
             .into_iter()
             .map(|candidate| (crate::Syntax::edit_distance(name, candidate), candidate))
-            .filter(|(distance, _)| *distance <= 3)
+            // Distance 0 is the rejected spelling itself; never suggest it (#2002).
+            .filter(|(distance, _)| *distance > 0 && *distance <= 3)
             .min_by_key(|(distance, candidate)| (*distance, *candidate))
             .map(|(_, candidate)| candidate)
     }
