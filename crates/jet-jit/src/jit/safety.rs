@@ -2093,6 +2093,29 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::CtLit(jet_foundation::AST::CtValue::Struct { fields, .. }) => {
             resident_safe_ct_struct_fields(fields)
         }
+        // `CtValue::Float` lowers with a bare `f64const` (lower_ctx.rs
+        // `lower_ct_value`), which does not round through f32 the way
+        // `TExprKind::FloatLit` does for `Float32`. Admit plain `Float` only.
+        TExprKind::CtLit(jet_foundation::AST::CtValue::Float(_)) => {
+            matches!(&expr.ty, Type::Float)
+        }
+        // `CtValue::Unit` lowers to the same zero word as `TExprKind::Unit`.
+        TExprKind::CtLit(jet_foundation::AST::CtValue::Unit) => true,
+        // A comptime Map literal builds the same string-keyed heap map the
+        // runtime literal path builds: `map_new`, then `map_insert(handle,
+        // string-handle, packed-value)` (lower_ctx.rs `CtValue::Map`), which is
+        // the ABI `lower_map_lit_pairs` emits. That arm stringifies
+        // `CtKey::Int`/`Bool`/`Char` while `jit_map_int_type` maps carry raw
+        // i64 keys, so only `CtKey::Str` over a `Map<String, _>` is admitted.
+        TExprKind::CtLit(jet_foundation::AST::CtValue::Map(entries)) => {
+            jit_map_string_type(&expr.ty)
+                && jit_map_resident_type(&expr.ty)
+                && matches!(&expr.ty, Type::Map { value, .. } if jit_value_type(value))
+                && entries.iter().all(|(key, value)| {
+                    matches!(key, jet_foundation::AST::CtKey::Str(_))
+                        && resident_safe_ct_value(value)
+                })
+        }
         TExprKind::StrLit(parts) => {
             resident_safe_string_parts(parts, callees)
         }
