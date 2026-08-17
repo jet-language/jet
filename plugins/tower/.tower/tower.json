@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2029,
-    "rev": 38086,
+    "rev": 38088,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -100440,8 +100440,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:59.251Z",
-      "updated": "2026-08-17T10:54:10.273Z",
-      "updatedBy": "owner",
+      "updated": "2026-08-17T10:58:49.095Z",
+      "updatedBy": "fable",
       "workOrder": 1000
     },
     {
@@ -174908,6 +174908,13 @@
           "detail": "The menu becomes `Rights.FS`, keeping `Authority` for the value a program passes around and using a different word for the menu of facts. Gain: two related but distinct ideas keep distinct names, so a reader is not left wondering why one word means both. Loss: a third word enters the vocabulary a reader must learn.",
           "technical": "Rename the fact menu to `Rights`, matching the rights-tree wording already used in the authority substrate work. `Authority` stays the name of the handle a program holds. The two library and tool names follow option B and stay.",
           "code": "#Caps(Rights.FS)\nfn read_report() ? { … }\n\n// the value a program holds keeps its own name\nfn serve(auth: Authority) ? { … }"
+        },
+        {
+          "key": "E",
+          "name": "Rename the marker menu to Ability",
+          "detail": "The menu becomes `Ability.FS`. `Authority` stays the name of the value a program holds, and the two library and tool names stay, as in option B. Gain: a plain short word for the thing a marker grants, with no echo of auth or authorization. A web program already contains `core.auth`, and a permission menu spelled `Authority` sits next to login code in exactly that setting. Loss: a second word joins the vocabulary, so the docs must teach that an authority holds abilities.",
+          "technical": "Rename the fact menu `Capability` to `Ability` and move its E0119 snapshot. Update the read-only wording that names menu facts so a diagnostic and the typed name match. `Authority` (D-AUTHORITY-NAME1) is untouched. `BrowserCapabilities`, `.capabilities()` and `--capabilities-json` stay per option B. No `Ability` symbol exists anywhere in the codebase, so the rename is collision-free.",
+          "code": "#Caps(Ability.FS)\nfn read_report() ? { … }\n\n// the value a program holds keeps its own name\nfn serve(auth: Authority) ? { … }"
         }
       ],
       "comparisons": [
@@ -174927,13 +174934,17 @@
           "code": "{ \"capabilities\": { \"alwaysMatch\": { \"browserName\": \"chrome\" } } }"
         }
       ],
-      "rec": "B",
+      "rec": "E",
       "recommendation": {
-        "why": "It fixes the one case a reader actually reaches from a diagnostic, and it leaves alone the two names that come from an external protocol rather than from Jet's vocabulary. A reader who searches for the browser reader is reading browser documentation, where the old word is correct.",
+        "why": "It fixes the case a reader reaches from a diagnostic, exactly as option B does. It also removes a collision option B creates: web programs already use core.auth, and a permission menu spelled Authority reads as authorization vocabulary there. Ability says what the fact grants in the word a beginner would choose, and no existing name clashes with it.",
         "whyNot": [
           {
             "key": "A",
             "reason": "It renames two names that are borrowed from the WebDriver wire format, where `capabilities` is the correct term. That trades a real break for consistency with a word the protocol does not use."
+          },
+          {
+            "key": "B",
+            "reason": "It puts the word authority beside core.auth in the one domain where the two are easiest to conflate. It also gives the fact menu and the carried value one name, though they are different ideas."
           },
           {
             "key": "C",
@@ -174941,10 +174952,10 @@
           },
           {
             "key": "D",
-            "reason": "It adds a third word for one family of ideas. The rights-tree wording is internal to the substrate design and has not been a name a user types."
+            "reason": "Rights fixes the same problem as Ability, but with a legalistic word that has only lived inside the substrate design. Ability names the same idea in plainer language."
           }
         ],
-        "tradeoff": "Option B leaves the old word visible in two places, so a search for it still returns hits. That is acceptable because both are documented as protocol vocabulary, and the case that misleads a reader following an error is the one that gets fixed."
+        "tradeoff": "Option E keeps two words: Authority for the value a program holds, ability for the thing the menu names. That costs one line of teaching — an authority holds abilities. A lowercase search for ability also matches inside words like capability and reliability, though the typed name `Ability.FS` is unambiguous. One adjacent fossil stays either way: the marker `#Caps` is short for the retired word; renaming it is a separate choice."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -176273,9 +176284,11 @@
       "by": "owner",
       "kind": "question",
       "text": "What about ability ? That is a little shorter than capabilities, is clear to me, and does confuse me with something like \"auth\" in web dev",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-17T10:54:10.273Z"
+      "status": "answered",
+      "answer": "Ability works, and it is now option E on the ballot (and the new recommendation). It is collision-free: no Ability symbol exists anywhere in the codebase. It reads naturally in place — #Caps(Ability.FS) says this function has the ability to touch the filesystem. And your auth point is concrete, not just taste: Jet ships core.auth (D-AUTH1/D-AUTH2), so a permission menu spelled Authority would sit next to real login code in web programs, inviting the wrong guess that the marker is about authorization. Two small costs, stated in the ballot: (1) Authority stays the ratified name of the carried value (D-AUTHORITY-NAME1), so the vocabulary has two words — the docs teach that an authority holds abilities; the menu and the value are genuinely different ideas, so distinct names are honest. (2) Unison uses ability to mean effect; Jet has a separate effect system, so an expert arriving from Unison may pause once. The browser .capabilities() reader and --capabilities-json flag stay either way — WebDriver protocol vocabulary, not Jet's. One adjacent fossil to flag: the marker itself is #Caps, short for the retired word capability; renaming it (e.g. to match whatever wins here) is a separate choice not on this ballot.",
+      "created": "2026-08-17T10:54:10.273Z",
+      "answeredAt": "2026-08-17",
+      "answeredBy": "fable"
     }
   ],
   "ideas": [
@@ -176740,6 +176753,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-17T10:58:49.095Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q0l239o9",
+      "note": ""
+    },
+    {
+      "at": "2026-08-17T10:58:37.462Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-AUTHORITY-WORD2",
+      "note": ""
+    },
     {
       "at": "2026-08-17T10:57:59.793Z",
       "by": "fable-e3-burndown",
@@ -180225,20 +180252,6 @@
       "action": "card.update",
       "ref": "c0nycd3c",
       "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:59:01.456Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0nycd3c",
-      "note": "JIT emits invalid CLIF L3: Branch edge passes i64 into an f64 block parameter"
-    },
-    {
-      "at": "2026-08-15T18:59:01.028Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0exr0fm",
-      "note": "#4 A regression test pins the emitted shape so invalid CLIF at "
     }
   ],
   "nextNum": 368,
