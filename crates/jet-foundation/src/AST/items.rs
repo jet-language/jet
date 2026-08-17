@@ -1223,6 +1223,60 @@ impl Func {
     }
 }
 
+/// D-WEBAPP1=D: does this type name the `App` service builder — `App` itself,
+/// or `App ? E`?
+///
+/// One canonical answer (I8). Sema's app-graph extraction, AOT entry emit, the
+/// web artifact front door, and the interpreter entry each carried a private
+/// copy of this three-line match, so "the entry returns App" could mean four
+/// slightly different things. It means exactly one thing, and it is here.
+pub fn type_is_app(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => name == "App",
+        Type::Result { ok, .. } => matches!(ok.as_ref(), Type::Named(name) if name == "App"),
+        _ => false,
+    }
+}
+
+/// The `fn run` that returns an `App`, including one declared inside a `module`
+/// body in the same file.
+pub fn app_entry_run_fn(items: &[Item]) -> Option<&Func> {
+    for item in items {
+        match item {
+            Item::Func(function)
+                if function.name == "run"
+                    && function.return_type.as_ref().is_some_and(type_is_app) =>
+            {
+                return Some(function);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(function) = app_entry_run_fn(body) {
+                        return Some(function);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Does running this program start a service that serves until the process is
+/// stopped?
+///
+/// `jet run` hands an `App`-returning entry to `App::serve`, which binds a
+/// listener and then serves: the program has no terminating output and no exit
+/// code of its own, in any tier. A differential harness reads this fact to keep
+/// such a program in its compile universe and out of its run universe, instead
+/// of discovering the same thing as a timeout.
+pub fn bundle_serves_until_stopped(bundle: &super::ProgramBundle) -> bool {
+    bundle
+        .modules
+        .get(bundle.entry)
+        .is_some_and(|module| app_entry_run_fn(&module.items).is_some())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaskMetadata {
     /// D-JOB-SUBCMD1=C: the build tier in which a named job is exposed.

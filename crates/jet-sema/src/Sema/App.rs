@@ -17,7 +17,7 @@ pub fn extract_app_graph(bundle: &ProgramBundle) -> (Option<AppGraph>, Vec<Diagn
     let Some(module) = bundle.modules.get(bundle.entry) else {
         return (None, Vec::new());
     };
-    let Some(run_fn) = find_app_run_fn(&module.items) else {
+    let Some(run_fn) = crate::AST::app_entry_run_fn(&module.items) else {
         return (None, Vec::new());
     };
 
@@ -63,35 +63,6 @@ pub fn extract_app_graph(bundle: &ProgramBundle) -> (Option<AppGraph>, Vec<Diagn
     }
 
     (Some(graph), diags)
-}
-
-fn find_app_run_fn(items: &[Item]) -> Option<&crate::AST::Func> {
-    for item in items {
-        match item {
-            Item::Func(f) if f.name == "run" && returns_app(f.return_type.as_ref()) => {
-                return Some(f)
-            }
-            Item::CodeModule(cm) => {
-                if let Some(body) = &cm.body {
-                    if let Some(f) = find_app_run_fn(body) {
-                        return Some(f);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn returns_app(ty: Option<&crate::AST::Type>) -> bool {
-    match ty {
-        Some(crate::AST::Type::Named(name)) => name == "App",
-        Some(crate::AST::Type::Result { ok, .. }) => {
-            matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "App")
-        }
-        _ => false,
-    }
 }
 
 fn collect_fn_names(items: &[Item]) -> Vec<String> {
