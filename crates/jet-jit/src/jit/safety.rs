@@ -3449,7 +3449,32 @@ fn resident_safe_builtin_op(
             }
             true
         }
-        TBuiltinOp::Unzip { .. } => args.is_empty(),
+        // `jet_jit_list_unzip` is an i64-pair host: it reads both columns with
+        // `record_get_int`, runs `collection_semantics::list_unzip_i64`, and
+        // republishes each column with `list_push_int`. A `String` column has no
+        // raw-int reading, so `["a","bb","c"].zip([1,2,3]).unzip()` came back as
+        // two EMPTY lists — `clone_int_list(..).unwrap_or_default()` and the
+        // `record_get_int(..)?` inside the `filter_map` both swallow the
+        // mismatch. This predicate admitted every receiver, so the swallow was
+        // reachable from a correct program.
+        //
+        // Polarity: the host cannot honour a non-Int column, so the wide form
+        // DEOPTS rather than answering emptily. A future lowering that wants
+        // `[(String, Int)]` needs the per-column representation plan `Zip`
+        // already carries (`JitZipColumn`/`jit_zip_set_value`) threaded into the
+        // unzip host so each column is read and republished in its own kind;
+        // until then the shared kernel stays the only answer for mixed columns.
+        TBuiltinOp::Unzip { .. } => {
+            args.is_empty()
+                && jit_zip_sequence_elem_type(recv_ty).is_some_and(|elem| {
+                    matches!(
+                        &elem,
+                        Type::Tuple(fields)
+                            if fields.len() == 2
+                                && fields.iter().all(|(_, field)| intish_ty(field))
+                    )
+                })
+        }
         TBuiltinOp::TryCollect => {
             jit_result_list_elem(recv_ty).is_some() && args.is_empty()
         }
