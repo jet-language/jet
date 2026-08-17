@@ -120,8 +120,8 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
     let project_dir = std::env::current_dir().unwrap_or_default();
     // Early collision check on the projected name (package short name or --as).
     let preview = as_name.unwrap_or(spec.short_name());
-    if let Some((task, path)) = find_task_collision(&project_dir, preview) {
-        report_collide(theme, preview, &task, &path, raw);
+    if let Some((job, path)) = find_job_collision(&project_dir, preview) {
+        report_collide(theme, preview, &job, &path, raw);
         return 2;
     }
     let roots = Store::resolve();
@@ -183,8 +183,8 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         if bin_name == preview {
             continue;
         }
-        if let Some((task, path)) = find_task_collision(&project_dir, bin_name) {
-            report_collide(theme, bin_name, &task, &path, raw);
+        if let Some((job, path)) = find_job_collision(&project_dir, bin_name) {
+            report_collide(theme, bin_name, &job, &path, raw);
             return 2;
         }
     }
@@ -301,7 +301,7 @@ fn reject_unavailable_provider(theme: &Theme, raw: &str) -> Option<i32> {
     Some(2)
 }
 
-fn report_collide(theme: &Theme, bin: &str, task: &str, path: &Path, raw: &str) {
+fn report_collide(theme: &Theme, bin: &str, job: &str, path: &Path, raw: &str) {
     let rel = path
         .file_name()
         .and_then(|s| s.to_str())
@@ -311,7 +311,7 @@ fn report_collide(theme: &Theme, bin: &str, task: &str, path: &Path, raw: &str) 
         Syntax::TOOL_DIAG_COLLIDE,
         &format!("`{bin}` is already a job in {rel}"),
         &format!(
-            "the project job `{task}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE / D-JPK-TOOLRUN1)."
+            "the project job `{job}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE / D-JPK-TOOLRUN1)."
         ),
         &format!(
             "install under a different bin name  ->  jetpack tool install {raw} {} <other>\n     or just run it once                  ->  jetpack tool run {raw}",
@@ -321,7 +321,7 @@ fn report_collide(theme: &Theme, bin: &str, task: &str, path: &Path, raw: &str) 
 }
 
 /// Scan project `.jet` sources for `#Job fn <name>` matching `bin`.
-fn find_task_collision(dir: &Path, bin: &str) -> Option<(String, PathBuf)> {
+fn find_job_collision(dir: &Path, bin: &str) -> Option<(String, PathBuf)> {
     let mut files = Vec::new();
     collect_jet_files(dir, &mut files, 0);
     for path in files {

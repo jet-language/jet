@@ -79,7 +79,7 @@ pub(super) fn wait_for_services_ready(
                 );
                 return Err(format!("service `{}` has an unsupported field", svc.name));
             }
-            if let Err(()) = run_before_start_tasks(theme, parsed, roots, project_dir, entry, svc) {
+            if let Err(()) = run_before_start_jobs(theme, parsed, roots, project_dir, entry, svc) {
                 return Err(format!("before_start task for service `{}` failed", svc.name));
             }
             theme.detail(&format!(
@@ -121,7 +121,7 @@ fn report_service_start_error(theme: &Theme, title: &str, error: &str) {
     }
 }
 
-fn run_before_start_tasks(
+fn run_before_start_jobs(
     theme: &Theme,
     parsed: &Parsed,
     roots: &Store::Roots,
@@ -526,7 +526,7 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
-                    run_before_start_tasks(
+                    run_before_start_jobs(
                         theme,
                         parsed,
                         &roots,
@@ -578,7 +578,7 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
-                    run_before_start_tasks(
+                    run_before_start_jobs(
                         theme,
                         parsed,
                         &roots,
@@ -747,7 +747,7 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
-                    run_before_start_tasks(
+                    run_before_start_jobs(
                         theme,
                         parsed,
                         &roots,
@@ -1150,7 +1150,7 @@ fn project_job_names(file: &Path) -> Option<Vec<String>> {
         .items
         .iter()
         .filter_map(|i| match i {
-            crate::AST::Item::Func(f) if f.is_task => Some(f.name.clone()),
+            crate::AST::Item::Func(f) if f.is_job => Some(f.name.clone()),
             _ => None,
         })
         .collect();
@@ -1171,7 +1171,7 @@ pub(super) fn project_job_declared(file: &Path, job: &str) -> Option<bool> {
 pub(super) fn project_job_metadata(
     file: &Path,
     job: &str,
-) -> Option<crate::AST::TaskMetadata> {
+) -> Option<crate::AST::JobMetadata> {
     let src = std::fs::read_to_string(file).ok()?;
     let (toks, diags) = crate::Lexer::lex(&src);
     if !diags.is_empty() {
@@ -1179,8 +1179,8 @@ pub(super) fn project_job_metadata(
     }
     let prog = crate::Parser::parse(&toks).ok()?;
     prog.items.iter().find_map(|item| match item {
-        crate::AST::Item::Func(function) if function.name == job && function.is_task => {
-            function.task_metadata.clone()
+        crate::AST::Item::Func(function) if function.name == job && function.is_job => {
+            function.job_metadata.clone()
         }
         _ => None,
     })

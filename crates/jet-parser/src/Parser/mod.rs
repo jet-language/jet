@@ -910,7 +910,7 @@ fn build(b: BuildContext) {
             crate::AST::Item::Func(func) if func.name == "sync" => Some(func),
             _ => None,
         }).expect("sync function");
-        assert!(func.is_task);
+        assert!(func.is_job);
         assert!(func.meta.is_some());
         assert_eq!(func.maturity, Some(crate::AST::MaturityTag::Tested));
         assert!(p.policy_declarations.iter().any(|declaration| {

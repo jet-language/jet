@@ -1203,9 +1203,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Syntax::KW_JOB => {
-                        function.is_task = true;
-                        function.task_span = Some(marker.span);
-                        function.task_metadata = self.task_metadata_from_marker(&marker)?;
+                        function.is_job = true;
+                        function.job_span = Some(marker.span);
+                        function.job_metadata = self.job_metadata_from_marker(&marker)?;
                     }
                     // D-TASKS-LIST1=A: only a group that also has `#Job`
                     // reaches this arm. Discovery reads the retained marker.
@@ -1425,7 +1425,7 @@ impl<'a> Parser<'a> {
                 declaration.target = Some(function.span);
             }
             if let Some(every) = &function.every {
-                if !function.is_task {
+                if !function.is_job {
                     self.diags
                         .push(Self::e0925_every_without_job(every.span));
                 }

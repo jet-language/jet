@@ -215,22 +215,22 @@ impl<'a> Parser<'a> {
 
         /// D-TASK-META1=A: decode optional static fields on the existing task
         /// marker. Task execution remains an ordinary function call.
-        pub(in crate::Parser) fn task_metadata_from_marker(
+        pub(in crate::Parser) fn job_metadata_from_marker(
             &self,
             marker: &crate::AST::Marker,
-        ) -> Result<Option<crate::AST::TaskMetadata>, Diagnostic> {
+        ) -> Result<Option<crate::AST::JobMetadata>, Diagnostic> {
             if marker.args.is_empty() {
                 return Ok(None);
             }
             let arguments = self.bound_registered_rule_arguments(marker)?;
-            let mut metadata = crate::AST::TaskMetadata::default();
+            let mut metadata = crate::AST::JobMetadata::default();
             if let Some(scope) = arguments.parameter(0) {
-                metadata.scope = match Self::task_word(scope) {
+                metadata.scope = match Self::job_word(scope) {
                     Some("Dev") => crate::AST::JobScope::Dev,
                     Some("Ship") => crate::AST::JobScope::Ship,
                     Some("Internal") => crate::AST::JobScope::Internal,
                     _ => {
-                        return Err(Self::task_metadata_error(
+                        return Err(Self::job_metadata_error(
                             "scope",
                             ".Dev, .Ship, or .Internal",
                             scope.span(),
@@ -244,12 +244,12 @@ impl<'a> Parser<'a> {
             metadata.outputs = Self::task_string_list(arguments.parameter(4), marker.span)?;
             metadata.skip = Self::task_skip(arguments.parameter(5), marker.span)?;
             if let Some(cache) = arguments.parameter(6) {
-                metadata.cache = match Self::task_word(cache) {
-                    Some("Local") => crate::AST::TaskCachePolicy::Local,
-                    Some("Shared") => crate::AST::TaskCachePolicy::Shared,
-                    Some("Uncached") | Some("Off") => crate::AST::TaskCachePolicy::Uncached,
+                metadata.cache = match Self::job_word(cache) {
+                    Some("Local") => crate::AST::JobCachePolicy::Local,
+                    Some("Shared") => crate::AST::JobCachePolicy::Shared,
+                    Some("Uncached") | Some("Off") => crate::AST::JobCachePolicy::Uncached,
                     _ => {
-                        return Err(Self::task_metadata_error(
+                        return Err(Self::job_metadata_error(
                             "cache",
                             ".Uncached, .Local, or .Shared",
                             cache.span(),
@@ -272,8 +272,8 @@ impl<'a> Parser<'a> {
                 crate::AST::Expr::ListLit(values, _) => values
                     .iter()
                     .map(|value| {
-                        Self::task_word(value).map(str::to_string).ok_or_else(|| {
-                            Self::task_metadata_error(
+                        Self::job_word(value).map(str::to_string).ok_or_else(|| {
+                            Self::job_metadata_error(
                                 "list",
                                 "a list of strings or names",
                                 value.span(),
@@ -281,10 +281,10 @@ impl<'a> Parser<'a> {
                         })
                     })
                     .collect(),
-                _ => Self::task_word(expr)
+                _ => Self::job_word(expr)
                     .map(|value| vec![value.to_string()])
                     .ok_or_else(|| {
-                        Self::task_metadata_error(
+                        Self::job_metadata_error(
                             "list",
                             "a list of strings or names",
                             marker_span,
@@ -299,38 +299,38 @@ impl<'a> Parser<'a> {
             field: &str,
         ) -> Result<Option<String>, Diagnostic> {
             let Some(expr) = expr else { return Ok(None) };
-            match Self::task_word(expr) {
+            match Self::job_word(expr) {
                 Some(value) if value != "none" && value != "None" => Ok(Some(value.to_string())),
                 Some(_) => Ok(None),
-                None => Err(Self::task_metadata_error(field, "a string or name", marker_span)),
+                None => Err(Self::job_metadata_error(field, "a string or name", marker_span)),
             }
         }
 
         fn task_skip(
             expr: Option<&crate::AST::Expr>,
             marker_span: Span,
-        ) -> Result<Option<crate::AST::TaskSkip>, Diagnostic> {
+        ) -> Result<Option<crate::AST::JobSkip>, Diagnostic> {
             let Some(expr) = expr else { return Ok(None) };
-            if let Some(value) = Self::task_word(expr) {
+            if let Some(value) = Self::job_word(expr) {
                 return Ok((value != "none" && value != "None")
-                    .then(|| crate::AST::TaskSkip::Always(value.to_string())));
+                    .then(|| crate::AST::JobSkip::Always(value.to_string())));
             }
             let crate::AST::Expr::EnumLit { variant, args, .. } = expr else {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "skip",
                     "a reason string or .Unless(.Platform(.Linux))",
                     marker_span,
                 ));
             };
             let [crate::AST::EnumLitArg::Positional(platform)] = args.as_slice() else {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "skip",
                     ".Unless(.Platform(.Linux))",
                     marker_span,
                 ));
             };
             if variant != "Unless" {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "skip",
                     ".Unless(.Platform(.Linux))",
                     marker_span,
@@ -342,21 +342,21 @@ impl<'a> Parser<'a> {
                 ..
             } = platform
             else {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "skip",
                     ".Unless(.Platform(.Linux))",
                     marker_span,
                 ));
             };
             let [crate::AST::EnumLitArg::Positional(platform)] = platform_args.as_slice() else {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "skip",
                     ".Unless(.Platform(.Linux))",
                     marker_span,
                 ));
             };
-            let Some(platform) = Self::task_word(platform) else {
-                return Err(Self::task_metadata_error(
+            let Some(platform) = Self::job_word(platform) else {
+                return Err(Self::job_metadata_error(
                     "skip",
                     ".Unless(.Platform(.Linux))",
                     marker_span,
@@ -365,13 +365,13 @@ impl<'a> Parser<'a> {
             if platform_constructor != "Platform"
                 || !matches!(platform, "Linux" | "MacOS" | "Windows" | "FreeBSD")
             {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "skip",
                     ".Unless(.Platform(.Linux))",
                     marker_span,
                 ));
             }
-            Ok(Some(crate::AST::TaskSkip::UnlessPlatform {
+            Ok(Some(crate::AST::JobSkip::UnlessPlatform {
                 platform: platform.to_string(),
             }))
         }
@@ -381,7 +381,7 @@ impl<'a> Parser<'a> {
             marker_span: Span,
         ) -> Result<std::collections::BTreeMap<String, String>, Diagnostic> {
             let crate::AST::Expr::MapLit(entries, _) = expr else {
-                return Err(Self::task_metadata_error(
+                return Err(Self::job_metadata_error(
                     "limits",
                     "a map of names to static values",
                     marker_span,
@@ -389,22 +389,22 @@ impl<'a> Parser<'a> {
             };
             let mut limits = std::collections::BTreeMap::new();
             for (key, value) in entries {
-                let Some(key) = Self::task_word(key) else {
-                    return Err(Self::task_metadata_error(
+                let Some(key) = Self::job_word(key) else {
+                    return Err(Self::job_metadata_error(
                         "limits",
                         "a map of names to static values",
                         key.span(),
                     ));
                 };
-                let Some(value) = Self::task_static_word(value) else {
-                    return Err(Self::task_metadata_error(
+                let Some(value) = Self::job_static_word(value) else {
+                    return Err(Self::job_metadata_error(
                         "limits",
                         "a map of names to static values",
                         value.span(),
                     ));
                 };
                 if limits.insert(key.to_string(), value).is_some() {
-                    return Err(Self::task_metadata_error(
+                    return Err(Self::job_metadata_error(
                         "limits",
                         "a map with unique keys",
                         marker_span,
@@ -414,7 +414,7 @@ impl<'a> Parser<'a> {
             Ok(limits)
         }
 
-        fn task_word(expr: &crate::AST::Expr) -> Option<&str> {
+        fn job_word(expr: &crate::AST::Expr) -> Option<&str> {
             match expr {
                 crate::AST::Expr::Ident(value, _) => Some(value.as_str()),
                 crate::AST::Expr::EnumLit { variant, args, .. } if args.is_empty() => {
@@ -428,15 +428,15 @@ impl<'a> Parser<'a> {
             }
         }
 
-        fn task_static_word(expr: &crate::AST::Expr) -> Option<String> {
-            Self::task_word(expr).map(str::to_string).or_else(|| match expr {
+        fn job_static_word(expr: &crate::AST::Expr) -> Option<String> {
+            Self::job_word(expr).map(str::to_string).or_else(|| match expr {
                 crate::AST::Expr::Int(value, ..) => Some(value.to_string()),
                 crate::AST::Expr::Bool(value, _) => Some(value.to_string()),
                 _ => None,
             })
         }
 
-        fn task_metadata_error(field: &str, expected: &str, span: Span) -> Diagnostic {
+        fn job_metadata_error(field: &str, expected: &str, span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E1330",
                 format!("task metadata {field} has the wrong shape"),

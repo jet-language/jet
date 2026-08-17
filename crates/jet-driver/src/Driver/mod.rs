@@ -5716,10 +5716,10 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
                 reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
-        is_task: false,
-        task_span: None,
+        is_job: false,
+        job_span: None,
         every: None,
-        task_metadata: None,
+        job_metadata: None,
         is_must_use: false,
         must_use_span: None,
         maturity: None,
@@ -5953,9 +5953,9 @@ fn swap_command_entry_point(
     wrapper.unsafe_reason = None;
     wrapper.unsafe_span = None;
     wrapper.is_pure = false;
-    wrapper.is_task = false;
-    wrapper.task_span = None;
-    wrapper.task_metadata = None;
+    wrapper.is_job = false;
+    wrapper.job_span = None;
+    wrapper.job_metadata = None;
     wrapper.every = None;
     // The wrapper deletes the target's parameters, so every decoded fact that
     // names one has to go with them: a copied `#Pre`/`#Post` clause would read
