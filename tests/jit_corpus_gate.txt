@@ -3,6 +3,18 @@
 # Update only for intentional ratchet moves.
 # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green
 # examples that fail default jet run. Record stem + diagnostic code only.
+#
+# That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
+# and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
+# stems this file classifies and how many it still says nothing about; both live
+# outside this file so a hand-edit cannot green the check by deleting the row that
+# fails. Rows may only GROW, unclassified stems may only SHRINK, and
+# tests/dev_corpus_gate.rs::corpus_gate_manifest_accounts_for_every_example checks
+# both with no run at all.
+#
+# Never hand-write a classification: a row states an OBSERVED tier. Regenerate with
+#   JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate \
+#     example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture
 
 frontend_rejected:
 
