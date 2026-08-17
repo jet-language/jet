@@ -11881,7 +11881,20 @@ impl LowerCtx<'_, '_> {
         Ok(handle)
     }
 
-    fn lower_ct_value(&mut self, value: &jet_foundation::AST::CtValue) -> Result<Value, String> {
+    /// Materialize one comptime-folded value.
+    ///
+    /// `slot` is the type the value has to land in, when the caller knows it: a
+    /// `TExprKind::CtLit` or `ConstRef` node carries `expr.ty`, a struct field
+    /// carries its layout type, and a list/map element carries the collection's
+    /// element type. `None` means no reader has been named, and each arm then
+    /// falls back to the value's own `jet_type()`. The slot matters wherever one
+    /// `CtValue` shape can land in two different physical carriers — see
+    /// `CtValue::Present` below.
+    fn lower_ct_value(
+        &mut self,
+        value: &jet_foundation::AST::CtValue,
+        slot: Option<&Type>,
+    ) -> Result<Value, String> {
         use jet_foundation::AST::{CtKey, CtReport, CtValue};
         match value {
             CtValue::Int(value) => Ok(self.b.ins().iconst(types::I64, *value)),
@@ -11910,6 +11923,10 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I64, handle))
             }
             CtValue::List(values) => {
+                let elem_slot = match slot {
+                    Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(elem.as_ref()),
+                    _ => None,
+                };
                 let handle = self.call_host(self.host.coll.list_new, &[]);
                 let push_i = self
                     .module
@@ -11919,7 +11936,7 @@ impl LowerCtx<'_, '_> {
                     .declare_func_in_func(self.host.coll.list_push_f64, self.b.func);
                 for value in values {
                     let is_float = matches!(value, CtValue::Float(_));
-                    let raw = self.lower_ct_value(value)?;
+                    let raw = self.lower_ct_value(value, elem_slot)?;
                     // list_push expects i64; Char lowers to i32.
                     let bits = match value {
                         CtValue::Char(_) => self.b.ins().uextend(types::I64, raw),
@@ -11932,6 +11949,10 @@ impl LowerCtx<'_, '_> {
                 Ok(handle)
             }
             CtValue::Map(entries) => {
+                let value_slot = match slot {
+                    Some(Type::Map { value, .. }) => Some(value.as_ref()),
+                    _ => None,
+                };
                 let handle = self.call_host(self.host.coll.map_new, &[]);
                 let insert_ref = self
                     .module
@@ -11959,7 +11980,7 @@ impl LowerCtx<'_, '_> {
                             self.b.ins().iconst(types::I64, sid)
                         }
                     };
-                    let raw = self.lower_ct_value(val)?;
+                    let raw = self.lower_ct_value(val, value_slot)?;
                     let packed = match val {
                         CtValue::Float(_) => self.b.ins().bitcast(
                             types::I64,
@@ -11974,13 +11995,36 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(handle)
             }
-            CtValue::Present(inner) => {
-                let payload = self.lower_ct_value(inner)?;
-                self.pack_option_payload(payload, &inner.jet_type())
-            }
+            // D-FAIL-CARRIER1=A: one `Present` carries both the `T?` present
+            // side and the `T ? E` ok side, so the value alone cannot say which
+            // physical carrier its reader will use. The slot says it: `T?` is the
+            // packed carrier (`pack_option_payload`; absent is the zero word
+            // below), and `T ? E` is the result arena (`lower_ct_result`, the
+            // same `result_new_*` handle the runtime `Ok`/`Err` path builds).
+            //
+            // This used to be two arms, and the second — the result one — sat
+            // below `Failed(CtReport::Clean(_))` where it was unreachable: every
+            // comptime `Ok` lowered as a packed Option while the `Failed(Told)`
+            // beside it lowered as a result handle, so one type had two carriers.
+            CtValue::Present(inner) => match slot {
+                Some(Type::Result { ok, .. }) => self.lower_ct_result(true, inner, Some(ok.as_ref())),
+                _ => {
+                    let payload_slot = match slot {
+                        Some(Type::Option(inner_ty)) => Some(inner_ty.as_ref()),
+                        _ => None,
+                    };
+                    let payload = self.lower_ct_value(inner, payload_slot)?;
+                    self.pack_option_payload(payload, &inner.jet_type())
+                }
+            },
             CtValue::Failed(CtReport::Clean(_)) => Ok(self.b.ins().iconst(types::I64, 0)),
-            CtValue::Present(inner) => self.lower_ct_result(true, inner),
-            CtValue::Failed(CtReport::Told(inner)) => self.lower_ct_result(false, inner),
+            CtValue::Failed(CtReport::Told(inner)) => {
+                let err_slot = match slot {
+                    Some(Type::Result { err, .. }) => Some(err.as_ref()),
+                    _ => None,
+                };
+                self.lower_ct_result(false, inner, err_slot)
+            }
             CtValue::Struct { type_name, fields } => {
                 self.lower_ct_struct(type_name, fields)
             }
@@ -12014,10 +12058,17 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// Build the `T ? E` result-arena carrier for one comptime outcome side.
+    ///
+    /// `payload_slot` is the declared side type when the caller knows it (the
+    /// `ok` type for `Present`, the `err` type for `Failed(Told)`); the payload's
+    /// own `jet_type()` still picks the `result_new_*` host, so a folded scalar
+    /// keeps its own width.
     fn lower_ct_result(
         &mut self,
         ok: bool,
         inner: &jet_foundation::AST::CtValue,
+        payload_slot: Option<&Type>,
     ) -> Result<Value, String> {
         use jet_foundation::AST::CtValue;
         let tag = self.b.ins().iconst(types::I8, i64::from(ok));
@@ -12026,7 +12077,7 @@ impl LowerCtx<'_, '_> {
             return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
         }
         let ty = inner.jet_type();
-        let payload = self.lower_ct_value(inner)?;
+        let payload = self.lower_ct_value(inner, payload_slot.or(Some(&ty)))?;
         let host_id = match clif_ty(&ty) {
             Some(ty) if ty == types::F64 => self.host.result_new_f64,
             Some(ty) if ty == types::I8 => self.host.result_new_i8,
@@ -12087,7 +12138,7 @@ impl LowerCtx<'_, '_> {
         let n = self.b.ins().iconst(types::I64, ordered.len() as i64);
         let handle = self.call_host(self.host.struct_new, &[n]);
         for (i, (field_ty, ct)) in ordered.iter().enumerate() {
-            let raw = self.lower_ct_value(ct)?;
+            let raw = self.lower_ct_value(ct, Some(field_ty))?;
             // A generic owner stores its declaration field as `T`, but the
             // folded CtValue already contains the concrete scalar. Select the
             // record setter from that value or a String field is written as an
@@ -12150,7 +12201,7 @@ impl LowerCtx<'_, '_> {
         }
         if args.len() == 1 && args[0].0.is_none() {
             let payload_ty = args[0].1.jet_type();
-            let payload = self.lower_ct_value(&args[0].1)?;
+            let payload = self.lower_ct_value(&args[0].1, Some(&payload_ty))?;
             if type_name == "AuthError" {
                 return Ok(self.pack_auth_error(disc, Some(payload)));
             }
@@ -12173,8 +12224,8 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(set_i, &[handle, zero, disc_v]);
         for (i, (_name, arg)) in args.iter().enumerate() {
             let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
-            let payload = self.lower_ct_value(arg)?;
             let ty = arg.jet_type();
+            let payload = self.lower_ct_value(arg, Some(&ty))?;
             if Self::is_string_abi_ty(&ty) {
                 self.b.ins().call(set_s, &[handle, idx, payload]);
                 continue;
@@ -18395,7 +18446,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::CtLit(value) => self.lower_ct_value(value),
+            TExprKind::CtLit(value) => self.lower_ct_value(value, Some(&expr.ty)),
             TExprKind::Uninit => {
                 in_own_frame(|| -> Result<Value, String> {
                     // D-UNINIT1 / GC promote: placeholder overwritten before read.
@@ -18539,7 +18590,7 @@ impl LowerCtx<'_, '_> {
                                 .map(jet_foundation::AST::CtValue::Int)
                         })
                         .ok_or_else(|| format!("jit const ref unknown: {name}"))?;
-                    self.lower_ct_value(&value)
+                    self.lower_ct_value(&value, Some(&expr.ty))
                 })
             }
             TExprKind::DataEntriesToMap(local) => {
