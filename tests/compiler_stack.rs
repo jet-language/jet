@@ -351,6 +351,7 @@ fn nested_tir_program(
         source_file: "nested-tir.jet".to_string(),
         source_text: String::new(),
         package_hardened: false,
+        edition: jet::Manifest::latest_edition().to_string(),
         entry: "run".to_string(),
         instance_provenance: Vec::new(),
         funcs: vec![tir_func(

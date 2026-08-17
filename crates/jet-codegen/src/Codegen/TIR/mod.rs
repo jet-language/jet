@@ -298,6 +298,14 @@ pub struct JitProgram {
     /// D-MEM-GUARANTEE1: package hardening is a checked bundle fact carried
     /// into named deopt; the evaluator never reparses package.jet.
     pub package_hardened: bool,
+    /// D-REL3: the package edition is a checked bundle fact carried the same
+    /// way, because every tier that runs this program answers edition-gated
+    /// questions (`core.data`'s checked surface, `fixed_sigs.rs`) from the
+    /// `PACKAGE_EDITION` thread-local. The evaluator runs the body on its own
+    /// sized worker and named deopt runs on the JIT's thread, so a caller's
+    /// ambient scope never reaches either; the fact travels with the program
+    /// and is established under the boundary instead.
+    pub edition: String,
     /// Sema-selected callable name. The JIT compiles this exact function and
     /// never assumes the source spelling `run`.
     pub entry: String,
@@ -2350,6 +2358,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
         source_file: module.display.clone(),
         source_text: module.source.clone(),
         package_hardened: bundle.package_guarantees.harden,
+        edition: bundle.edition.clone(),
         entry: entry_name,
         funcs,
         spawn_lambdas,

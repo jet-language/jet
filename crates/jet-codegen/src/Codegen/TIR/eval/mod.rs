@@ -4119,12 +4119,25 @@ fn run_program_with_structs_at_stage_and_cli(
     // semantic spine, but its large Rust frame makes ordinary test/CLI stacks
     // too small for nested aggregate literals. Keep the public runtime seam
     // on a bounded worker stack; this changes no language semantics.
+    //
+    // Thread-locals across the spawn. `PACKAGE_EDITION` is established *inside*
+    // the worker from the program's own edition fact, so `with_package_edition`
+    // stays under the boundary rather than over it — the same discipline sema
+    // states in `Sema/Bundle/Pipeline.rs` and the driver states in
+    // `jet_driver::run_compiler_work`. Wrapping the caller instead leaves this
+    // worker on the reverted "2026" default, which picks the unchecked
+    // `core.data` surface for a program sema typed as checked: `line_text` then
+    // yields a plain `Str` that matches neither the `.Ok` nor the `.Err` arm and
+    // the arm table prints nothing. The comptime ambient hooks are the one piece
+    // of caller-established state the run reads, so they are carried explicitly.
     let (ambient_core, ambient_handle) = crate::Comptime::ambient_hooks();
+    let edition = program.edition.clone();
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("jet-tir-eval".to_string())
             .stack_size(64 * 1024 * 1024)
             .spawn_scoped(scope, move || {
+                jet_foundation::PackageEdition::with_package_edition(&edition, || {
                 crate::Comptime::with_ambient(ambient_core, ambient_handle, || {
                     run_program_with_structs_on_stack(
                         program,
@@ -4139,6 +4152,7 @@ fn run_program_with_structs_at_stage_and_cli(
                         cli_dispatch,
                         package_hardened,
                     )
+                })
                 })
             })
             .expect("evaluator worker");
@@ -4313,6 +4327,22 @@ pub fn run_named_func_with_memos(
     sink: &mut DevSink,
     memos: MemoState,
 ) -> Result<CtValue, Diagnostic> {
+    // Deopt runs on the JIT's own thread, which never entered a caller's
+    // `with_package_edition` scope, so the edition is established here from the
+    // program's carried bundle fact — the same reason `package_hardened` rides
+    // the program instead of being reparsed or inherited ambiently.
+    jet_foundation::PackageEdition::with_package_edition(&program.edition, || {
+        run_named_func_on_program_edition(program, name, args, sink, memos)
+    })
+}
+
+fn run_named_func_on_program_edition(
+    program: &JitProgram,
+    name: &str,
+    args: Vec<CtValue>,
+    sink: &mut DevSink,
+    memos: MemoState,
+) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
     jet_foundation::MemSentry::jet_sentry_reset();
     jet_foundation::MemSentry::jet_sentry_set_hardened(program.package_hardened);
@@ -4423,15 +4453,12 @@ fn run_bundle_at_stage(
     gates: jet_foundation::Policy::GateSet,
     stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
-    // The edition is a package fact, not an ambient one. Sema chose every
-    // edition-gated signature under `with_package_edition(&bundle.edition)`
-    // (`Sema/Bundle/Pipeline.rs`), and that scope has closed by the time the
-    // program runs, so a fresh thread-local read here answers the reverted
-    // "2026" default and picks the unchecked `core.data` surface for a program
-    // sema typed as checked. AOT (`Codegen/mod.rs`) and JIT lowering
-    // (`Codegen/TIR/mod.rs`) already re-establish the bundle edition for the
-    // same reason; the interpreter is the third tier of the same mechanism.
-    jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
+    // The edition is a package fact, not an ambient one, and it is established
+    // where the work runs: TIR lowering re-establishes it from `bundle.edition`
+    // (`Codegen/TIR/mod.rs`), and the lowered program carries the same fact to
+    // the evaluator's worker and to named deopt. Wrapping this caller instead
+    // would sit *over* the evaluator's `std::thread::scope` spawn, which is how
+    // a checked-surface program ran against the reverted "2026" default.
     let program = lower_interp_program(bundle).ok_or_else(|| {
         crate::Sema::Diagnostics::render_registered(
             "E2201",
@@ -4508,7 +4535,6 @@ fn run_bundle_at_stage(
         Some(bundle),
         bundle.package_guarantees.harden,
     )
-    })
 }
 
 fn eval_expr_hook(
