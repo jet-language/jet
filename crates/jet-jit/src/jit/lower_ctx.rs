@@ -758,6 +758,13 @@ impl LowerCtx<'_, '_> {
             // `RemoveMap` and `IterLastIndexOf` never had an arm, and
             // `PriorityQueuePop` lost its arm when e7fdc84a5 split the `pop` verb
             // and left this table (the third) naming only `Pop`.
+            //
+            // `PriorityQueueRemove` was the fourth, and it shows the standing
+            // hazard: an op whose arm is missing here is HARMLESS while its
+            // safety predicate refuses the construct, and becomes a wrong answer
+            // the moment some other lane widens that predicate. A host that
+            // answers `option_i64` needs its arm here in the same change,
+            // whether or not the JIT can reach it yet.
             TExprKind::BuiltinMethod { op, recv, .. } => match op {
                 // Map.get returns a result-arena Option handle.
                 TBuiltinOp::GetMap => matches!(&recv.ty, Type::Map { .. }),
@@ -776,6 +783,17 @@ impl LowerCtx<'_, '_> {
                 TBuiltinOp::LruPut | TBuiltinOp::LruGet => {
                     Self::receiver_is(&recv.ty, "Cache")
                 }
+                // `pq.remove(x)`/`pq.remove(i, .Slot)` → `priority_queue_remove_value`
+                // /`_remove_slot`. Both hosts answer `option_i64`, and
+                // `resolve_builtin_op` only ever builds this op under
+                // `is_priority_queue` (`TIR lower/builtins.rs`), so the op alone
+                // carries the answer and no receiver test is needed. Missing here,
+                // it read as packed: `pq.remove(99)` allocated a non-zero handle
+                // for None, so absence was unreachable and each successive remove
+                // rendered the next arena slot minus one — 6, 7, 8 where the
+                // shared kernel says 3, 5, null. The selector was never at fault;
+                // `mode` already routes to the two distinct hosts.
+                TBuiltinOp::PriorityQueueRemove { .. } => true,
                 // These arms call exactly one host unconditionally, and each of
                 // those hosts answers with `option_i64`: `map_remove`,
                 // `map_first`, `map_pop_first`, `map_min`, `map_max`,
