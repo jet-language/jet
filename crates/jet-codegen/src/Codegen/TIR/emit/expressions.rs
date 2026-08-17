@@ -3298,13 +3298,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // D-SOA1 / D-SOA-TIER1=A: a columnar list literal → the Prelude
         // `JetColumnList<S>` built from the array-of-structs, which scatters the
         // records across the shared store's columns.
+        //
+        // `columns_ty` is a TYPE (`JetColumnList<S>`), and calling an associated
+        // function on a generic type needs the PATH form, so the generic argument
+        // has to be turbofished: `JetColumnList<S>::from_aos` is not Rust and
+        // rustc rejects it with "comparison operators cannot be chained", which
+        // per I2 surfaces as an internal compiler error rather than as anything a
+        // user can act on. This is the only site that calls an associated function
+        // on that string; `gather_at` and `iter_aos` are method calls on a value.
         TExprKind::ColumnarListLit { columns_ty, elems } => {
             let parts = elems
                 .iter()
                 .map(|e| emit_tir_expr(e, cx))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{}::from_aos(vec![{}])", columns_ty, parts)
+            let path = match columns_ty.split_once('<') {
+                Some((head, args)) => format!("{head}::<{args}"),
+                None => columns_ty.clone(),
+            };
+            format!("{}::from_aos(vec![{}])", path, parts)
         }
         // D-SOA1 / D-SOA-TIER1=A: `xs[i]` on a columnar list → THE shared gather
         // read, then the generated `JetRow` join back to the logical `S`.
