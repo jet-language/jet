@@ -3189,7 +3189,35 @@ enum CorpusGateClass {
     FrontendRejected,
     GateExcluded,
     NonRunnable,
+    /// The HOST has no rustc, so no AOT oracle could be built for ANY stem. This
+    /// states a fact about the machine, never about the program: membership is
+    /// all-or-nothing and flips when a toolchain is installed. That is exactly
+    /// why it is neither `expected_exit` nor `aot_broken` — a shrink-only
+    /// ratchet over a set the host decides cannot be held honestly, and a stem
+    /// whose oracle was never built is no evidence that anything is broken or
+    /// repaired (#2016). Detail names the missing tool.
+    OracleUnavailable,
+    /// The GOLDEN expects a non-zero exit (an `.err` golden is present), so the
+    /// stem has no exit-0 oracle to differentiate against. Exactly ONE fact.
+    ///
+    /// It used to carry four: this one, `rustc unavailable`, `AOT compile or run
+    /// failed`, and `AOT exit N`. A broken oracle therefore sat in a
+    /// benign-sounding section and was dropped from the differential entirely,
+    /// so a cross-tier divergence in any of those stems was permanently
+    /// unobservable — the same shape as the `parity` rows that hid in
+    /// `run_tier_broken` (#2016).
     ExpectedExit,
+    /// The AOT ORACLE ITSELF is broken: the optimized AOT build failed, or the
+    /// binary it produced exited non-zero for a stem whose golden expects exit
+    /// 0. No tier comparison runs for such a stem, so this is a HOLE in the
+    /// differential, not an outcome the gate accepts. Shrink-only against
+    /// `AOT_BROKEN_HELD_OUT`.
+    ///
+    /// A build failure here is also where an I2 violation surfaces: rustc
+    /// rejecting GENERATED code is an internal compiler error, never a
+    /// user-facing outcome. Detail is `AOT compile or run failed` or `AOT exit
+    /// N`.
+    AotBroken,
     ResidentJit,
     DeoptInterp,
     /// AOT-green (oracle exit 0) but the default tiered run REFUSES to run the
@@ -3217,13 +3245,91 @@ enum CorpusGateClass {
 /// It lives in source, not in `tests/jit_corpus_gate.txt`: the ledger is
 /// regenerated from an observed run, so a row there cannot hold a law that
 /// regeneration is meant to be unable to silence (#2013).
-const RUN_TIER_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[(
-    "lowlevel/layout_columnar",
-    "E0956",
-    "#1988: the last JIT compile gap — no Cranelift host is built for the \
-     construct, so the default tier deopts into a TIR evaluator that does not \
-     cover it either",
-)];
+///
+/// Empty since #2016: the one row here, `lowlevel/layout_columnar`, cannot be
+/// observed in this class at all while its AOT oracle is broken, because an
+/// exit-0 oracle is the precondition for reaching the run tier. The stem is
+/// held out in `AOT_BROKEN_HELD_OUT` instead, which names #1988 too, and the
+/// diff that repairs the AOT build moves the row back here — one section owns a
+/// stem, so the two lists never double-count it.
+const RUN_TIER_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[];
+
+/// The stems whose AOT ORACLE is KNOWN to be broken, with the observed detail
+/// and the card that owes the fix. Stem-sorted, compared EXACTLY against the
+/// observed `aot_broken` class for the same reason `RUN_TIER_BROKEN_HELD_OUT`
+/// is: a new breakage fails, and a repaired stem fails until its row is deleted
+/// here.
+///
+/// Every row is a stem the three-tier differential does not cover, so the list
+/// is the honest size of the hole. It may only SHRINK. Raising it is not a fix
+/// — repair the oracle (#2016).
+const AOT_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[
+    (
+        "devloop/schedule_every",
+        "AOT compile or run failed",
+        "#2016: the optimized AOT build or run of the example fails, so the gate \
+         has no oracle to compare the tiers against",
+    ),
+    (
+        "lowlevel/layout_columnar",
+        "AOT compile or run failed",
+        "#2016 masking #1988: the AOT build or run fails, so the gate never \
+         reaches the run tier that stops on E0956 (no Cranelift host is built \
+         for the construct, and the TIR evaluator it deopts into does not cover \
+         it either). Repairing the AOT build moves this row to \
+         RUN_TIER_BROKEN_HELD_OUT, where #1988 is still owed",
+    ),
+    (
+        "operators/spaceship",
+        "AOT compile or run failed",
+        "#2016: the optimized AOT build or run of the example fails, so the gate \
+         has no oracle to compare the tiers against",
+    ),
+    (
+        "reflection/reflect-value",
+        "AOT exit 70",
+        "#2016: the AOT binary exits 70 for a stem whose golden expects exit 0, \
+         so the oracle disagrees with the golden and cannot arbitrate the tiers",
+    ),
+    (
+        "serde/hand_codec",
+        "AOT exit 1",
+        "#2016: the AOT binary exits 1 for a stem whose golden expects exit 0, \
+         so the oracle disagrees with the golden and cannot arbitrate the tiers",
+    ),
+    (
+        "streams/generators",
+        "AOT exit 1",
+        "#2016: the AOT binary exits 1 for a stem whose golden expects exit 0, \
+         so the oracle disagrees with the golden and cannot arbitrate the tiers",
+    ),
+    (
+        "tooling/service_authority",
+        "AOT compile or run failed",
+        "#2016: rustc rejects the GENERATED crate with E0252 — two Prelude \
+         fragments each emit `use std::time::{Duration, ...}` into one file. \
+         That is an I2 internal compiler error, and this section is where it \
+         became visible",
+    ),
+    (
+        "tooling/service_runtime",
+        "AOT compile or run failed",
+        "#2016: the optimized AOT build or run of the example fails, so the gate \
+         has no oracle to compare the tiers against",
+    ),
+    (
+        "tooling/service_tree",
+        "AOT compile or run failed",
+        "#2016: the optimized AOT build or run of the example fails, so the gate \
+         has no oracle to compare the tiers against",
+    ),
+    (
+        "types/typed_literal_head",
+        "AOT compile or run failed",
+        "#2016: the optimized AOT build or run of the example fails, so the gate \
+         has no oracle to compare the tiers against",
+    ),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CorpusGateRecord {
@@ -3313,10 +3419,13 @@ fn classify_corpus_stem(
         };
     }
 
+    // A HOST fact, kept out of every ratcheted section: without rustc there is
+    // no oracle for ANY stem, so nothing here can be read as a property of the
+    // program (#2016).
     if !have_rustc {
         return CorpusGateRecord {
             stem: stem.to_string(),
-            class: CorpusGateClass::ExpectedExit,
+            class: CorpusGateClass::OracleUnavailable,
             detail: "rustc unavailable; oracle skipped".to_string(),
         };
     }
@@ -3362,7 +3471,7 @@ fn classify_corpus_stem(
         None => {
             return CorpusGateRecord {
                 stem: stem.to_string(),
-                class: CorpusGateClass::ExpectedExit,
+                class: CorpusGateClass::AotBroken,
                 detail: "AOT compile or run failed".to_string(),
             };
         }
@@ -3370,7 +3479,7 @@ fn classify_corpus_stem(
     if aot.exit_code != 0 {
         return CorpusGateRecord {
             stem: stem.to_string(),
-            class: CorpusGateClass::ExpectedExit,
+            class: CorpusGateClass::AotBroken,
             detail: format!("AOT exit {}", aot.exit_code),
         };
     }
@@ -3624,6 +3733,10 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          # examples whose default jet run REFUSES to run. Record stem + diagnostic code only.\n\
          # tier_divergent is the other half: it ran under both tiers and the observables\n\
          # differ. Record stem + the diverging stream(s) only.\n\
+         # aot_broken may only shrink too (#2016): the AOT oracle failed to build or exited\n\
+         # non-zero, so NO tier comparison ran for the stem. expected_exit means one thing\n\
+         # and one thing only — the golden itself expects a non-zero exit. oracle_unavailable\n\
+         # is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.\n\
          #\n\
          # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR\n\
          # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many\n\
@@ -3667,11 +3780,13 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
 /// The one section order. The writer and the `JET_DUMP_CORPUS_GATE` printer used
 /// to carry a private copy of this list each, so a new class could reach the
 /// ledger and never be printed (AGENTS.md I8).
-const CORPUS_GATE_SECTION_ORDER: [CorpusGateClass; 8] = [
+const CORPUS_GATE_SECTION_ORDER: [CorpusGateClass; 10] = [
     CorpusGateClass::FrontendRejected,
     CorpusGateClass::GateExcluded,
     CorpusGateClass::NonRunnable,
+    CorpusGateClass::OracleUnavailable,
     CorpusGateClass::ExpectedExit,
+    CorpusGateClass::AotBroken,
     CorpusGateClass::ResidentJit,
     CorpusGateClass::DeoptInterp,
     CorpusGateClass::RunTierBroken,
@@ -3683,7 +3798,9 @@ fn corpus_gate_section_name(class: &CorpusGateClass) -> &'static str {
         CorpusGateClass::FrontendRejected => "frontend_rejected",
         CorpusGateClass::GateExcluded => "gate_excluded",
         CorpusGateClass::NonRunnable => "non_runnable",
+        CorpusGateClass::OracleUnavailable => "oracle_unavailable",
         CorpusGateClass::ExpectedExit => "expected_exit",
+        CorpusGateClass::AotBroken => "aot_broken",
         CorpusGateClass::ResidentJit => "resident_jit",
         CorpusGateClass::DeoptInterp => "deopt_interp",
         CorpusGateClass::RunTierBroken => "run_tier_broken",
@@ -3958,7 +4075,9 @@ fn audit_corpus_gate_ledger(
                 CorpusGateClass::FrontendRejected
                     | CorpusGateClass::GateExcluded
                     | CorpusGateClass::NonRunnable
+                    | CorpusGateClass::OracleUnavailable
                     | CorpusGateClass::ExpectedExit
+                    | CorpusGateClass::AotBroken
                     | CorpusGateClass::RunTierBroken
                     | CorpusGateClass::TierDivergent
             ) && record.detail.is_empty()

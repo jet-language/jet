@@ -111,7 +111,11 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 /// hold exactly `RUN_TIER_BROKEN_HELD_OUT`; one that runs but disagrees with the
 /// oracle lands in `tier_divergent`, which must stay empty. Recording both facts
 /// in one section made the run-tier message false for the divergences
-/// (D-VERDICT-1254-1 / D-LENS-RUN1).
+/// (D-VERDICT-1254-1 / D-LENS-RUN1). An example whose AOT oracle failed to build
+/// or exited non-zero gets no comparison at all and lands in `aot_broken`, which
+/// must hold exactly `AOT_BROKEN_HELD_OUT`: that fact used to be filed under
+/// `expected_exit`, so seven stems with a broken oracle sat in a benign section
+/// and were dropped from the differential (#2016).
 /// parity: guard tests/dev_corpus_gate.rs::example_corpus_strict_jit_aot_differential_gate
 ///
 /// c730: CI runs this via `tools/ci/jit-aot-parity.sh` on every supported
@@ -174,22 +178,29 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         assert_corpus_gate_manifest_covers_corpus();
     }
     // Hard floor, independent of the ledger: the run-tier class holds exactly the
-    // stems named in `RUN_TIER_BROKEN_HELD_OUT` and nothing else. A regression
-    // that moves an AOT-green example into the class fails here even if the
-    // manifest is regenerated, and a fixed hold-out fails too, so the list cannot
-    // outlive its defect (D-VERDICT-1254-1 / D-LENS-RUN1).
+    // stems named in `RUN_TIER_BROKEN_HELD_OUT` and nothing else, and the
+    // broken-oracle class holds exactly `AOT_BROKEN_HELD_OUT`. A regression that
+    // moves an AOT-green example into the run-tier class, or breaks another
+    // stem's oracle, fails here even if the manifest is regenerated, and a fixed
+    // hold-out fails too, so neither list can outlive its defect
+    // (D-VERDICT-1254-1 / D-LENS-RUN1, #2016).
     let broken: Vec<(&str, &str)> = records
         .iter()
         .filter(|r| r.class == CorpusGateClass::RunTierBroken)
         .map(|r| (r.stem.as_str(), r.detail.as_str()))
         .collect();
-    // `JET_CORPUS_GATE_FILTER` narrows which stems were classified at all, so a
-    // hold-out the run never visited is not evidence of a fix.
-    let classified: std::collections::HashSet<&str> =
-        records.iter().map(|r| r.stem.as_str()).collect();
+    // One filter for both compares: a hold-out this run never put an oracle
+    // behind is not evidence of a fix. `JET_CORPUS_GATE_FILTER` narrows which
+    // stems were classified at all, and a host without rustc classifies every
+    // stem `oracle_unavailable` without building anything.
+    let oracle_reached: std::collections::HashSet<&str> = records
+        .iter()
+        .filter(|r| r.class != CorpusGateClass::OracleUnavailable)
+        .map(|r| r.stem.as_str())
+        .collect();
     let held_out: Vec<(&str, &str)> = RUN_TIER_BROKEN_HELD_OUT
         .iter()
-        .filter(|(stem, _, _)| classified.contains(stem))
+        .filter(|(stem, _, _)| oracle_reached.contains(stem))
         .map(|(stem, codes, _)| (*stem, *codes))
         .collect();
     assert_eq!(
@@ -201,6 +212,35 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         RUN_TIER_BROKEN_HELD_OUT
             .iter()
             .map(|(stem, codes, why)| format!("{stem} ({codes}) — {why}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    );
+    // #2016: the section that used to hide inside `expected_exit`. A stem whose
+    // AOT oracle failed to build or exited non-zero gets NO tier comparison at
+    // all, so every row here is a hole in the differential and the set may only
+    // shrink. A build failure is also an I2 internal compiler error: rustc
+    // rejecting generated code is never a user-facing outcome.
+    let aot_broken: Vec<(&str, &str)> = records
+        .iter()
+        .filter(|r| r.class == CorpusGateClass::AotBroken)
+        .map(|r| (r.stem.as_str(), r.detail.as_str()))
+        .collect();
+    let aot_held_out: Vec<(&str, &str)> = AOT_BROKEN_HELD_OUT
+        .iter()
+        .filter(|(stem, _, _)| oracle_reached.contains(stem))
+        .map(|(stem, detail, _)| (*stem, *detail))
+        .collect();
+    assert_eq!(
+        aot_broken,
+        aot_held_out,
+        "AOT oracle regression: the example(s) whose optimized AOT build or run FAILED are not \
+         the held-out set, so the three-tier differential silently covers a different set than \
+         the one this gate claims. New entries are the defect — a failed AOT build of generated \
+         code is an I2 internal compiler error; a vanished entry is fixed and must leave \
+         AOT_BROKEN_HELD_OUT in the same diff. Held out: {}",
+        AOT_BROKEN_HELD_OUT
+            .iter()
+            .map(|(stem, detail, why)| format!("{stem} ({detail}) — {why}"))
             .collect::<Vec<_>>()
             .join("; ")
     );
@@ -238,7 +278,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         })
         .collect();
     eprintln!(
-        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp), {} run-tier-broken, {} tier-divergent",
+        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp), {} run-tier-broken, {} tier-divergent, {} aot-broken",
         records.len(),
         aot_oracle.len(),
         records
@@ -256,6 +296,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         records
             .iter()
             .filter(|r| r.class == CorpusGateClass::TierDivergent)
+            .count(),
+        records
+            .iter()
+            .filter(|r| r.class == CorpusGateClass::AotBroken)
             .count(),
     );
     write_corpus_gate_report(&records, started.elapsed());
