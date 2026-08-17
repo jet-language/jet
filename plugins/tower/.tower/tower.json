@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2025,
-    "rev": 37994,
+    "rev": 37997,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e6"
       ]
     },
-    "completionCursor": "2026-08-17T00:00:48.152Z"
+    "completionCursor": "2026-08-17T01:09:01.996Z"
   },
   "epochs": [
     {
@@ -132062,7 +132062,13 @@
       "plan": "Establish the (a)/(b) split with evidence, one family at a time, largest first.\n\nFor an (a) family, the fix is to make the oracle construct the context the corpus gate already constructs, so the stems enter the universe and are actually judged. Declaring them permanently out-of-universe is the weaker outcome and must be justified per family, not per stem.\n\nFor a (b) stem, the example or the front end is genuinely broken and the audit was hiding it; fix the defect. E2402 in particular is a real language question: 28 shipped net/* examples using `?` on NetError with no declared conversion is either a missing Prelude conversion or 28 examples written against a surface that no longer exists.\n\nWhatever the outcome, OUT_OF_UNIVERSE_CEILING in tests/dev.rs must be lowered by exactly the number of stems this card recovers, in the same diff. The ceiling is the ratchet: the population may only shrink.\n\nDo not add a skip list, and do not raise the ceiling to accommodate a new failure.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-17",
+          "by": "fable-e3-burndown",
+          "text": "Root cause established by lane audit, verdict (b) real frontend defect and NOT a harness gap. The oracle (tests/dev.rs:772+781) and the corpus gate (tests/dev.rs:9274+9288) call the identical Loader::load_entry then Sema::check_bundle(CompileMode::Run) pair, so no package or manifest context differs and there is nothing for the harness to reconstruct. Commit d1aaf936e (2026-08-14) mechanically rewrote x ?? panic(...) into x? and fn run() into fn run() ? across 39 net and serde files. That surface had been deleted 8 days earlier by D-FAIL-CONV1=A, which removed the implicit trait rail so sema now accepts only a declared impl X => Err plus the single Prelude String => Err arm. That is exactly why net/url_mime (errors are ? String) is covered while net/dns_lookup (? NetError) is not. It landed invisible because typechecked_example_stems() at tests/dev.rs:565-575 silently drops every sema-failing stem and feeds the filtered list to the dev default battery - the same hole #1998 closed in observe_jit_coverage and #2012 closed in jit_covered_example_stems, in a third oracle. That third hole is routed to the tests/dev.rs owner this wave. Also recorded: tests/jit_corpus_gate.txt last changed 2026-08-13, the day BEFORE the migration, so its resident_jit rows for these stems were never re-observed and are stale (card #2013). BLOCKED on ballot D-FAIL-CONV2: both remaining fixes are owner-gated. Option A ships one Prelude conversion, which is an unratified user-facing policy; option B corrects 28 examples, which this card's own criterion 4 forbids as a per-example fix. OUT_OF_UNIVERSE_CEILING deliberately left at 81 - on outcome A it drops by exactly the recovered count, and only an oracle run after the fix is an honest source for that number."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -132115,7 +132121,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:54:01.076Z",
-      "updated": "2026-08-16T12:54:03.699Z",
+      "updated": "2026-08-17T01:14:19.477Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -174470,6 +174476,87 @@
       "created": "2026-08-16T23:48:25.792Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-17"
+    },
+    {
+      "id": "D-FAIL-CONV2",
+      "cardId": "c0dr8aqt",
+      "group": "syntax",
+      "title": "How a program passes a core-library error out of a plain fallible function",
+      "gist": "Whether the standard library declares one conversion for its own error types.",
+      "lesson": "A fallible Jet function is written `fn run() ?`. Its failure value has one type. When a library call fails with its own error type, something must say how that becomes the function's failure. Today the program must declare that itself, once per error type, in every program. This choice decides whether the standard library declares it once instead.",
+      "explainer": "",
+      "story": "Sam writes a twenty-line script that fetches a URL and prints the body. The fetch can fail, so Sam writes `fn run() ?` and passes the failure up with `?`. The compiler stops and asks for a declared conversion from the network error. Sam did not define that error and does not want to name it.",
+      "inWild": "use core.net as net\n\n// What a reader writes, and what 28 shipped examples were rewritten to say.\nfn run() ? {\n    reply := net.get(\"https://example.com\")?\n    print(reply.body)\n}\n\n// Today this stops with:\n//   E2402: `?` can't convert `NetError` into `Err` - no declared conversion exists",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The standard library declares the conversion for its own errors",
+          "detail": "The standard library ships one declaration covering its own error family, so passing a library error out of a plain fallible function works with no extra code. Gain: the short program above compiles, and no one copies the same declaration into every project. Loss: the conversion is invisible in the program text, so a reader cannot see where it came from.",
+          "technical": "Ship `impl <CoreError> => Err` once for the core error family on the existing D-ERR-CONV rail, injected the way `Prelude/Units.jet` already is (see `crates/jet-sema/src/Sema/Bundle/Units.rs`). No new syntax, no new trait, no new compiler arm, and one source for every tier to lower.",
+          "code": "use core.net as net\n\nfn run() ? {\n    reply := net.get(\"https://example.com\")?\n    print(reply.body)\n}\n\n// Compiles. The failure carries the network error's report."
+        },
+        {
+          "key": "B",
+          "name": "The program names the error types it passes up",
+          "detail": "Keep today's rule. A function that passes a library error up names that error in its own return type. Gain: the reader sees exactly which failures a function can produce, and nothing is added behind their back. Loss: every such function repeats the list, and a new call site can force the list to change.",
+          "technical": "Keep the ratified explicit rule. The 28 affected examples move to typed or union error returns, following `examples/features/net/http_readiness.jet:5`, which already spells `fn run() ? NetError | RangeError | TaskFailure`.",
+          "code": "use core.net as net\n\nfn run() ? NetError {\n    reply := net.get(\"https://example.com\")?\n    print(reply.body)\n}\n\n// Compiles. The signature states the failure type."
+        },
+        {
+          "key": "C",
+          "name": "The program declares the conversion once per project",
+          "detail": "Keep today's rule and let a project write the conversion one time in one file, then reuse it everywhere. Gain: short signatures, and the conversion is written down somewhere a reader can find. Loss: every new project still writes it, so the same lines exist in every project rather than in every function.",
+          "technical": "No language change. The declaration is ordinary user code in the project root module, relying on the existing declared-impl rule.",
+          "code": "// project.jet, written once\nimpl NetError => Err\n\n// then anywhere in the project\nfn run() ? {\n    reply := net.get(\"https://example.com\")?\n    print(reply.body)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust ships a blanket conversion into a boxed error, so a short program passes library errors up with no declaration. A program that wants named failures opts into its own type instead.",
+          "code": "fn main() -> Result<(), Box<dyn Error>> {\n    let body = reqwest::blocking::get(\"https://example.com\")?.text()?;\n    println!(\"{body}\");\n    Ok(())\n}"
+        },
+        {
+          "lang": "Go",
+          "note": "Go has one error interface, so any library error satisfies any error return. The cost is that a signature says nothing about which failures are possible.",
+          "code": "func run() error {\n    resp, err := http.Get(\"https://example.com\")\n    if err != nil { return err }\n    ...\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift marks a function `throws` without naming the error type, so a library error passes up untouched. Typed throws were added later as an opt-in.",
+          "code": "func run() throws {\n    let (data, _) = try URLSession.shared.data(from: url)\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The declaration is the same in every program, so writing it once in the library is the one-mechanism answer. It also fixes the beginner path: the twenty-line script compiles, while an author who wants named failures still writes them and gets exactly today's behaviour.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It is correct today and stays available, but on its own it makes the short script name a type its author never chose. It also leaves 28 shipped examples needing per-file unions."
+          },
+          {
+            "key": "C",
+            "reason": "It moves the repetition from every function to every project without removing it. A rule that every project must restate is a library gap, not a project decision."
+          }
+        ],
+        "tradeoff": "Option A makes one conversion invisible in the program text. That is acceptable because it is the library's own error family, not the author's, and an author who wants the failure named still writes the named form. If the invisibility ever bites, `jet inspect` can show the conversion rather than the rule being reversed."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a library-shipped conversion against keeping the explicit rule, and recommended the library conversion because the declaration is identical in every program.",
+        "boilOcean": "The breadth review added the per-project declaration, and tested inferring the union automatically. Inference was dropped because a signature that changes when a callee changes is worse than either option here.",
+        "hybrid": "The hybrid review kept the library conversion and asked whether a project could refuse it. That is already possible by naming the error type, so no separate opt-out is needed.",
+        "cooperative": "The cooperative review strengthened the explicit rule with better diagnostic text naming the exact impl to write. It still leaves the same line copied into every program.",
+        "adversarial": "The adversarial review asked what happens when two library errors reach one function and whether a report loses detail. The failure carries the original report either way, so no detail is lost, and the library conversion remains the recommendation."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-17T01:14:04.816Z"
     }
   ],
   "questions": [
@@ -176161,6 +176248,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-17T01:14:19.477Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dr8aqt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-17T01:14:04.816Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-FAIL-CONV2",
+      "note": "How a program passes a core-library error out of a plain fallible function"
+    },
+    {
+      "at": "2026-08-17T01:09:01.996Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-17T01:09:01.996Z"
+    },
     {
       "at": "2026-08-17T01:05:38.508Z",
       "by": "fable-e3-burndown",
@@ -179639,27 +179747,6 @@
       "action": "card.delete",
       "ref": "c05im8f9",
       "note": "probe card add shape"
-    },
-    {
-      "at": "2026-08-15T18:56:36.673Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c05im8f9",
-      "note": "probe card add shape"
-    },
-    {
-      "at": "2026-08-15T18:53:29.662Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09mc3y7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-15T17:54:45.331Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-15T17:54:45.331Z"
     }
   ],
   "nextNum": 368,
