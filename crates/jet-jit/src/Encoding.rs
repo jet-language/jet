@@ -138,72 +138,6 @@ pub(crate) mod json_rt {
         crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(value))
     }
 
-    /// D-JSON3 coerce walk — same as `jet_std_json_coerce_walk` (MathRandomTime.rs).
-    pub fn coerce_walk(value: &JSON, path: &str) -> JSON {
-        match value {
-            JSON::Text(s) => {
-                if s == "true" {
-                    emit_coerce(path, "string", "boolean");
-                    return JSON::Boolean(true);
-                }
-                if s == "false" {
-                    emit_coerce(path, "string", "boolean");
-                    return JSON::Boolean(false);
-                }
-                if let Ok(n) = s.parse::<f64>() {
-                    if n.is_finite() {
-                        emit_coerce(path, "string", "number");
-                        return JSON::Number(n);
-                    }
-                }
-                value.clone()
-            }
-            JSON::Object(entries) => {
-                let mut out = std::collections::BTreeMap::new();
-                for (k, v) in entries {
-                    let child = if path.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{path}.{k}")
-                    };
-                    out.insert(k.clone(), coerce_walk(v, &child));
-                }
-                JSON::Object(out)
-            }
-            JSON::Array(items) => JSON::Array(
-                items
-                    .iter()
-                    .enumerate()
-                    .map(|(i, v)| {
-                        let child = if path.is_empty() {
-                            format!("[{i}]")
-                        } else {
-                            format!("{path}[{i}]")
-                        };
-                        coerce_walk(v, &child)
-                    })
-                    .collect(),
-            ),
-            other => other.clone(),
-        }
-    }
-
-    fn emit_coerce(path: &str, from: &str, to: &str) {
-        let field_label = if path.is_empty() { "<root>" } else { path };
-        let msg = format!("json coerce: field \"{field_label}\" {from} \u{2192} {to}");
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        // Capture into JitRuntime.stderr (like jit_log_emit / core.term). Raw
-        // eprintln! escapes the ProgramOutput buffer and breaks JIT/AOT parity.
-        let line = format!("{{\"level\":\"info\",\"body\":\"{msg}\",\"ts\":{ts}}}");
-        crate::Concurrency::with_runtime_mut(|rt| {
-            rt.stderr.push_str(&line);
-            rt.stderr.push('\n');
-        });
-    }
-
     pub fn parse_datatree(text: &str) -> Result<DataTree, JSONError> {
         parse_json(text).map(|j| datatree_from_json(&j))
     }
@@ -216,9 +150,19 @@ pub(crate) mod json_rt {
         parse_json_typed_datatree(text)
     }
 
+    /// D-JSON3 lenient decode. The walk, the coercion message and the audit-line
+    /// shape are ONE policy in the included `JSONDataTree.rs`; this host used to
+    /// carry a byte-equivalent `coerce_walk` copy self-documented as "same as"
+    /// AOT's (I8/I9). Only the sink is per-tier: raw `eprintln!` would escape
+    /// `ProgramOutput`, so the line goes to `JitRuntime.stderr` like
+    /// `jit_log_emit` and `core.term`.
     pub fn decode_lenient(text: &str) -> Result<DataTree, JSONError> {
-        let parsed = parse_json(text)?;
-        Ok(datatree_from_json(&coerce_walk(&parsed, "")))
+        jet_std_json_decode_lenient(text, &mut |line| {
+            crate::Concurrency::with_runtime_mut(|rt| {
+                rt.stderr.push_str(&line);
+                rt.stderr.push('\n');
+            });
+        })
     }
 }
 

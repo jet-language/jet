@@ -9304,15 +9304,51 @@ impl LowerCtx<'_, '_> {
         list: Value,
         inner: &Type,
     ) -> Result<Value, String> {
+        self.lower_jet_show_sequence_value(list, inner, None)
+    }
+
+    /// One element renderer for list `jet_show` AND for `TBuiltinOp::JoinSep`.
+    ///
+    /// `sep = None` renders the show shape `[a, b]`. `sep = Some(handle)` renders
+    /// the join shape — no brackets, the runtime separator between elements —
+    /// which is exactly AOT's
+    /// `iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(sep)`
+    /// (`TIR/emit/expressions.rs`).
+    ///
+    /// Join used to marshal to a `jet_jit_list_join_str` host that was handed no
+    /// element type and GUESSED one by probing the string arena with each raw
+    /// i64 element (`clone_string(value)` first, decimal only as a fallback).
+    /// Values and string handles are the same i64, so an `[Int]` whose element
+    /// happened to be a live string id rendered that unrelated string:
+    /// `[Int].{3,1,2}` sorted, sliced `[1..2]` and joined printed arena text
+    /// instead of `2,3` on the resident tier only. The element type is already
+    /// resolved here, so the guess is DELETED rather than repaired (I9: one
+    /// renderer, no engine-local policy).
+    fn lower_jet_show_sequence_value(
+        &mut self,
+        list: Value,
+        inner: &Type,
+        sep: Option<Value>,
+    ) -> Result<Value, String> {
         let list_var = self.fresh_var(types::I64);
         self.b.def_var(list_var, list);
+        let sep_var = match sep {
+            Some(sep) => {
+                let var = self.fresh_var(types::I64);
+                self.b.def_var(var, sep);
+                Some(var)
+            }
+            None => None,
+        };
         let index_var = self.fresh_var(types::I64);
         let zero_index = self.b.ins().iconst(types::I64, 0);
         self.b.def_var(index_var, zero_index);
         let buf_var = self.fresh_var(types::I64);
         let buf = self.call_host(self.host.str_begin, &[]);
         self.b.def_var(buf_var, buf);
-        self.push_str_lit(buf, "[")?;
+        if sep_var.is_none() {
+            self.push_str_lit(buf, "[")?;
+        }
 
         let header = self.b.create_block();
         let body = self.b.create_block();
@@ -9340,7 +9376,13 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(first, element, &[], comma, &[]);
         self.b.switch_to_block(comma);
         self.b.seal_block(comma);
-        self.push_str_lit(buf, ", ")?;
+        match sep_var {
+            Some(var) => {
+                let sep = self.b.use_var(var);
+                self.push_str_value(buf, sep);
+            }
+            None => self.push_str_lit(buf, ", ")?,
+        }
         self.b.ins().jump(element, &[]);
         self.b.switch_to_block(element);
         self.b.seal_block(element);
@@ -9376,7 +9418,9 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(header);
         self.b.seal_block(exit);
         let buf = self.b.use_var(buf_var);
-        self.push_str_lit(buf, "]")?;
+        if sep_var.is_none() {
+            self.push_str_lit(buf, "]")?;
+        }
         Ok(buf)
     }
 
@@ -20199,8 +20243,14 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::JoinSep => {
                 in_own_frame(|| -> Result<Value, String> {
+                    // The element type decides the rendering. Without it the old
+                    // host had to guess (see `lower_jet_show_sequence_value`), so
+                    // an unresolvable element type deopts instead of guessing.
+                    let Some(elem) = jit_list_iter_elem_type(&recv_ty) else {
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
+                    };
                     let sep = self.lower_expr(&args[0])?;
-                    Ok(self.call_host(self.host.coll.list_join_str, &[recv_val, sep]))
+                    self.lower_jet_show_sequence_value(recv_val, &elem, Some(sep))
                 })
             }
             // Remaining TBuiltinOp variants have no JIT lowering: each is named

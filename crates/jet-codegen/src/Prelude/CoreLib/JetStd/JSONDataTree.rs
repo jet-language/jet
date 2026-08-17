@@ -190,3 +190,92 @@
             _ => None,
         }
     }
+
+    // D-JSON3: ONE lenient-decode policy — the walk, the coercion message, and
+    // the audit-line shape. A tier supplies only the sink it can reach (AOT
+    // `eprintln!`, the resident JIT's `JitRuntime.stderr`), which is real
+    // marshalling. This lived as two byte-equivalent copies: AOT's
+    // `jet_std_json_coerce_walk` (`CoreLib/Top/MathRandomTime.rs`) and the JIT
+    // host's `coerce_walk` (`jet-jit/src/Encoding.rs`), the second
+    // self-documented as "same as" the first. Both tiers include this file, so
+    // the copy is deleted rather than kept in sync (I8/I9).
+    pub fn jet_std_json_coerce_line(path: &str, from: &str, to: &str) -> String {
+        let field_label = if path.is_empty() { "<root>" } else { path };
+        let msg = format!(
+            "json coerce: field \"{}\" {} \u{2192} {}",
+            field_label, from, to
+        );
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        format!("{{\"level\":\"info\",\"body\":\"{}\",\"ts\":{}}}", msg, ts)
+    }
+
+    // Any JSON string that looks like a boolean or a number becomes that type,
+    // and one audit line is emitted per coercion naming the field and from→to.
+    pub fn jet_std_json_coerce_walk(
+        value: &JSON,
+        path: &str,
+        emit: &mut dyn FnMut(String),
+    ) -> JSON {
+        match value {
+            JSON::Text(s) => {
+                // Bool first (exact match only).
+                if s == "true" {
+                    emit(jet_std_json_coerce_line(path, "string", "boolean"));
+                    return JSON::Boolean(true);
+                }
+                if s == "false" {
+                    emit(jet_std_json_coerce_line(path, "string", "boolean"));
+                    return JSON::Boolean(false);
+                }
+                // Then number (must parse as a finite f64).
+                if let Ok(n) = s.parse::<f64>() {
+                    if n.is_finite() {
+                        emit(jet_std_json_coerce_line(path, "string", "number"));
+                        return JSON::Number(n);
+                    }
+                }
+                value.clone()
+            }
+            JSON::Object(entries) => {
+                let mut out = std::collections::BTreeMap::new();
+                for (k, v) in entries {
+                    let child_path = if path.is_empty() {
+                        format!("{}", k)
+                    } else {
+                        format!("{}.{}", path, k)
+                    };
+                    out.insert(k.clone(), jet_std_json_coerce_walk(v, &child_path, emit));
+                }
+                JSON::Object(out)
+            }
+            JSON::Array(items) => {
+                let mut coerced: Vec<JSON> = Vec::with_capacity(items.len());
+                for (i, v) in items.iter().enumerate() {
+                    let child_path = if path.is_empty() {
+                        format!("[{}]", i)
+                    } else {
+                        format!("{}[{}]", path, i)
+                    };
+                    coerced.push(jet_std_json_coerce_walk(v, &child_path, emit));
+                }
+                JSON::Array(coerced)
+            }
+            // Null, Boolean, Integer, Number — already the right type.
+            other => other.clone(),
+        }
+    }
+
+    // D-JSON1-decode + D-JSON3. The coerced value collapses onto `Data`
+    // (D-ENC-DYN1=A+).
+    pub fn jet_std_json_decode_lenient(
+        text: &str,
+        emit: &mut dyn FnMut(String),
+    ) -> Result<DataTree, JSONError> {
+        let parsed = parse_json(text)?;
+        Ok(datatree_from_json(&jet_std_json_coerce_walk(
+            &parsed, "", emit,
+        )))
+    }
