@@ -1378,7 +1378,7 @@ fn push_corelib_prelude_body(
         out.push_str("\n}\npub(crate) use jet_sync::*;\n");
     }
     if needs_services {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/ServiceAuthority.rs"));
+        out.push_str(service_authority_prelude_for_emit());
         out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
     }
 }
@@ -1509,23 +1509,166 @@ fn strip_scheduler_region(mut source: String, name: &str) -> String {
     source
 }
 
+const SERVICE_AUTHORITY_PRELUDE_RAW: &str =
+    include_str!("../Prelude/CoreLib/Top/ServiceAuthority.rs");
+
+/// Every fragment concatenated into the generated program's ONE flat Rust
+/// module that brings its own top-level imports. `FLAT_PRELUDE_IMPORTS` merges
+/// them; each fragment is emitted through `flat_prelude_body`.
+const FLAT_PRELUDE_SOURCES: [&str; 3] = [
+    SCHEDULER_PRELUDE_RAW,
+    STREAM_PRELUDE_RAW,
+    SERVICE_AUTHORITY_PRELUDE_RAW,
+];
+
+/// A fragment's leading top-level `use` items, split from the rest of its
+/// source. Only the leading block, and only plain `use`: a fragment's later
+/// `pub use jet_devserver_impl::…` re-export is part of its API and stays put.
+fn split_leading_top_level_uses(source: &str) -> (Vec<&str>, String) {
+    let mut imports = Vec::new();
+    let mut body = String::with_capacity(source.len());
+    let mut rest = source;
+    while !rest.is_empty() {
+        let line_end = rest.find('\n').map_or(rest.len(), |index| index + 1);
+        let line = &rest[..line_end];
+        let trimmed = line.trim();
+        // Header comments and inner attributes precede the import block.
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+            body.push_str(line);
+            rest = &rest[line_end..];
+            continue;
+        }
+        if !line.starts_with("use ") {
+            break;
+        }
+        let mut end = line_end;
+        while !rest[..end].contains(';') && end < rest.len() {
+            end += rest[end..]
+                .find('\n')
+                .map_or(rest.len() - end, |index| index + 1);
+        }
+        imports.push(rest[..end].trim());
+        rest = &rest[end..];
+    }
+    body.push_str(rest);
+    (imports, body)
+}
+
+/// One flat fragment's source as the assembler emits it: its own imports removed,
+/// because `FLAT_PRELUDE_IMPORTS` declares them for the whole module instead.
+fn flat_prelude_body(source: &str) -> String {
+    split_leading_top_level_uses(source).1
+}
+
+/// The `(path, name)` pairs a fragment's leading top-level `use` items bring in.
+/// One parser backs both the emitted import list and its guard test (I8).
+fn flat_prelude_import_pairs(source: &str) -> Vec<(&str, &str)> {
+    let mut pairs = Vec::new();
+    for statement in split_leading_top_level_uses(source).0 {
+        let item = statement
+            .trim_start_matches("use ")
+            .trim_end_matches(';')
+            .trim();
+        let (path, names) = match item.split_once("::{") {
+            Some((path, names)) => (path.trim(), names.trim_end_matches('}')),
+            None => item.rsplit_once("::").unwrap_or(("", item)),
+        };
+        for name in names.split(',') {
+            let name = name.trim();
+            if !name.is_empty() {
+                pairs.push((path, name));
+            }
+        }
+    }
+    pairs
+}
+
+/// The generated program is ONE flat Rust module assembled from many Prelude
+/// fragments, but each fragment is also a real Rust file compiled inside a
+/// module of its own crate — `Prelude/Scheduler.rs` as `jet_codegen::scheduler`,
+/// `Prelude/CoreLib/Top/ServiceAuthority.rs` inside `jet-comptime`'s
+/// `Comptime/ServicesLite.rs` — so a fragment must keep its own imports there.
+///
+/// Concatenated, those per-fragment imports land in one scope, and two fragments
+/// importing one name make rustc reject the generated file: Scheduler.rs and
+/// ServiceAuthority.rs both imported `std::time::Duration`, so every program
+/// using `core.services` failed to build with E0252 — an internal compiler
+/// error (I2), never a user diagnostic.
+///
+/// Neither per-fragment workaround closes that class. Qualifying paths inline
+/// cannot work for trait imports, because method resolution needs the trait in
+/// scope (Scheduler.rs calls `TcpStream::write`). Wrapping these fragments in a
+/// private module the way `jet_gc`/`jet_sync` are wrapped cannot work either,
+/// because generated code calls their private items flat — `TIR/emit/core_calls.rs`
+/// emits 24 private `jet_services_*` calls and `Context.rs` three private types,
+/// and a glob re-export carries only `pub` ones.
+///
+/// So the assembler owns the flat module's import set instead (I8). It is
+/// derived, not restated: add an import to any flat fragment and it is merged
+/// here automatically, so no second collision can be introduced by hand.
+/// Emitted unconditionally with the scheduler, which every embedded runtime
+/// carries — the harness carries `#![allow(warnings)]`, so an import a program
+/// never uses costs nothing, and no user name can shadow one because every
+/// emitted user type goes through `mangle_path` (`__jet_` prefix).
+static FLAT_PRELUDE_IMPORTS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let mut groups: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        std::collections::BTreeMap::new();
+    for source in FLAT_PRELUDE_SOURCES {
+        for (path, name) in flat_prelude_import_pairs(source) {
+            groups.entry(path).or_default().insert(name);
+        }
+    }
+    let mut rendered = String::new();
+    for (path, names) in groups {
+        let names: Vec<&str> = names.into_iter().collect();
+        if let [only] = names[..] {
+            rendered.push_str(&format!("use {path}::{only};\n"));
+        } else {
+            rendered.push_str(&format!("use {path}::{{{}}};\n", names.join(", ")));
+        }
+    }
+    rendered.push('\n');
+    rendered
+});
+
+/// `Prelude/CoreLib/Top/ServiceAuthority.rs` as the assembler emits it.
+static SERVICE_AUTHORITY_PRELUDE: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| flat_prelude_body(SERVICE_AUTHORITY_PRELUDE_RAW));
+
+fn service_authority_prelude_for_emit() -> &'static str {
+    SERVICE_AUTHORITY_PRELUDE.as_str()
+}
+
+/// The flat import set, then `Prelude/Scheduler.rs` + `Prelude/Stream.rs` bodies.
+fn assemble_scheduler_prelude(scheduler: String) -> String {
+    let stream = flat_prelude_body(STREAM_PRELUDE_RAW);
+    let mut source =
+        String::with_capacity(FLAT_PRELUDE_IMPORTS.len() + scheduler.len() + stream.len());
+    source.push_str(FLAT_PRELUDE_IMPORTS.as_str());
+    source.push_str(&scheduler);
+    source.push_str(&stream);
+    source
+}
+
+static SCHEDULER_PRELUDE_NATIVE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    assemble_scheduler_prelude(
+        flat_prelude_body(SCHEDULER_PRELUDE_RAW).replace("feature = \"jet_native_io\"", "all()"),
+    )
+});
+
+static SCHEDULER_PRELUDE_PORTABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    assemble_scheduler_prelude(
+        ["notify", "epoll", "kqueue", "iocp"]
+            .into_iter()
+            .fold(flat_prelude_body(SCHEDULER_PRELUDE_RAW), strip_scheduler_region),
+    )
+});
+
 fn scheduler_prelude_for_emit(native_io: bool) -> &'static str {
-    static NATIVE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    static PORTABLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     if native_io {
-        NATIVE.get_or_init(|| {
-            let mut source = SCHEDULER_PRELUDE_RAW.replace("feature = \"jet_native_io\"", "all()");
-            source.push_str(STREAM_PRELUDE_RAW);
-            source
-        })
+        SCHEDULER_PRELUDE_NATIVE.as_str()
     } else {
-        PORTABLE.get_or_init(|| {
-            let mut source = ["notify", "epoll", "kqueue", "iocp"]
-                .into_iter()
-                .fold(SCHEDULER_PRELUDE_RAW.to_string(), strip_scheduler_region);
-            source.push_str(STREAM_PRELUDE_RAW);
-            source
-        })
+        SCHEDULER_PRELUDE_PORTABLE.as_str()
     }
 }
 
@@ -3179,6 +3322,90 @@ mod tests {
         assert!(
             pruned.starts_with(emitted.as_str()),
             "program-specific pruning must not create runtime-cache variants"
+        );
+    }
+
+    /// I2: rustc rejecting generated code is an internal compiler error, never a
+    /// user diagnostic. `Prelude/Scheduler.rs` and
+    /// `Prelude/CoreLib/Top/ServiceAuthority.rs` each imported
+    /// `std::time::Duration`, and because both are concatenated into the one flat
+    /// module of a generated program, every `core.services` program failed to
+    /// build with `E0252: the name Duration is defined multiple times`.
+    ///
+    /// The assembler owns that module's imports now. Keep it owning them: a
+    /// fragment that ships its own, or a name the merged set drops or declares
+    /// twice, is the same internal compiler error again.
+    #[test]
+    fn the_assembler_owns_every_flat_prelude_import() {
+        let mut wanted: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+        for source in FLAT_PRELUDE_SOURCES {
+            for statement in split_leading_top_level_uses(source).0 {
+                // `flat_prelude_import_pairs` merges one path level, so a nested
+                // group or an alias would be silently mis-parsed.
+                assert!(
+                    statement.matches('{').count() <= 1,
+                    "flat prelude import `{statement}` nests brace groups; \
+                     flat_prelude_import_pairs merges exactly one path level"
+                );
+                assert!(
+                    !statement.contains(" as "),
+                    "flat prelude import `{statement}` is aliased; \
+                     flat_prelude_import_pairs merges plain paths only"
+                );
+            }
+            for (path, name) in flat_prelude_import_pairs(source) {
+                if let Some(previous) = wanted.insert(name, path) {
+                    assert_eq!(
+                        previous, path,
+                        "flat fragments import `{name}` from two different paths, \
+                         so one flat module cannot hold both"
+                    );
+                }
+            }
+            // The body the assembler emits carries no import of its own.
+            assert!(
+                !split_leading_top_level_uses(source)
+                    .1
+                    .lines()
+                    .any(|line| line.starts_with("use ")),
+                "a flat prelude fragment must be emitted with no top-level import"
+            );
+        }
+
+        // The merged set declares every wanted name exactly once — and nothing
+        // else, so an import removed from a fragment stops being emitted.
+        let mut declared: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for (path, name) in flat_prelude_import_pairs(&FLAT_PRELUDE_IMPORTS) {
+            assert!(
+                declared.insert(name),
+                "the merged flat import set declares `{path}::{name}` twice (E0252)"
+            );
+        }
+        assert_eq!(
+            declared,
+            wanted.keys().copied().collect::<std::collections::BTreeSet<&str>>(),
+            "the merged flat import set must be exactly the union the fragments import"
+        );
+
+        // The measured failure itself: one `Duration`, in the emitted scheduler.
+        let mut emitted = String::new();
+        push_corelib_prelude(
+            &mut emitted,
+            &["core.services".to_string()].into_iter().collect(),
+            false,
+        );
+        emitted.push_str(scheduler_prelude_for_emit(true));
+        assert!(
+            emitted.contains("SERVICE_AUTH_LOCK_STALE_MS"),
+            "this fixture must actually emit the services fragment"
+        );
+        assert_eq!(
+            emitted
+                .lines()
+                .filter(|line| line.starts_with("use ") && line.contains("Duration"))
+                .count(),
+            1,
+            "a services program must import Duration once"
         );
     }
 
