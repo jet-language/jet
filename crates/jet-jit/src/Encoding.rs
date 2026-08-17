@@ -188,16 +188,29 @@ const DT_OBJECT: i64 = crate::types_meta::PRELUDE_DATATREE_OBJECT;
 const DT_NUMBER: i64 = -1;
 const DT_TYPED_TEXT: i64 = -2;
 
+/// One enum-record ABI: slot 0 is the discriminant and slot 1 holds the
+/// payload under its own `JetVal` tag, exactly as `pack_enum_record` writes a
+/// user enum. A text payload is therefore a `JetVal::String`, not an
+/// Int-tagged string id: `unpack_enum_heap_payload_at` reads a `String`
+/// payload with `struct_get_str`, and `jet_jit_struct_get_str` answers 0 for
+/// an Int slot, so an Int-tagged `.Text` bound heap id 0 — the first string
+/// the lowerer allocates, the entry file path — instead of the payload.
 fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let h = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(h, 0, disc);
-        if disc == DT_FLOAT {
-            let _ = rt
-                .heap
-                .record_set_float(h, 1, f64::from_bits(payload as u64));
-        } else {
-            let _ = rt.heap.record_set_int(h, 1, payload);
+        match disc {
+            DT_FLOAT => {
+                let _ = rt
+                    .heap
+                    .record_set_float(h, 1, f64::from_bits(payload as u64));
+            }
+            DT_TEXT | DT_NUMBER | DT_TYPED_TEXT => {
+                let _ = rt.heap.record_set_string(h, 1, payload);
+            }
+            _ => {
+                let _ = rt.heap.record_set_int(h, 1, payload);
+            }
         }
         h
     })
@@ -275,9 +288,8 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
                     Some((disc, 0i64, None, None, None, Some(f)))
                 }
                 DT_TEXT | DT_NUMBER | DT_TYPED_TEXT => {
-                    let payload = rt.heap.record_get_int(handle, 1)?;
-                    let s = rt.heap.clone_string(payload).unwrap_or_default();
-                    Some((disc, payload, Some(s), None, None, None))
+                    let s = rt.heap.record_clone_string(handle, 1)?;
+                    Some((disc, 0i64, Some(s), None, None, None))
                 }
                 DT_ARRAY => {
                     let payload = rt.heap.record_get_int(handle, 1)?;
