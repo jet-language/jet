@@ -129,6 +129,7 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
         ("SMTPAuth", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "SMTPAuth"),
         ("TLSTrust", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "TLSTrust"),
         ("EmailError", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "Error"),
+        ("TLSVersion", "../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs", "JetTLSVersion"),
         ("DataTree", "../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs", "DataTree"),
     ];
     let mut entries = Vec::new();

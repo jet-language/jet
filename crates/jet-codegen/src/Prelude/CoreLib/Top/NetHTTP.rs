@@ -312,6 +312,23 @@ pub enum JetTLSVersion {
     Tls13,
 }
 
+/// D-CORESURF-SMALL1 / I9: the one `JetShow` rendering of a negotiated TLS
+/// protocol version — its declared variant name. Every tier reads this one
+/// renderer: AOT emits `print(x)` as `(x).jet_show()`, `jet-jit`'s
+/// `net_http_rt` includes this file so the resident host and the interpreter
+/// bridge call the same impl, and the Cranelift show table takes its variant
+/// spellings from this declaration (`jet-jit/build.rs` prelude enum meta). No
+/// engine re-encodes the spelling.
+impl JetShow for JetTLSVersion {
+    fn jet_show(&self) -> String {
+        match self {
+            JetTLSVersion::Tls12 => "Tls12",
+            JetTLSVersion::Tls13 => "Tls13",
+        }
+        .to_string()
+    }
+}
+
 #[derive(Clone)]
 pub struct JetTLSClientConfig {
     trust: JetTLSTrust,

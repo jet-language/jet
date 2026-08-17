@@ -2933,10 +2933,9 @@ fn tls_peer_identity_value(identity: JetTLSPeerIdentity) -> CtValue {
                 "tls_version".to_string(),
                 CtValue::Enum {
                     type_name: "TLSVersion".to_string(),
-                    variant: match identity.tls_version {
-                        JetTLSVersion::Tls12 => "Tls12".to_string(),
-                        JetTLSVersion::Tls13 => "Tls13".to_string(),
-                    },
+                    // I9: marshalling only — the variant spelling comes from
+                    // the one Prelude renderer AOT prints through.
+                    variant: identity.tls_version.jet_show(),
                     args: vec![],
                 },
             ),
