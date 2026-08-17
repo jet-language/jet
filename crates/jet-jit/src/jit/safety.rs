@@ -240,29 +240,110 @@ pub(crate) fn is_packed_process_signal(expr: &TExpr) -> bool {
     }
 }
 
-fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
-    use jet_foundation::AST::{CtReport, CtValue};
+/// The one comptime-value table (I8).
+///
+/// `slot` is the type the value has to land in, when a caller knows it. A
+/// `TExprKind::CtLit` node carries `expr.ty` and has already passed
+/// `jit_value_type`, so its ABI is pinned; `None` means the value sits inside
+/// another comptime value, where `lower_ct_value` picks the ABI from the value's
+/// own `jet_type()` instead. Only the arms where that choice differs read `slot`,
+/// and each one says why.
+///
+/// This was two tables: an inline `TExprKind::CtLit` or-pattern that admitted
+/// `BigInt` but neither `Float` nor `Unit`, and this helper, which admitted
+/// `Float` and `Unit` but not `BigInt`. Same fact, two answers.
+fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue, slot: Option<&Type>) -> bool {
+    use jet_foundation::AST::{CtKey, CtReport, CtValue};
     match value {
-        CtValue::Int(_)
-        | CtValue::Float(_)
-        | CtValue::Bool(_)
-        | CtValue::Char(_)
-        | CtValue::Str(_)
-        | CtValue::Unit
-        | CtValue::Failed(CtReport::Clean(_)) => true,
-        CtValue::Present(inner) | CtValue::Failed(CtReport::Told(inner)) => {
-            resident_safe_ct_value(inner)
+        CtValue::Int(_) | CtValue::Bool(_) | CtValue::Char(_) | CtValue::Str(_) => true,
+        // `CtValue::Unit` lowers to the same zero word as `TExprKind::Unit`.
+        CtValue::Unit => true,
+        // A comptime `Int` outside the small range lowers through
+        // `heap.int_from_str`, which packs the same tagged-Int word
+        // `TExprKind::IntLit` gets from `int_from_i64` (lower_ctx.rs). That word is
+        // an `Int` wherever an `Int` goes, so no slot changes the answer.
+        CtValue::BigInt(_) => true,
+        // `CtValue::Float` lowers with a bare `f64const` (lower_ctx.rs
+        // `lower_ct_value`), which does not round through f32 the way
+        // `TExprKind::FloatLit` does for a `Float32` slot. Nested, no slot claims
+        // f32: the record setter and `list_push_f64` follow the value's own
+        // `CtFloat` width.
+        CtValue::Float(_) => slot.is_none_or(|ty| matches!(ty, Type::Float)),
+        // A comptime Map literal builds the same string-keyed heap map the
+        // runtime literal path builds: `map_new`, then `map_insert(handle,
+        // string-handle, packed-value)` (lower_ctx.rs `CtValue::Map`), which is
+        // the ABI `lower_map_lit_pairs` emits. That arm stringifies
+        // `CtKey::Int`/`Bool`/`Char` while `jit_map_int_type` maps carry raw i64
+        // keys, so only `CtKey::Str` over a `Map<String, _>` is admitted — and
+        // only where a slot names that map type, since nothing else pins the key.
+        CtValue::Map(entries) => slot.is_some_and(|ty| {
+            jit_map_string_type(ty)
+                && jit_map_resident_type(ty)
+                && match ty {
+                    Type::Map { value: value_ty, .. } => {
+                        jit_value_type(value_ty)
+                            && entries.iter().all(|(key, entry)| {
+                                matches!(key, CtKey::Str(_))
+                                    && resident_safe_ct_value(entry, Some(value_ty.as_ref()))
+                            })
+                    }
+                    _ => false,
+                }
+        }),
+        // With a slot, the list type itself passed `jit_value_type`, which pins
+        // the element ABI, and the `CtValue::List` arm pushes every element
+        // through the same `list_push`/`list_push_f64` a runtime list literal
+        // uses. Nested, nothing pinned it, so each element must stand alone.
+        CtValue::List(items) => match slot {
+            Some(_) => true,
+            None => items
+                .iter()
+                .all(|item| resident_safe_ct_value(item, None)),
+        },
+        // Field slots come from the struct layout, which `lower_ct_struct` reads
+        // for itself; safety has no layout access, so each field value stands
+        // alone here whether or not the struct's own slot is known.
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .all(|(_, field)| resident_safe_ct_value(field, None)),
+        // Anonymous-union field payloads lower as `CtValue::Enum` (#1444
+        // `Box.{value: 9}`), which is the nested case this arm has always been
+        // about. It does not extend to a `CtLit` whose own slot is an enum:
+        // `lower_ct_enum` has no `pack_datatree_enum` arm, so for
+        // DataTree/JSON/TOML/YAML/CSV it would build a different carrier than
+        // `TExprKind::EnumLit` builds, and safety may not keep a second copy of
+        // that type list to say so (I8).
+        CtValue::Enum { args, .. } => {
+            slot.is_none() && args.iter().all(|(_, arg)| resident_safe_ct_value(arg, None))
         }
-        // Anonymous-union field payloads lower as CtValue::Enum (#1444 Box.{value: 9}).
-        CtValue::Enum { args, .. } => args.iter().all(|(_, v)| resident_safe_ct_value(v)),
-        CtValue::Struct { fields, .. } => fields.iter().all(|(_, v)| resident_safe_ct_value(v)),
-        CtValue::List(items) => items.iter().all(resident_safe_ct_value),
+        // D-FAIL-CARRIER1=A: one `Present` carries both outcome views, so the slot
+        // picks which carrier `lower_ct_value` builds — the packed Option word
+        // (`pack_option_payload`, absent = 0) or the result arena
+        // (`lower_ct_result`, the same `result_new_*` handle `TExprKind::Ok`
+        // builds). `Option<IntN>` is excluded: its present side is arena-carried
+        // while a clean report still lowers to the packed zero, so the two sides
+        // of one option would disagree (lower_ctx.rs `option_present_flag`).
+        CtValue::Present(inner) => match slot {
+            Some(Type::Option(payload)) => {
+                !matches!(payload.as_ref(), Type::IntN { .. })
+                    && resident_safe_ct_value(inner, Some(payload.as_ref()))
+            }
+            Some(Type::Result { ok, .. }) => resident_safe_ct_value(inner, Some(ok.as_ref())),
+            Some(_) => false,
+            None => resident_safe_ct_value(inner, None),
+        },
+        CtValue::Failed(CtReport::Clean(_)) => match slot {
+            Some(Type::Option(payload)) => !matches!(payload.as_ref(), Type::IntN { .. }),
+            Some(_) => false,
+            None => true,
+        },
+        CtValue::Failed(CtReport::Told(inner)) => match slot {
+            Some(Type::Result { err, .. }) => resident_safe_ct_value(inner, Some(err.as_ref())),
+            Some(_) => false,
+            None => resident_safe_ct_value(inner, None),
+        },
         _ => false,
     }
-}
-
-fn resident_safe_ct_struct_fields(fields: &[(String, jet_foundation::AST::CtValue)]) -> bool {
-    fields.iter().all(|(_, value)| resident_safe_ct_value(value))
 }
 
 fn jit_scalar_type(ty: &Type) -> bool {
@@ -895,6 +976,33 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
     results.pop().unwrap_or(false)
 }
 
+/// The one `??` table (I8): which expressions a fallback makes the JIT lower.
+///
+/// `TExprKind::OrFallback`'s lowering builds the same fail block for either
+/// carrier — the packed Option word and the result-arena handle — and its match
+/// on `TOrFallback` is total in both: `Value` lowers the expression and jumps to
+/// the merge, `Break`/`Continue` (and their labelled forms) go through
+/// `emit_loop_fallback`, `Return` through `emit_lexical_exit`, and `Panic`
+/// through `emit_rich_panic` (lower_ctx.rs `TExprKind::OrFallback`). So the
+/// carrier does not change the answer and no fallback shape is refused; the only
+/// question left is whether the expressions the fallback carries are resident.
+///
+/// The option side used to refuse `?? return …` while the result side admitted
+/// it, and it also admitted `?? <value>` without ever asking about the value.
+fn or_fallback_children<'a>(value: &'a TExpr, fallback: &'a TOrFallback) -> Vec<&'a TExpr> {
+    let mut children = vec![value];
+    match fallback {
+        TOrFallback::Value(e) | TOrFallback::Return(Some(e)) => children.push(e),
+        TOrFallback::Return(None)
+        | TOrFallback::Panic { .. }
+        | TOrFallback::Break
+        | TOrFallback::Continue
+        | TOrFallback::BreakLabel(_)
+        | TOrFallback::ContinueLabel(_) => {}
+    }
+    children
+}
+
 fn resident_safe_expr_work_item<'a>(
     expr: &'a TExpr,
     callees: &HashSet<String>,
@@ -908,30 +1016,7 @@ fn resident_safe_expr_work_item<'a>(
             ..
         } => resident_safe_crypto_work_item(module, method, args),
         TExprKind::OrFallback { value, fallback } => {
-            if matches!(&value.ty, Type::Option(_)) {
-                return Some((
-                    matches!(
-                        fallback,
-                        TOrFallback::Value(_)
-                            | TOrFallback::Panic { .. }
-                            | TOrFallback::Break
-                            | TOrFallback::Continue
-                            | TOrFallback::BreakLabel(_)
-                            | TOrFallback::ContinueLabel(_)
-                    ),
-                    vec![value],
-                ));
-            }
-            match fallback {
-                TOrFallback::Value(e) => Some((true, vec![value, e])),
-                TOrFallback::Return(None) => Some((true, vec![value])),
-                TOrFallback::Return(Some(e)) => Some((true, vec![value, e])),
-                TOrFallback::Panic { .. }
-                | TOrFallback::Break
-                | TOrFallback::Continue
-                | TOrFallback::BreakLabel(_)
-                | TOrFallback::ContinueLabel(_) => Some((true, vec![value])),
-            }
+            Some((true, or_fallback_children(value, fallback)))
         }
         TExprKind::ListLit(elems) => {
             let scalar_list = jit_list_native_type(&expr.ty)
@@ -1761,32 +1846,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 && args_ok
                 && resident_safe_handle_op(op, recv, args)
         }
-        TExprKind::OrFallback { value, fallback } => {
-            if matches!(value.ty, Type::Option(_)) {
-                resident_safe_expr(value, callees)
-                    && matches!(
-                        fallback,
-                        TOrFallback::Value(_)
-                            | TOrFallback::Panic { .. }
-                            | TOrFallback::Break
-                            | TOrFallback::Continue
-                            | TOrFallback::BreakLabel(_)
-                            | TOrFallback::ContinueLabel(_)
-                    )
-            } else {
-                resident_safe_expr(value, callees)
-                    && match fallback {
-                        TOrFallback::Value(e) => resident_safe_expr(e, callees),
-                        TOrFallback::Return(None) => true,
-                        TOrFallback::Return(Some(e)) => resident_safe_expr(e, callees),
-                        TOrFallback::Panic { .. }
-                        | TOrFallback::Break
-                        | TOrFallback::Continue
-                        | TOrFallback::BreakLabel(_)
-                        | TOrFallback::ContinueLabel(_) => true,
-                    }
-            }
-        }
+        // Shadowed by `resident_safe_expr_work_item`; both read the one table.
+        TExprKind::OrFallback { value, fallback } => or_fallback_children(value, fallback)
+            .into_iter()
+            .all(|child| resident_safe_expr(child, callees)),
         TExprKind::MapLit(entries) => {
             jit_map_resident_type(&expr.ty)
                 && entries.iter().all(|(k, v)| {
@@ -2081,41 +2144,11 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         | TExprKind::FloatLit(_)
         | TExprKind::BoolLit(_)
         | TExprKind::CharLit(_) => true,
-        TExprKind::CtLit(
-            jet_foundation::AST::CtValue::Int(_)
-            | jet_foundation::AST::CtValue::BigInt(_)
-            | jet_foundation::AST::CtValue::Bool(_)
-            | jet_foundation::AST::CtValue::Char(_)
-            | jet_foundation::AST::CtValue::Str(_)
-            | jet_foundation::AST::CtValue::List(_),
-        )
-        | TExprKind::ConstRef(_) => true,
-        TExprKind::CtLit(jet_foundation::AST::CtValue::Struct { fields, .. }) => {
-            resident_safe_ct_struct_fields(fields)
-        }
-        // `CtValue::Float` lowers with a bare `f64const` (lower_ctx.rs
-        // `lower_ct_value`), which does not round through f32 the way
-        // `TExprKind::FloatLit` does for `Float32`. Admit plain `Float` only.
-        TExprKind::CtLit(jet_foundation::AST::CtValue::Float(_)) => {
-            matches!(&expr.ty, Type::Float)
-        }
-        // `CtValue::Unit` lowers to the same zero word as `TExprKind::Unit`.
-        TExprKind::CtLit(jet_foundation::AST::CtValue::Unit) => true,
-        // A comptime Map literal builds the same string-keyed heap map the
-        // runtime literal path builds: `map_new`, then `map_insert(handle,
-        // string-handle, packed-value)` (lower_ctx.rs `CtValue::Map`), which is
-        // the ABI `lower_map_lit_pairs` emits. That arm stringifies
-        // `CtKey::Int`/`Bool`/`Char` while `jit_map_int_type` maps carry raw
-        // i64 keys, so only `CtKey::Str` over a `Map<String, _>` is admitted.
-        TExprKind::CtLit(jet_foundation::AST::CtValue::Map(entries)) => {
-            jit_map_string_type(&expr.ty)
-                && jit_map_resident_type(&expr.ty)
-                && matches!(&expr.ty, Type::Map { value, .. } if jit_value_type(value))
-                && entries.iter().all(|(key, value)| {
-                    matches!(key, jet_foundation::AST::CtKey::Str(_))
-                        && resident_safe_ct_value(value)
-                })
-        }
+        // One comptime table, asked with the slot this literal lands in
+        // (`resident_safe_ct_value`). `lower_ctx.rs` lowers `CtLit` and `ConstRef`
+        // through the one `lower_ct_value`, which reads the same slot.
+        TExprKind::CtLit(value) => resident_safe_ct_value(value, Some(&expr.ty)),
+        TExprKind::ConstRef(_) => true,
         TExprKind::StrLit(parts) => {
             resident_safe_string_parts(parts, callees)
         }
@@ -4720,6 +4753,95 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
     }
 }
 
+/// Name a pattern shape for the refusal ladder. Total over `Pattern`, and with no
+/// `_` fallback, for the same reason `expr_kind_name` is: an `if let` refused for
+/// its pattern must say which pattern.
+fn pattern_kind_tag(pattern: &Pattern) -> &'static str {
+    match pattern {
+        Pattern::Variant { .. } => "Variant",
+        Pattern::Present { .. } => "Present",
+        Pattern::Absent(_) => "Absent",
+        Pattern::Ok { .. } => "Ok",
+        Pattern::Err { .. } => "Err",
+        Pattern::Range { .. } => "Range",
+        Pattern::Or(_, _) => "Or",
+        Pattern::Struct { .. } => "Struct",
+        Pattern::StrMatch { .. } => "StrMatch",
+        Pattern::BinMatch { .. } => "BinMatch",
+    }
+}
+
+/// Walk the single-operand wrappers whose safety answer IS their operand's, so a
+/// refused `print(x)` names `x` instead of stopping at `Print`.
+///
+/// Every variant here has one arm in `resident_safe_expr_work_item` of the shape
+/// `Some((true, vec![operand]))`, which means the wrapper adds no gate of its own
+/// and the operand carries the whole refusal. `Print` in particular reports its
+/// own `Unit` type, which named nothing at all. `??` is here too: it carries two
+/// candidate expressions, and `or_fallback_children` already says which.
+fn refusal_operand_chain(expr: &TExpr, callees: &HashSet<String>) -> String {
+    let mut out = String::new();
+    let mut cur = expr;
+    loop {
+        let operand: &TExpr = match &cur.kind {
+            TExprKind::Print(inner)
+            | TExprKind::Present(inner)
+            | TExprKind::Ok(inner)
+            | TExprKind::Err(inner)
+            | TExprKind::Drop(inner)
+            | TExprKind::MaterializeView(inner)
+            | TExprKind::ResourceNew(inner)
+            | TExprKind::DistinctConvert { arg: inner, .. }
+            | TExprKind::DistinctRaw(inner)
+            | TExprKind::Clone(inner) => inner.as_ref(),
+            // `??` carries two candidate expressions and `or_fallback_children`
+            // is the one table that says which; name the first it refuses.
+            TExprKind::OrFallback { value, fallback } => {
+                match or_fallback_children(value, fallback)
+                    .into_iter()
+                    .find(|child| !resident_safe_expr(child, callees))
+                {
+                    Some(child) => child,
+                    None => return out,
+                }
+            }
+            _ => return out,
+        };
+        out.push_str(&format!(
+            " > {} ty={:?}",
+            expr_kind_tag(operand),
+            operand.ty
+        ));
+        cur = operand;
+    }
+}
+
+/// Which half of a refused `if` refused: a branch statement, or the condition.
+///
+/// `resident_safe_stmt`'s `If` arm is `cond_ok && every branch statement`, so a
+/// clean pair of branches leaves the condition as the only candidate. The
+/// condition is then named by shape — this states no rule of its own.
+fn if_cond_tag(cond: &TIfCond) -> String {
+    match cond {
+        TIfCond::Plain(e) => format!("Plain:{} ty={:?}", expr_kind_tag(e), e.ty),
+        TIfCond::IfLet { pattern, subj } => format!(
+            "IfLet:{} subj={} ty={:?}",
+            pattern_kind_tag(&pattern.pattern),
+            expr_kind_tag(subj),
+            subj.ty
+        ),
+        TIfCond::Matches { subj, .. } => {
+            format!("Matches subj={} ty={:?}", expr_kind_tag(subj), subj.ty)
+        }
+        TIfCond::IsNone { subj } => {
+            format!("IsNone subj={} ty={:?}", expr_kind_tag(subj), subj.ty)
+        }
+        TIfCond::And { left, right } => {
+            format!("And({} , {})", if_cond_tag(left), if_cond_tag(right))
+        }
+    }
+}
+
 fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Option<String> {
     for (i, s) in stmts.iter().enumerate() {
         if resident_safe_stmt(s, callees) {
@@ -4747,6 +4869,7 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                     detail.push_str(&format!(" `{name}`"));
                 }
                 detail.push_str(&format!(" init={} ty={:?}", expr_kind_tag(init), init.ty));
+                detail.push_str(&refusal_operand_chain(init, callees));
                 if let TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::ReactiveDerived { executable, .. }
                         | TCoreClosureKind::ReactiveEffect { executable, .. }
@@ -4803,6 +4926,29 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                         _ => "HandleOp".to_string(),
                     };
                     detail.push_str(&format!(" op={op_tag}"));
+                }
+                return Some(detail);
+            }
+            TStmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                // `If[i]` alone left both branches and every condition shape as
+                // candidates. `resident_safe_stmt` refuses an `if` for exactly one
+                // of three reasons, so ask them in that order and name the one
+                // that answered.
+                let mut detail = format!("{}[{i}]", stmt_kind_tag(s));
+                if let Some(inner) = first_unsafe_stmt_detail(then_body, callees) {
+                    detail.push_str(&format!(" then>{inner}"));
+                } else if let Some(inner) = else_body
+                    .as_ref()
+                    .and_then(|body| first_unsafe_stmt_detail(body, callees))
+                {
+                    detail.push_str(&format!(" else>{inner}"));
+                } else {
+                    detail.push_str(&format!(" cond={}", if_cond_tag(cond)));
                 }
                 return Some(detail);
             }
