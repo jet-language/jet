@@ -9110,8 +9110,7 @@ fn cranelift_three_way_differential_battery_inner() {
         // so a fourth service example is classified instead of being discovered
         // by a timeout. Still counted with a reason, per the #1998 rule.
         {
-            let path = example_path(stem);
-            let file = path.to_string_lossy().to_string();
+            let file = example_path(stem);
             if let Ok(mut bundle) = jet::Loader::load_entry(&file) {
                 let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
                 if jet::AST::bundle_serves_until_stopped(&bundle) {
