@@ -5400,8 +5400,30 @@ fn ledger_cross_check_holds() {
 /// #1760: the two serde stems stay green — and each pin claims only what a
 /// ledger can actually prove about that stem.
 ///
-/// The run tier is pinned for both: `tests/jit_corpus_gate.txt` records them
-/// `resident_jit:`, and neither may come back to `gaps:` or `run_gaps:`.
+/// The old run-tier pin demanded `resident_jit:` for BOTH stems. That was true
+/// the day it was written (`af3201409`) and is not true now, and neither half of
+/// the change was a regression this test could have caught:
+///
+/// * `d1aaf936e` rewrote error handling across 39 net and serde examples one day
+///   AFTER the gate last moved, so the `resident_jit:` rows for those stems were
+///   never re-observed. `f7aab7bf8` re-derived the ledger from an observed run
+///   (374 -> 496 rows, 122 stems previously in no section at all) and recorded
+///   what the tiers actually do: `serde/encoding_breadth` is `frontend_rejected:`
+///   on the E2402 `?`-conversion family, and `serde/serde_generic` is a bare
+///   `deopt_interp:` row.
+/// * Nothing ran this test in between. `dev` belonged to no named target set
+///   until `tests/suites.txt` landed, so the pin went stale silently — the same
+///   shape as the `compile_covered` claim described below.
+///
+/// So the pin is re-stated against the OBSERVED classification, and only in the
+/// directions the gate's own ratchet allows. `run_tier_broken:` and
+/// `tier_divergent:` are shrink-only and both are currently EMPTY, so "neither
+/// stem may be a refusal or a divergence" can only ever get easier to satisfy —
+/// it is a real parity claim, not a restatement of today's row. A bare
+/// `deopt_interp:` row is a TIER CHOICE; the gate treats a detail-carrying one as
+/// FAILING (`ledger_conflicts`), so the empty-detail pin below is the
+/// assertion that actually catches a `serde/serde_generic` regression, and it is
+/// stricter than the class pin it replaces.
 ///
 /// Compile coverage is pinned for `serde/serde_generic` alone. `compile_covered:`
 /// is not a wish list — `jit_coverage_audit` compares it to the OBSERVED set in
@@ -5420,12 +5442,50 @@ fn serde_jit_parity_manifest_pins() {
     let (compile_covered, gaps, run_gaps, _) = parse_jit_gap_manifest_full();
     let gate = parse_corpus_gate_manifest();
     for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
-        assert!(
-            gate.iter().any(|record| {
-                record.stem == stem && record.class == CorpusGateClass::ResidentJit
-            }),
-            "{stem} must remain a resident-JIT corpus regression"
+        // Accounted for exactly once. A ghost row, a duplicate, or a stem that
+        // dropped out of the file entirely would otherwise make every claim
+        // below vacuously true.
+        let rows: Vec<_> = gate.iter().filter(|record| record.stem == stem).collect();
+        assert_eq!(
+            rows.len(),
+            1,
+            "{stem} must carry exactly one corpus-gate row, found {}",
+            rows.len()
         );
+        let record = rows[0];
+        // The parity claim, on the two shrink-only sections that mean "a tier
+        // disagreed". Both are empty today, so this may only get easier to hold.
+        assert!(
+            !matches!(
+                record.class,
+                CorpusGateClass::RunTierBroken | CorpusGateClass::TierDivergent
+            ),
+            "{stem} became a run-tier refusal or a tier divergence: {:?} {}",
+            record.class,
+            record.detail
+        );
+        // A tier choice carries no diagnostic; a failure does.
+        if record.class == CorpusGateClass::DeoptInterp {
+            assert!(
+                record.detail.is_empty(),
+                "{stem} deopts to the interpreter CARRYING a diagnostic, which the \
+                 gate counts as failing: {}",
+                record.detail
+            );
+        }
+        // `serde/encoding_breadth` is frontend-rejected today on the E2402
+        // `?`-conversion family. That is an open defect, not a licence: this
+        // pins the CAUSE, so repairing E2402 moves the stem out of the section
+        // and retires the branch, while a NEW and unrelated frontend rejection
+        // fails here instead of hiding behind an already-red row.
+        if record.class == CorpusGateClass::FrontendRejected {
+            assert!(
+                record.detail.contains("E2402"),
+                "{stem} is frontend-rejected for a NEW reason, not the known \
+                 E2402 `?`-conversion gap: {}",
+                record.detail
+            );
+        }
         assert!(
             !gaps.iter().any(|row| {
                 row == stem || row.starts_with(&format!("{stem}:"))

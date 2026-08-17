@@ -1749,8 +1749,15 @@
     }
 
     fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
+        // D-FLOORDIV1 / D-FAIL-ARITH1: plain `Int` `/`, `%` and `/%` stop with THE
+        // canonical arithmetic wording, never a second copy typed here. This site
+        // carried the invented "division by zero" while `Core.rs`'s fixed-width
+        // remainder, the TIR evaluator and the Cranelift host all raised
+        // `JET_ARITHMETIC_DIVIDE_ZERO`, so one operator reported two sentences and
+        // only the plain-`Int` AOT tier drifted (the same shape `jet-jit`'s
+        // `Numeric.rs` records for the E3001/E3010 split it already closed).
         if jet_int_is_zero(divisor) {
-            crate::jet_arithmetic_stop(file, line, "division by zero");
+            crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
         }
         if !jet_int_is_tagged(value) && !jet_int_is_tagged(divisor) {
             if let (Some(quotient), Some(remainder)) =
