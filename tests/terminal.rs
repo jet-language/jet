@@ -9,10 +9,20 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+mod common;
+
 const EXAMPLE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/examples/features/io/terminal_parity.jet"
 );
+
+/// The answers this example needs, from their one home in `tests/common`.
+/// `tests/golden.rs`, `tests/corelib_parts/http_data.rs` and `tests/dev.rs`
+/// read the same entry, so a change to the transcript reaches every tier at
+/// once instead of leaving one harness answering an older program.
+fn answers() -> &'static common::ExampleStdin {
+    common::example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers")
+}
 
 /// A differential means nothing until we know which tier answered. The resident
 /// tier has to compile `run` itself: a silent deopt would let tier0 answer for
@@ -66,7 +76,7 @@ fn assert_default_run_traces_native_tier() {
         .stdin
         .take()
         .expect("traced stdin")
-        .write_all(b"\nnot-a-number\n3\n2\n")
+        .write_all(answers().piped.as_bytes())
         .expect("write traced answers");
     let output = child.wait_with_output().expect("collect tier trace");
     let trace = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -111,7 +121,7 @@ fn run_pty(mode: &str) -> String {
         .stdin
         .take()
         .expect("PTY stdin")
-        .write_all(b"\nnot-a-number\n3\n2\nsecret\n")
+        .write_all(answers().tty().as_bytes())
         .expect("write terminal answers");
     let output = child.wait_with_output().expect("collect PTY transcript");
     assert!(
@@ -128,8 +138,6 @@ struct NonPtyOutput {
 }
 
 fn run_non_pty(mode: &str) -> NonPtyOutput {
-    let jet = env!("CARGO_BIN_EXE_jet");
-    let example = EXAMPLE;
     let mut args = vec!["run", "--quiet"];
     match mode {
         "default" => {}
@@ -137,22 +145,8 @@ fn run_non_pty(mode: &str) -> NonPtyOutput {
         "interpret" => args.push("--interpret"),
         _ => panic!("unknown non-PTY mode: {mode}"),
     }
-    args.push(example);
-    let mut child = Command::new(jet)
-        .args(args)
-        .env("NO_COLOR", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("non-PTY jet run must start");
-    child
-        .stdin
-        .take()
-        .expect("non-PTY stdin")
-        .write_all(b"\nnot-a-number\n3\n2\n")
-        .expect("write non-PTY answers");
-    let output = child.wait_with_output().expect("collect non-PTY output");
+    args.push(EXAMPLE);
+    let output = common::jet_cli_output_with_stdin(&args, answers().piped);
     assert!(
         output.status.success(),
         "non-PTY child failed: {}",
@@ -199,7 +193,7 @@ fn run_non_pty_merged(mode: &str) -> String {
         .stdin
         .take()
         .expect("merged non-PTY stdin")
-        .write_all(b"\nnot-a-number\n3\n2\n")
+        .write_all(answers().piped.as_bytes())
         .expect("write merged non-PTY answers");
     let status = child.wait().expect("collect merged non-PTY status");
     assert!(status.success(), "merged non-PTY child failed: {status}");

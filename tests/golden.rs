@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 mod common;
 use common::{
-    add_generated_rust, fixture_filter, fixture_matches, have_rustc, panic_message,
+    add_generated_rust, example_stdin, fixture_filter, fixture_matches, have_rustc, panic_message,
     strip_vetted_prelude_modules, test_worker_count, unified_diff, FfiBridgeLock,
 };
 
@@ -466,7 +466,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     if needs_gtk {
         run_cmd.env("JET_UI_HEADLESS", "1");
     }
-    let run = if stem == "io/terminal_parity" {
+    // An interactive example only reproduces its golden against the answers
+    // that golden was recorded with. `common::example_stdin` is the one home
+    // for those answers (I8); this run asks for them by stem instead of
+    // naming the example and restating its bytes.
+    let run = if let Some(answers) = example_stdin(stem) {
         use std::io::Write;
         use std::process::Stdio;
         let mut child = run_cmd
@@ -479,7 +483,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             .stdin
             .take()
             .unwrap()
-            .write_all(b"\nnot-a-number\n3\n2\n")
+            .write_all(answers.piped.as_bytes())
             .unwrap();
         child.wait_with_output().unwrap()
     } else {
