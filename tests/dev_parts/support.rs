@@ -582,7 +582,13 @@ fn interpreter_example_stems() -> Vec<String> {
 /// recorded observation, not a measurement of this assertion — correct it to the
 /// first count this battery observes, in the same diff as that observation, and
 /// only downward afterwards.
-const SEMA_REJECTED_CEILING: usize = 28;
+/// 54 is the first OBSERVED count, taken at 76bb19ba9 once this assertion
+/// existed to measure it. The 28 it replaced was a hand-traced estimate from a
+/// different oracle (the JIT coverage universe, which walks a slightly
+/// different set) and was never a measurement of this battery. Correcting an
+/// estimate to its measurement is not raising a guard: the number may only fall
+/// from here, and card #2018 owns driving it down.
+const SEMA_REJECTED_CEILING: usize = 54;
 
 /// The stems the run-path front end accepts, and the ones it rejects together
 /// with the reason the compiler gave (#2020). Nothing is discarded.
