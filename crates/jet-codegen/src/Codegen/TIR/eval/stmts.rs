@@ -1544,7 +1544,26 @@ impl<'a> EvalCtx<'a> {
                 value,
                 ..
             } => {
-                let base_value = self.eval_expr(base, scope)?;
+                // D-UNINIT1: a `[T#N].{ uninit }` local is a LEGAL index-assign
+                // base — the write is what initializes the slot — so the
+                // `__JetViewMut` probe below must not read the whole place to
+                // find out whether it is a window. `eval_expr` on such a local
+                // demands every slot already written (that read IS the uninit
+                // safety rule, `eval/exprs.rs` `TExprKind::Local`), so it
+                // refused the very first `bytes[0] = 1` with an E2201 boundary
+                // while the correct write path (`uninit_fixed_write`, below)
+                // sat unreached. Take the slot's own value instead: a carrier
+                // is never a `__JetViewMut`, so the probe answers the same and
+                // the write rule stays exactly where it belongs — on reads.
+                let base_value = match &base.kind {
+                    crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed => scope
+                        .get(&local.name)
+                        .cloned()
+                        .ok_or_else(|| {
+                            unsupported(&format!("unbound `{}`", local.name), self.span())
+                        })?,
+                    _ => self.eval_expr(base, scope)?,
+                };
                 let idx_v = self.eval_expr(index, scope)?;
                 let rhs = self.eval_expr(value, scope)?;
                 // Mutable place-window write-through (`&xs[a..b]` → `__JetViewMut`).

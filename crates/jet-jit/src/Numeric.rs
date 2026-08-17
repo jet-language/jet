@@ -21,6 +21,21 @@ fn trap_fraction(msg: &str) {
     });
 }
 
+/// D-FAIL-ARITH1 / I9: a zero divisor is ONE arithmetic boundary, so both the
+/// diagnostic code and the sentence come from the shared Prelude table
+/// (`Prelude/Core/Contracts.rs`, reached through
+/// `runtime_host::contract_kernel`), never from a host adapter's own literal.
+///
+/// `JitHeap::int_div_rem` answers `None` only when the divisor is zero
+/// (`jet-rt/src/lib.rs`), so that is the exact fact these hosts marshal. They
+/// used to raise `set_trap`'s generic `E3001` "division by zero" while the
+/// fixed-width path beside them raised `E3010` "divided by zero" through this
+/// same table (`jit/runtime_host.rs`, `lower_intn_values`) — one operator, two
+/// reports, and the plain-`Int` one carried the invented wording.
+fn divide_by_zero_message() -> &'static str {
+    super::runtime_host::contract_kernel::jet_arithmetic_message("divide_zero")
+}
+
 pub(crate) fn push_decimal(d: CtDecimal) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.decimal_values.push(Some(d));
@@ -174,7 +189,7 @@ fn jet_jit_int_div(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div(a, b) {
         Some(value) => value,
         None => {
-            rt.set_trap("division by zero");
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
             0
         }
     })
@@ -184,7 +199,7 @@ fn jet_jit_int_floor_div(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_floor_div(a, b) {
         Some(value) => value,
         None => {
-            rt.set_trap("division by zero");
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
             0
         }
     })
@@ -194,7 +209,7 @@ fn jet_jit_int_mod(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_mod(a, b) {
         Some(value) => value,
         None => {
-            rt.set_trap("division by zero");
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
             0
         }
     })
@@ -204,7 +219,7 @@ fn jet_jit_int_rem(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_rem(a, b) {
         Some(value) => value,
         None => {
-            rt.set_trap("division by zero");
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
             0
         }
     })
@@ -374,7 +389,7 @@ fn jet_jit_int_div_mod(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_mod(left, right) {
         Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
         None => {
-            rt.set_trap("division by zero");
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
             int_pair(rt, 0, 0)
         }
     })
@@ -384,7 +399,7 @@ fn jet_jit_int_div_rem_pair(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_rem(left, right) {
         Some((quotient, remainder)) => int_pair(rt, quotient, remainder),
         None => {
-            rt.set_trap("division by zero");
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
             int_pair(rt, 0, 0)
         }
     })
