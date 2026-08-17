@@ -222,12 +222,6 @@ pub mod jet_std {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
-// The included HTTPMessage and NetHTTP fragments render their error surfaces
-// through the shared display seam, so the trait has to be in scope here the
-// same way the other include sites bring it in.
-#[allow(unused_imports)]
-use crate::JetDisplay;
-
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
