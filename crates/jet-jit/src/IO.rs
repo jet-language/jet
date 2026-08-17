@@ -909,37 +909,42 @@ fn string_handle_eq(a: i64, b: i64) -> bool {
     })
 }
 
-pub(crate) fn progress_transfer_zip_state(left: i64, right: i64, target: i64) {
-    let left_active = progress_states()
-        .lock()
-        .expect("JIT progress state poisoned")
-        .contains_key(&left);
-    let right_active = progress_states()
-        .lock()
-        .expect("JIT progress state poisoned")
-        .contains_key(&right);
+/// D-COREIO1=A: the zip family is N-column and the receiver is column 0. A
+/// progress sidecar on any column becomes the zipped result's plan; the other
+/// columns' sidecars retire with their handles.
+pub(crate) fn progress_transfer_zip_state(columns: &[i64], target: i64) {
+    let active = {
+        let states = progress_states()
+            .lock()
+            .expect("JIT progress state poisoned");
+        columns
+            .iter()
+            .copied()
+            .filter(|handle| states.contains_key(handle))
+            .collect::<Vec<_>>()
+    };
+    let Some(source) = active.first().copied() else {
+        return;
+    };
     let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
-    let selected = if left_active { Some(left) } else if right_active { Some(right) } else { None };
-    if let Some(source) = selected {
-        if let Some((plan, old_tail)) = source_plan(source) {
-            let consumed = target_len.min(plan.len());
-            // `Iterator::zip` asks the receiver for one item before it asks
-            // the other side. When the other side ends first, an exhaustive
-            // zip therefore consumes one extra receiver item while probing
-            // for the next pair. Preserve that source pull in the progress
-            // sidecar; a right-only active source has no such probe.
-            let tail = if target_len < plan.len() && source == left {
-                plan.get(target_len).copied().unwrap_or(0)
-            } else if target_len >= plan.len() {
-                old_tail
-            } else {
-                0
-            };
-            install_plan(source, target, plan.into_iter().take(consumed).collect(), tail);
-        }
+    if let Some((plan, old_tail)) = source_plan(source) {
+        let consumed = target_len.min(plan.len());
+        // `Iterator::zip` asks the receiver for one item before it asks the
+        // other side. When another column ends first, an exhaustive zip
+        // therefore consumes one extra receiver item while probing for the
+        // next row. Preserve that source pull in the progress sidecar; a
+        // non-receiver active column has no such probe.
+        let tail = if target_len < plan.len() && Some(source) == columns.first().copied() {
+            plan.get(target_len).copied().unwrap_or(0)
+        } else if target_len >= plan.len() {
+            old_tail
+        } else {
+            0
+        };
+        install_plan(source, target, plan.into_iter().take(consumed).collect(), tail);
     }
-    if left_active && right_active {
-        progress_remove_state(if selected == Some(left) { right } else { left });
+    for retired in active.into_iter().skip(1) {
+        progress_remove_state(retired);
     }
 }
 
