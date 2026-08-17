@@ -155,7 +155,10 @@ fn emit_struct_command_entry(
             &callable,
             Some(&call_args),
             function.return_type.as_ref().and_then(|ty| entry_error(cx, ty)),
-            function.return_type.as_ref().is_some_and(returns_app),
+            function
+                .return_type
+                .as_ref()
+                .is_some_and(jet_foundation::AST::type_is_app),
             false,
             "                    ",
         );
