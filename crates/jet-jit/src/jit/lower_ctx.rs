@@ -12783,7 +12783,12 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn service_core_arity(module: &str, method: &str) -> Option<usize> {
+    /// The ONE table naming which `core.services` / `core.sync` / `app.sync`
+    /// calls this tier can marshal, and at what arity. `lower_service_core_call`
+    /// refuses every pair this table does not name, and `safety.rs` admits
+    /// exactly what it names, so tier admission cannot drift from the lowering
+    /// arm that implements it (I8: one mechanism, one fact).
+    pub(crate) fn service_core_arity(module: &str, method: &str) -> Option<usize> {
         match (module, method) {
             ("core.services", "runtime") => Some(2),
             (
