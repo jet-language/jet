@@ -225,6 +225,23 @@ fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R>
     })
 }
 
+/// I9 / D-BOUND-HEAD1=A: the URL and MIME hosts are marshalling adapters over
+/// one Prelude kernel. A receiver handle that holds no `NetValue` is an engine
+/// fault, never an empty component: `scheme`, `path`, `query`, `userinfo` and
+/// friends all return a genuinely empty `String` for real URLs, so answering
+/// `String::new()` here makes the fault unreachable and prints a wrong answer
+/// no output check can see. Trap instead, the way `Math::require_string_list`
+/// already does for the typed-text lists that feed the same Prelude kernel.
+fn require_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R> {
+    let value = with_net(handle, f);
+    if value.is_none() {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("net handle does not carry a URL or MIME value")
+        });
+    }
+    value
+}
+
 fn take_net(handle: i64) -> Option<NetValue> {
     if handle <= 0 {
         return None;
@@ -358,8 +375,16 @@ fn jet_jit_url_parse(s: i64) -> i64 {
 }
 
 fn jet_jit_url_typed_literal(literals: i64, holes: i64) -> i64 {
-    let literals = list_strings(literals).unwrap_or_default();
-    let holes = list_strings(holes).unwrap_or_default();
+    // Defaulting a failed marshal to an empty list used to hand the Prelude
+    // constructor mismatched literal/hole counts, and `jet_typed_url_literal`
+    // answers that violated invariant with `std::process::abort()` — a bare
+    // engine abort with no report. Trap at the adapter that owns the marshal.
+    let Some(literals) = require_string_list(literals) else {
+        return 0;
+    };
+    let Some(holes) = require_string_list(holes) else {
+        return 0;
+    };
     push(NetValue::Url(runtime::url_typed_literal(&literals, &holes)))
 }
 
@@ -416,24 +441,22 @@ fn jet_jit_mime_extension(mime: i64) -> i64 {
 }
 
 fn jet_jit_url_to_string(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.to_string_value()),
         NetValue::Mime(m) => Some(m.to_string_value()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_scheme(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.scheme()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_host(recv: i64) -> i64 {
@@ -444,43 +467,39 @@ fn jet_jit_url_host(recv: i64) -> i64 {
 }
 
 fn jet_jit_url_path(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.path()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_query_value(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.query()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_query_pairs(recv: i64) -> i64 {
-    let Some(pairs) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.query_pairs()),
         _ => None,
-    }) else {
-        return list_of_string_pairs(Vec::new());
-    };
-    list_of_string_pairs(pairs)
+    })
+    .map(list_of_string_pairs)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_path_segments(recv: i64) -> i64 {
-    let Some(segs) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.path_segments()),
         _ => None,
-    }) else {
-        return list_of_strings(Vec::new());
-    };
-    list_of_strings(segs)
+    })
+    .map(list_of_strings)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_fragment(recv: i64) -> i64 {
@@ -491,43 +510,39 @@ fn jet_jit_url_fragment(recv: i64) -> i64 {
 }
 
 fn jet_jit_url_username(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.username()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_password(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.password()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_userinfo(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.userinfo()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_authority(recv: i64) -> i64 {
-    let Some(text) = with_net(recv, |v| match v {
+    require_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.authority()),
         _ => None,
-    }) else {
-        return alloc_string(String::new());
-    };
-    alloc_string(text)
+    })
+    .map(alloc_string)
+    .unwrap_or(0)
 }
 
 fn jet_jit_url_default_port(recv: i64) -> i64 {
@@ -661,6 +676,18 @@ fn list_strings(list: i64) -> Option<Vec<String>> {
         }
         Some(out)
     })
+}
+
+/// The typed-URL literal head's list marshal. Mirrors `Math::require_string_list`
+/// so both boundary heads report a broken `[String]` carrier the same way (I8).
+fn require_string_list(list: i64) -> Option<Vec<String>> {
+    let values = list_strings(list);
+    if values.is_none() {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("typed URL list contains a non-string value")
+        });
+    }
+    values
 }
 
 fn list_bytes(list: i64) -> Option<Vec<u8>> {

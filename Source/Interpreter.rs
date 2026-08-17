@@ -248,6 +248,9 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
     }
     program.entry = name.to_string();
     let mut sink = crate::Comptime::DevSink::new();
+    // Same per-run buffer discipline as `run_checked`: the E3002 journey drains
+    // at the report edge, so a recovered failure must not leak into this run.
+    jet_foundation::Outcome::jet_journey_reset();
     let mut globals = std::collections::HashMap::new();
     for module in &bundle.modules {
         for item in &module.items {
@@ -317,8 +320,11 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
                     crate::Comptime::display_core_pure_value(&error)
                         .unwrap_or_else(|| error.jet_show())
                 });
-            sink.stderr.push_str(&rendered);
-            sink.stderr.push('\n');
+            // D-FAIL-CTX1=A: the fourth entry report edge. A `#Job` entry that
+            // lets a `?`-propagated failure escape reports the same journey AOT's
+            // `jet_entry_report` and the resident and deopt boundaries report (I9).
+            sink.stderr
+                .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
             RunOutcome::Ran {
                 stdout: sink.stdout,
                 stderr: sink.stderr,
