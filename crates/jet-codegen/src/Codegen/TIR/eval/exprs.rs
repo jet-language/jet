@@ -7242,17 +7242,17 @@ impl<'a> EvalCtx<'a> {
                         } else {
                             String::new()
                         };
-                        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+                        // Accumulate only. The frame reaches stderr at the one
+                        // report edge (`jet_journey_report`), so a failure the
+                        // program recovers reports nothing — the AOT Prelude's
+                        // `jet_trace_err` has done exactly this since the report
+                        // edge landed, and printing here was the second policy.
+                        let _ = jet_foundation::Outcome::jet_journey_frame(
                             file,
                             *line as u32,
                             fn_name,
                             || note,
-                        ) {
-                            if let Some(sink) = self.sink.as_ref() {
-                                let mut sink = sink.lock().expect("evaluator sink poisoned");
-                                sink.stderr.push_str(&frame);
-                            }
-                        }
+                        );
                         // D-FAIL-ERROR1=A: the evaluator marshals the same
                         // String-to-Err conversion selected by sema. Declared
                         // conversions run their lowered body, so the evaluator

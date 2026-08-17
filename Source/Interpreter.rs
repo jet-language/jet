@@ -129,6 +129,9 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         }
     }
     let mut sink = crate::Comptime::DevSink::new();
+    // Per-run buffer, cleared like the sink: the E3002 journey now drains at the
+    // report edge, so a recovered failure must not leak into a later run.
+    jet_foundation::Outcome::jet_journey_reset();
     let cap_bytes = match &bundle.program_allocator {
         jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } => {
             Some(cap.map_or(0, |size| size.bytes))
@@ -150,8 +153,10 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
                         crate::Comptime::display_core_pure_value(&error)
                             .unwrap_or_else(|| error.jet_show())
                     });
-                sink.stderr.push_str(&rendered);
-                sink.stderr.push('\n');
+                // Same report edge as AOT's `jet_entry_report` and the resident
+                // tier: the accumulated E3002 journey prefixes this error.
+                sink.stderr
+                    .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
                 RunOutcome::Ran {
                     stdout: sink.stdout,
                     stderr: sink.stderr,

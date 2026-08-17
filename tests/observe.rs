@@ -448,7 +448,10 @@ fn error_return_trace_frames() {
     }
 
     // parse_age originates an Err; `?` in load and again in double each append
-    // one E3002 frame as the error propagates. main catches it, so exit is 0.
+    // one E3002 frame to the journey. The journey reaches stderr at the one
+    // report edge, so `run` lets the failure escape — a recovered failure
+    // reports nothing, which is why catching it here proved nothing about the
+    // frames.
     let src = r#"
 enum ParseError {
     Empty
@@ -468,33 +471,33 @@ fn double(raw: String) => Int ? ParseError {
     n :: load(raw)? "doubling age"
     return Ok((n * 2))
 }
-fn run() {
-    if double("") == {
-        .Ok(n) -> { print(n) }
-        .Err(e) -> { print("failed") }
-    }
+fn run() ? ParseError {
+    n :: double("")?
+    print(n)
 }
 "#;
     let (code, stdout, stderr) = build_and_run_debug("error_trace", src);
-    assert_eq!(code, 0, "program should exit 0 (error caught): {stderr}");
-    assert!(stdout.contains("failed"), "error not caught: {stdout}");
-    // Two propagation frames, innermost (load) first.
+    assert_eq!(code, 1, "escaping failure must exit 1: {stderr}");
+    assert!(stdout.is_empty(), "nothing printed before the failure: {stdout}");
+    // Innermost frame first, one per `?` site, each carrying its own note.
+    let frames: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("error propagated from: "))
+        .collect();
+    assert_eq!(frames.len(), 3, "one frame per `?` site: {stderr}");
     assert!(
-        stderr.contains("error propagated from: load"),
-        "missing load frame: {stderr}"
+        frames[0].starts_with("error propagated from: load (")
+            && frames[0].ends_with(") via ?: loading age"),
+        "innermost frame must be load with its note: {stderr}"
     );
     assert!(
-        stderr.contains("error propagated from: double"),
-        "missing double frame: {stderr}"
-    );
-    assert!(stderr.contains("via ?"), "missing `via ?` suffix: {stderr}");
-    assert!(
-        stderr.contains("via ?: loading age"),
-        "missing note on a typed error: {stderr}"
+        frames[1].starts_with("error propagated from: double (")
+            && frames[1].ends_with(") via ?: doubling age"),
+        "second frame must be double with its note: {stderr}"
     );
     assert!(
-        stderr.contains("via ?: doubling age"),
-        "missing second note on a typed error: {stderr}"
+        frames[2].starts_with("error propagated from: run (") && frames[2].ends_with(") via ?"),
+        "outermost frame must be run with no note: {stderr}"
     );
 }
 
@@ -590,6 +593,8 @@ fn propagation_trace_collapses_repeated_frames() {
     }
 
     // Same `?` site hit repeatedly via recursion → one frame, not N copies.
+    // The journey only reaches stderr when the failure escapes the entry, so
+    // `run` propagates instead of recovering.
     let src = r#"
 fn dive(n: Int) => Int ? {
     if n <= 0 {
@@ -598,16 +603,14 @@ fn dive(n: Int) => Int ? {
     v :: dive((n - 1))?
     return Ok(v)
 }
-fn run() {
-    if dive(4) == {
-        .Ok(v) -> { print(v) }
-        .Err(e) -> { print("failed") }
-    }
+fn run() ? {
+    v :: dive(4)?
+    print(v)
 }
 "#;
     let (code, stdout, stderr) = build_and_run_debug("error_trace_collapse", src);
-    assert_eq!(code, 0, "program should exit 0: {stderr}");
-    assert!(stdout.contains("failed"), "error not caught: {stdout}");
+    assert_eq!(code, 1, "an escaping failure must exit 1: {stderr}");
+    assert!(stdout.is_empty(), "the failure precedes the print: {stdout}");
     let dive_frames = stderr
         .lines()
         .filter(|l| l.contains("error propagated from: dive"))
