@@ -10,16 +10,20 @@ fn stdin_filter_default_dev_reports_jit_gap() {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
-    let input = dir.join("stdin.txt");
-    fs::write(&input, "jet one\nnope\njet two\n").unwrap();
     let file = example_path("io/stdin_filter");
+    // #2017: NOT in `common::example_stdin`, deliberately. That table holds the
+    // answers a checked-in golden was recorded with, and every harness that
+    // walks stems feeds whatever it finds there. `io/stdin_filter`'s golden is
+    // the no-input case, so an entry would make those harnesses feed the wrong
+    // thing. These three lines are this test's own input for the filter, stated
+    // as bytes like every other harness states them.
     let compiled = compiled_binary_output_with_stdin(
         &dir,
         "stdin_filter_aot",
         0,
         "io/stdin_filter",
         &file,
-        Some(&input),
+        Some("jet one\nnope\njet two\n"),
     );
     assert_eq!(compiled.stdout.trim(), "jet one\njet two");
     assert_default_dev_jit_gap("io/stdin_filter", &file);

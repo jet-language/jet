@@ -213,6 +213,20 @@ fn compiled_binary_path(
     dir.join(format!("jet_{tag}_{i}_bin")).join(program_name)
 }
 
+/// #2017: the one place a dev-side harness turns shared answers into something
+/// a child can read.
+///
+/// The answers arrive as bytes from `common::example_stdin`, and each tier gets
+/// its OWN file so three children can each read the whole sequence — a single
+/// pipe would be drained by whichever tier ran first, which is a silent
+/// no-input run for the other two, the exact defect this card is about.
+fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std::path::PathBuf {
+    let path = dir.join(format!("jet_{tag}_{i}.stdin"));
+    fs::create_dir_all(dir).unwrap_or_else(|e| panic!("create answer dir: {e}"));
+    fs::write(&path, answers).unwrap_or_else(|e| panic!("write answers for `{tag}`: {e}"));
+    path
+}
+
 fn compiled_binary_output(
     dir: &std::path::Path,
     tag: &str,
@@ -223,13 +237,20 @@ fn compiled_binary_output(
     compiled_binary_output_with_stdin(dir, tag, i, stem, file, None)
 }
 
+/// #2017: every harness states the ANSWERS, never a path. The three suites that
+/// feed an interactive example used to disagree on the type of the input —
+/// inline bytes in `tests/golden.rs`, an `Option<&Path>` here — so a call site
+/// had to convert before it could share a fixture. `common::example_stdin` is
+/// the one home for the answers themselves (I8); materializing them is this
+/// function's private business, because `command_output_with_timeout` owns the
+/// spawn and never services a pipe, so a child needs a real fd 0.
 fn compiled_binary_output_with_stdin(
     dir: &std::path::Path,
     tag: &str,
     i: usize,
     stem: &str,
     file: &str,
-    stdin: Option<&std::path::Path>,
+    answers: Option<&str>,
 ) -> ProgramOutput {
     let src = fs::read_to_string(file).unwrap();
     let compiled = match jet::compile_with_path(&src, file) {
@@ -289,8 +310,8 @@ fn compiled_binary_output_with_stdin(
         );
     }
     let mut run_cmd = Command::new(&bin);
-    if let Some(path) = stdin {
-        run_cmd.stdin(fs::File::open(path).unwrap());
+    if let Some(answers) = answers {
+        run_cmd.stdin(fs::File::open(answer_file(dir, tag, i, answers)).unwrap());
     }
     // Match golden / ui_and_web three-way: GTK `present` opens a real window
     // unless headless — AOT would hang the 30s timeout otherwise.
@@ -446,30 +467,102 @@ fn command_output_with_timeout(mut cmd: Command, timeout: Duration, label: &str)
     }
 }
 
-fn dev_cli_output_with_stdin(
+/// #2017: run one tier of one example in its own child, with the answers the
+/// golden was recorded with on its own fd 0.
+///
+/// The choice, recorded here because the card asks for it: a SUBPROCESS, not an
+/// injected reader. The in-process entry points (`dev_iteration`,
+/// `CraneliftBackend::run`) read the test binary's own fd 0, which every thread
+/// of a parallel suite shares, so there is nothing per-run to redirect there;
+/// and an injected reader would exercise an input path no user has, which is
+/// exactly the sort of harness-only seam an I9 differential is supposed to
+/// catch rather than contain. A child reads stdin the way a user's program
+/// does, through the same CLI entry point.
+///
+/// `trace` asks the run for `--trace-tiers`, which puts the tier attribution on
+/// stderr and therefore makes stderr unusable as a byte comparison — so a
+/// caller that needs both takes two runs: one to learn WHICH tier answered, one
+/// to collect what it printed. `tests/terminal.rs` splits the same way.
+fn cli_tier_output_with_answers(
     file: &str,
-    stdin: &std::path::Path,
-    label: &str,
-) -> ProgramOutput {
-    let mut dev_cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
-    dev_cmd
-        .args(["dev", file, "--watch=off"])
-        .stdin(fs::File::open(stdin).unwrap());
-    let dev = command_output_with_timeout(dev_cmd, DEV_DIFF_TIMEOUT, label);
-    let stdout = String::from_utf8_lossy(&dev.stdout);
-    let (runtime_stdout, status) = stdout
-        .rsplit_once("✓ ran in ")
-        .expect("one-shot jet dev must print its completion status");
-    assert!(
-        status
-            .strip_suffix(" ms\n")
-            .is_some_and(|millis| !millis.is_empty() && millis.bytes().all(|b| b.is_ascii_digit())),
-        "unexpected one-shot jet dev completion status: {status:?}"
+    stem: &str,
+    answers: &str,
+    interpret: bool,
+    trace: bool,
+) -> Output {
+    let tag = format!(
+        "{}_{}",
+        stem.replace('/', "_"),
+        if interpret { "interp" } else { "default" }
     );
+    let cache = common::unique_tmp(&format!("jet_stdin_{tag}_cache"));
+    fs::create_dir_all(&cache).unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
+    cmd.arg("run").arg(file);
+    if interpret {
+        cmd.arg("--interpret");
+    }
+    // `--quiet` on every run: the banner is the CLI's, not the program's, and
+    // `tests/terminal.rs` compares this same golden from this same CLI with it.
+    cmd.arg("--quiet");
+    if trace {
+        cmd.arg("--trace-tiers");
+    }
+    cmd.current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .env("JET_RUN_CACHE_DIR", &cache)
+        .env("JET_CACHE_DIR", cache.join("build"))
+        .stdin(fs::File::open(answer_file(&cache, &tag, 0, answers)).unwrap());
+    let output = command_output_with_timeout(
+        cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("`jet run` with answers for `{stem}` ({tag})"),
+    );
+    let _ = fs::remove_dir_all(&cache);
+    output
+}
+
+/// The tier that answered, proved from the trace of a run fed the same answers.
+///
+/// Stated as a positive AND a negative, because a differential that only checks
+/// "the tier I wanted appears" passes when BOTH tiers ran and one deopted.
+fn assert_cli_tier_answered(file: &str, stem: &str, answers: &str, interpret: bool) {
+    let traced = cli_tier_output_with_answers(file, stem, answers, interpret, true);
+    assert!(
+        traced.status.success(),
+        "traced `jet run{}` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{}",
+        if interpret { " --interpret" } else { "" },
+        String::from_utf8_lossy(&traced.stdout),
+        String::from_utf8_lossy(&traced.stderr)
+    );
+    let trace = String::from_utf8_lossy(&traced.stderr);
+    let (wanted, forbidden) = if interpret {
+        ("tier0 interp", "tier1 native")
+    } else {
+        ("tier1 native", "tier0 interp")
+    };
+    assert!(
+        trace.contains(wanted),
+        "`{stem}` did not report `{wanted}` when fed its answers:\n{trace}"
+    );
+    assert!(
+        !trace.contains(forbidden),
+        "`{stem}` reached `{forbidden}` when it had to stay on `{wanted}`:\n{trace}"
+    );
+}
+
+/// One tier of one interactive example, byte-for-byte, with no trace on stderr.
+fn cli_tier_program_output(
+    file: &str,
+    stem: &str,
+    answers: &str,
+    interpret: bool,
+) -> ProgramOutput {
+    let output = cli_tier_output_with_answers(file, stem, answers, interpret, false);
     ProgramOutput::ran(
-        runtime_stdout.to_string(),
-        String::from_utf8_lossy(&dev.stderr).to_string(),
-        dev.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.code().unwrap_or(1),
     )
 }
 
@@ -2406,6 +2499,52 @@ fn golden_stderr(stem: &str) -> String {
     }
 }
 
+/// #2017: the three-tier differential for an example that reads stdin.
+///
+/// The same claim its caller makes — interpreter, resident JIT and AOT all
+/// reproduce the checked-in golden byte for byte — with the one difference that
+/// makes the claim true here: every tier is a child, and every child is fed the
+/// answers the golden was recorded with, from `common::example_stdin`.
+///
+/// Each tier gets its own file of answers rather than one shared pipe, because
+/// the first reader would otherwise drain it and the other two would silently
+/// run with no input — a pass that means "three tiers agree about nothing".
+fn assert_interactive_example_three_way(file: &str, stem: &str, answers: &str) {
+    let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
+
+    // Which tier answered, then what it printed. Two runs, because the trace
+    // that proves the tier lands on the stderr the golden pins.
+    assert_cli_tier_answered(file, stem, answers, true);
+    let interpreted = cli_tier_program_output(file, stem, answers, true);
+    assert_eq!(
+        interpreted, golden,
+        "forced interpreter drifted from the golden for `{stem}` with the answers it was \
+         recorded with"
+    );
+
+    assert_cli_tier_answered(file, stem, answers, false);
+    let jit = cli_tier_program_output(file, stem, answers, false);
+    assert_eq!(
+        jit, golden,
+        "resident JIT drifted from the golden for `{stem}` with the answers it was recorded with"
+    );
+
+    if !have_rustc() {
+        eprintln!(
+            "note: rustc not found; `{stem}` compared on interpreter and resident JIT only"
+        );
+        return;
+    }
+    let dir = common::unique_tmp(&format!("jet_stdin_three_way_{}", stem.replace('/', "_")));
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output_with_stdin(&dir, "stdin_three_way", 0, stem, file, Some(answers));
+    assert_eq!(
+        aot, golden,
+        "AOT drifted from the golden for `{stem}` with the answers it was recorded with"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
     if skip_if_cranelift_host_unsupported() {
         return;
@@ -2423,6 +2562,19 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
         jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
     );
+
+    // #2017: an interactive example is only comparable against the answers its
+    // golden was recorded with, and this battery fed NOTHING — so a pass here
+    // meant the three tiers agreed on a no-input run while the golden described
+    // a fed run. The answers come from `common::example_stdin`, the one home
+    // for them (I8), and each tier gets its own child so each gets its own fd 0.
+    // The in-process resident-JIT safety proof above still runs; the tier
+    // attribution below moves to `--trace-tiers`, which is the out-of-process
+    // form of the same claim (`run_cli_default_resident` already reads it).
+    if let Some(answers) = common::example_stdin(stem) {
+        assert_interactive_example_three_way(file, stem, answers.piped);
+        return;
+    }
 
     let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
 

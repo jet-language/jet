@@ -18,9 +18,11 @@
 //! own 165 declared tests inside the 900s suite guard, so the corpus batteries
 //! moved to sibling targets — `dev_interp_parity`, `dev_default_parity`,
 //! `dev_tier_parity`, `dev_corpus`, `dev_corpus_gate` — each with its own budget.
-//! Every one of them is a `tests/*.rs` file, so they are all routine by
-//! construction: `scripts/agent/time-suites.sh` times each root test binary and
-//! `tools/ci/test-shards.sh` shards the whole inventory (D-CI1=A).
+//! Every one of them is a `tests/*.rs` file, so cargo builds a binary for each;
+//! `tests/suites.txt` then puts each one in a named verification set and
+//! `tests/suite_membership.rs` fails if any declared target is in none (#2025).
+//! `scripts/agent/time-suites.sh --set <name>` runs a set against this same
+//! guard, and `tools/ci/test-shards.sh` shards the whole inventory (D-CI1=A).
 //! `every_dev_slice_is_wired_into_a_test_target` pins that nothing was dropped.
 #![allow(dead_code, unused_imports)]
 

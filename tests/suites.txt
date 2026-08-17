@@ -1,0 +1,352 @@
+# Routine verification sets: every declared test target belongs to exactly one (#2025).
+#
+# A target nobody runs is a target whose failures are invisible. `golden`,
+# `ban_bare_panic` and `jit_run` were each found red while sitting outside every
+# set an agent routinely ran, because membership was REMEMBERED rather than
+# enforced. This file makes it enforced: it is the one list of sets, and
+# tests/suite_membership.rs::every_test_target_belongs_to_a_named_set walks
+# `tests/*.rs` and `crates/*/tests/*.rs` and fails when the two disagree.
+#
+# Scope: integration test targets. Cargo builds one test binary per file, so the
+# filesystem walk IS the target inventory. Package lib/bin unit tests ride with
+# their package and are covered by `--workspace`; they cannot fall out of a set
+# on their own, which is the failure mode this file exists to stop.
+#
+# Nothing here is decorative. `scripts/agent/time-suites.sh --set <name>` reads
+# this file to decide what to run, and `--set all` is the union, so the sets are
+# a partition of the inventory rather than a description of one.
+#
+# The pins live OUTSIDE this file, in tests/suite_membership.rs, so a hand-edit
+# cannot green the check by deleting the row that fails:
+#   TEST_TARGET_FLOOR       rows may only GROW
+#   UNASSIGNED_CEILING = 0  a target in no section is a failure, never a count
+#   HOST_GATED_HELD_OUT     exact, with the observed gate and the owing card
+#
+# Rows are repo-relative paths without `.rs`, sorted, one per line.
+
+# Repo law: the checks that hold the tree honest (I2 bare-panic ban, generated-code
+#   safety, diagnostics registration, ratchets, ledgers). Cheap, and the first set to run.
+guards:
+  tests/ban_bare_panic
+  tests/ban_jetpack_unwrap_expect
+  tests/diagnostic_gate
+  tests/diagnostic_snapshots
+  tests/diagnostics_coverage
+  tests/diagnostics_format
+  tests/fuzz_sema
+  tests/gate_ledger
+  tests/gen_errors
+  tests/golden
+  tests/hardening
+  tests/ice_regressions
+  tests/ice_report_single_home
+  tests/jit_no_unwind_boundary
+  tests/parity
+  tests/parity_lint
+  tests/retirement_ratchet
+  tests/suite_membership
+  tests/truthfulness
+  tests/unsafe_ratchet
+  tests/unsafe_sentries
+
+# The edit-run loop and its tiers: `jet dev`, the JIT/run entry points, REPL,
+#   notebook, formatter, LSP, perf trace, and the test/bench harnesses.
+dev_loop:
+  tests/codemod
+  tests/comptime_diff
+  tests/debug
+  tests/dev
+  tests/dev_corpus
+  tests/dev_corpus_gate
+  tests/dev_default_parity
+  tests/dev_interp_parity
+  tests/dev_latency
+  tests/dev_tier_parity
+  tests/devtools
+  tests/fmt
+  tests/fmt_project
+  tests/guard_selftest
+  tests/harness_tools
+  tests/impact
+  tests/jet_bench
+  tests/jet_perf_trace
+  tests/jet_perf_trace_capture_attach
+  tests/jet_perf_trace_capture_run
+  tests/jet_perf_trace_views
+  tests/jet_test
+  tests/jit_run
+  tests/live_inspect
+  tests/lsp
+  tests/notebook
+  tests/repl
+  tests/report
+  tests/run_cache
+  tests/run_entry
+  tests/run_interpret
+  tests/run_tier_diagnostics
+  tests/semindex
+  tests/testing_tiers
+
+# Front end and semantics: sema soundness, TIR lowering, grammar, generics,
+#   ownership, effects, numerics, markers, comptime.
+language:
+  crates/jet-sema/tests/generic_module_body
+  crates/jet-sema/tests/must_use
+  tests/allocator_families
+  tests/arena
+  tests/auto_derive_policy
+  tests/bind
+  tests/bitwise_not
+  tests/closures
+  tests/comptime_cli_parity
+  tests/comptime_core_one_home
+  tests/comptime_core_pure_parity
+  tests/comptime_sequence_parity
+  tests/decisions
+  tests/dsl_blocks
+  tests/effects
+  tests/fact_contribution_law
+  tests/fact_declaration_tiers
+  tests/fact_reads
+  tests/fenced_names
+  tests/floor_division
+  tests/flow_facts_tiers
+  tests/generics
+  tests/grammar
+  tests/inline_range_tiers
+  tests/int_division
+  tests/layout
+  tests/lib_use
+  tests/local_cell_tiers
+  tests/marker_declarations
+  tests/marker_registry_coverage
+  tests/marker_rule_signatures
+  tests/math_display_parity
+  tests/memory_semantics
+  tests/modules
+  tests/numeric_widening
+  tests/numops
+  tests/outcome_carrier
+  tests/output_callable
+  tests/ownership
+  tests/pin
+  tests/pool_id_equality
+  tests/power_and_exclusive_or
+  tests/prove
+  tests/pure
+  tests/reflect
+  tests/refutable_test_bind
+  tests/sema_soundness
+  tests/sema_soundness_differential
+  tests/sema_soundness_differential_part2
+  tests/sema_soundness_differential_part3
+  tests/sema_soundness_differential_part4
+  tests/sema_soundness_differential_part5
+  tests/sema_soundness_differential_part6
+  tests/sema_soundness_differential_part7
+  tests/sema_soundness_differential_part8
+  tests/sema_soundness_invalid
+  tests/sema_soundness_provenance
+  tests/shared_guards
+  tests/shared_weak
+  tests/single_use
+  tests/source_import
+  tests/structural_merge
+  tests/syntax_reconciliation
+  tests/tag_group_pattern_coverage
+  tests/taint
+  tests/tir_collections_and_methods
+  tests/tir_control_and_data
+  tests/tir_core_and_closures
+  tests/tir_data_math_reactive
+  tests/tir_exhaustive_match
+  tests/tir_io_and_ownership
+  tests/tir_language_features
+  tests/tir_modules_and_enums
+  tests/tir_operators_and_runtime
+  tests/tir_patterns_and_fields
+  tests/tir_target_structure
+  tests/tir_unsafe_and_runtime
+  tests/type_sentinel_guard
+  tests/typestate
+  tests/uninit_fixed
+  tests/unit_family
+
+# Core library and runtime services: corelib, HTTP, TLS, crypto, data/compute,
+#   encoding, tasks and concurrency, OS surfaces, FFI.
+runtime:
+  crates/jet-comptime/tests/tls_tier2
+  crates/jet-rt/tests/gc_collector
+  tests/agent_workloads
+  tests/archive
+  tests/base_encoding_2026
+  tests/capabilities
+  tests/cffi
+  tests/cffi_native_matrix
+  tests/compute_extended
+  tests/compute_parity
+  tests/compute_views
+  tests/concurrency_boundaries
+  tests/concurrency_freeze_tiers
+  tests/corelib
+  tests/corelib_compile
+  tests/corelib_derives
+  tests/corelib_encoding_streams
+  tests/corelib_encoding_surface
+  tests/corelib_http_data
+  tests/corelib_net
+  tests/corelib_platform
+  tests/corelib_platform_email
+  tests/corelib_runtime
+  tests/corelib_system
+  tests/crypto_c12
+  tests/crypto_diagnostics
+  tests/crypto_entropy
+  tests/data_bridges
+  tests/data_hostile
+  tests/data_one_kernel
+  tests/dataflow_stream
+  tests/db_policy
+  tests/deadline_and_crypto_text_single_home
+  tests/deadline_clock_single_home
+  tests/determinism
+  tests/duration_runtime
+  tests/encoding_corpus
+  tests/encoding_edition
+  tests/encoding_hostile_io
+  tests/encoding_parity
+  tests/encoding_variance
+  tests/engine_dispatch
+  tests/env_dev_trust
+  tests/env_hook
+  tests/env_overlay
+  tests/error_conversions
+  tests/event_hooks
+  tests/event_observations
+  tests/fleet
+  tests/http
+  tests/http_client_law
+  tests/http_dependency_audit
+  tests/http_i9
+  tests/http_server_lifecycle
+  tests/http_server_tls
+  tests/image
+  tests/net_tls
+  tests/observe
+  tests/os_interrupt_windows
+  tests/os_native
+  tests/path_durability
+  tests/policy_scope
+  tests/polyglot_systems
+  tests/regex
+  tests/resource_close
+  tests/ring_layer
+  tests/ring_shipping
+  tests/scheduler_native
+  tests/secrets
+  tests/secrets_expiry
+  tests/services_runtime
+  tests/sync_crdt
+  tests/task_control_tiers
+  tests/task_state
+  tests/task_state_tiers
+  tests/taskgroup_params
+  tests/text_unicode
+  tests/vault_key_wrap
+  tests/vault_keys
+  tests/ws_law
+  tests/zip_family
+
+# CLI, jetpack, packaging, build graph and cache, workspace, cross targets,
+#   release gates.
+tooling:
+  crates/jetpack-bin/tests/build_plugin_e2e
+  crates/jetpack-bin/tests/compiler_extension_e2e
+  crates/jetpack-bin/tests/theme
+  tests/build_cache_normalization
+  tests/build_cache_race
+  tests/build_entry
+  tests/build_entry_epoch4
+  tests/build_graph
+  tests/build_sandbox
+  tests/cli
+  tests/cli_bindings
+  tests/cli_budget
+  tests/cli_commands
+  tests/cli_expand
+  tests/cli_positionals
+  tests/cli_runtime
+  tests/cli_scene_assets
+  tests/cli_scene_draws
+  tests/cli_scene_forged
+  tests/cli_scene_memory
+  tests/cli_scene_probe
+  tests/cli_surface
+  tests/compiler_api
+  tests/compiler_stack
+  tests/core_call_table
+  tests/core_surface_ledger
+  tests/cross
+  tests/example_artifacts
+  tests/feature_acceptance
+  tests/inline_deps
+  tests/jetpack_build_debug
+  tests/jetpack_discovery
+  tests/jetpack_dispatch
+  tests/jetpack_engine
+  tests/jetpack_hangar_store_v2
+  tests/jetpack_jetos
+  tests/jetpack_nix_eval_boundary
+  tests/jetpack_no_daemon
+  tests/jetpack_offline
+  tests/jetpack_output
+  tests/jetpack_platform
+  tests/jetpack_semantic_lock
+  tests/jetpack_services
+  tests/jetpack_studio
+  tests/jetpack_tasks
+  tests/jetpack_tool
+  tests/jetpack_trust_root
+  tests/jetpack_truth
+  tests/jetpack_variants
+  tests/library_outputs
+  tests/package_outputs
+  tests/package_root_single_home
+  tests/performance_budget_providers
+  tests/pkg
+  tests/provider_visibility
+  tests/release_gates
+  tests/rollback
+  tests/target_machines
+  tests/toolchain_pin
+  tests/workspace
+  tests/workspace_crates
+
+# User-visible surfaces: web, UI, canvas, browser, DOM, terminal.
+surface:
+  tests/browser_bidi
+  tests/browser_lock
+  tests/canvas
+  tests/canvas_scenarios
+  tests/dom_runtime_parity
+  tests/help_pty
+  tests/interpreter_extension_lint_policy
+  tests/terminal
+  tests/terminal_default_single_home
+  tests/ui_backend
+  tests/ui_fixes
+  tests/web_app
+  tests/web_app_graph
+  tests/web_browser
+  tests/web_build
+  tests/web_dev
+  tests/web_examples_doc
+  tests/web_partition
+  tests/web_tir_contract
+
+# Declared targets that cannot run in ANY routine set on a normal host, each with
+#   the observed gate and the card that owes the fix. Compared EXACTLY against
+#   HOST_GATED_HELD_OUT in tests/suite_membership.rs, so parking a target costs two
+#   reviewed edits and un-parking one fails until both rows go. Empty is the goal.
+host_gated:
+

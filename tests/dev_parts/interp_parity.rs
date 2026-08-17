@@ -64,6 +64,24 @@ fn interpreter_matches_expected_golden() {
         if stem.starts_with("web/web_wasm_") {
             continue;
         }
+        // #2017: an interactive example's golden was recorded WITH answers, and
+        // this battery fed none, so it compared a no-input run against a
+        // fed-input transcript — agreement by shared absence, not agreement.
+        // The in-process interpreter reads the test binary's own fd 0, which
+        // every thread of this suite shares, so the fed run is a child on the
+        // forced tier-0 CLI (`jet run --interpret`, pinned as tier 0 by
+        // tests/run_interpret.rs::run_interpret_forces_tier_zero_without_watch).
+        // The answers come from `common::example_stdin`, their one home (I8).
+        if let Some(answers) = common::example_stdin(&stem) {
+            let interpreted = cli_tier_program_output(&file, &stem, answers.piped, true);
+            assert_eq!(
+                interpreted.stdout,
+                golden_stdout(&stem),
+                "`{stem}`: forced interpreter differs from the golden recorded with its answers"
+            );
+            checked += 1;
+            continue;
+        }
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
         match dev_iteration_with_timeout(&stem, &file, true) {
             RunOutcome::Ran { stdout, .. } => {

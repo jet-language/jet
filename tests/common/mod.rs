@@ -160,12 +160,17 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
 // --- interactive example stdin ----------------------------------------------
 //
 // An interactive example's checked-in golden is only reproducible against the
-// answers it was recorded with, and four suites feed those answers
-// (`tests/golden.rs`, `tests/terminal.rs`, `tests/corelib_parts/http_data.rs`,
-// `tests/dev.rs`). They live here once. A second copy is how a golden and a
-// harness drift apart while neither one looks wrong on its own — and a harness
-// that feeds nothing at all silently compares a no-input run against a
-// fed-input golden.
+// answers it was recorded with, and five suites feed those answers
+// (`tests/golden.rs`, `tests/terminal.rs`, `tests/jit_run.rs`,
+// `tests/corelib_parts/http_data.rs`, and the `tests/dev*.rs` batteries). They
+// live here once. A second copy is how a golden and a harness drift apart while
+// neither one looks wrong on its own — and a harness that feeds nothing at all
+// silently compares a no-input run against a fed-input golden.
+//
+// #2017 recorded the mechanism as well as the bytes: a harness feeds a CHILD
+// process, never an injected reader. The in-process entry points read the test
+// binary's own fd 0, shared by every thread of a parallel suite, and an
+// injected reader would exercise an input path no user has.
 
 /// The answers one example needs on stdin.
 pub struct ExampleStdin {
