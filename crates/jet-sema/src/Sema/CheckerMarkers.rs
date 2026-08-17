@@ -539,6 +539,14 @@ pub(crate) fn resolve_static_rule_products(
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
     materialize_test_faults(&mut module.items, diags);
     // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T = expr`.
+    // Then sweep whatever retired spellings are left on the field: the field
+    // attachment point had no reader at all, so the registry's `@retired`
+    // column was true and silent there — `#Uninit label: String` parsed,
+    // applied nothing, and said nothing (D-UNINIT-SENTINEL2=A: `uninit` is
+    // legal only as the whole body of a `Type.{ }` head, "anywhere else it is
+    // the ordinary error"). `Policy::marker_unknown_error` is that ordinary
+    // error and the one text every other site prints (I8); `#Default` has
+    // already left the list above under its own registered code E0375.
     for item in &mut module.items {
         let Item::Struct(item) = item else { continue };
         for field in &mut item.fields {
@@ -573,6 +581,20 @@ pub(crate) fn resolve_static_rule_products(
                     Some(marker.span),
                 ));
             }
+            field.serde_markers.retain(|marker| {
+                if !matches!(
+                    crate::Policy::applied_rule(&marker.name).map(|rule| rule.status),
+                    Some(crate::Policy::RuleStatus::Retired { .. })
+                ) {
+                    return true;
+                }
+                diags.push(crate::Policy::marker_unknown_error(
+                    &marker.name,
+                    &crate::Policy::active_rule_names(),
+                    marker.name_span,
+                ));
+                false
+            });
         }
     }
     // Evaluate `field: T = expr` defaults to compile-time values (D-SERDE5).
