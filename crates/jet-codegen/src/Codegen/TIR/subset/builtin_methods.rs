@@ -105,6 +105,16 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("delete", 1)
         // D-FAILCOMP1: failure-aware list adapter.
         | ("try_collect", 0)
+        // D-ALLOCFAIL1=A: the fallible-allocation rail is an ordinary builtin
+        // receiver op on the same list/map/string surface — sema types it via
+        // `Collections::*_method_return` (so `recv_type` stays `None`),
+        // `resolve_builtin_op` maps it to `TBuiltinOp::TryPush`/`TryStringPush`/
+        // `TryReserve`/`TryInsertMap`, and emit renders `jet_list_try_push`/
+        // `jet_string_try_push`/`jet_list_try_reserve`/`jet_map_try_insert`.
+        // This gate is the third table of that set and must name them too, or a
+        // `#Test` body using the rail leaves the subset and `emit_test_body`
+        // reports an internal compiler error instead of emitting (I2/R7).
+        | ("try_push", 1) | ("try_reserve", 1) | ("try_insert", 2)
         // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor. The
         // View<T> read-accessor methods (`get`/`first`/`last`/`index_of`/
         // `len`/`is_empty`/`contains`) need no separate entry — they share
