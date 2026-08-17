@@ -3834,7 +3834,15 @@ fn resident_safe_builtin_op(
                         if name == "PriorityQueue"
                             && matches!(targs.as_slice(), [Type::Int])
                 )
-                && args.len() == 1
+                // D-LISTREMOVE1/F: the selector rides as an optional SECOND
+                // argument, so `pq.remove(0, .Slot)` arrives with two. The
+                // sibling `RemoveList` arm above already spells this `1 | 2`,
+                // and `mode` is read from the selector during lowering, which
+                // only ever evaluates `args[0]`. Demanding exactly one argument
+                // judged every `.Slot` call non-resident-safe while
+                // `try_compile_bundle` compiled it, so the scanner and the
+                // lowering disagreed about one construct (AGENTS.md I8).
+                && matches!(args.len(), 1 | 2)
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }

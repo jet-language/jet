@@ -548,16 +548,20 @@ fn jet_wasm_int_clamp(value: JetWasmInt, low: JetWasmInt, high: JetWasmInt) -> J
     value.clamp(low, high)
 }
 
+// D-FLOORDIV1: the native and wasm Rust tiers share this trap wording verbatim
+// (docs/spec/syntax-decisions.md), so these four `JetWasmInt` boundaries name the
+// one arithmetic contract constant instead of retyping it. They carried the
+// invented "division by zero" while every other tier said "divided by zero".
 fn jet_wasm_int_div(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     left.div_rem_ref(&right).map(|pair| pair.0).unwrap_or_else(|| {
-        jet_arithmetic_stop(file, line, "division by zero")
+        jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO)
     })
 }
 
 fn jet_wasm_int_floor_div(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     let (quotient, remainder) = left
         .div_rem_ref(&right)
-        .unwrap_or_else(|| jet_arithmetic_stop(file, line, "division by zero"));
+        .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO));
     if !remainder.is_zero() && left.negative != right.negative {
         quotient.sub_ref(&JetWasmInt::from_u64(1))
     } else {
@@ -568,7 +572,7 @@ fn jet_wasm_int_floor_div(left: JetWasmInt, right: JetWasmInt, file: &str, line:
 fn jet_wasm_int_mod(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     let (quotient, remainder) = left
         .div_rem_ref(&right)
-        .unwrap_or_else(|| jet_arithmetic_stop(file, line, "division by zero"));
+        .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO));
     if !remainder.is_zero() && left.negative != right.negative {
         remainder.add_ref(&right)
     } else {
@@ -579,7 +583,7 @@ fn jet_wasm_int_mod(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) 
 
 fn jet_wasm_int_rem(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     left.div_rem_ref(&right).map(|pair| pair.1).unwrap_or_else(|| {
-        jet_arithmetic_stop(file, line, "division by zero")
+        jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO)
     })
 }
 
