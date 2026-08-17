@@ -4291,13 +4291,27 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
     let stem = "memory/place_windows";
     let file = example_path(stem);
     let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
-    let RunOutcome::Problems(interpreter_diags) = dev_iteration(&file, false, true) else {
-        panic!("`{stem}` unexpectedly left its ratcheted interpreter boundary");
+    // The ratchet here used to require the forced interpreter to STOP at
+    // E2201. It runs the example now, so that claim is stale: card 2001
+    // (c86f848ed) stopped `run_bundle_at_stage` reporting every lowering
+    // failure as a missing `run`, and the place-loan mechanism reached
+    // `__JetViewMut` regions — this example's own subject.
+    //
+    // A boundary that has fallen is not weakened into silence. The interpreter
+    // now owes the same golden every other tier owes here, which is strictly
+    // more than "it must refuse" ever proved, and it is what the corpus sweep
+    // already measures for this stem (`check_interpreter_stem`, no manifested
+    // divergence entry).
+    let interpreted = match dev_iteration(&file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("`{stem}` must run in the forced interpreter: {diags:?}")
+        }
     };
-    assert!(
-        interpreter_diags.iter().any(|diag| diag.code == "E2201"),
-        "`{stem}` interpreter boundary drifted: {interpreter_diags:?}"
-    );
 
     let source = fs::read_to_string(&file).unwrap();
     jet_jit::reset_jit_trace_for_test();
@@ -4313,6 +4327,7 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
 
     let dir = std::env::temp_dir().join(format!("jet_place_windows_{}", std::process::id()));
     let aot = compiled_binary_output(&dir, "place_windows", 0, stem, &file);
+    assert_eq!(interpreted, expected, "interpreter drifted for `{stem}`");
     assert_eq!(resident, expected, "resident JIT drifted for `{stem}`");
     assert_eq!(aot, expected, "AOT drifted for `{stem}`");
     let _ = fs::remove_dir_all(&dir);
@@ -4323,17 +4338,25 @@ fn fixed_width_integers_match_interpreter_resident_jit_default_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
+    // Two retired spellings, both from before this fixture's neighbours moved.
+    // D-ARROW-CONTROL1: a callable result is `=>`; `->` is reserved for
+    // selected or yielded control values, and sema rejects it with E0070, so
+    // every signature below stopped type-checking and the forced interpreter
+    // reported nine E0070s instead of running. D-EXPOP1=A / D-XORSPELL1=A
+    // (2026-08-05): the caret raises to a power and exclusive-or is `~|`, so
+    // `flags ^ mask` on a trapping `U8` would overflow rather than answer the
+    // 7 this block asks for. Both spellings move; not one expected value does.
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
-fn i8_id(value: I8) -> I8 { return value }
-fn i16_id(value: I16) -> I16 { return value }
-fn i32_id(value: I32) -> I32 { return value }
-fn i64_id(value: I64) -> I64 { return value }
-fn u8_id(value: U8) -> U8 { return value }
-fn u16_id(value: U16) -> U16 { return value }
-fn u32_id(value: U32) -> U32 { return value }
-fn u64_id(value: U64) -> U64 { return value }
-fn pass_u64(value: U64?) -> (U64?) { return ~value }
+fn i8_id(value: I8) => I8 { return value }
+fn i16_id(value: I16) => I16 { return value }
+fn i32_id(value: I32) => I32 { return value }
+fn i64_id(value: I64) => I64 { return value }
+fn u8_id(value: U8) => U8 { return value }
+fn u16_id(value: U16) => U16 { return value }
+fn u32_id(value: U32) => U32 { return value }
+fn u64_id(value: U64) => U64 { return value }
+fn pass_u64(value: U64?) => (U64?) { return ~value }
 
 fn run() {
     print(i8_id(I8.{-8}))
@@ -4367,7 +4390,7 @@ fn run() {
     combined := U8.{flags}
     combined |= mask
     print(combined)
-    print(flags ^ mask)
+    print(flags ~| mask)
     print(flags << 1)
     print(u8_id(U8.MAX) << 1)
     print(i8_id(I8.{64}) << 1)
@@ -4865,6 +4888,13 @@ fn numeric_singleton_splits_match_resident_jit_and_aot_without_fallback() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
+    // D-EXPOP1=A / D-XORSPELL1=A (ratified 2026-08-05, syntax-decisions.md):
+    // `^=` raises in place and exclusive-or-assign is `~|=`. This fixture was
+    // written when the caret was xor, so `high ^= 10` had stopped meaning what
+    // the golden below says: the resident tier answered 9 ^ 10 = 3486784401,
+    // then `|= 8` = 3486784409, which is the RIGHT answer for the operator on
+    // the page. The bit-operator coverage this block exists for is spelled
+    // `~|=` now, so the operator moves and every expected value stays.
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
 fn run() {
@@ -4887,7 +4917,7 @@ fn run() {
     high += 6
     low &= 6
     low <<= 1
-    high ^= 10
+    high ~|= 10
     high |= 8
     print(low)
     print(high)
