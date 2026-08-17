@@ -2681,6 +2681,26 @@ fn resident_safe_map_expr_callback<'a>(
     resident_safe_expr(body, callees).then_some(body.as_ref())
 }
 
+/// `each`/`each_mut`/`each_ref` take one callback of one parameter.
+///
+/// The body gate is `resident_safe_stmt` and nothing else. A block-bodied
+/// callback used to carry a second, narrower statement table here
+/// (`Let | Assign | ExprStmt`), which made both block arms UNSATISFIABLE: TIR
+/// lowers a lambda block through `lower_stmts`
+/// (`Codegen/TIR/lower/statements.rs`, `markers = true`), so the body always
+/// opens with a `TStmt::SourceSpan` the second table refused. Every
+/// block-bodied `each` therefore deopted the whole enclosing function —
+/// `examples/features/collections/set.jet`'s
+/// `s.each((n: Int) => { visited.push(n) })` was the corpus case (#1585). The
+/// canonical predicate already answers `true` for both marker statements, and
+/// the sibling callbacks (`resident_safe_map_callback`, the `EditDisjoint`
+/// arm) never grew that second table.
+///
+/// The lowering pairs with this: `LowerCtx::lower_iter_each` hands the block to
+/// `lower_collection_callback` → `functions_compile::lower_collection_callable_lambda`,
+/// which runs `LowerCtx::lower_stmts` — the same statement lowering a resident
+/// function body uses, markers included — and `sync_collection_captures` writes
+/// the callback's captures back into the caller's slots.
 fn resident_safe_each_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
     args.len() == 1
         && matches!(
@@ -2690,14 +2710,12 @@ fn resident_safe_each_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool 
                     && lam.source_params.len() == 1
                     && match &lam.executable {
                         TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
-                        TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|stmt| {
-                            matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
-                                && resident_safe_stmt(stmt, callees)
-                        }),
-                        TIR::TLambdaBody::SharedBlock(stmts) => stmts.iter().all(|stmt| {
-                            matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
-                                && resident_safe_stmt(stmt, callees)
-                        }),
+                        TIR::TLambdaBody::Block(stmts) => {
+                            stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        }
+                        TIR::TLambdaBody::SharedBlock(stmts) => {
+                            stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        }
                     }
         )
 }
