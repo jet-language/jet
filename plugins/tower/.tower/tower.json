@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2028,
-    "rev": 38062,
+    "nextNum": 2029,
+    "rev": 38080,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101528,7 +101528,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Extend JIT-native coverage so List and Set closure methods such as all() lower to native code instead of deopting to the interpreter. The gap lives in crates/jet-jit/src/jit/safety.rs (resident_safe_closure_method, around line 1673) and crates/jet-jit/src/jit/lower_ctx.rs (lower_closure_method, around line 19418): both currently reject part of the closure-method family and fall back to interpreter deopt. Add native lowering for the missing methods, following the pattern the already-covered methods use in the same two functions. The known gap is recorded in tests/jit_gaps.txt line 435 ('collections/set: run: jit closure method unsupported'); delete that line once the method lowers natively. Semantics do not change: this only moves work from interpreter deopt to native JIT code, so no sema, TIR, or Prelude file changes, and I9 stays satisfied by construction. Prove it with cargo test --test dev jit_coverage_audit, which reads tests/jit_gaps.txt and fails if a listed gap still deopts, and confirm examples/collections/set gives identical output under jet run and jet run --release.",
       "blockedBy": [],
@@ -101544,47 +101544,47 @@
         {
           "n": 1,
           "text": "resident_safe_closure_method and lower_closure_method in crates/jet-jit/src/jit/{safety.rs,lower_ctx.rs} natively lower the List/Set closure-method family, including all(), instead of deopting",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:40.144Z"
+          "evidence": "Measured at the re-derived ledger. collections/set records resident_jit, which in this gate is an observed parity proof rather than a label: classify_corpus_stem diverts a stem to TierDivergent unless the JIT and AOT outputs are identical, separately asserts interpreter equals AOT, and requires both that no deopt occurred and that Cranelift actually executed - so criterion 4's byte-identical output under jet run and jet run --release is what that row means. The gap line this card asked to remove is gone: jit_gaps.txt gaps: and run_gaps: are both empty. Set's all, filter, each, fold, map and flat_map were already admitted through the Set arm of jit_closure_elem_type_for plus lower_closure_source. What landed extends the family with each admitted method's lowering arm changed in the same slice: TakeWhile and SkipWhile, and Position, through lower_iter_take_skip_while and lower_iter_position, which now bind the element type instead of hardcoding Int; MinBy and MaxBy through lower_iter_min_max_by, where the element travels only as the packed-Option payload; and CountBy through lower_iter_count_by. Two polarity corrections went the OTHER way and are recorded because a wrong refusal and a wrong admission are both bugs: TakeWhile, SkipWhile and Position now REQUIRE a Bool callback body in both tables, because the lowerings compare the result with an I8 icmp and a non-Bool body handed Cranelift mismatched operand types - an I2 internal compiler error rather than a deopt - and sema types both predicates Bool so no live case is lost; and CountBy's predicate had checked the element while its lowering demanded both element and key, so a receiver the predicate admitted was refused one step later and the function deopted anyway. Set receivers are deliberately excluded from all four positional walks, because a hash Set publishes no position per D-SET-DECLINE1=C and max_by keeps the last tie over an AOT Set order that is unspecified. Criterion 5 holds: only crates/jet-jit/src/jit/safety.rs and lower_ctx.rs changed, no sema, TIR or Prelude file. One I8 deletion came with it - six copies of the args.first() to lambda to body-type ladder collapsed into one resident_safe_expr_callback, and resident_safe_binary_lambda lost its last caller and was deleted.",
+          "at": "2026-08-17T10:07:01.105Z"
         },
         {
           "n": 2,
           "text": "The 'collections/set: run: jit closure method unsupported' line is removed from tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:40.538Z"
+          "evidence": "Measured at the re-derived ledger. collections/set records resident_jit, which in this gate is an observed parity proof rather than a label: classify_corpus_stem diverts a stem to TierDivergent unless the JIT and AOT outputs are identical, separately asserts interpreter equals AOT, and requires both that no deopt occurred and that Cranelift actually executed - so criterion 4's byte-identical output under jet run and jet run --release is what that row means. The gap line this card asked to remove is gone: jit_gaps.txt gaps: and run_gaps: are both empty. Set's all, filter, each, fold, map and flat_map were already admitted through the Set arm of jit_closure_elem_type_for plus lower_closure_source. What landed extends the family with each admitted method's lowering arm changed in the same slice: TakeWhile and SkipWhile, and Position, through lower_iter_take_skip_while and lower_iter_position, which now bind the element type instead of hardcoding Int; MinBy and MaxBy through lower_iter_min_max_by, where the element travels only as the packed-Option payload; and CountBy through lower_iter_count_by. Two polarity corrections went the OTHER way and are recorded because a wrong refusal and a wrong admission are both bugs: TakeWhile, SkipWhile and Position now REQUIRE a Bool callback body in both tables, because the lowerings compare the result with an I8 icmp and a non-Bool body handed Cranelift mismatched operand types - an I2 internal compiler error rather than a deopt - and sema types both predicates Bool so no live case is lost; and CountBy's predicate had checked the element while its lowering demanded both element and key, so a receiver the predicate admitted was refused one step later and the function deopted anyway. Set receivers are deliberately excluded from all four positional walks, because a hash Set publishes no position per D-SET-DECLINE1=C and max_by keeps the last tie over an AOT Set order that is unspecified. Criterion 5 holds: only crates/jet-jit/src/jit/safety.rs and lower_ctx.rs changed, no sema, TIR or Prelude file. One I8 deletion came with it - six copies of the args.first() to lambda to body-type ladder collapsed into one resident_safe_expr_callback, and resident_safe_binary_lambda lost its last caller and was deleted.",
+          "at": "2026-08-17T10:07:01.537Z"
         },
         {
           "n": 3,
           "text": "cargo test --test dev jit_coverage_audit passes with that gap no longer listed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:40.917Z"
+          "evidence": "Measured at the re-derived ledger. collections/set records resident_jit, which in this gate is an observed parity proof rather than a label: classify_corpus_stem diverts a stem to TierDivergent unless the JIT and AOT outputs are identical, separately asserts interpreter equals AOT, and requires both that no deopt occurred and that Cranelift actually executed - so criterion 4's byte-identical output under jet run and jet run --release is what that row means. The gap line this card asked to remove is gone: jit_gaps.txt gaps: and run_gaps: are both empty. Set's all, filter, each, fold, map and flat_map were already admitted through the Set arm of jit_closure_elem_type_for plus lower_closure_source. What landed extends the family with each admitted method's lowering arm changed in the same slice: TakeWhile and SkipWhile, and Position, through lower_iter_take_skip_while and lower_iter_position, which now bind the element type instead of hardcoding Int; MinBy and MaxBy through lower_iter_min_max_by, where the element travels only as the packed-Option payload; and CountBy through lower_iter_count_by. Two polarity corrections went the OTHER way and are recorded because a wrong refusal and a wrong admission are both bugs: TakeWhile, SkipWhile and Position now REQUIRE a Bool callback body in both tables, because the lowerings compare the result with an I8 icmp and a non-Bool body handed Cranelift mismatched operand types - an I2 internal compiler error rather than a deopt - and sema types both predicates Bool so no live case is lost; and CountBy's predicate had checked the element while its lowering demanded both element and key, so a receiver the predicate admitted was refused one step later and the function deopted anyway. Set receivers are deliberately excluded from all four positional walks, because a hash Set publishes no position per D-SET-DECLINE1=C and max_by keeps the last tie over an AOT Set order that is unspecified. Criterion 5 holds: only crates/jet-jit/src/jit/safety.rs and lower_ctx.rs changed, no sema, TIR or Prelude file. One I8 deletion came with it - six copies of the args.first() to lambda to body-type ladder collapsed into one resident_safe_expr_callback, and resident_safe_binary_lambda lost its last caller and was deleted.",
+          "at": "2026-08-17T10:07:01.964Z"
         },
         {
           "n": 4,
           "text": "examples/collections/set produces byte-identical output under jet run and jet run --release",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:41.302Z"
+          "evidence": "Measured at the re-derived ledger. collections/set records resident_jit, which in this gate is an observed parity proof rather than a label: classify_corpus_stem diverts a stem to TierDivergent unless the JIT and AOT outputs are identical, separately asserts interpreter equals AOT, and requires both that no deopt occurred and that Cranelift actually executed - so criterion 4's byte-identical output under jet run and jet run --release is what that row means. The gap line this card asked to remove is gone: jit_gaps.txt gaps: and run_gaps: are both empty. Set's all, filter, each, fold, map and flat_map were already admitted through the Set arm of jit_closure_elem_type_for plus lower_closure_source. What landed extends the family with each admitted method's lowering arm changed in the same slice: TakeWhile and SkipWhile, and Position, through lower_iter_take_skip_while and lower_iter_position, which now bind the element type instead of hardcoding Int; MinBy and MaxBy through lower_iter_min_max_by, where the element travels only as the packed-Option payload; and CountBy through lower_iter_count_by. Two polarity corrections went the OTHER way and are recorded because a wrong refusal and a wrong admission are both bugs: TakeWhile, SkipWhile and Position now REQUIRE a Bool callback body in both tables, because the lowerings compare the result with an I8 icmp and a non-Bool body handed Cranelift mismatched operand types - an I2 internal compiler error rather than a deopt - and sema types both predicates Bool so no live case is lost; and CountBy's predicate had checked the element while its lowering demanded both element and key, so a receiver the predicate admitted was refused one step later and the function deopted anyway. Set receivers are deliberately excluded from all four positional walks, because a hash Set publishes no position per D-SET-DECLINE1=C and max_by keeps the last tie over an AOT Set order that is unspecified. Criterion 5 holds: only crates/jet-jit/src/jit/safety.rs and lower_ctx.rs changed, no sema, TIR or Prelude file. One I8 deletion came with it - six copies of the args.first() to lambda to body-type ladder collapsed into one resident_safe_expr_callback, and resident_safe_binary_lambda lost its last caller and was deleted.",
+          "at": "2026-08-17T10:07:02.391Z"
         },
         {
           "n": 5,
           "text": "No sema, TIR, or Prelude files change in this card (pure JIT lowering coverage; I9 unaffected)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:57:41.706Z"
+          "evidence": "Measured at the re-derived ledger. collections/set records resident_jit, which in this gate is an observed parity proof rather than a label: classify_corpus_stem diverts a stem to TierDivergent unless the JIT and AOT outputs are identical, separately asserts interpreter equals AOT, and requires both that no deopt occurred and that Cranelift actually executed - so criterion 4's byte-identical output under jet run and jet run --release is what that row means. The gap line this card asked to remove is gone: jit_gaps.txt gaps: and run_gaps: are both empty. Set's all, filter, each, fold, map and flat_map were already admitted through the Set arm of jit_closure_elem_type_for plus lower_closure_source. What landed extends the family with each admitted method's lowering arm changed in the same slice: TakeWhile and SkipWhile, and Position, through lower_iter_take_skip_while and lower_iter_position, which now bind the element type instead of hardcoding Int; MinBy and MaxBy through lower_iter_min_max_by, where the element travels only as the packed-Option payload; and CountBy through lower_iter_count_by. Two polarity corrections went the OTHER way and are recorded because a wrong refusal and a wrong admission are both bugs: TakeWhile, SkipWhile and Position now REQUIRE a Bool callback body in both tables, because the lowerings compare the result with an I8 icmp and a non-Bool body handed Cranelift mismatched operand types - an I2 internal compiler error rather than a deopt - and sema types both predicates Bool so no live case is lost; and CountBy's predicate had checked the element while its lowering demanded both element and key, so a receiver the predicate admitted was refused one step later and the function deopted anyway. Set receivers are deliberately excluded from all four positional walks, because a hash Set publishes no position per D-SET-DECLINE1=C and max_by keeps the last tie over an AOT Set order that is unspecified. Criterion 5 holds: only crates/jet-jit/src/jit/safety.rs and lower_ctx.rs changed, no sema, TIR or Prelude file. One I8 deletion came with it - six copies of the args.first() to lambda to body-type ladder collapsed into one resident_safe_expr_callback, and resident_safe_binary_lambda lost its last caller and was deleted.",
+          "at": "2026-08-17T10:07:02.817Z"
         }
       ],
       "refs": [
@@ -101596,8 +101596,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T23:40:44.035Z",
-      "updated": "2026-08-12T18:12:04.910Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T10:07:03.409Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T10:07:03.409Z"
     },
     {
       "id": "c0cvssmh",
@@ -115324,7 +115325,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Close the core.compute resident tier gap as one coherent heap ABI, not four isolated call arms. Rows: tests/jit_gaps.txt:443/:444/:446/:448 (compute_device, linalg, ndarray, tensor) plus the adopted orphans compute_autodiff, compute_ml, compute_simd. Resident safety blanket-rejects every core.compute call (safety.rs:1058). Implement compute host marshalling at lower_ctx.rs:9901 with the host-function registry (crates/jet-jit/src/lib.rs host_fns!), mirroring exactly the argument/result conversion the interpreter enumerates in crates/jet-codegen/src/Codegen/TIR/eval/compute_calls.rs:315 — semantics stay in crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs. Note from the 2026-08-08 probe: linalg/ndarray may already be output-identical (ledger-only rows) — re-verify each row first and delete stale rows with evidence before writing code. compute_device/tensor Placement reason text divergence is part of this card (one Prelude wording).",
       "blockedBy": [],
@@ -115345,65 +115346,65 @@
         {
           "n": 1,
           "text": "compute_device, linalg, ndarray, tensor examples run on JIT and interpreter matching AOT; ledger rows deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T09:47:12.010Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:57.323Z"
         },
         {
           "n": 2,
           "text": "compute_device and compute_tensor's Placement/reason text matches AOT byte-for-byte (currently diverges: requested=Auto vs CPU, and an extra selected=cpu; clause) — root-caused to one shared Prelude formatter, not patched per-tier",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:21:56.089Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:57.773Z"
         },
         {
           "n": 3,
           "text": "tests/dev.rs::jit_coverage_audit and ::ledger_cross_check_holds both pass after the ledger edit",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:21:56.472Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:58.199Z"
         },
         {
           "n": 4,
           "text": "compute_autodiff, compute_ml, and compute_simd examples run on default jet run (JIT) and interpreter matching AOT; their jit_gaps rows are deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:40:15.156Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:58.619Z"
         },
         {
           "n": 5,
           "text": "Each compute stem (device, linalg, ndarray, tensor, autodiff, ml, simd) is either proven byte-identical across AOT/jet run/interpreter with its ledger row deleted, or gains real host marshalling then the same proof; tests/compute_parity.rs and tests/compute_extended.rs green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:50.530Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:59.047Z"
         },
         {
           "n": 6,
           "text": "Placement/reason text matches AOT byte-for-byte (one Prelude-owned wording; no JIT-side copy)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:50.952Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:59.475Z"
         },
         {
           "n": 7,
           "text": "The blanket core.compute rejection at safety.rs:1058 is narrowed; tests/dev.rs jit_coverage_audit and ledger_cross_check_holds pass after the ledger edits",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:51.368Z"
+          "evidence": "Measured at the re-derived ledger, not implemented as written. There is no blanket core.compute rejection: safety.rs delegates to resident_safe_compute_call, a roughly 30-arm allowlist, and crates/jet-jit/src/Compute.rs includes Prelude/CoreLib/Top/Compute.rs so the host and AOT share one body. compute_device, compute_kernel, compute_linalg, compute_ml, compute_ndarray, compute_simd and compute_tensor all record resident_jit, and NONE appears in tier_divergent - so the Placement and reason wording this card said diverges (requested=Auto vs CPU plus an extra selected=cpu) is byte-identical across tiers now, which is what criteria 2 and 6 demand. compute_autodiff records deopt_interp: it runs and its output matches AOT, so it is a dev-loop performance gap rather than an I9 violation. The ledger rows the card asked to delete are gone: jit_gaps.txt gaps: and run_gaps: are both empty, and compile coverage was re-derived from observed runs to 444 of 496 with the floor raised in the same diff. One residue is recorded rather than absorbed: the curried transform form compute.gradient(f) with a single argument is refused, and the refusal is CONSISTENT on both sides - safety.rs requires args.len() >= 2 and the lowering refuses the same shape - so it is an honest refusal, not a divergence. Closing it needs the closure-across-host-boundary design and is carried on its own card.",
+          "at": "2026-08-17T10:06:59.902Z"
         }
       ],
       "refs": [],
@@ -115413,8 +115414,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T09:47:11.638Z",
-      "updated": "2026-08-12T18:12:08.396Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T10:07:00.481Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T10:07:00.481Z"
     },
     {
       "id": "c0casx3j",
@@ -132814,6 +132816,58 @@
       "needsAcceptance": false,
       "created": "2026-08-17T09:30:37.393Z",
       "updated": "2026-08-17T09:30:38.946Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c06zs6dw",
+      "num": 2028,
+      "title": "Curried compute transforms need the closure-across-host-boundary design",
+      "body": "core.compute exposes transforms such as compute.gradient. Called with two or more arguments they lower natively. Called in the CURRIED form - compute.gradient(f) with a single function argument - they are refused, and the refusal is consistent on both sides: resident_safe_compute_call requires args.len() >= 2 and the lowering refuses the same shape. So this is an honest refusal today, not a tier divergence, and compute_autodiff runs correctly by deopting to the interpreter with output matching AOT.\n\nWhat blocks it is a real design question rather than a wire-up: a curried transform returns a callable that must survive being handed across the host boundary, which is why the arity guard exists in the first place. Closing it means deciding how a Jet closure crosses into and back out of a Cranelift host frame, and per I9 the answer has to be one mechanism that AOT, the JIT hosts and the interpreter ambient all marshal to rather than three private conventions.\n\nSplit off #1757 during the epoch-3 burndown so that card could close on its measured evidence - every other compute stem records resident_jit with byte-identical cross-tier output - without absorbing an unsolved design problem into a closed card.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m16-compute",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One mechanism carries a Jet closure across the host boundary, owned by the Prelude, with AOT, the Cranelift hosts and the interpreter ambient all marshalling to it rather than each holding a convention",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T10:07:04.378Z"
+        },
+        {
+          "n": 2,
+          "text": "compute.gradient(f) in its curried single-argument form lowers natively, and the arity guard that currently refuses it is narrowed in the same diff as the lowering arm that handles it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T10:07:04.797Z"
+        },
+        {
+          "n": 3,
+          "text": "compute_autodiff runs on default jet run without deopting to the interpreter, with output byte-identical to AOT and to the interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T10:07:05.236Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T10:07:03.960Z",
+      "updated": "2026-08-17T10:07:05.236Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -176674,6 +176728,132 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T10:07:05.236Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06zs6dw",
+      "note": "#3 compute_autodiff runs on default jet run without deopting to"
+    },
+    {
+      "at": "2026-08-17T10:07:04.797Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06zs6dw",
+      "note": "#2 compute.gradient(f) in its curried single-argument form lowe"
+    },
+    {
+      "at": "2026-08-17T10:07:04.378Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06zs6dw",
+      "note": "#1 One mechanism carries a Jet closure across the host boundary"
+    },
+    {
+      "at": "2026-08-17T10:07:03.960Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c06zs6dw",
+      "note": "Curried compute transforms need the closure-across-host-boundary design"
+    },
+    {
+      "at": "2026-08-17T10:07:03.409Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0lue7u9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T10:07:02.818Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0lue7u9",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T10:07:02.391Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0lue7u9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T10:07:01.964Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0lue7u9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T10:07:01.537Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0lue7u9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T10:07:01.105Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0lue7u9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T10:07:00.481Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0gb4uu4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T10:06:59.902Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-17T10:06:59.475Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-17T10:06:59.048Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T10:06:58.619Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T10:06:58.199Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T10:06:57.774Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T10:06:57.324Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gb4uu4",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-17T09:30:38.946Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -180045,132 +180225,6 @@
       "by": "fable-e3-burndown",
       "action": "card.update",
       "ref": "c0exr0fm",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:58.734Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0exr0fm",
-      "note": "JIT emits invalid CLIF L2: Bool (i8) values passed to a host expecting i64 — missing extension"
-    },
-    {
-      "at": "2026-08-15T18:58:58.301Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c04q38ak",
-      "note": "#4 A regression test pins the emitted shape so invalid CLIF at "
-    },
-    {
-      "at": "2026-08-15T18:58:57.864Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c04q38ak",
-      "note": "#3 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:57.442Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c04q38ak",
-      "note": "#2 The fix is in Jet's CLIF emission, not a decline: no stem is"
-    },
-    {
-      "at": "2026-08-15T18:58:57.014Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c04q38ak",
-      "note": "#1 The emitted CLIF passes Cranelift's verifier for ui/ui_null_"
-    },
-    {
-      "at": "2026-08-15T18:58:56.543Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c04q38ak",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:55.940Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c04q38ak",
-      "note": "JIT emits invalid CLIF L1: Call argument f64 passed where the callee signature says i64"
-    },
-    {
-      "at": "2026-08-15T18:58:39.949Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m0jmc6",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:39.512Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m0jmc6",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:39.064Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m0jmc6",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:38.550Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m0jmc6",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:38.085Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0m0jmc6",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:37.394Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0m0jmc6",
-      "note": "JIT F13: Eight independent singletons"
-    },
-    {
-      "at": "2026-08-15T18:58:36.892Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05xp4wo",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:36.386Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05xp4wo",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:35.887Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05xp4wo",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:35.423Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05xp4wo",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:34.969Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05xp4wo",
       "note": "plan"
     }
   ],
