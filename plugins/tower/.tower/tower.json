@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2027,
-    "rev": 38058,
+    "nextNum": 2028,
+    "rev": 38062,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132763,6 +132763,58 @@
       "created": "2026-08-17T08:46:37.484Z",
       "updated": "2026-08-17T08:46:50.171Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0p6kqj5",
+      "num": 2027,
+      "title": "One signal handler exists in three copies with three queues",
+      "body": "A boundary audit found unix_mark/windows_mark in crates/jet-jit/src is the THIRD copy of one signal handler. The other two are crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:1010 (AOT) and crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:177 (interpreter). Each carries its OWN queue static.\n\nThis is an I8 and I9 violation of the exact shape that produced most of this epoch's silent wrong answers: one fact stored three times, so the copies can disagree and nothing detects it. Three separate queues mean a signal delivered while one engine is executing is recorded in that engine's queue only, so signal-observing behaviour is per-tier by construction rather than by decision - and per I9 semantics belong in the Prelude with the engines marshalling to it.\n\nNo divergence has been MEASURED between the three yet; this card exists because the duplication is proven and the mechanism for detecting a disagreement does not exist. Found while widening the no-unwind boundary check; deliberately left out of that slice because it is a semantics change, not a test change.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m13-jit-parity",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One signal-handler mechanism owns the queue, living in the Prelude, with AOT, the Cranelift host and the interpreter ambient all marshalling to that one symbol rather than keeping a private copy",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T09:30:37.929Z"
+        },
+        {
+          "n": 2,
+          "text": "The two redundant queue statics are deleted, not synchronised",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T09:30:38.439Z"
+        },
+        {
+          "n": 3,
+          "text": "A cross-tier test observes the same signal-delivery behaviour on AOT, default jet run and the interpreter, so a future divergence between them fails rather than hides",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T09:30:38.946Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T09:30:37.393Z",
+      "updated": "2026-08-17T09:30:38.946Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -176622,6 +176674,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T09:30:38.946Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0p6kqj5",
+      "note": "#3 A cross-tier test observes the same signal-delivery behaviou"
+    },
+    {
+      "at": "2026-08-17T09:30:38.439Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0p6kqj5",
+      "note": "#2 The two redundant queue statics are deleted, not synchronise"
+    },
+    {
+      "at": "2026-08-17T09:30:37.929Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0p6kqj5",
+      "note": "#1 One signal-handler mechanism owns the queue, living in the P"
+    },
+    {
+      "at": "2026-08-17T09:30:37.406Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0p6kqj5",
+      "note": "One signal handler exists in three copies with three queues"
+    },
+    {
       "at": "2026-08-17T09:18:24.098Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -180092,34 +180172,6 @@
       "action": "card.update",
       "ref": "c05xp4wo",
       "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:34.245Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c05xp4wo",
-      "note": "JIT F12: Equality on a non-#Numeric distinct type outside the TIR subset"
-    },
-    {
-      "at": "2026-08-15T18:58:33.808Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0v2w0vu",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:33.282Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0v2w0vu",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:32.476Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0v2w0vu",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
     }
   ],
   "nextNum": 368,
