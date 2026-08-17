@@ -583,6 +583,74 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     if core_type == "DateTime" {
         return datetime_string(value, Span::new(0, 0)).ok();
     }
+    // D-TYPE2-TIME1=A / I9: the canonical nanosecond carrier has exactly one
+    // `JetShow` rendering. AOT's `impl JetShow for Duration` and the Cranelift
+    // host both call `jet_duration_kernel_show`; the evaluator marshals the
+    // carrier out of the struct and calls the same kernel instead of falling
+    // through to a structural record render.
+    if core_type == crate::Syntax::DURATION_TYPE {
+        if let CtValue::Struct { fields, .. } = value {
+            if let Some(CtValue::Int(ns)) = fields.iter().find_map(|(name, field)| {
+                (name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(name.as_str())
+                    == "ns")
+                    .then_some(field)
+            }) {
+                return Some(super::duration_kernel::jet_duration_kernel_show(*ns));
+            }
+        }
+    }
+    // D-ENCSTREAM-SURFACE1=A / I9: the shared encoding failure has one
+    // rendering. AOT's `impl JetShow for EncodingError` and the Cranelift host
+    // both call `jet_encoding_error_kernel_show`; the evaluator marshals the
+    // seven carrier fields and calls the same kernel.
+    if core_type == "EncodingError" {
+        if let CtValue::Struct { fields, .. } = value {
+            let get = |wanted: &str| -> Option<&CtValue> {
+                fields.iter().find_map(|(name, held)| {
+                    (name
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(name.as_str())
+                        == wanted)
+                        .then_some(held)
+                })
+            };
+            let variant = |wanted: &str| match get(wanted)? {
+                CtValue::Enum { variant, .. } => Some(
+                    variant
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(variant.as_str()),
+                ),
+                _ => None,
+            };
+            let text = |wanted: &str| match get(wanted)? {
+                CtValue::Str(held) => Some(held.as_str()),
+                _ => None,
+            };
+            let optional_int = |wanted: &str| match get(wanted)? {
+                CtValue::Present(inner) => match inner.as_ref() {
+                    CtValue::Int(held) => Some(Some(*held)),
+                    _ => None,
+                },
+                CtValue::Failed(CtReport::Clean(_)) => Some(None),
+                CtValue::Int(held) => Some(Some(*held)),
+                _ => None,
+            };
+            let CtValue::Int(byte_offset) = get("byte_offset")? else {
+                return None;
+            };
+            return Some(super::encoding_error_kernel::jet_encoding_error_kernel_show(
+                variant("format")?,
+                variant("kind")?,
+                *byte_offset,
+                optional_int("line")?,
+                optional_int("column")?,
+                text("path")?,
+                text("reason")?,
+            ));
+        }
+    }
     match value {
         CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == "HyperLogLog" =>
