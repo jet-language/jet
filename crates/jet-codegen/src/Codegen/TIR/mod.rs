@@ -1071,16 +1071,16 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             .map(|(param, arg)| (param.name.clone(), arg.clone()))
             .collect();
         for item in items {
-            let (method, trait_name) = match item {
+            let (method, trait_name, generated_serde) = match item {
                 Item::Struct(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
-                        Some(method) => (method, None),
+                        Some(method) => (method, None, false),
                         None => continue,
                     }
                 }
                 Item::Enum(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
-                        Some(method) => (method, None),
+                        Some(method) => (method, None, false),
                         None => continue,
                     }
                 }
@@ -1090,11 +1090,11 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                         continue;
                     };
                     match &imp.trait_name {
-                        None => (method, None),
+                        None => (method, None, false),
                         Some(t)
                             if t == crate::Generics::ENCODE || t == crate::Generics::DECODE =>
                         {
-                            (method, Some(t.as_str()))
+                            (method, Some(t.as_str()), imp.is_generated_serde)
                         }
                         Some(_) => continue,
                     }
@@ -1146,10 +1146,24 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             let mut method_type_params = previous_type_params.clone();
             method_type_params.extend(residual_type_params);
             cx.current_type_params.replace(method_type_params);
-            let covered = match trait_name {
-                Some(trait_name) => tir_covers_trait_method(&specialized, name, cx, trait_name),
-                None => tir_covers_method(&specialized, name, cx),
-            };
+            // D-SERDE2=A / I9 + I8: a generated codec's provenance is the coverage
+            // authority in EVERY tier, exactly as the entry-module `Item::Impl` arm
+            // below and AOT's `Codegen/Items.rs::emit_trait_method` already treat it.
+            // That arm defers every method that still carries type params, so this is
+            // the only path that can lower a GENERIC generated codec. Re-deciding
+            // coverage here was a second copy of one admission rule (I8), and the two
+            // disagreed: a generic derived codec whose specialized body fell outside
+            // the structural subset was dropped from the JIT program, so the resident
+            // JIT refused and the interpreter reported `Encode/Decode body for
+            // `Wrap<Int>`` unsupported for a method AOT emits from the AST path — one
+            // program, two meanings by tier. Bodies come from the fixed
+            // `Registration/Serde.rs::serde_method` template and `is_generated_serde`
+            // is parser-unforgeable, so this admits no user code.
+            let covered = generated_serde
+                || match trait_name {
+                    Some(trait_name) => tir_covers_trait_method(&specialized, name, cx, trait_name),
+                    None => tir_covers_method(&specialized, name, cx),
+                };
             if !covered {
                 cx.current_type_params.replace(previous_type_params);
                 continue;
