@@ -13,6 +13,12 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+/// D-FAIL-CONV2=A: the included wire fragment renders `DBError`'s failure text
+/// through this seam, the same one AOT output supplies.
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
 // The shared DB wire fragment receives the host's row carrier through this
 // name. AOT supplies its JetMap; JIT keeps rows in the native map until heap
 // marshalling.
