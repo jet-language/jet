@@ -1740,6 +1740,7 @@ impl TraitRegistry {
             "TempFile",
             "TextError",
             "TLSStream",
+            "TLSVersion",
             "UDPPacket",
             "UdpSocket",
             "UnixListener",
@@ -1785,6 +1786,10 @@ impl TraitRegistry {
         // D-RANGE-VALUE1=A: Range uses the same structural value contracts as
         // an ordinary record. Values.rs owns the matching runtime protocols.
         self.auto_equatable.insert(Syntax::TYPE_RANGE.to_string());
+        // D-CORESURF-SMALL1: the negotiated TLS protocol version is a plain
+        // two-variant value; the Prelude's `JetTLSVersion` derives `Eq`, so
+        // `peer.tls_version == .Tls13` is ordinary value equality.
+        self.auto_equatable.insert("TLSVersion".to_string());
         self.trait_impls.insert((
             Syntax::TYPE_RANGE.to_string(),
             DISPLAY.to_string(),
