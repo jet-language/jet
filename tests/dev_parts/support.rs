@@ -330,8 +330,13 @@ fn try_compiled_binary_build(
     let src = fs::read_to_string(file).ok()?;
     let compiled = jet::compile_with_path(&src, file).ok()?;
     let rs = dir.join(format!("jet_{tag}_{i}.rs"));
-    let bin = dir.join(format!("jet_{tag}_{i}"));
-    fs::create_dir_all(dir).ok()?;
+    // I8: `compiled_binary_path` is the ONE oracle-binary naming rule, and it
+    // exists precisely so argv[0] is the program's own name (see its doc). This
+    // site kept the old `jet_<tag>_<i>` name, so the corpus gate's oracle ran as
+    // `jet_corpus_gate_aot_0`; a generated CLI's usage banner names argv[0], so
+    // the gate read its own harness binary name back as a run-tier divergence.
+    let bin = compiled_binary_path(dir, tag, i, file);
+    fs::create_dir_all(bin.parent().expect("oracle binary has a parent")).ok()?;
     let mut rustc_cmd = Command::new("rustc");
     add_generated_rust(
         &mut rustc_cmd,
@@ -3158,6 +3163,27 @@ fn corpus_gate_unique_codes<'a>(codes: impl IntoIterator<Item = &'a str>) -> Str
     out.join("; ")
 }
 
+/// Which observable stream(s) diverged, as stable tokens.
+///
+/// The old detail for a divergence was the single word `parity`, which named the
+/// CHECK rather than the finding: a stem could sit in `run_tier_broken` reading
+/// `parity` while the default run had exited 0 with correct-looking output. These
+/// tokens are the finding, and they stay free of program text so a divergence
+/// cannot thrash the ledger with its own payload.
+fn corpus_gate_divergent_streams(jit: &ProgramOutput, aot: &ProgramOutput) -> String {
+    let mut streams = Vec::new();
+    if jit.stdout != aot.stdout {
+        streams.push("stdout");
+    }
+    if jit.stderr != aot.stderr {
+        streams.push("stderr");
+    }
+    if jit.exit_code != aot.exit_code {
+        streams.push("exit");
+    }
+    streams.join("+")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum CorpusGateClass {
     FrontendRejected,
@@ -3166,10 +3192,38 @@ enum CorpusGateClass {
     ExpectedExit,
     ResidentJit,
     DeoptInterp,
-    /// AOT-green (oracle exit 0) but default tiered `jet run` fails — shrink-only
-    /// burndown (D-VERDICT-1254-1 / D-LENS-RUN1). Detail is diagnostic codes only.
+    /// AOT-green (oracle exit 0) but the default tiered run REFUSES to run the
+    /// program: sema rejects it on the run path, or the tiered backend answers
+    /// `Problems`. Shrink-only burndown (D-VERDICT-1254-1 / D-LENS-RUN1). Detail
+    /// is diagnostic codes only — a record with any other detail is not this
+    /// class, which is how `parity` rows hid eight non-refusals here.
     RunTierBroken,
+    /// AOT-green and the default tiered run ALSO ran to completion, but their
+    /// normalized stdout/stderr/exit differ. That is a tier-semantics divergence,
+    /// not a run-tier refusal: the program runs under `jet run` and prints the
+    /// wrong thing (or the oracle does). Kept separate because `run_tier_broken`
+    /// asserts "fails under default `jet run`", and a stem that ran did not fail
+    /// (D-ONECORE1=A, the same law `jit_gaps.txt::parity_divergences` states).
+    /// Detail names the diverging stream(s): `stdout`, `stderr`, `exit`.
+    TierDivergent,
 }
+
+/// The stems whose default `jet run` is KNOWN to refuse an AOT-green program,
+/// with the codes it stops on and the card that owes the fix. Stem-sorted, and
+/// the gate compares its observed `run_tier_broken` class against this list
+/// EXACTLY — so a new refusal fails, and a repaired one fails until its row is
+/// deleted here.
+///
+/// It lives in source, not in `tests/jit_corpus_gate.txt`: the ledger is
+/// regenerated from an observed run, so a row there cannot hold a law that
+/// regeneration is meant to be unable to silence (#2013).
+const RUN_TIER_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[(
+    "lowlevel/layout_columnar",
+    "E0956",
+    "#1988: the last JIT compile gap — no Cranelift host is built for the \
+     construct, so the default tier deopts into a TIR evaluator that does not \
+     cover it either",
+)];
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct CorpusGateRecord {
@@ -3207,11 +3261,28 @@ fn classify_corpus_stem(
             };
         }
     };
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
+    // The run tier's bundle is the one `jet run` builds, not a load+check
+    // lookalike. `Interpreter::checked_bundle_with_entry` seeds the single
+    // build-fact snapshot before sema, and the AOT oracle below gets it too
+    // (`compile_with_path` -> `Driver::seed_build_facts_from_stamp`). Skipping it
+    // here left every `@build.*` read folding to a default on the tiered side
+    // only, so `comptime/build_stamp` printed the harness's defaults against the
+    // oracle's locked `.jet/lock` stamp and the gate blamed the run tier for a
+    // snapshot the gate itself never took (I9: engines marshal one snapshot).
+    let errors: Vec<_> = match jet::Driver::seed_build_facts(
+        &mut bundle,
+        "dev",
+        false,
+        &std::collections::BTreeMap::new(),
+    ) {
+        // Seeding answers with errors only, so they are already the run-path
+        // rejection the block below classifies.
+        Err(diags) => diags,
+        Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect(),
+    };
     if !errors.is_empty() {
         let detail = errors
             .iter()
@@ -3336,13 +3407,16 @@ fn classify_corpus_stem(
                 ProgramOutput::ran(stdout, stderr, exit_code),
             );
             let aot_out = normalize_for_parity(stem, aot);
-            // AOT-green but tiered output/exit differs → shrink-only burndown
-            // (D-VERDICT-1254-1). Detail is the stable token `parity` (no free text).
+            // The program RAN under the default tier. If its normalized output
+            // differs from the oracle's, that is a tier-semantics divergence, not
+            // the run-tier refusal `run_tier_broken` asserts — recording it there
+            // made that section's own message ("fail under default `jet run`")
+            // false for every `parity` row it held.
             if jit_out != aot_out {
                 return CorpusGateRecord {
                     stem: stem.to_string(),
-                    class: CorpusGateClass::RunTierBroken,
-                    detail: "parity".to_string(),
+                    class: CorpusGateClass::TierDivergent,
+                    detail: corpus_gate_divergent_streams(&jit_out, &aot_out),
                 };
             }
             // Criterion #5: tiered must match AOT (above). Pure-interpreter must
@@ -3547,7 +3621,9 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          # Every top-level examples/features/<topic>/*.jet appears in exactly one section.\n\
          # Update only for intentional ratchet moves.\n\
          # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green\n\
-         # examples that fail default jet run. Record stem + diagnostic code only.\n\
+         # examples whose default jet run REFUSES to run. Record stem + diagnostic code only.\n\
+         # tier_divergent is the other half: it ran under both tiers and the observables\n\
+         # differ. Record stem + the diverging stream(s) only.\n\
          #\n\
          # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR\n\
          # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many\n\
@@ -3561,16 +3637,7 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          #   JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate \\\n\
          #     example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture\n\n",
     );
-    let classes = [
-        CorpusGateClass::FrontendRejected,
-        CorpusGateClass::GateExcluded,
-        CorpusGateClass::NonRunnable,
-        CorpusGateClass::ExpectedExit,
-        CorpusGateClass::ResidentJit,
-        CorpusGateClass::DeoptInterp,
-        CorpusGateClass::RunTierBroken,
-    ];
-    for class in classes {
+    for class in CORPUS_GATE_SECTION_ORDER {
         let section = corpus_gate_section_name(&class);
         let mut section_records: Vec<_> = records
             .iter()
@@ -3597,6 +3664,20 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
     out
 }
 
+/// The one section order. The writer and the `JET_DUMP_CORPUS_GATE` printer used
+/// to carry a private copy of this list each, so a new class could reach the
+/// ledger and never be printed (AGENTS.md I8).
+const CORPUS_GATE_SECTION_ORDER: [CorpusGateClass; 8] = [
+    CorpusGateClass::FrontendRejected,
+    CorpusGateClass::GateExcluded,
+    CorpusGateClass::NonRunnable,
+    CorpusGateClass::ExpectedExit,
+    CorpusGateClass::ResidentJit,
+    CorpusGateClass::DeoptInterp,
+    CorpusGateClass::RunTierBroken,
+    CorpusGateClass::TierDivergent,
+];
+
 fn corpus_gate_section_name(class: &CorpusGateClass) -> &'static str {
     match class {
         CorpusGateClass::FrontendRejected => "frontend_rejected",
@@ -3606,77 +3687,40 @@ fn corpus_gate_section_name(class: &CorpusGateClass) -> &'static str {
         CorpusGateClass::ResidentJit => "resident_jit",
         CorpusGateClass::DeoptInterp => "deopt_interp",
         CorpusGateClass::RunTierBroken => "run_tier_broken",
+        CorpusGateClass::TierDivergent => "tier_divergent",
     }
 }
 
 fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
-    enum Section {
-        None,
-        FrontendRejected,
-        GateExcluded,
-        NonRunnable,
-        ExpectedExit,
-        ResidentJit,
-        DeoptInterp,
-        RunTierBroken,
-    }
-
-    let mut section = Section::None;
+    // The section names come from `corpus_gate_section_name`, not from a private
+    // copy of the list: a header this parser did not know used to be silently
+    // impossible to add (AGENTS.md I8).
+    let mut section: Option<CorpusGateClass> = None;
     let mut records = Vec::new();
     for raw in include_str!("../jit_corpus_gate.txt").lines() {
         let trimmed = raw.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        match trimmed {
-            "frontend_rejected:" => {
-                section = Section::FrontendRejected;
-                continue;
-            }
-            "gate_excluded:" => {
-                section = Section::GateExcluded;
-                continue;
-            }
-            "non_runnable:" => {
-                section = Section::NonRunnable;
-                continue;
-            }
-            "expected_exit:" => {
-                section = Section::ExpectedExit;
-                continue;
-            }
-            "resident_jit:" => {
-                section = Section::ResidentJit;
-                continue;
-            }
-            "deopt_interp:" => {
-                section = Section::DeoptInterp;
-                continue;
-            }
-            "run_tier_broken:" => {
-                section = Section::RunTierBroken;
-                continue;
-            }
-            "e2211:" => {
-                section = Section::DeoptInterp;
-                continue;
-            }
-            _ => {}
+        if let Some(name) = trimmed.strip_suffix(':') {
+            // `e2211:` is a retired section that folded into deopt_interp.
+            section = Some(if name == "e2211" {
+                CorpusGateClass::DeoptInterp
+            } else {
+                CORPUS_GATE_SECTION_ORDER
+                    .into_iter()
+                    .find(|class| corpus_gate_section_name(class) == name)
+                    .unwrap_or_else(|| panic!("unknown manifest section: {trimmed}"))
+            });
+            continue;
         }
         let (stem, detail) = match trimmed.split_once(": ") {
             Some((stem, detail)) => (stem.to_string(), detail.to_string()),
             None => (trimmed.to_string(), String::new()),
         };
-        let class = match section {
-            Section::FrontendRejected => CorpusGateClass::FrontendRejected,
-            Section::GateExcluded => CorpusGateClass::GateExcluded,
-            Section::NonRunnable => CorpusGateClass::NonRunnable,
-            Section::ExpectedExit => CorpusGateClass::ExpectedExit,
-            Section::ResidentJit => CorpusGateClass::ResidentJit,
-            Section::DeoptInterp => CorpusGateClass::DeoptInterp,
-            Section::RunTierBroken => CorpusGateClass::RunTierBroken,
-            Section::None => panic!("manifest entry outside a section: {trimmed}"),
-        };
+        let class = section
+            .clone()
+            .unwrap_or_else(|| panic!("manifest entry outside a section: {trimmed}"));
         records.push(CorpusGateRecord {
             stem,
             class,
@@ -3916,6 +3960,7 @@ fn audit_corpus_gate_ledger(
                     | CorpusGateClass::NonRunnable
                     | CorpusGateClass::ExpectedExit
                     | CorpusGateClass::RunTierBroken
+                    | CorpusGateClass::TierDivergent
             ) && record.detail.is_empty()
         })
         .map(|record| {
@@ -3941,16 +3986,7 @@ fn audit_corpus_gate_ledger(
 }
 
 fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
-    let classes = [
-        CorpusGateClass::FrontendRejected,
-        CorpusGateClass::GateExcluded,
-        CorpusGateClass::NonRunnable,
-        CorpusGateClass::ExpectedExit,
-        CorpusGateClass::ResidentJit,
-        CorpusGateClass::DeoptInterp,
-        CorpusGateClass::RunTierBroken,
-    ];
-    for class in classes {
+    for class in CORPUS_GATE_SECTION_ORDER {
         let section = corpus_gate_section_name(&class);
         let mut section_records: Vec<_> = records
             .iter()
@@ -3987,19 +4023,12 @@ fn write_corpus_gate_report(records: &[CorpusGateRecord], elapsed: std::time::Du
     let mut backend_trace = String::from(
         "# backend attribution (c727/c730)\n\
          # resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0\n\
-         # run_tier_broken = AOT-green but default jet run fails (D-VERDICT-1254-1)\n\
+         # run_tier_broken = AOT-green but the default jet run refuses (D-VERDICT-1254-1)\n\
+         # tier_divergent = both tiers ran and the named stream(s) disagree\n\
          # parity = pure-interpreter + default tiered + optimized AOT identity\n",
     );
     for record in records {
-        let backend = match record.class {
-            CorpusGateClass::ResidentJit => "resident_jit",
-            CorpusGateClass::DeoptInterp => "deopt_interp",
-            CorpusGateClass::RunTierBroken => "run_tier_broken",
-            CorpusGateClass::FrontendRejected => "frontend_rejected",
-            CorpusGateClass::GateExcluded => "gate_excluded",
-            CorpusGateClass::NonRunnable => "non_runnable",
-            CorpusGateClass::ExpectedExit => "expected_exit",
-        };
+        let backend = corpus_gate_section_name(&record.class);
         if record.detail.is_empty() {
             backend_trace.push_str(&format!("{}\t{}\n", record.stem, backend));
         } else {
