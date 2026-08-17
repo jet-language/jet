@@ -2,7 +2,9 @@
 # Every top-level examples/features/<topic>/*.jet appears in exactly one section.
 # Update only for intentional ratchet moves.
 # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green
-# examples that fail default jet run. Record stem + diagnostic code only.
+# examples whose default jet run REFUSES to run. Record stem + diagnostic code only.
+# tier_divergent is the other half: it ran under both tiers and the observables
+# differ. Record stem + the diverging stream(s) only.
 #
 # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
 # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
@@ -96,6 +98,7 @@ expected_exit:
   errors/todo_stop: golden expects non-zero exit
   errors/u8_divide_zero: golden expects non-zero exit
   io/log_fatal: golden expects non-zero exit
+  lowlevel/layout_columnar: AOT compile or run failed
   memory/pool_stale_id: golden expects non-zero exit
   memory/unsafe_sentries: golden expects non-zero exit
   memory/unsafe_sentries_provenance: golden expects non-zero exit
@@ -145,6 +148,8 @@ resident_jit:
   basics/values
   basics/variadics_spread
   callable/callable_policies
+  cli/positionals
+  cli/subcommands
   collections/fixed_arrays
   collections/fn_dispatch_map
   collections/index_hook
@@ -159,6 +164,7 @@ resident_jit:
   collections/wordcount
   collections/zip_family
   comptime/build_fact_precedence
+  comptime/build_stamp
   comptime/comptime_block
   comptime/comptime_core
   comptime/comptime_if
@@ -516,13 +522,11 @@ deopt_interp:
   ui/events
 
 run_tier_broken:
-  cli/positionals: parity
-  cli/subcommands: parity
-  collections/iter_adapters: parity
-  collections/lists: parity
-  comptime/build_stamp: parity
-  io/scope_guard: parity
-  lowlevel/layout_columnar: E0956
-  serde/json_coerce: parity
-  types/no_any_alternatives: parity
+
+tier_divergent:
+  collections/iter_adapters: stdout
+  collections/lists: stdout
+  io/scope_guard: stderr
+  serde/json_coerce: stdout
+  types/no_any_alternatives: stdout
 
