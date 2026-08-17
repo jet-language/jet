@@ -162,6 +162,12 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Job.rs"),
     include_str!("../Prelude/Core/Option.rs"),
     include_str!("../Prelude/Core/FixedList.rs"),
+    // D-SOA-TIER1=A: THE shared column store and the one gather read, plus the
+    // Prelude-owned `[S]` facade over it. Right after FixedList because the
+    // read reuses that shared bounds stop; the Cranelift host and the
+    // interpreter ambient include the same store source.
+    include_str!("../Prelude/Core/Columns.rs"),
+    include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/FloatProvenance.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
@@ -1217,6 +1223,9 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
     out.push_str(include_str!("../Prelude/Core/Codec.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
+    // D-SOA2D: columnar-list transparency rides with the codec traits it names,
+    // so it exists exactly when a program has encoding at all.
+    out.push_str(include_str!("../Prelude/Core/ColumnListCodec.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
     out.push_str(include_str!("../Prelude/Core/EncodingError.rs"));

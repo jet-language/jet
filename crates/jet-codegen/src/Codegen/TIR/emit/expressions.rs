@@ -3307,7 +3307,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             s.push_str(&jet_format!("{jet_prefix}sp }}"));
             s
         }
-        // D-SOA1: a columnar list literal → `__jet_<S>_columns::from_aos(vec![…])`.
+        // D-SOA1 / D-SOA-TIER1=A: a columnar list literal → the Prelude
+        // `JetColumnList<S>` built from the array-of-structs, which scatters the
+        // records across the shared store's columns.
         TExprKind::ColumnarListLit { columns_ty, elems } => {
             let parts = elems
                 .iter()
@@ -3316,24 +3318,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("{}::from_aos(vec![{}])", columns_ty, parts)
         }
-        // D-SOA1: `xs[i]` on a columnar list → bounds-checked gather of the logical S.
+        // D-SOA1 / D-SOA-TIER1=A: `xs[i]` on a columnar list → THE shared gather
+        // read, then the generated `JetRow` join back to the logical `S`.
         TExprKind::ColumnarGather { base, index, line } => {
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!("({}).gather_at({}, {:?}, {})", b, i, cx.file, line)
         }
-        // D-SOA1: `xs[i].field` on a columnar list → direct column read.
+        // D-SOA1 / D-SOA-TIER1=A: `xs[i].field` on a columnar list → the fused
+        // single-column read out of the shared store, then the generated accessor
+        // that unwraps that column's cell back to the field's own type.
         TExprKind::ColumnarColumnRead {
             base,
             index,
-            column_rust,
+            column,
+            accessor,
             line,
         } => {
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(
-                "jet_index_vec(&({}).{}, {}, {:?}, {})",
-                b, column_rust, i, cx.file, line
+                "({}).cell({}, {}, {:?}, {}).{}()",
+                b, column, i, cx.file, line, accessor
             )
         }
         // c109 Phase 23: a named-tuple literal → `JetTup_<hash> { __jet_<f>: <v>, … }`.

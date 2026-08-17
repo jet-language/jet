@@ -5101,6 +5101,65 @@ impl<'a> EvalCtx<'a> {
         Ok(mark_unknown_progress_total(value, module, method, args, progress_known_total))
     }
 
+    /// D-SOA-TIER1=A: marshal a columnar list's rows into THE shared Prelude
+    /// column store, returning the store, its column order, and the element
+    /// struct's name.
+    ///
+    /// The column order is the declared stored-field order. Both this and
+    /// `Cx::columnar_column_index` read it from `reflection_fields`, so the
+    /// column index a fused read carries and the columns built here are numbered
+    /// by one source and cannot drift apart into a silently wrong field.
+    fn columnar_store(
+        &mut self,
+        base: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(crate::columns::JetColumns<CtValue>, Vec<String>, String), Diagnostic> {
+        let Type::List(inner) = &base.ty else {
+            return Err(unsupported("columnar list receiver", self.span()));
+        };
+        let Type::Named(elem) = inner.as_ref() else {
+            return Err(unsupported("columnar list element", self.span()));
+        };
+        let elem = elem.clone();
+        let order: Vec<String> = {
+            let Some(fields) = self.struct_field_types.get(&elem) else {
+                return Err(unsupported("columnar list element shape", self.span()));
+            };
+            fields.iter().map(|(name, _)| name.clone()).collect()
+        };
+        let CtValue::List(rows) = self.eval_expr_child(base, scope)? else {
+            return Err(unsupported("columnar list receiver", self.span()));
+        };
+        let mut columns = crate::columns::JetColumns::new(order.len());
+        for row in &rows {
+            let CtValue::Struct { fields, .. } = row else {
+                return Err(unsupported("columnar list row", self.span()));
+            };
+            let mut cells = Vec::with_capacity(order.len());
+            for name in &order {
+                match fields.iter().find(|(field, _)| field == name) {
+                    Some((_, value)) => cells.push(value.clone()),
+                    None => return Err(unsupported("columnar list row field", self.span())),
+                }
+            }
+            columns.push_row(cells);
+        }
+        Ok((columns, order, elem))
+    }
+
+    /// D-SOA-TIER1=A: the index operand of a columnar read. Bounds are the
+    /// shared store's business, so this only insists the operand is an integer.
+    fn columnar_index(
+        &mut self,
+        index: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<i64, Diagnostic> {
+        match self.eval_expr_child(index, scope)? {
+            CtValue::Int(at) => Ok(at),
+            _ => Err(unsupported("columnar list index", self.span())),
+        }
+    }
+
     fn eval_expr_inner(
         &mut self,
         expr: &'a TExpr,
@@ -8424,14 +8483,48 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::List(values))
             }
-            TExprKind::ColumnarListLit { .. } => {
-                Err(unsupported("expr `ColumnarListLit`", self.span()))
+            // D-SOA-TIER1=A: the ambient tier holds a columnar list as its
+            // logical rows, so `len`, `is_empty`, `push`, rendering,
+            // serialization and iteration are the plain list operations and stay
+            // transparent by construction (D-SOA2D). The two reads the layout
+            // itself defines go through THE shared Prelude column store, so the
+            // row bookkeeping and the bounds policy are the Prelude's here too
+            // rather than a second copy of them (I9).
+            TExprKind::ColumnarListLit { elems, .. } => {
+                let mut values = Vec::with_capacity(elems.len());
+                for elem in elems {
+                    values.push(self.eval_expr_child(elem, scope)?);
+                }
+                Ok(CtValue::List(values))
             }
-            TExprKind::ColumnarGather { .. } => {
-                Err(unsupported("expr `ColumnarGather`", self.span()))
+            TExprKind::ColumnarGather { base, index, line } => {
+                let (columns, order, elem) = self.columnar_store(base.as_ref(), scope)?;
+                let at = self.columnar_index(index.as_ref(), scope)?;
+                match columns.gather(at) {
+                    Ok(cells) => Ok(CtValue::Struct {
+                        type_name: elem,
+                        fields: order.into_iter().zip(cells).collect(),
+                    }),
+                    Err(error) => {
+                        Err(self.runtime_index_stop("E3010", *line as u32, &error.message()))
+                    }
+                }
             }
-            TExprKind::ColumnarColumnRead { .. } => {
-                Err(unsupported("expr `ColumnarColumnRead`", self.span()))
+            TExprKind::ColumnarColumnRead {
+                base,
+                index,
+                column,
+                line,
+                ..
+            } => {
+                let (columns, ..) = self.columnar_store(base.as_ref(), scope)?;
+                let at = self.columnar_index(index.as_ref(), scope)?;
+                match columns.gather_cell(*column, at) {
+                    Ok(cell) => Ok(cell),
+                    Err(error) => {
+                        Err(self.runtime_index_stop("E3010", *line as u32, &error.message()))
+                    }
+                }
             }
             TExprKind::PoolSlot {
                 pool,

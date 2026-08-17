@@ -492,73 +492,87 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     emit_struct_cli(cx, s, out);
     emit_struct_patchable(cx, s, out);
     if s.layout == Some(crate::AST::StructLayout::Columnar) {
-        emit_columnar_storage(cx, s, out);
+        emit_columnar_row_adapter(cx, s, out);
     }
 }
 
-/// D-SOA1 / D-SOA2A=C: emit the struct-of-arrays storage type for a
-/// `#layout(columnar)` struct `S`. A `[S]` collection lowers to `__jet_S_columns`
-/// (one `Vec` per field). The type exposes the v1 list surface as inherent
-/// methods (`new`, `len`, `is_empty`, `push`, `gather`, `from_aos`, `iter_aos`)
-/// so the existing dumb codegen routes columnar list ops through it (R1, I3). It
-/// is serialization-transparent (D-SOA2D): `JetShow`/`__jet_Encode`/`__jet_Decode`
-/// render the gathered AoS form, byte-identical to a `Vec<S>`.
-fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
-    // D-FIELDPOL1: a computed field is never a stored column.
+/// D-SOA-TIER1=A: emit the marshalling adapter that lets a `#Layout(columnar)`
+/// struct `S` live in THE shared Prelude column store.
+///
+/// This is deliberately NOT a storage type. The columns, the row bookkeeping,
+/// the bounds policy and the gather read are Prelude source (`JetColumns` /
+/// `JetColumnList`), shared verbatim with the Cranelift host and the interpreter
+/// ambient, so the compiled build no longer generates a private per-struct
+/// layout (I9). What remains per struct is only a vocabulary — one cell variant
+/// per column, carrying that field's own Rust type — plus the split/join that
+/// moves a record in and out of cells, and one accessor per column for the fused
+/// `xs[i].field` read.
+///
+/// Rendering and serialization transparency (D-SOA2D) are no longer emitted
+/// here either: the Prelude proves them once, generically, over `JetColumnList`.
+fn emit_columnar_row_adapter(cx: &Cx, s: &StructDef, out: &mut String) {
+    // D-FIELDPOL1: a computed field is never a stored column. This is the same
+    // filter `Cx::columnar_column_index` reads, so a column's index here and the
+    // index a fused read passes are the same number.
     let fields: Vec<&Field> = s.fields.iter().filter(|f| f.computed.is_none()).collect();
-    let name = &s.name;
-    let rust_name = mangle_path(name);
-    let cn = jet_foundation::Names::mangle_path(&format!("{name}_columns"));
+    let rust_name = mangle_path(&s.name);
+    let cell = columnar_cell_type(&s.name);
 
-    let mut rust_derives: Vec<&str> = vec!["Debug"];
-    if cx.cloneable.contains(name) {
-        rust_derives.push("Clone");
-    }
-    out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
-    out.push_str(&format!("pub struct {cn} {{\n"));
+    // The cell vocabulary. `Clone` is required by the store's read (a gather
+    // clones one row out of the columns) and every columnar field already had to
+    // be cloneable for that reason.
+    out.push_str("#[derive(Clone, Debug)]\n#[allow(dead_code, non_camel_case_types)]\n");
+    out.push_str(&format!("pub enum {cell} {{\n"));
     for f in &fields {
         out.push_str(&format!(
-            "    pub {}: Vec<{}>,\n",
+            "    {}({}),\n",
             mangle(&f.name),
             cx.rust_type(&f.ty)
         ));
     }
     out.push_str("}\n\n");
 
-    out.push_str(&format!("impl {cn} {{\n"));
-    // new() — empty columns.
-    out.push_str("    pub fn new() -> Self {\n        Self {\n");
-    for f in &fields {
-        out.push_str(&format!("            {}: Vec::new(),\n", mangle(&f.name)));
-    }
-    out.push_str("        }\n    }\n");
-    // len / is_empty — driven by the first column (all columns stay in sync).
-    let first = mangle(&fields[0].name);
-    out.push_str(&format!(
-        "    pub fn len(&self) -> usize {{ self.{first}.len() }}\n"
-    ));
-    out.push_str(&format!(
-        "    pub fn is_empty(&self) -> bool {{ self.{first}.is_empty() }}\n"
-    ));
-    // push(S) — distribute one logical value across the columns.
-    out.push_str(&format!(
-        "    pub fn push(&mut self, __v: {rust_name}) {{\n",
-        rust_name = rust_name
-    ));
+    // One accessor per column, for the fused `xs[i].field` read. The store hands
+    // back the cell it holds for that column, so the variant always matches the
+    // column index the read asked for; the other arms are a real invariant, not
+    // a fallback (same class as the CLI projection's `unreachable!` arms).
+    out.push_str("#[allow(dead_code, unreachable_patterns)]\n");
+    out.push_str(&format!("impl {cell} {{\n"));
     for f in &fields {
         let m = mangle(&f.name);
-        out.push_str(&format!("        self.{m}.push(__v.{m});\n"));
+        out.push_str(&format!(
+            "    pub fn {}(self) -> {} {{\n        match self {{\n            {cell}::{m}(__v) => __v,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}\n",
+            columnar_cell_accessor(&f.name),
+            cx.rust_type(&f.ty)
+        ));
     }
-    out.push_str("    }\n");
-    // gather(i) — reconstruct the logical S at index i (cloning each column cell).
+    out.push_str("}\n\n");
+
+    // The split/join contract. Both walk the stored fields in declaration
+    // order, which is the column order.
+    out.push_str(&format!("impl JetRow for {rust_name} {{\n"));
+    out.push_str(&format!("    type Cell = {cell};\n"));
     out.push_str(&format!(
-        "    pub fn gather(&self, __i: usize) -> {rust_name} {{\n        {rust_name} {{\n",
-        rust_name = rust_name
+        "    fn jet_row_width() -> usize {{ {} }}\n",
+        fields.len()
     ));
+    out.push_str("    fn jet_row_split(self) -> Vec<Self::Cell> {\n        vec![\n");
     for f in &fields {
         let m = mangle(&f.name);
-        out.push_str(&format!("            {m}: self.{m}[__i].clone(),\n"));
+        out.push_str(&format!("            {cell}::{m}(self.{m}),\n"));
     }
+    out.push_str("        ]\n    }\n");
+    out.push_str("    fn jet_row_join(__cells: Vec<Self::Cell>) -> Self {\n");
+    out.push_str("        let mut __cells = __cells.into_iter();\n");
+    out.push_str("        Self {\n");
+    for f in &fields {
+        let m = mangle(&f.name);
+        out.push_str(&format!(
+            "            {m}: match __cells.next() {{\n                Some({cell}::{m}(__v)) => __v,\n                _ => unreachable!(\"columnar row is narrower than its column set\"),\n            }},\n"
+        ));
+    }
+    // D-FIELDMEMO1=A: a memo store is hidden storage, not a column, so a
+    // gathered record gets a fresh empty one exactly as before.
     if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
         for field in memo_fields.keys() {
             let storage = crate::Syntax::memo_storage_name(field);
@@ -569,60 +583,18 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
         }
     }
     out.push_str("        }\n    }\n");
-    // gather_at(i) — bounds-checked index-read producing a logical S. Reuses the
-    // shared list stop so `xs[i]` reports identically AoS vs columnar.
-    out.push_str(&format!(
-        "    pub fn gather_at(&self, __i: i64, __file: &str, __line: u32) -> {rust_name} {{\n        let __len = self.len() as i64;\n        if __i < 0 || __i >= __len {{ jet_arithmetic_stop(__file, __line, &jet_list_bounds_message(__len, __i)); }}\n        self.gather(__i as usize)\n    }}\n",
-        rust_name = rust_name
-    ));
-    // from_aos(Vec<S>) — build columns from an array-of-structs (list literals).
-    out.push_str(&format!(
-        "    pub fn from_aos(__xs: Vec<{rust_name}>) -> Self {{\n        let mut __c = Self::new();\n        for __x in __xs {{ __c.push(__x); }}\n        __c\n    }}\n",
-        rust_name = rust_name
-    ));
-    // to_aos / iter_aos — materialize for any op that needs a Vec<S> view.
-    out.push_str(&format!(
-        "    pub fn to_aos(&self) -> Vec<{rust_name}> {{ (0..self.len()).map(|__i| self.gather(__i)).collect() }}\n",
-        rust_name = rust_name
-    ));
-    out.push_str(&format!(
-        "    pub fn iter_aos(&self) -> impl Iterator<Item = {rust_name}> + '_ {{ (0..self.len()).map(move |__i| self.gather(__i)) }}\n",
-        rust_name = rust_name
-    ));
     out.push_str("}\n\n");
+}
 
-    // JetShow — render identically to a `Vec<S>` (the AoS form), so `println`
-    // output is unchanged by the layout (D-SOA2D extends to display).
-    out.push_str(&format!(
-        "impl JetShow for {cn} {{\n    fn jet_show(&self) -> String {{ self.to_aos().jet_show() }}\n}}\n\n"
-    ));
+/// D-SOA-TIER1=A: the generated cell vocabulary type for columnar struct `name`.
+pub(crate) fn columnar_cell_type(name: &str) -> String {
+    jet_foundation::Names::mangle_path(&format!("{name}_cell"))
+}
 
-    // Serialization transparency (D-SOA2D): encode/decode as the AoS array, so
-    // `json.to_string` of a columnar list equals the plain `[S]` output. Only
-    // emit the impl for the trait the element struct derives.
-    // Built-in derives are expanded into ordinary trait blocks before codegen,
-    // so inspect the checked protocol impls as well as any legacy marker still
-    // present. This adapter belongs to the physical columnar storage type; the
-    // logical struct codec itself remains the generated Jet implementation.
-    let enc = s.derives.iter().any(|(t, _)| t == Generics::ENCODE)
-        || s.trait_impls
-            .iter()
-            .any(|block| block.trait_name == Generics::ENCODE);
-    let dec = s.derives.iter().any(|(t, _)| t == Generics::DECODE)
-        || s.trait_impls
-            .iter()
-            .any(|block| block.trait_name == Generics::DECODE);
-    if enc {
-        out.push_str(&format!(
-            "impl __jet_Encode for {cn} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{ self.to_aos().jet_encode() }}\n}}\n\n"
-        ));
-    }
-    if dec {
-        out.push_str(&format!(
-            "impl __jet_Decode for {cn} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        let __xs: Vec<{rust_name}> = <Vec<{rust_name}> as __jet_Decode>::jet_decode(__t)?;\n        Ok(Self::from_aos(__xs))\n    }}\n}}\n\n",
-            rust_name = rust_name
-        ));
-    }
+/// D-SOA-TIER1=A: the accessor that unwraps one column's cell to the field's own
+/// type, used by the fused `xs[i].field` read.
+pub(crate) fn columnar_cell_accessor(field: &str) -> String {
+    format!("__jet_col_{field}")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
