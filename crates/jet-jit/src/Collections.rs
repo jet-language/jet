@@ -1816,16 +1816,6 @@ fn jet_jit_map_get(map: i64, key: i64, line: u32) -> i64 {
     })
 }
 
-fn jet_jit_map_validate(map: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        if rt.heap.map_len(map).is_some() {
-            map
-        } else {
-            jet_foundation::ice!(None, "data object payload is not a map");
-        }
-    })
-}
-
 /// Result-arena Option handle (`result_is_ok` / `result_get_i64`), *not* the
 /// packed `0 / value + 1` carrier its sibling `jet_jit_list_get_opt` returns.
 ///
@@ -2607,19 +2597,6 @@ fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
     });
 }
 
-/// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
-/// `kind`: 0 = Int, 1 = String, 2 = signed IntN, 3 = unsigned IntN,
-/// 4 = Float, 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
-/// 9 = civil-time handle. Debug list marshalling uses 5 = Bool, 6 = Char,
-/// 7 = F32.
-fn jet_jit_print_list(list: i64, kind: i64) {
-    Concurrency::with_runtime_mut(|rt| {
-        let text = list_show_text(rt, list, kind);
-        let frame = crate::IO::term_prelude::jet_term_print_frame(&text);
-        rt.stdout.push_str(&frame);
-    });
-}
-
 fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
     if !debug {
         let values = || rt.heap.clone_int_list(list).unwrap_or_default();
@@ -2768,20 +2745,8 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> Strin
     }
 }
 
-fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
-    list_text(rt, list, kind, false)
-}
-
 fn list_debug_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
     list_text(rt, list, kind, true)
-}
-
-/// JetShow `[T]` as a string handle for `{list}` interpolation.
-fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let text = list_show_text(rt, list, kind);
-        rt.heap.alloc_string(text)
-    })
 }
 
 /// Jet Debug list text as a string handle for structural-value marshalling.
@@ -2891,61 +2856,6 @@ fn jet_jit_str_push_debug_variant(
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&text);
         }
-    });
-}
-
-/// Print `T?` using its JIT Option carrier.
-/// `kind`: 0 = packed i64, 1 = packed string, 2 = packed f64 bits,
-/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN,
-/// 5 = URL/MIME handle, 6 = Bool, 7 = Char, 8 = Path handle,
-/// 9 = civil-time handle.
-fn jet_jit_print_opt(packed: i64, kind: i64) {
-    Concurrency::with_runtime_mut(|rt| {
-        let result_abi = kind >= 10;
-        if (result_abi
-            && !crate::runtime_host::jit_result_is_ok(rt, packed).unwrap_or(false))
-            || (!result_abi && packed == 0)
-        {
-            let frame = crate::IO::term_prelude::jet_term_print_frame("null");
-            rt.stdout.push_str(&frame);
-            return;
-        }
-        let kind = if result_abi { kind - 10 } else { kind };
-        let payload = if result_abi || matches!(kind, 3 | 4) {
-            crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
-        } else {
-            packed.wrapping_sub(1)
-        };
-        let mut shown = String::new();
-        match kind {
-            1 => {
-                let text = rt.heap.clone_string(payload).unwrap_or_default();
-                shown.push_str(&text);
-            }
-            2 => {
-                shown.push_str(&jet_rt::display_f64(f64::from_bits(payload as u64)));
-            }
-            3 | 4 => {
-                shown.push_str(
-                    &jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
-                );
-            }
-            5 => shown.push_str(&crate::Net::show_value(rt, payload)),
-            6 => shown.push_str(&(payload != 0).to_string()),
-            7 => {
-                let text = char::from_u32(payload as u32)
-                    .map(|character| character.to_string())
-                    .unwrap_or_default();
-                shown.push_str(&text);
-            }
-            8 => shown.push_str(&crate::CoreHost::show_path(rt, payload)),
-            9 => shown.push_str(&crate::Time::show_value(rt, payload)),
-            _ => {
-                shown.push_str(&payload.to_string());
-            }
-        }
-        let frame = crate::IO::term_prelude::jet_term_print_frame(&shown);
-        rt.stdout.push_str(&frame);
     });
 }
 
@@ -4801,8 +4711,6 @@ host_fns! {
         let sig_map_get = sig_get.clone();
         let sig_map_get_opt = sig_get_opt.clone();
         let sig_map_at = sig_get_opt.clone();
-        let mut sig_print_list = sig_get_opt.clone();
-        sig_print_list.returns.clear();
         let mut sig_print_enum = Signature::new(cc);
         sig_print_enum.params.push(AbiParam::new(types::I64));
         sig_print_enum.params.push(AbiParam::new(types::I64));
@@ -4911,7 +4819,6 @@ host_fns! {
     map_try_insert: "jet_jit_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
     map_increment: "jet_jit_map_increment" => jet_jit_map_increment: sig_push;
     map_get: "jet_jit_map_get" => jet_jit_map_get: sig_map_get;
-    map_validate: "jet_jit_map_validate" => jet_jit_map_validate: sig_len;
     map_get_opt: "jet_jit_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
     map_remove: "jet_jit_map_remove" => jet_jit_map_remove: sig_map_get_opt;
     map_len: "jet_jit_map_len" => jet_jit_map_len: sig_len;
@@ -4960,10 +4867,7 @@ host_fns! {
     list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_len;
     list_sort_by_i64_keys: "jet_jit_list_sort_by_i64_keys" => jet_jit_list_sort_by_i64_keys: sig_sort_by_keys;
     list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
-    print_list: "jet_jit_print_list" => jet_jit_print_list: sig_print_list;
-    print_opt: "jet_jit_print_opt" => jet_jit_print_opt: sig_print_list;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
-    list_show: "jet_jit_list_show" => jet_jit_list_show: sig_get_opt;
     list_debug: "jet_jit_list_debug" => jet_jit_list_debug: sig_get_opt;
     string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;
     scalar_debug: "jet_jit_scalar_debug" => jet_jit_scalar_debug: sig_scalar_debug;
