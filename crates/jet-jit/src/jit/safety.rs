@@ -594,6 +594,20 @@ pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
     }
 }
 
+/// The element a single-index closure loop can bind straight off `list_get`:
+/// one i64 the callback reads as an `Int`, a `String` handle, or a record
+/// handle. `Float` stays out on purpose — it needs `list_get_f64`, a different
+/// host fn — and so does `Set`, which `jit_closure_elem_type_for` adds: every
+/// caller of this helper walks the receiver BY INDEX, and a hash `Set`
+/// publishes no position (D-SET-DECLINE1=C). Paired with
+/// `LowerCtx::lower_iter_position`, `lower_iter_take_skip_while`,
+/// `lower_iter_min_max_by` and `lower_iter_count_by`, which all bind the
+/// element at this type instead of assuming `Int`.
+pub(crate) fn jit_closure_loop_elem(ty: &Type) -> Option<Type> {
+    jit_closure_elem_type(ty)
+        .filter(|elem| matches!(elem, Type::Int | Type::String | Type::Named(_)))
+}
+
 pub(crate) fn jit_closure_elem_type_for(ty: &Type) -> Option<Type> {
     jit_closure_elem_type(ty).or_else(|| match ty {
         Type::Apply { name, args }
@@ -2674,32 +2688,41 @@ fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
     resident_safe_expr(&arg.value, callees)
 }
 
-fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
-    args.len() == 1
-        && matches!(
-            &args[0].kind,
-            TExprKind::Lambda(lam)
-                if lam.prep.is_empty()
-                    && lam.source_params.len() == 1
-                    && matches!(
-                        &lam.executable,
-                        TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
-                    )
-        )
+/// The single expression-bodied callback argument, taking `params` parameters,
+/// or `None`.
+///
+/// `resident_safe_unary_lambda` is this with the body thrown away. Every arm
+/// that also needs the body TYPE (`any`, `all`, `sort_by`, `sort_by` with a
+/// comparator, `min_by`, `max_by`, `count_by`, `take_while`, `skip_while`,
+/// `position`, `dedup_by`, `is_sorted_by`, `chunk_while`) used to call a
+/// wrapper and then re-walk the same `args.first()` lambda through its own copy
+/// of this ladder just to reach `body.ty` — six copies of one fact, and the
+/// wrapper's `params` check was the only thing keeping them honest. One fact,
+/// one walk (I8): the arity travels as `params` and the body comes back.
+/// Mirrors `resident_safe_map_expr_callback`, which does the same for a map
+/// callback at a given argument index.
+fn resident_safe_expr_callback<'a>(
+    args: &'a [TExpr],
+    params: usize,
+    callees: &HashSet<String>,
+) -> Option<&'a TExpr> {
+    if args.len() != 1 {
+        return None;
+    }
+    let TExprKind::Lambda(lam) = &args[0].kind else {
+        return None;
+    };
+    if !lam.prep.is_empty() || lam.source_params.len() != params {
+        return None;
+    }
+    let TIR::TLambdaBody::Expr(body) = &lam.executable else {
+        return None;
+    };
+    resident_safe_expr(body, callees).then_some(body.as_ref())
 }
 
-fn resident_safe_binary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
-    args.len() == 1
-        && matches!(
-            &args[0].kind,
-            TExprKind::Lambda(lam)
-                if lam.prep.is_empty()
-                    && lam.source_params.len() == 2
-                    && matches!(
-                        &lam.executable,
-                        TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
-                    )
-        )
+fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
+    resident_safe_expr_callback(args, 1, callees).is_some()
 }
 
 fn resident_safe_map_callback(args: &[TExpr], index: usize, callees: &HashSet<String>) -> bool {
@@ -2856,17 +2879,8 @@ fn resident_safe_closure_method(
         TIR::TClosureOp::Any | TIR::TClosureOp::All => {
             jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
-            }) && resident_safe_unary_lambda(args, callees)
-                && matches!(
-                    args.first().and_then(|arg| match &arg.kind {
-                        TExprKind::Lambda(lambda) => match &lambda.executable {
-                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
-                            TIR::TLambdaBody::Block(_) | TIR::TLambdaBody::SharedBlock(_) => None,
-                        },
-                        _ => None,
-                    }),
-                    Some(Type::Bool)
-                )
+            }) && resident_safe_expr_callback(args, 1, callees)
+                .is_some_and(|body| matches!(&body.ty, Type::Bool))
         }
         TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::ViewMap => {
             jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
@@ -2927,29 +2941,33 @@ fn resident_safe_closure_method(
         TIR::TClosureOp::SortBy => {
             jit_closure_elem_type(&recv.ty)
                 .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
-                && resident_safe_unary_lambda(args, callees)
-                && matches!(
-                    &args[0].kind,
-                    TExprKind::Lambda(lam)
-                        if matches!(&lam.executable, TIR::TLambdaBody::Expr(body) if matches!(body.ty, Type::Int))
-                )
+                && resident_safe_expr_callback(args, 1, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::Int))
         }
         TIR::TClosureOp::SortByCompare => {
             jit_closure_elem_type(&recv.ty)
                 .is_some_and(|elem| matches!(elem, Type::Int | Type::String | Type::Named(_)))
-                && resident_safe_binary_lambda(args, callees)
-                && matches!(
-                    args.first().map(|arg| &arg.kind),
-                    Some(TExprKind::Lambda(lam))
-                        if matches!(&lam.executable, TIR::TLambdaBody::Expr(body)
-                            if matches!(&body.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ORDERING))
-                )
+                && resident_safe_expr_callback(args, 2, callees).is_some_and(|body| {
+                    matches!(&body.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ORDERING)
+                })
         }
+        // One index walk over `list_get` handles, so the element only has to be
+        // one i64 the callback can bind — `Int` was the whole admitted set, and
+        // a `[String]`/`[Shape]` receiver deopted its entire enclosing function
+        // even though the loop never looks at the element itself.
+        // The Bool requirement is new and NARROWS: `lower_iter_take_skip_while`
+        // and `lower_iter_position` compare the callback result with `icmp` at
+        // `I8`, so a non-Bool body would have handed Cranelift mismatched
+        // operand types — an I2 internal compiler error, not a refusal. Sema
+        // already types both predicates `Bool` (I3), so no live case is lost.
+        // Lowering: `LowerCtx::lower_iter_take_skip_while` (TakeWhile/SkipWhile)
+        // and `LowerCtx::lower_iter_position` (Position).
         TIR::TClosureOp::TakeWhile
         | TIR::TClosureOp::SkipWhile
         | TIR::TClosureOp::Position => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
-                && resident_safe_unary_lambda(args, callees)
+            jit_closure_loop_elem(&recv.ty).is_some()
+                && resident_safe_expr_callback(args, 1, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::Bool))
         }
         TIR::TClosureOp::Fold | TIR::TClosureOp::Reduce | TIR::TClosureOp::ViewFold => {
             jit_closure_elem_type_for(&recv.ty)
@@ -2957,20 +2975,17 @@ fn resident_safe_closure_method(
                 .is_some_and(|elem| matches!(elem, Type::Int | Type::Named(_)))
                 && resident_safe_fold_lambda(args, callees)
         }
+        // The comparison is over the `Int` key the callback returns; the element
+        // itself only travels as the packed-Option payload
+        // (`LowerCtx::lower_iter_min_max_by`, `elem + 1` — the same one-based
+        // carrier `pack_option_payload` writes), so any i64-shaped element
+        // works. `String` was the whole admitted set, so `[Int].min_by(…)` and
+        // `[Shape].max_by(…)` deopted their enclosing function.
+        // Lowering: `LowerCtx::lower_iter_min_max_by`.
         TIR::TClosureOp::MinBy | TIR::TClosureOp::MaxBy => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
-                && resident_safe_unary_lambda(args, callees)
-                && matches!(
-                    args.first().and_then(|arg| match &arg.kind {
-                        TExprKind::Lambda(lam) => match &lam.executable {
-                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
-                            TIR::TLambdaBody::Block(_) => None,
-                            TIR::TLambdaBody::SharedBlock(_) => None,
-                        },
-                        _ => None,
-                    }),
-                    Some(Type::Int)
-                )
+            jit_closure_loop_elem(&recv.ty).is_some()
+                && resident_safe_expr_callback(args, 1, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::Int))
         }
         TIR::TClosureOp::FlatMap => {
             let callback_returns_int_list = matches!(
@@ -2992,37 +3007,26 @@ fn resident_safe_closure_method(
         }
         TIR::TClosureOp::DedupBy | TIR::TClosureOp::IsSortedBy => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
-                && resident_safe_unary_lambda(args, callees)
-                && matches!(
-                    args.first().and_then(|arg| match &arg.kind {
-                        TExprKind::Lambda(lam) => match &lam.executable {
-                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
-                            TIR::TLambdaBody::Block(_) => None,
-                            TIR::TLambdaBody::SharedBlock(_) => None,
-                        },
-                        _ => None,
-                    }),
-                    Some(Type::Int)
-                )
+                && resident_safe_expr_callback(args, 1, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::Int))
         }
         TIR::TClosureOp::ChunkWhile => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
-                && resident_safe_binary_lambda(args, callees)
-                && matches!(
-                    args.first().and_then(|arg| match &arg.kind {
-                        TExprKind::Lambda(lam) => match &lam.executable {
-                            TIR::TLambdaBody::Expr(body) => Some(&body.ty),
-                            TIR::TLambdaBody::Block(_) => None,
-                            TIR::TLambdaBody::SharedBlock(_) => None,
-                        },
-                        _ => None,
-                    }),
-                    Some(Type::Bool)
-                )
+                && resident_safe_expr_callback(args, 2, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::Bool))
         }
+        // `count_by` tallies into the one `Map<String, Int>` the JIT map ABI
+        // carries, so the KEY the callback returns must be a `String`; the
+        // element only has to be one i64 the callback can bind. This table used
+        // to check the element and skip the key while
+        // `LowerCtx::lower_iter_count_by` demanded both — a `[String]` receiver
+        // with an `Int` key passed here and was refused there, so the function
+        // deopted anyway. Both sides now state the same two facts.
+        // Lowering: `LowerCtx::lower_iter_count_by`.
         TIR::TClosureOp::CountBy => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
-                && resident_safe_unary_lambda(args, callees)
+            jit_closure_loop_elem(&recv.ty).is_some()
+                && resident_safe_expr_callback(args, 1, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::String))
         }
         TIR::TClosureOp::EachMap
         | TIR::TClosureOp::MapAny

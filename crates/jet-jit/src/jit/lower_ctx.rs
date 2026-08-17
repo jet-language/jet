@@ -27,6 +27,7 @@ use super::runtime_host::{
 };
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_closure_elem_type_for,
+    jit_closure_loop_elem,
     jit_list_float_type, jit_list_int_type, jit_list_iter_elem_type, jit_list_native_type,
     jit_list_of_int_list_type, jit_list_record_type,
     jit_list_string_type, jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type,
@@ -20821,28 +20822,26 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
                 in_own_frame(|| -> Result<Value, String> {
+                    // One arity fact for both receivers. The String path used to
+                    // index `args[0]` when only the List path had checked the
+                    // length, so a zero-argument call reached here as a raw index
+                    // panic in the compiler instead of a refusal (#1754).
+                    if args.len() != 1 {
+                        return Err(Self::BUILTIN_UNSUPPORTED.to_string());
+                    }
                     // FileReader.lines() for-in vars may still be typed Unit in TIR;
                     // the host ABI is always a string handle.
-                    if jit_list_int_type(&recv_ty)
-                        && args.len() == 1
-                        && jit_list_int_type(&args[0].ty)
-                    {
-                        let needle = self.lower_expr(&args[0])?;
-                        let host = if matches!(op, TBuiltinOp::StartsWith) {
-                            self.host.coll.list_starts_with
-                        } else {
-                            self.host.coll.list_ends_with
-                        };
-                        return Ok(self.call_host(host, &[recv_val, needle]));
-                    }
-                    if !matches!(&recv_ty, Type::String) {
+                    let list_recv =
+                        jit_list_int_type(&recv_ty) && jit_list_int_type(&args[0].ty);
+                    if !list_recv && !matches!(&recv_ty, Type::String) {
                         return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                     }
                     let needle = self.lower_expr(&args[0])?;
-                    let host_id = if matches!(op, TBuiltinOp::StartsWith) {
-                        self.host.str_starts_with
-                    } else {
-                        self.host.str_ends_with
+                    let host_id = match (list_recv, matches!(op, TBuiltinOp::StartsWith)) {
+                        (true, true) => self.host.coll.list_starts_with,
+                        (true, false) => self.host.coll.list_ends_with,
+                        (false, true) => self.host.str_starts_with,
+                        (false, false) => self.host.str_ends_with,
                     };
                     Ok(self.call_host(host_id, &[recv_val, needle]))
                 })
@@ -28035,11 +28034,18 @@ impl LowerCtx<'_, '_> {
         recv: &TExpr,
         args: &[TExpr],
     ) -> Result<Value, String> {
-        let elem_ty = jit_closure_elem_type(&recv.ty)
-            .ok_or_else(|| "jit count_by receiver unsupported".to_string())?;
+        let elem_ty = jit_closure_loop_elem(&recv.ty)
+            .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
-        if !matches!((&elem_ty, &body_expr.ty), (Type::String, Type::String)) {
-            return Err("jit count_by types unsupported".to_string());
+        // The tally lands in the one `Map<String, Int>` this tier carries, so the
+        // key must be a String; the element only has to be one i64 the callback
+        // can bind. Paired with the `CountBy` arm of
+        // `resident_safe_closure_method`, which now states both facts too.
+        if !matches!(&body_expr.ty, Type::String) {
+            return Err(format!(
+                "{}: count_by key must be a String",
+                Self::CLOSURE_UNSUPPORTED
+            ));
         }
         let recv_val = self.lower_expr(recv)?;
         let recv_val = self.collect_progress(recv_val);
@@ -30393,12 +30399,15 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
         is_skip: bool,
     ) -> Result<Value, String> {
-        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+        let elem_ty = jit_closure_loop_elem(&recv.ty)
             .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
-        if !matches!(elem_ty, Type::Int) {
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        // The predicate result is compared with `icmp` at `I8` below, so a
+        // non-Bool body would hand Cranelift mismatched operand types — an I2
+        // internal compiler error rather than a deopt. Refuse it here.
+        if !matches!(&body_expr.ty, Type::Bool) {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
-        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
@@ -30439,7 +30448,7 @@ impl LowerCtx<'_, '_> {
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let elem = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
-        let pred = self.with_bound_local(&param_place, Type::Int, elem, |this| this.lower_expr(body_expr))?;
+        let pred = self.with_bound_local(&param_place, elem_ty, elem, |this| this.lower_expr(body_expr))?;
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let pred_true = self.b.ins().icmp(IntCC::NotEqual, pred, zero_b);
 
@@ -30748,12 +30757,13 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_iter_position(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
-        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+        let elem_ty = jit_closure_loop_elem(&recv.ty)
             .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
-        if !matches!(elem_ty, Type::Int) {
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        // Same `icmp`-at-`I8` obligation as `lower_iter_take_skip_while`.
+        if !matches!(&body_expr.ty, Type::Bool) {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
-        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
@@ -30805,7 +30815,7 @@ impl LowerCtx<'_, '_> {
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let elem = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
-        let pred = self.with_bound_local(&param_place, Type::Int, elem, |this| this.lower_expr(body_expr))?;
+        let pred = self.with_bound_local(&param_place, elem_ty, elem, |this| this.lower_expr(body_expr))?;
         let found = self.b.create_block();
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let pred_true = self.b.ins().icmp(IntCC::NotEqual, pred, zero_b);
@@ -30841,11 +30851,12 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
         is_max: bool,
     ) -> Result<Value, String> {
-        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+        // The element only travels as the packed-Option payload (`elem + 1`
+        // below), so any i64-shaped element works; the ordering is over the
+        // `Int` key the callback returns. Paired with the `MinBy`/`MaxBy` arm of
+        // `resident_safe_closure_method`.
+        let elem_ty = jit_closure_loop_elem(&recv.ty)
             .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
-        if !matches!(elem_ty, Type::String) {
-            return Err(Self::CLOSURE_UNSUPPORTED.to_string());
-        }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         if !matches!(body_expr.ty, Type::Int) {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
@@ -30893,7 +30904,7 @@ impl LowerCtx<'_, '_> {
         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
         let elem = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
-        let key = self.with_bound_local(&param_place, elem_ty.clone(), elem, |this| this.lower_expr(body_expr))?;
+        let key = self.with_bound_local(&param_place, elem_ty, elem, |this| this.lower_expr(body_expr))?;
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let has_flag = self.b.use_var(has_var);
         let one_b = self.b.ins().iconst(types::I8, 1);
