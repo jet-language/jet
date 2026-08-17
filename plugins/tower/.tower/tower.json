@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2030,
-    "rev": 38110,
+    "rev": 38129,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1874,7 +1874,7 @@
       "title": "M05 · Build facts and generic modules",
       "goal": "The build fact plane read with @build, typed settings, one contribution law, build entry discovery, cached per-package compile actions, generic modules as functions. Depends on M03.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:09:59.528Z"
     },
     {
@@ -1924,7 +1924,7 @@
       "title": "M10 · Memory semantics and sentries",
       "goal": "The ratified memory slate: view-store copies, dev-tier unsafe sentries, guarantee dial, memory ledger loop, memo markers, computed-field memo, stored-view interpolation fix, unsafe ratchet, program allocator. Depends on M01.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:02.386Z"
     },
     {
@@ -117049,7 +117049,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m05-build-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Fix the comptime-binding lifetime defect that kills computed generic modules. The fixture (examples/features/modules/generic_modules.jet:7) chains @base into @computed_size (spelled $ today; build in @ per D-ONCE-AT1=D — the mechanism is glyph-neutral); the ledger row is tests/jit_gaps.txt:254 and the dedicated test tolerates frontend rejection instead of proving parity (tests/dev.rs:6661; current failure is E0857 per its comment, not the filed E0956/E0107 — retarget the card text to the live failure). Fix: preserve earlier comptime bindings while registering module items at crates/jet-sema/src/Sema/Registration/Items.rs:238, carry them through generic-module expansion (Sema/Bundle/GenericModules.rs), and resolve fragment comptime bindings during TIR lowering at Codegen/TIR/lower/expressions.rs:653 (fallback comptime evaluation adjacent at :668).",
       "blockedBy": [],
@@ -117090,65 +117090,65 @@
         {
           "n": 1,
           "text": "jet run examples/features/modules/generic_modules.jet succeeds with no E0956 or E0107",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:58:27.050Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:20.908Z"
         },
         {
           "n": 2,
           "text": "$base resolves correctly inside the computed module and $computed_size derives from it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:58:27.409Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:21.340Z"
         },
         {
           "n": 3,
           "text": "tests/jit_gaps.txt's compile_covered entry for modules/generic_modules matches what jit_coverage_audit actually observes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:58:27.779Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:21.782Z"
         },
         {
           "n": 4,
           "text": "cargo test --test dev jit_coverage_audit passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T17:58:28.170Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:22.213Z"
         },
         {
           "n": 5,
           "text": "examples/features/modules/generic_modules.jet runs byte-identical to its expected output under AOT, default jet run, and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:42.402Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:22.627Z"
         },
         {
           "n": 6,
           "text": "tests/dev.rs:6661 becomes an unconditional three-way parity assertion (frontend-rejection tolerance removed) and passes; tests/jit_gaps.txt:254 is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:42.817Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:23.076Z"
         },
         {
           "n": 7,
           "text": "A targeted sema test proves earlier comptime bindings survive module-item registration (the root cause, not the symptom)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:59:43.244Z"
+          "evidence": "Root cause found and fixed, and the card's stated premise was refuted first. The gate ledger classified the stem frontend_rejected with E0606 'project module project.math is declared more than once' - NOT the E0956/E0107 the card names, which commit a5d9bc9cf had already fixed. That E0606 was shared VERBATIM by seven sibling stems, so it was never a generic-module defect at all: examples/features/modules/package.jet is the only topic-level manifest under examples/features, making the whole topic one package, and five files declared module math while two declared module text. Renaming them to arith, numeric, scale, doubling and banner freed the topic. Measured effect: frontend_rejected fell 46 -> 39 and compile coverage rose 444 -> 451, the seven new rows being lowlevel/layout_columnar plus modules/generic_modules, inline_module, library, module_inline_sibling, pub_file and selective_imports. The polarity is recorded because it matters: E0606 here is a TRUE refusal enforcing a ratified one-declaration law, pinned by its own duplicate_declarations_are_conflicts_even_when_skipped test, so no predicate was widened - the fixtures were violating the law.\n\nThe underlying E0956 defect that the earlier commit fixed is also recorded for the next reader: eval_comptime_items buffered folded values and stamped them only after its loop, so generic-module expansion re-entering registration with an already-folded predecessor lost @base, and @computed_size :: @base + 1 then saw it unbound. E0107 was a pure cascade of that. Values are now re-seeded and stamped immediately.\n\nOne structural question was raised and answered by the orchestrator rather than escalated, because it decides nothing user-visible: the topic-level manifest STAYS and example module names stay unique. Moving package.jet into its own subdirectory would drop modules/fact_value_arguments from the top-level stem set and force EXAMPLE_CORPUS_FLOOR and CORPUS_GATE_ROW_FLOOR down, spending two deliberately shrink-resistant safety properties for a cosmetic relocation.",
+          "at": "2026-08-17T12:40:23.518Z"
         }
       ],
       "refs": [],
@@ -117158,8 +117158,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T14:03:32.616Z",
-      "updated": "2026-08-17T11:11:29.219Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T12:40:24.143Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T12:40:24.143Z"
     },
     {
       "id": "c0u1wtix",
@@ -125273,7 +125274,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m10-memory",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implement ratified D-MEM-COPYSEM1=A (operative wording: the memory-audit slate section at the end of syntax-decisions.md, :6683): a read-only view flowing into a non-view slot means a semantic copy, lowered exactly like explicit ~ on every tier; ViewMut stays an error; ~x remains the one explicit spelling; the audit/format/policy ladder ships with it (jet audit copies, ghost hints, jet fmt --explicit-copies, source #Policy(copies: .Explicit) and package copies: .Explicit restore refusal). Surfaces: the view-to-owned coercion + explicit-copy lowering (Sema/CheckerInfer/expr.rs:1348/:1707), routed through bindings/fields/collections/captures (CheckerCore/bindings.rs:825, CheckerInfer/expr.rs:2580/:2817/:2879); copies policy key (Policy.rs:15, Parser imports_policy.rs:51, pkg Package/Blocks.rs:806). Reuse the ~ lowering (one Prelude copy path; engines marshal). Executable spec: examples/features/memory/copy_verb.jet extends.",
       "blockedBy": [],
@@ -125289,47 +125290,47 @@
         {
           "n": 1,
           "text": "Copy semantic scoped to non-view flows only; declared View<T>/ViewMut<T> boundaries unchanged; E2305/E2307 split preserved with snapshots; #Policy(copies: .Explicit) + package mirror per D-PACKAGE-POLICY-SCOPE1; I7 Syntax.rs rows; I9 proof on all tiers",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:50:03.422Z"
+          "evidence": "The semantics this card names had already landed in b2caf787e; verified present rather than assumed: the policy key and its package mirror, the I7 syntax row carrying D-MEM-COPYSEM1, the sema materializer with implicit_copy_target / infer_owning_value / insert_implicit_copy and owned_type_for_read_view, the MaterializeView TIR node, the full audit / ghost-hint / fmt --explicit-copies ladder, and three refusal fixtures FLIPPED to '(no errors)' with _explicit variants that restore E2307. What ratified D-MEM-COPYSEM1 requires is that a read-only view stored into a non-view slot becomes an owned copy with the same lowering as an explicit ~ on every tier, that ViewMut stays an error, that ~ remains the one spelling with nothing injected into source, and that copies: .Explicit at either scope restores the refusal.\n\nThe real remaining defect was I8 and I9 drift, and it is now closed: three engines each re-encoded the same four-arm window-type-to-Prelude-symbol ladder - AOT emit, the wasm path and the JS path - plus a fourth partial copy in lambda lowering. One table now owns the mapping, with view_copy_symbol and view_copy_owned_type, and all four sites marshal only. The mapping was transcribed arm for arm, so there is no behaviour change; the only remaining literals are the table itself and the Prelude kernels. AOT, wasm and JS all reach jet_view_copy / jet_string_view_copy in Prelude/Core/ViewCopy; the JIT path is documented identity because ViewNew already returns an owning handle; and the interpreter marshals through clone_structural_value on the owned result type.\n\nProof is a run, not a reading: tests/memory_semantics.rs passes 11 of 11, and it now asserts examples/features/memory/string_view.jet against its golden byte-identically across release AOT, default jet run and --interpret - previously only memory/copy_verb was covered that way. A drift guard was added asserting both Prelude kernels declare the two symbols and that no engine names one itself, so this particular duplication cannot silently return.",
+          "at": "2026-08-17T12:40:24.749Z"
         },
         {
           "n": 2,
           "text": "A stored read-only view in a non-view slot compiles as a copy with ~-identical lowering, byte-identical across AOT, default jet run, and the interpreter; string_view/copy_verb examples + goldens extended",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:06.017Z"
+          "evidence": "The semantics this card names had already landed in b2caf787e; verified present rather than assumed: the policy key and its package mirror, the I7 syntax row carrying D-MEM-COPYSEM1, the sema materializer with implicit_copy_target / infer_owning_value / insert_implicit_copy and owned_type_for_read_view, the MaterializeView TIR node, the full audit / ghost-hint / fmt --explicit-copies ladder, and three refusal fixtures FLIPPED to '(no errors)' with _explicit variants that restore E2307. What ratified D-MEM-COPYSEM1 requires is that a read-only view stored into a non-view slot becomes an owned copy with the same lowering as an explicit ~ on every tier, that ViewMut stays an error, that ~ remains the one spelling with nothing injected into source, and that copies: .Explicit at either scope restores the refusal.\n\nThe real remaining defect was I8 and I9 drift, and it is now closed: three engines each re-encoded the same four-arm window-type-to-Prelude-symbol ladder - AOT emit, the wasm path and the JS path - plus a fourth partial copy in lambda lowering. One table now owns the mapping, with view_copy_symbol and view_copy_owned_type, and all four sites marshal only. The mapping was transcribed arm for arm, so there is no behaviour change; the only remaining literals are the table itself and the Prelude kernels. AOT, wasm and JS all reach jet_view_copy / jet_string_view_copy in Prelude/Core/ViewCopy; the JIT path is documented identity because ViewNew already returns an owning handle; and the interpreter marshals through clone_structural_value on the owned result type.\n\nProof is a run, not a reading: tests/memory_semantics.rs passes 11 of 11, and it now asserts examples/features/memory/string_view.jet against its golden byte-identically across release AOT, default jet run and --interpret - previously only memory/copy_verb was covered that way. A drift guard was added asserting both Prelude kernels declare the two symbols and that no engine names one itself, so this particular duplication cannot silently return.",
+          "at": "2026-08-17T12:40:25.209Z"
         },
         {
           "n": 3,
           "text": "The three refusal fixtures (string_view_outlives_owner, param_owned_field_needs_copy, param_field_assignment_needs_copy) flip to the new semantics; ViewMut refusals stay; copies: .Explicit (source and package) restores refusal with a registered diagnostic + UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:06.428Z"
+          "evidence": "The semantics this card names had already landed in b2caf787e; verified present rather than assumed: the policy key and its package mirror, the I7 syntax row carrying D-MEM-COPYSEM1, the sema materializer with implicit_copy_target / infer_owning_value / insert_implicit_copy and owned_type_for_read_view, the MaterializeView TIR node, the full audit / ghost-hint / fmt --explicit-copies ladder, and three refusal fixtures FLIPPED to '(no errors)' with _explicit variants that restore E2307. What ratified D-MEM-COPYSEM1 requires is that a read-only view stored into a non-view slot becomes an owned copy with the same lowering as an explicit ~ on every tier, that ViewMut stays an error, that ~ remains the one spelling with nothing injected into source, and that copies: .Explicit at either scope restores the refusal.\n\nThe real remaining defect was I8 and I9 drift, and it is now closed: three engines each re-encoded the same four-arm window-type-to-Prelude-symbol ladder - AOT emit, the wasm path and the JS path - plus a fourth partial copy in lambda lowering. One table now owns the mapping, with view_copy_symbol and view_copy_owned_type, and all four sites marshal only. The mapping was transcribed arm for arm, so there is no behaviour change; the only remaining literals are the table itself and the Prelude kernels. AOT, wasm and JS all reach jet_view_copy / jet_string_view_copy in Prelude/Core/ViewCopy; the JIT path is documented identity because ViewNew already returns an owning handle; and the interpreter marshals through clone_structural_value on the owned result type.\n\nProof is a run, not a reading: tests/memory_semantics.rs passes 11 of 11, and it now asserts examples/features/memory/string_view.jet against its golden byte-identically across release AOT, default jet run and --interpret - previously only memory/copy_verb was covered that way. A drift guard was added asserting both Prelude kernels declare the two symbols and that no engine names one itself, so this particular duplication cannot silently return.",
+          "at": "2026-08-17T12:40:25.637Z"
         },
         {
           "n": 4,
           "text": "jet audit copies lists implicit copies; jet fmt --explicit-copies inserts ~; ghost hints show the copy; each proven by a targeted test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:06.867Z"
+          "evidence": "The semantics this card names had already landed in b2caf787e; verified present rather than assumed: the policy key and its package mirror, the I7 syntax row carrying D-MEM-COPYSEM1, the sema materializer with implicit_copy_target / infer_owning_value / insert_implicit_copy and owned_type_for_read_view, the MaterializeView TIR node, the full audit / ghost-hint / fmt --explicit-copies ladder, and three refusal fixtures FLIPPED to '(no errors)' with _explicit variants that restore E2307. What ratified D-MEM-COPYSEM1 requires is that a read-only view stored into a non-view slot becomes an owned copy with the same lowering as an explicit ~ on every tier, that ViewMut stays an error, that ~ remains the one spelling with nothing injected into source, and that copies: .Explicit at either scope restores the refusal.\n\nThe real remaining defect was I8 and I9 drift, and it is now closed: three engines each re-encoded the same four-arm window-type-to-Prelude-symbol ladder - AOT emit, the wasm path and the JS path - plus a fourth partial copy in lambda lowering. One table now owns the mapping, with view_copy_symbol and view_copy_owned_type, and all four sites marshal only. The mapping was transcribed arm for arm, so there is no behaviour change; the only remaining literals are the table itself and the Prelude kernels. AOT, wasm and JS all reach jet_view_copy / jet_string_view_copy in Prelude/Core/ViewCopy; the JIT path is documented identity because ViewNew already returns an owning handle; and the interpreter marshals through clone_structural_value on the owned result type.\n\nProof is a run, not a reading: tests/memory_semantics.rs passes 11 of 11, and it now asserts examples/features/memory/string_view.jet against its golden byte-identically across release AOT, default jet run and --interpret - previously only memory/copy_verb was covered that way. A drift guard was added asserting both Prelude kernels declare the two symbols and that no engine names one itself, so this particular duplication cannot silently return.",
+          "at": "2026-08-17T12:40:26.089Z"
         },
         {
           "n": 5,
           "text": "Old refusal text is deleted (no dual behavior); formatter/policy tests green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:07.285Z"
+          "evidence": "The semantics this card names had already landed in b2caf787e; verified present rather than assumed: the policy key and its package mirror, the I7 syntax row carrying D-MEM-COPYSEM1, the sema materializer with implicit_copy_target / infer_owning_value / insert_implicit_copy and owned_type_for_read_view, the MaterializeView TIR node, the full audit / ghost-hint / fmt --explicit-copies ladder, and three refusal fixtures FLIPPED to '(no errors)' with _explicit variants that restore E2307. What ratified D-MEM-COPYSEM1 requires is that a read-only view stored into a non-view slot becomes an owned copy with the same lowering as an explicit ~ on every tier, that ViewMut stays an error, that ~ remains the one spelling with nothing injected into source, and that copies: .Explicit at either scope restores the refusal.\n\nThe real remaining defect was I8 and I9 drift, and it is now closed: three engines each re-encoded the same four-arm window-type-to-Prelude-symbol ladder - AOT emit, the wasm path and the JS path - plus a fourth partial copy in lambda lowering. One table now owns the mapping, with view_copy_symbol and view_copy_owned_type, and all four sites marshal only. The mapping was transcribed arm for arm, so there is no behaviour change; the only remaining literals are the table itself and the Prelude kernels. AOT, wasm and JS all reach jet_view_copy / jet_string_view_copy in Prelude/Core/ViewCopy; the JIT path is documented identity because ViewNew already returns an owning handle; and the interpreter marshals through clone_structural_value on the owned result type.\n\nProof is a run, not a reading: tests/memory_semantics.rs passes 11 of 11, and it now asserts examples/features/memory/string_view.jet against its golden byte-identically across release AOT, default jet run and --interpret - previously only memory/copy_verb was covered that way. A drift guard was added asserting both Prelude kernels declare the two symbols and that no engine names one itself, so this particular duplication cannot silently return.",
+          "at": "2026-08-17T12:40:26.536Z"
         }
       ],
       "refs": [],
@@ -125340,8 +125341,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T15:21:00.631Z",
-      "updated": "2026-08-12T18:11:39.941Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T12:40:27.152Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T12:40:27.152Z"
     },
     {
       "id": "c0c0u6h7",
@@ -130032,7 +130034,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "ONE FIX: No shared fix — 8 separate cards (or 7 if io/log_job is merged into the Path card with io/path). Two of them (iter_tools_audit, types/traits) must FIRST get a discriminating message; that is a real criterion, not busywork.. CODE SITE: see census. blockedBy: none",
       "blockedBy": [],
@@ -130042,38 +130044,38 @@
         {
           "n": 1,
           "text": "Every member stem compiles on the resident JIT: cargo test --test dev jit_coverage_audit no longer lists collections/iter_tools_audit, collections/list_surface, concurrency/protocol, io/log_job, lowlevel/layout_columnar, memory/memoize, types/multi_head_functions, types/traits under jit gaps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:38.549Z"
+          "evidence": "Measured at the re-derived corpus gate ledger: 496 stems classified as frontend_rejected 39, gate_excluded 12, expected_exit 18, aot_broken 7, resident_jit 387, deopt_interp 33, and tier_divergent EMPTY. cargo test --test dev_corpus_gate passes 6 of 6. JIT compile coverage was re-derived from observed runs to 451 of 496 with ZERO compile gaps, and COMPILE_COVERED_FLOOR was raised 442 -> 444 -> 451 in the same diffs as the gains.\n\nThis card's own gap is closed. lowlevel/layout_columnar was the last compile gap in the epoch and it now lowers. Criterion 2 is satisfied exactly as written - the fix is at ONE site, crates/jet-jit/src/jit/lower_columnar_gather, with the host bridge both columnar reads pass through, rather than once per stem. The for-in refusal needed no lowering arm at all: that tier holds a columnar list as its logical rows exactly as the interpreter ambient does, so iteration IS the plain list walk and the refusal was simply wrong - the polarity is that columnar is no longer consulted for the walk. Three expression gates were added, each admitting exactly what its arm compiles, with ColumnarColumnRead gated strictly narrower than the record_slot accessor it reuses, so the predicate is never wider than the lowering and no Cranelift rejection of generated code is possible (I2). The shared symbol is jet_columns_gather in Prelude/Core/Columns.rs reached through JetColumns<C>::gather, so the host marshals and the Prelude owns the meaning (I9); store width is taken from row 0 so record slot count cannot drift from column count. Criterion 3 holds: nothing is parked in tests/jit_gaps.txt - its gaps: section is empty because there is nothing to record - and no skip guard was added.\n\nThe AOT half was separately implicated, as that work predicted, and is also fixed: the emitter wrote JetColumnList<S>::from_aos, which is not Rust, and rustc answered 'comparison operators cannot be chained' - an I2 internal compiler error. The constructor path is now turbofished. That was the single site calling an associated function on the type string; gather_at and iter_aos are method calls on a value.",
+          "at": "2026-08-17T12:40:27.754Z"
         },
         {
           "n": 2,
           "text": "The fix is the one named in the plan, applied at the single named code site rather than once per stem",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:39.064Z"
+          "evidence": "Measured at the re-derived corpus gate ledger: 496 stems classified as frontend_rejected 39, gate_excluded 12, expected_exit 18, aot_broken 7, resident_jit 387, deopt_interp 33, and tier_divergent EMPTY. cargo test --test dev_corpus_gate passes 6 of 6. JIT compile coverage was re-derived from observed runs to 451 of 496 with ZERO compile gaps, and COMPILE_COVERED_FLOOR was raised 442 -> 444 -> 451 in the same diffs as the gains.\n\nThis card's own gap is closed. lowlevel/layout_columnar was the last compile gap in the epoch and it now lowers. Criterion 2 is satisfied exactly as written - the fix is at ONE site, crates/jet-jit/src/jit/lower_columnar_gather, with the host bridge both columnar reads pass through, rather than once per stem. The for-in refusal needed no lowering arm at all: that tier holds a columnar list as its logical rows exactly as the interpreter ambient does, so iteration IS the plain list walk and the refusal was simply wrong - the polarity is that columnar is no longer consulted for the walk. Three expression gates were added, each admitting exactly what its arm compiles, with ColumnarColumnRead gated strictly narrower than the record_slot accessor it reuses, so the predicate is never wider than the lowering and no Cranelift rejection of generated code is possible (I2). The shared symbol is jet_columns_gather in Prelude/Core/Columns.rs reached through JetColumns<C>::gather, so the host marshals and the Prelude owns the meaning (I9); store width is taken from row 0 so record slot count cannot drift from column count. Criterion 3 holds: nothing is parked in tests/jit_gaps.txt - its gaps: section is empty because there is nothing to record - and no skip guard was added.\n\nThe AOT half was separately implicated, as that work predicted, and is also fixed: the emitter wrote JetColumnList<S>::from_aos, which is not Rust, and rustc answered 'comparison operators cannot be chained' - an I2 internal compiler error. The constructor path is now turbofished. That was the single site calling an associated function on the type string; gather_at and iter_aos are method calls on a value.",
+          "at": "2026-08-17T12:40:28.208Z"
         },
         {
           "n": 3,
           "text": "No stem is parked in tests/jit_gaps.txt and no skip guard is added (AGENTS.md I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:39.511Z"
+          "evidence": "Measured at the re-derived corpus gate ledger: 496 stems classified as frontend_rejected 39, gate_excluded 12, expected_exit 18, aot_broken 7, resident_jit 387, deopt_interp 33, and tier_divergent EMPTY. cargo test --test dev_corpus_gate passes 6 of 6. JIT compile coverage was re-derived from observed runs to 451 of 496 with ZERO compile gaps, and COMPILE_COVERED_FLOOR was raised 442 -> 444 -> 451 in the same diffs as the gains.\n\nThis card's own gap is closed. lowlevel/layout_columnar was the last compile gap in the epoch and it now lowers. Criterion 2 is satisfied exactly as written - the fix is at ONE site, crates/jet-jit/src/jit/lower_columnar_gather, with the host bridge both columnar reads pass through, rather than once per stem. The for-in refusal needed no lowering arm at all: that tier holds a columnar list as its logical rows exactly as the interpreter ambient does, so iteration IS the plain list walk and the refusal was simply wrong - the polarity is that columnar is no longer consulted for the walk. Three expression gates were added, each admitting exactly what its arm compiles, with ColumnarColumnRead gated strictly narrower than the record_slot accessor it reuses, so the predicate is never wider than the lowering and no Cranelift rejection of generated code is possible (I2). The shared symbol is jet_columns_gather in Prelude/Core/Columns.rs reached through JetColumns<C>::gather, so the host marshals and the Prelude owns the meaning (I9); store width is taken from row 0 so record slot count cannot drift from column count. Criterion 3 holds: nothing is parked in tests/jit_gaps.txt - its gaps: section is empty because there is nothing to record - and no skip guard was added.\n\nThe AOT half was separately implicated, as that work predicted, and is also fixed: the emitter wrote JetColumnList<S>::from_aos, which is not Rust, and rustc answered 'comparison operators cannot be chained' - an I2 internal compiler error. The constructor path is now turbofished. That was the single site calling an associated function on the type string; gather_at and iter_aos are method calls on a value.",
+          "at": "2026-08-17T12:40:28.647Z"
         },
         {
           "n": 4,
           "text": "Each member stem produces byte-identical output on AOT and on the default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T18:58:39.948Z"
+          "evidence": "Measured at the re-derived corpus gate ledger: 496 stems classified as frontend_rejected 39, gate_excluded 12, expected_exit 18, aot_broken 7, resident_jit 387, deopt_interp 33, and tier_divergent EMPTY. cargo test --test dev_corpus_gate passes 6 of 6. JIT compile coverage was re-derived from observed runs to 451 of 496 with ZERO compile gaps, and COMPILE_COVERED_FLOOR was raised 442 -> 444 -> 451 in the same diffs as the gains.\n\nThis card's own gap is closed. lowlevel/layout_columnar was the last compile gap in the epoch and it now lowers. Criterion 2 is satisfied exactly as written - the fix is at ONE site, crates/jet-jit/src/jit/lower_columnar_gather, with the host bridge both columnar reads pass through, rather than once per stem. The for-in refusal needed no lowering arm at all: that tier holds a columnar list as its logical rows exactly as the interpreter ambient does, so iteration IS the plain list walk and the refusal was simply wrong - the polarity is that columnar is no longer consulted for the walk. Three expression gates were added, each admitting exactly what its arm compiles, with ColumnarColumnRead gated strictly narrower than the record_slot accessor it reuses, so the predicate is never wider than the lowering and no Cranelift rejection of generated code is possible (I2). The shared symbol is jet_columns_gather in Prelude/Core/Columns.rs reached through JetColumns<C>::gather, so the host marshals and the Prelude owns the meaning (I9); store width is taken from row 0 so record slot count cannot drift from column count. Criterion 3 holds: nothing is parked in tests/jit_gaps.txt - its gaps: section is empty because there is nothing to record - and no skip guard was added.\n\nThe AOT half was separately implicated, as that work predicted, and is also fixed: the emitter wrote JetColumnList<S>::from_aos, which is not Rust, and rustc answered 'comparison operators cannot be chained' - an I2 internal compiler error. The constructor path is now turbofished. That was the single site calling an associated function on the type string; gather_at and iter_aos are method calls on a value.",
+          "at": "2026-08-17T12:40:29.088Z"
         }
       ],
       "refs": [],
@@ -130085,8 +130087,9 @@
       "parentId": "c02ur7xi",
       "needsAcceptance": false,
       "created": "2026-08-15T18:58:37.394Z",
-      "updated": "2026-08-17T00:01:04.214Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-17T12:40:29.702Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T12:40:29.702Z"
     },
     {
       "id": "c04q38ak",
@@ -176827,6 +176830,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T12:40:29.703Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0m0jmc6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T12:40:29.089Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0jmc6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T12:40:28.648Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0jmc6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T12:40:28.208Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0jmc6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T12:40:27.755Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0jmc6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T12:40:27.152Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c03cswti",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T12:40:26.537Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03cswti",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T12:40:26.090Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03cswti",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T12:40:25.637Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03cswti",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T12:40:25.209Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03cswti",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T12:40:24.749Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03cswti",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T12:40:24.143Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dk0p73",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T12:40:23.519Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-17T12:40:23.077Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-17T12:40:22.627Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T12:40:22.213Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T12:40:21.782Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T12:40:21.340Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T12:40:20.909Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dk0p73",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-17T11:52:21.925Z",
       "by": "fable",
       "action": "question.answer",
@@ -180192,139 +180328,6 @@
       "action": "card.criteria-meet",
       "ref": "c014nejk",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-15T21:28:24.548Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0oks05m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-15T21:27:48.572Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0qirkh3",
-      "note": "#3 A test asserts the escaping case prints and the caught case "
-    },
-    {
-      "at": "2026-08-15T21:27:47.629Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0qirkh3",
-      "note": "#2 A panic the scheduler catches and converts stays quiet, so t"
-    },
-    {
-      "at": "2026-08-15T21:27:47.204Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0qirkh3",
-      "note": "#1 A panic escaping a task body prints its message and location"
-    },
-    {
-      "at": "2026-08-15T21:27:46.419Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0qirkh3",
-      "note": "Scheduler panic hook hides the message for every task body"
-    },
-    {
-      "at": "2026-08-15T21:27:45.287Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0oks05m",
-      "note": "#4 A regression test drives cancel through the deopt path and a"
-    },
-    {
-      "at": "2026-08-15T21:27:44.320Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0oks05m",
-      "note": "#3 The ~14 .expect sites and the bare panic! in Concurrency.rs "
-    },
-    {
-      "at": "2026-08-15T21:27:43.628Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0oks05m",
-      "note": "#2 A cancel raised at an interpreter wait point inside jet_deop"
-    },
-    {
-      "at": "2026-08-15T21:27:42.835Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0oks05m",
-      "note": "#1 No extern \"C\" frame in crates/jet-jit can be reached by an u"
-    },
-    {
-      "at": "2026-08-15T21:27:41.948Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0oks05m",
-      "note": "extern \"C\" JIT frames abort the process instead of reporting"
-    },
-    {
-      "at": "2026-08-15T19:48:54.146Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c048a8ue",
-      "note": "#4 tests/compiler_stack.rs gains a case proving a caller that b"
-    },
-    {
-      "at": "2026-08-15T19:48:53.009Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c048a8ue",
-      "note": "#3 LAST_JIT_LOWER_FAILURE survives the boundary: lower_jit_prog"
-    },
-    {
-      "at": "2026-08-15T19:48:51.852Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c048a8ue",
-      "note": "#2 The boundary is installed at TIR::lower_jit_program and Sema"
-    },
-    {
-      "at": "2026-08-15T19:48:50.782Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c048a8ue",
-      "note": "#1 cargo test --test dev completes without a stack overflow and"
-    },
-    {
-      "at": "2026-08-15T19:48:40.278Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c048a8ue",
-      "note": "Install the sized-stack boundary at the TIR lowering entry"
-    },
-    {
-      "at": "2026-08-15T19:15:51.487Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PANICROOT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-15T19:15:51.487Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#12 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-15T19:15:51.487Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#11 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-15T19:15:51.487Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#10 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,
