@@ -1204,7 +1204,8 @@ machine records carry `profile: release`; directory targets qualify region
 names with their source path.
 
 **Compiler phase timing** — set **`JET_TIMING=1`** and any build writes
-`jet-timing.json` (load/sema/ffi/codegen µs + generated-Rust bytes), prints
+`jet-timing.json` (load/sema/ffi/codegen µs, plus `build_plan` µs when a build
+entry runs, and generated-Rust bytes), prints
 `jet-timing binary_bytes=…` after link, and the LSP appends per-request latency
 to `jet-lsp-timing.json`. All gated by the env var (zero cost otherwise; I6
 hand-rolled JSON, no external crate). **`tools/perf/dashboard.sh`** aggregates a
