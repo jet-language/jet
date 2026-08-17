@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2034,
-    "rev": 38142,
+    "nextNum": 2036,
+    "rev": 38146,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19597,6 +19597,11 @@
         {
           "at": "2026-08-17",
           "by": "fable",
+          "text": "CORRECTION (owner, 2026-08-17): the prior log's 'warm jet run hello.jet = 0.53-0.7s' line compared a hello-world to a legitimate Rust project's 15s rebuild — apples to oranges, retracted as a beat claim. Honest state: Jet has NO measured warm dev-loop latency on a representative project. The comparison only becomes citable once c02iiv45's checked corpus reports warm jet run / jet dev rebuild timings on realistic project sizes."
+        },
+        {
+          "at": "2026-08-17",
+          "by": "fable",
           "text": "Video-mine 2026-08-17 (Let's Get Rusty vFp4IbC2aZ0, compile times): ledger at /tmp/jet-yt/vFp4IbC2aZ0.claims.json. Rust needs nightly + 3 unstable flags to halve dev builds (line-tables-only debug, -Zthreads=8, Cranelift dev backend); commenters add mold/wild linkers, sccache, dep opt-level inversion, and want custom profiles (O3+debug). All already covered by ready cards c0j6jiv0 (parallel frontend), c0u57yrs (Cranelift debug-AOT), c0omljqx (profile routing), c088b5n0 (linker cleanup), c0be4wgi (latency budgets). Live probe: warm jet run hello.jet = 0.53-0.7s edit-to-output, no flags, stable — the beat vector is that Jet's default equals Rust's best nightly stack. Comment bar: even 15s rebuild called 'atrocious'; absolute seconds, not percent."
         },
         {
@@ -19713,7 +19718,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T18:00:25.417Z",
-      "updated": "2026-08-17T13:05:38.936Z",
+      "updated": "2026-08-17T13:18:58.896Z",
       "tags": [],
       "parentId": null,
       "updatedBy": "fable"
@@ -46307,6 +46312,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-17",
+          "by": "fable",
+          "text": "Owner directive 2026-08-17 (video-mine follow-up): the corpus must include warm default-tier rebuild latency (jet run / jet dev edit-to-output) on representative project sizes, not only phase timings — that is the number the Rust compile-time video competes on (~15s rebuild after nightly stack; comment bar calls even 15s 'atrocious'). No hello-world numbers may be quoted as beat evidence."
+        },
+        {
           "at": "2026-08-06",
           "by": "cursor-grok",
           "text": "Blocked on open D-TYPECHECK-BOUND1 (#1498) for typecheck-cliff corpus cases. Also owns clean/unchanged/edit timings and anti incremental-worse-than-clean folklore from Theo crosswalk."
@@ -46385,8 +46395,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:39.137Z",
-      "updated": "2026-08-06T15:40:52.727Z",
-      "updatedBy": "cursor-grok",
+      "updated": "2026-08-17T13:18:59.605Z",
+      "updatedBy": "fable",
       "tags": [],
       "parentId": null
     },
@@ -133121,6 +133131,54 @@
       "created": "2026-08-17T13:05:17.604Z",
       "updated": "2026-08-17T13:05:17.605Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0r02txw",
+      "num": 2034,
+      "title": "Typed runtime app config: env/.env to a typed record in one step (meet or beat pydantic-settings)",
+      "body": "Owner directive 2026-08-17: meet or beat pydantic-settings. The bar (ArjanCodes ssLO99uwPWI 00:19-02:08): declare config once as a typed model; one call reads env vars + project .env, strips a prefix (APP_), maps DOUBLE__UNDERSCORE keys to nested records, validates with field-pointing errors, yields the typed value. Jet today has the parts but not the surface: env get/set (FSIoEnvOsTesting.rs), ratified Dotenv.{file, allow, secrets} at the environment plane (E1333), typed decode with FieldError paths, and build-plane settings (D-CONF-KEY1) — no runtime env->typed-record composition. Beat vectors available to Jet: compile-checked config record (unknown/missing keys at compile time where the record is closed), Secret fields redacted by law (D-EMAIL-SMTP-CONFIG1 precedent), decode errors naming the env var not just the field, one mechanism shared with json/toml decode (I8 — no second validation plane). Beginner: config :: env.decode<Settings>() just works. Expert: prefix, source order, .env path, allowlist. Must reuse the existing codec/FieldError machinery, not a parallel validator.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T13:19:00.348Z",
+      "updated": "2026-08-17T13:19:00.348Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c00pxltq",
+      "num": 2035,
+      "title": "Embedded analytics: SQL query over CSV/Parquet/columnar values (meet or beat DuckDB)",
+      "body": "Owner directive 2026-08-17: meet or beat DuckDB's core loop. The bar (ArjanCodes ssLO99uwPWI 07:36-08:24): point a SQL query at a CSV/Parquet file with zero import step, get typed rows/dataframe back, in-process, fast; commenters add dataframe interop and call it beloved infrastructure (in-process C++ engine, DuckLake). Jet today: columnar substrate exists (Core/ColumnList, Columns, ColumnListCodec), csv.decode<T> typed ingestion, LiveQuery/DataFlow in CoreLib — but no query surface over files or columnar values. Decide the shape: (a) checked SQL text head (marker on .Text like the existing SQL taint rail, comptime-checked against the source schema), (b) typed query builder over ColumnList, or (c) both with one engine (I8: one mechanism). Beat vectors: schema known at comptime makes column-name typos compile errors (DuckDB fails at runtime); typed results skip the dataframe stringly layer; same query law across CSV/Parquet/columnar/live values. Expert: predicate pushdown, memory budget, spill policy. External-dependency note: any vendored engine or format reader beyond std needs owner approval per I6 — surface design first, engine decision explicitly gated.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T13:19:00.936Z",
+      "updated": "2026-08-17T13:19:00.936Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -177008,6 +177066,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T13:19:00.936Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c00pxltq",
+      "note": "Embedded analytics: SQL query over CSV/Parquet/columnar values (meet or beat DuckDB)"
+    },
+    {
+      "at": "2026-08-17T13:19:00.348Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0r02txw",
+      "note": "Typed runtime app config: env/.env to a typed record in one step (meet or beat pydantic-settings)"
+    },
+    {
+      "at": "2026-08-17T13:18:59.605Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c02iiv45",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-17T13:18:58.897Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0171611",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-17T13:05:39.726Z",
       "by": "fable",
       "action": "card.update",
@@ -180478,34 +180564,6 @@
       "action": "card.criteria-meet",
       "ref": "c048a8ue",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-15T23:28:27.624Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c048a8ue",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T23:28:26.820Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c048a8ue",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-15T23:28:25.680Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nycd3c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-15T23:28:24.999Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0exr0fm",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
