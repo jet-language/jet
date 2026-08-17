@@ -2,9 +2,9 @@
 // each hole is exactly one argv item, regardless of spaces or shell metacharacters.
 use core.process as process
 
-fn run() {
+fn run() ? {
     value :: "two words;*.jet"
     cmd :: Sh.{"printf <%s> {value}"}
-    result :: process.run(cmd) ?? panic("command failed")
+    result :: process.run(cmd) ?? return Err("command failed")
     print(result.output)
 }

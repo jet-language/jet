@@ -1,13 +1,13 @@
 // D-CRYPTOENV1=A: misuse-resistant crypto.seal / crypto.open envelope.
 use core.crypto as crypto
 
-fn run() {
-    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient key")
+fn run() ? {
+    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient key")
     msg :: [U8].{104, 101, 108, 108, 111, 44, 32, 106, 101, 116}
     aad :: [U8].{0x6a, 0x65, 0x74}
-    box :: crypto.seal([recipient.public_key()], msg, aad) ?? panic("seal failed")
+    box :: crypto.seal([recipient.public_key()], msg, aad) ?? return Err("seal failed")
     print("sealed bytes: {box.bytes().len()}")
-    plain :: crypto.open(recipient, box, aad) ?? panic("open failed")
+    plain :: crypto.open(recipient, box, aad) ?? return Err("open failed")
     print("roundtrip len: {plain.len()}")
     print("roundtrip ok: {plain == msg}")
 }

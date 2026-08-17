@@ -1,13 +1,13 @@
 // D-CORE-COMPRESS1=A / D-CODECS1: canonical gzip stream codec.
 use core.archive.gzip as gz
 
-fn run() {
+fn run() ? {
     original :: [U8].{72, 101, 108, 108, 111}  // ASCII "Hello"
     compressed :: gz.compress(original)
     // A gzip stream is always longer than 5 bytes (header alone is 10).
     print(compressed.len() > 5)
     // Round-trip: decompress must recover the original bytes exactly.
-    restored :: gz.decompress(compressed) ?? panic("bad gzip")
+    restored :: gz.decompress(compressed) ?? return Err("bad gzip")
     print(restored.len() == original.len())
     print(restored == original)
     // Decompress failure path: corrupt input returns err.

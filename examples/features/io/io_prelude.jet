@@ -19,7 +19,7 @@ fn run() {
 
     now :: Clock.now()
     today :: Date.today()
-    duration :: Duration.seconds(1) ?? panic("duration")
+    duration :: Duration.seconds(1) ?? return Err("duration")
     _ :: now
     _ :: today
     _ :: duration
@@ -30,8 +30,8 @@ fn run() {
     print("prelude: Path.home().join works: {home_join_ok}")
 
     temp :: "/tmp/jet-io-prelude.txt"
-    if files.exists(temp) -> files.remove(temp) ?? panic("cleanup")
-    write_file(Path.from(temp), "ambient") ?? panic("write_file")
+    if files.exists(temp) -> files.remove(temp) ?? return Err("cleanup")
+    write_file(Path.from(temp), "ambient") ?? return Err("write_file")
     print("prelude: file_exists: {file_exists(temp)}")
     // D-FAIL-EXIT1=A: `fn run()` is fallible by default, so its miss route
     // carries the failure value the entry contract owes.

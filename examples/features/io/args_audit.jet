@@ -3,7 +3,7 @@
 // completion text.
 use core.args as args
 
-fn run() {
+fn run() ? {
     serve :: args.spec()
         .option_int("port", "listen port", "PORT")
     spec :: args.spec()
@@ -27,7 +27,7 @@ fn run() {
         "--port",
         "8080"
     ]
-    parsed :: spec.parse(argv) ?? panic("bad args")
+    parsed :: spec.parse(argv) ?? return Err("bad args")
     print(parsed.flag("verbose"))
     print(parsed.option_int("jobs") ?? 0)
     print(parsed.option("mode") ?? "")

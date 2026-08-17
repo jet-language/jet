@@ -1,9 +1,12 @@
-fn run() {
-    exact :: Duration.seconds(2) ?? panic("duration")
-    fractional :: Duration.seconds(1.75) ?? panic("duration")
-    negative :: Duration.milliseconds(-1500) ?? panic("duration")
-    print(exact.in(.Milliseconds) ?? panic("duration read"))
-    print(fractional.in(.Milliseconds) ?? panic("duration read"))
-    print(negative.in(.Seconds) ?? panic("duration read"))
+fn run() ? {
+    exact :: Duration.seconds(2) ?? return Err("duration")
+    fractional :: Duration.seconds(1.75) ?? return Err("duration")
+    negative :: Duration.milliseconds(-1500) ?? return Err("duration")
+    exact_ms :: exact.in(.Milliseconds) ?? return Err("duration read")
+    print(exact_ms)
+    fractional_ms :: fractional.in(.Milliseconds) ?? return Err("duration read")
+    print(fractional_ms)
+    negative_s :: negative.in(.Seconds) ?? return Err("duration read")
+    print(negative_s)
     if Duration.hours(9223372036854775807) == .Err(_) -> print("range")
 }

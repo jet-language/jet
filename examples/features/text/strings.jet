@@ -1,5 +1,5 @@
 // 17 — Strings & Char (M5). ledger #1476 remaining String surface.
-fn run() {
+fn run() ? {
     loop c, "héllo".chars() -> print(c)
     print("  hi  ".trim())
     parts :: "a,b,c".split(",")
@@ -21,7 +21,7 @@ fn run() {
     print(" \t".is_whitespace())
     print("jet lang".is_ascii())
     print("hELLO jet".to_title())
-    pair :: "left:right".split_once(":") ?? panic("split")
+    pair :: "left:right".split_once(":") ?? return Err("split")
     print(pair.before)
     print(pair.after)
     // #1476
@@ -43,11 +43,11 @@ fn run() {
     // engine (`core.regex.compile` + `is_match`/`find`) — same bad-pattern
     // `? String` error shape `core.regex.compile` already returns.
     phone :: "call 555-0134"
-    has_digits :: phone.matches("[0-9]+") ?? panic("bad pattern")
+    has_digits :: phone.matches("[0-9]+") ?? return Err("bad pattern")
     print(has_digits)
-    no_digits :: "no numbers here".matches("[0-9]+") ?? panic("bad pattern")
+    no_digits :: "no numbers here".matches("[0-9]+") ?? return Err("bad pattern")
     print(no_digits)
-    found :: phone.match("[0-9]+") ?? panic("bad pattern")
+    found :: phone.match("[0-9]+") ?? return Err("bad pattern")
     print(found ?? "none")
     // A bad pattern takes the `??` fallback (compile fails before any match runs).
     bad_pattern :: "x".matches("[") ?? false
