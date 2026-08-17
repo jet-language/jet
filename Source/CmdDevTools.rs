@@ -1361,6 +1361,12 @@ pub(crate) const BLESS_TARGETS: &[&str] = &[
 /// comment) — `bless` just names and runs it so nobody has to remember the
 /// env var or the target list. `--dry-run` prints the commands without
 /// running them (never mutates a snapshot file).
+///
+/// A real sweep also needs `UPDATE_EXPECT_REASON` in the environment (card
+/// #2026): the snapshot harness refuses a blanket bless that does not name the
+/// compiler change it records, because 6fd88282b rewrote 122 diagnostic
+/// contracts with zero crate source changed. `Command` inherits the
+/// environment, so the reason reaches every target through the same variable.
 pub(crate) fn run_devtools_bless(args: &[&String]) {
     let mut dry_run = false;
     let mut requested: Vec<String> = Vec::new();
@@ -1391,6 +1397,25 @@ pub(crate) fn run_devtools_bless(args: &[&String]) {
         }
         return;
     }
+
+    let reason = std::env::var("UPDATE_EXPECT_REASON")
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default();
+    if reason.len() < 8 {
+        crate::cli_error!(
+            "E2104",
+            "a blanket bless must name the compiler change it records"
+        );
+        eprintln!(
+            "set the reason, then re-run:\n    UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" {} self devtools bless",
+            jet::Syntax::BINARY_NAME
+        );
+        eprintln!(
+            "to bless one reviewed fixture instead: JET_UI_FILTER=<fixture> UPDATE_EXPECT=<same fixture> cargo test --test diagnostic_snapshots"
+        );
+        exit(ExitCodes::USAGE);
+    }
+    println!("bless: reason recorded — {}", reason);
 
     let mut any_failed = false;
     for t in &targets {
