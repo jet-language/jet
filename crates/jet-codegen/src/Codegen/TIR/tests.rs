@@ -394,15 +394,22 @@ fn run() {
                 _ => None,
             })
             .collect();
+        // D-LOOPMAP1=B keeps `List.map` eager (`[R]`), but `scan` (D-ITERTOOLS1=A),
+        // `filter_map` (D-FAILCOMP1) and `flat_map` (D-ITER1) are lazy adapters that
+        // resolve to `Iter<T>` — sema refines the element and the TIR carries sema's
+        // `resolved_ret` verbatim (`lower/method_calls.rs`'s closure-op arm). The
+        // refinements are `CheckerInfer/calls/builtin_methods.rs`: scan at the seed
+        // (`Collections::iter_ty(seed_ty)`), filter_map from the closure's `ok` type,
+        // flat_map from the closure's list element.
         assert_eq!(
             actual,
             vec![
                 Type::Float,
                 Type::Float,
+                crate::Collections::iter_ty(Type::Float),
                 Type::List(Box::new(Type::Float)),
-                Type::List(Box::new(Type::Float)),
-                Type::List(Box::new(Type::Float)),
-                Type::List(Box::new(Type::Float)),
+                crate::Collections::iter_ty(Type::Float),
+                crate::Collections::iter_ty(Type::Float),
                 Type::Map {
                     key: Box::new(Type::Bool),
                     key_span: None,
@@ -911,11 +918,24 @@ fn mk() {
     #[test]
     fn rejects_range_switch_over_non_ident_subject() {
         // D-IF3: a value+range mixed switch (shape D) lowers each range head to
-        // `subject >= lo && subject <= hi`. The shared switch subject may be a
-        // non-ident expression: it is evaluated once, then reused by each arm.
-        // This call subject therefore remains in the covered mixed-switch subset.
+        // `subject >= lo && subject <= hi`. `arm_head_range` (subset/patterns.rs)
+        // admits an arm-head range ONLY over an `Expr::Ident` subject, so a call
+        // subject with a range arm leaves the whole switch out of the subset: the
+        // range arm satisfies neither `arm_head_range` nor `arm_is_plain_cond`
+        // (which excludes every `Expr::PatternTest`), so shape D rejects it.
+        //
+        // That restriction is deliberate and still load-bearing. The one
+        // `arm_head_range` helper gates BOTH shape B and shape D, and shape B's
+        // emitter (`TStmt::RangeSwitch`, emit/statements.rs) re-emits `subject_str`
+        // twice per arm instead of reading the `__jet_switch_subject` binding — so a
+        // call subject would be evaluated 2n times. Commit e45822626 added the
+        // guard for exactly that; this assertion had been flipped the day before
+        // (84ec4c9dc) and never ran, because the lib test target did not compile.
+        //
+        // A non-ident subject stays covered without a range arm — see
+        // `covers_mixed_switch_non_ident_subject`.
         let src = "fn pick() => Int { return 5 }\nfn f() => String {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
-        assert!(covers(src, "f"));
+        assert!(!covers(src, "f"));
     }
 
     // c109 Phase 5: collections. (Index/slice/index-assign coverage needs the
@@ -1204,8 +1224,18 @@ fn mk() {
     fn covers_optional_return_and_chaining() {
         // A `T?` return with `Val`/`None`, plus `?.` chaining over a covered struct.
         // (Multi-letter struct name; a single uppercase letter reads as a type var.)
+        //
+        // `opt` asserts through `covers_after_sema` for the same reason as
+        // `covers_generic_optional_return`: a bare `Val(x)`/`None` parses to an
+        // `Expr::EnumLit` with an EMPTY carrier type (jet-parser
+        // `Parser/Expressions/primary.rs`), and only sema rewrites it to
+        // `Expr::Present`/`Expr::Absent` (`Sema/CheckerInfer/expr.rs`). The gate's
+        // `Expr::EnumLit` arm (`subset/expressions.rs`, `enum_is_covered("")`) is
+        // right to reject the unresolved node; the covered shape is the resolved
+        // one. `ch` needs no sema fact — `Expr::OptField` is in-subset iff its base
+        // is — so it stays on the structural helper.
         let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) => (Int?) {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: (Addr?)) => (String?) {\n return a?.city\n}\n";
-        assert!(covers(src, "opt"));
+        assert!(covers_after_sema(src, "opt"));
         assert!(covers(src, "ch"));
     }
 
@@ -1617,15 +1647,29 @@ fn greet() => String { return input() }
         // is a collection builtin, NOT here); `send` is the 1-arg form. No `sender` —
         // `tasks.channel<T>()` returns the sender directly, no `.sender()` method.
         assert!(is_concurrency_method_name("join", 0));
-        assert!(is_concurrency_method_name("wait", 0));
         assert!(is_concurrency_method_name("detach", 0));
         assert!(is_concurrency_method_name("pause", 0));
+        // D-PAUSE mode argument: `pause(mode)` is the 1-arg twin of `pause()`.
+        assert!(is_concurrency_method_name("pause", 1));
         assert!(is_concurrency_method_name("resume", 0));
         assert!(is_concurrency_method_name("cancel", 0));
-        assert!(is_concurrency_method_name("trace", 0));
         assert!(is_concurrency_method_name("receive", 0));
+        assert!(is_concurrency_method_name("close", 0));
         assert!(!is_concurrency_method_name("sender", 0));
         assert!(is_concurrency_method_name("send", 1));
+        // Card #1685 (commit 957e191e8, "one keyword, nested combinators") retired
+        // `Task.wait()`/`trace()`/`exception()` and the `*_all` task-group twins from
+        // this set. Those spellings did not vanish from the language — they belong to
+        // OTHER receivers now and are keyed by receiver type, not by bare name:
+        // `wait`/0 is `Process` and `trace`/0 is the Event family (both in
+        // `subset/builtin_methods.rs`). Pinning their ABSENCE here is what keeps the
+        // name+arity sets disjoint.
+        assert!(!is_concurrency_method_name("wait", 0));
+        assert!(!is_concurrency_method_name("trace", 0));
+        assert!(!is_concurrency_method_name("exception", 0));
+        assert!(!is_concurrency_method_name("wait_all", 0));
+        assert!(!is_concurrency_method_name("join_all", 0));
+        assert!(!is_concurrency_method_name("cancel_all", 0));
         // Disjoint from the list `join(sep)` (1 arg) and any wrong arity.
         assert!(!is_concurrency_method_name("join", 1));
         assert!(!is_concurrency_method_name("send", 0));
@@ -2180,6 +2224,13 @@ fn bad(s: Nonexistent) {
         // covered — `struct_lit_constructible` admits the boxed edge and lowering wraps the
         // field value `Box::new(…)`. A fn building a nested `Tree { value, child: Val(…) }`
         // routes. (The boxed-field READ is also covered now — see covers_recursive_struct_boxed_field_read.)
+        //
+        // Asserted through `covers_after_sema`: the boxed field VALUE is a bare
+        // `Val(…)`/`None`, which parses to an `Expr::EnumLit` with an EMPTY carrier
+        // type and is only rewritten to `Expr::Present`/`Expr::Absent` by sema. The
+        // struct-literal gate checks each field value with `expr_in_subset`, so the
+        // unresolved node is correctly refused before sema — the covered shape is
+        // the resolved one (same reason as `covers_generic_optional_return`).
         let src = "\
 struct Tree {
     value: Int
@@ -2190,7 +2241,7 @@ fn build() {
     print(root.value)
 }
 ";
-        assert!(covers(src, "build"));
+        assert!(covers_after_sema(src, "build"));
     }
 
     #[test]

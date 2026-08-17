@@ -2486,7 +2486,20 @@ mod tests {
         let mut source = String::new();
         push_ffi_reporter(&mut source, Some(&link));
         assert!(source.contains("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)"));
-        assert!(source.contains("panic: a foreign function panicked"));
+        // a1dec295b ("feat(failure): centralize entry exit handling") deleted this
+        // hook's `eprintln!` copy of the panic message. The single owner is the FFI
+        // shim's `ffi_panic` (jet-pkg-model/src/FFI.rs), and that crate's own test
+        // forbids a second `eprintln!` of the text (I8: one error channel). So the
+        // generated hook must exist, stay vetted-unsafe bracketed, consume its
+        // arguments, and NOT re-carry the message.
+        assert!(source.contains("// JET_VETTED_UNSAFE_BEGIN: ffi_reporter"));
+        assert!(source.contains("// JET_VETTED_UNSAFE_END: ffi_reporter"));
+        assert!(source.contains(concat!(
+            "extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {\n",
+            "    let _ = (message, len);\n",
+            "}\n"
+        )));
+        assert!(!source.contains("panic: a foreign function panicked"));
 
         let mut cached = String::new();
         push_cached_runtime(&mut cached, Some(&link));
@@ -2652,6 +2665,8 @@ mod tests {
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
         let range_bounds =
             std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
+        let inline_range =
+            std::fs::read_to_string(root.join("src/Prelude/Core/InlineRange.rs")).unwrap();
         let disjoint =
             std::fs::read_to_string(root.join("src/Prelude/Core/Disjoint.rs")).unwrap();
         let expiring_secret =
@@ -2715,6 +2730,7 @@ mod tests {
             ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
+            ("src/Prelude/Core/InlineRange.rs", inline_range.as_str()),
             ("src/Prelude/Core/Disjoint.rs", disjoint.as_str()),
             (
                 "src/Prelude/Core/ExpiringSecret.rs",
@@ -2797,6 +2813,9 @@ mod tests {
         let string_concat_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/StringConcat.rs\")")
             .unwrap();
+        let view_copy_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/ViewCopy.rs\")")
+            .unwrap();
         let loadable_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Loadable.rs\")")
             .unwrap();
@@ -2805,6 +2824,9 @@ mod tests {
             .unwrap();
         let range_bounds_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RangeBounds.rs\")")
+            .unwrap();
+        let inline_range_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/InlineRange.rs\")")
             .unwrap();
         let disjoint_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Disjoint.rs\")")
@@ -2881,10 +2903,12 @@ mod tests {
                 && float_provenance_pos < unicode_pos
                 && unicode_pos < loadable_pos
                 && unicode_pos < string_concat_pos
-                && string_concat_pos < loadable_pos
+                && string_concat_pos < view_copy_pos
+                && view_copy_pos < loadable_pos
                 && loadable_pos < values_pos
                 && values_pos < range_bounds_pos
-                && range_bounds_pos < disjoint_pos
+                && range_bounds_pos < inline_range_pos
+                && inline_range_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
                 && expiring_secret_pos < set_algebra_pos
                 && set_algebra_pos < duration_pos
@@ -2922,9 +2946,11 @@ mod tests {
                 float_provenance.as_str(),
                 unicode.as_str(),
                 string_concat.as_str(),
+                view_copy.as_str(),
                 loadable.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
+                inline_range.as_str(),
                 disjoint.as_str(),
                 expiring_secret.as_str(),
                 set_algebra.as_str(),
@@ -2970,9 +2996,11 @@ mod tests {
                     float_provenance.as_str(),
                     unicode.as_str(),
                     string_concat.as_str(),
+                    view_copy.as_str(),
                     loadable.as_str(),
                     values.as_str(),
                     range_bounds.as_str(),
+                    inline_range.as_str(),
                     disjoint.as_str(),
                     expiring_secret.as_str(),
                     set_algebra.as_str(),
