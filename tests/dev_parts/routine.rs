@@ -6101,27 +6101,6 @@ fn front_end_errors_surface_in_dev_iteration() {
     }
 }
 
-/// D-DEV3 latency budget: a save-to-diagnostic round (check-only) must stay
-/// under 200ms on the example set. We measure the front-end check, which is
-/// the diagnostic-producing work the watch loop does on every save.
-#[test]
-fn check_latency_under_budget() {
-    let file = "examples/features/collections/wordcount.jet";
-    // Warm up (first load touches the filesystem and caches).
-    let _ = jet::check_with_path(file);
-    let mut best = u128::MAX;
-    for _ in 0..5 {
-        let started = Instant::now();
-        let _ = jet::check_with_path(file);
-        best = best.min(started.elapsed().as_millis());
-    }
-    assert!(
-        best < 200,
-        "save-to-diagnostic latency {} ms exceeds the 200ms budget (D-DEV3)",
-        best
-    );
-}
-
 /// A body-only edit keeps the type surface stable → swap (Ok).
 #[test]
 fn body_only_edit_is_type_stable() {

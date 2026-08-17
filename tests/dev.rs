@@ -8,11 +8,14 @@
 //!
 //! Also tested here:
 //!   - the E2201 honest-boundary note (FFI/`#Unsafe`/native std),
-//!   - the per-iteration `dev_iteration` function the watch loop is built on,
-//!   - the save-to-diagnostic latency budget (D-DEV3, <200ms check-only).
+//!   - the per-iteration `dev_iteration` function the watch loop is built on.
+//!
+//! The D-DEV3 save-to-diagnostic latency budget is NOT here: a wall-clock
+//! verdict cannot be taken inside a parallel suite, so #2005 moved it to
+//! `tests/dev_latency.rs`.
 //!
 //! #2020: the whole-corpus batteries are NOT here. One binary could not run its
-//! own 166 declared tests inside the 900s suite guard, so the corpus batteries
+//! own 165 declared tests inside the 900s suite guard, so the corpus batteries
 //! moved to sibling targets — `dev_interp_parity`, `dev_default_parity`,
 //! `dev_tier_parity`, `dev_corpus`, `dev_corpus_gate` — each with its own budget.
 //! Every one of them is a `tests/*.rs` file, so they are all routine by
