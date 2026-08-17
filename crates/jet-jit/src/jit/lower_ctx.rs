@@ -744,6 +744,20 @@ impl LowerCtx<'_, '_> {
                     }
                 } if self.meta.result_option_target(name)
             ),
+            // ONE fact, read by every seam: `??`, `match`, `if none`, `.map`,
+            // `==`/`<`, interpolation, `print`, and the binding that records
+            // `result_option_vars`. A builtin's carrier is decided in its host
+            // body in `crates/jet-jit/src/Collections.rs` — `option_i64` is the
+            // result arena, `option_packed` is the `0 = None, bits + 1 = Some`
+            // word — and this arm is where that host's choice is DECLARED. The
+            // two must be transcribed from each other: a result handle is 1-based
+            // and so never zero, so a host that allocates one while this arm says
+            // packed can never report absence and renders `handle - 1`. That is a
+            // small wrong integer, not a refusal, which is why only a cross-tier
+            // comparison catches it. Three ops were reading that way at once:
+            // `RemoveMap` and `IterLastIndexOf` never had an arm, and
+            // `PriorityQueuePop` lost its arm when e7fdc84a5 split the `pop` verb
+            // and left this table (the third) naming only `Pop`.
             TExprKind::BuiltinMethod { op, recv, .. } => match op {
                 // Map.get returns a result-arena Option handle.
                 TBuiltinOp::GetMap => matches!(&recv.ty, Type::Map { .. }),
@@ -753,12 +767,27 @@ impl LowerCtx<'_, '_> {
                 TBuiltinOp::Min { float: false } | TBuiltinOp::Max { float: false } => {
                     matches!(&recv.ty, Type::List(_) | Type::FixedList { .. })
                 }
-                TBuiltinOp::Pop | TBuiltinOp::PriorityQueuePeek => {
+                // `pq.pop()`/`pq.peek()` → `priority_queue_pop`/`_peek`. A list
+                // receiver reaches `list_pop`, which is packed, so the receiver
+                // test carries the whole answer for both spellings of the verb.
+                TBuiltinOp::Pop | TBuiltinOp::PriorityQueuePop | TBuiltinOp::PriorityQueuePeek => {
                     Self::receiver_is(&recv.ty, "PriorityQueue")
                 }
                 TBuiltinOp::LruPut | TBuiltinOp::LruGet => {
                     Self::receiver_is(&recv.ty, "Cache")
                 }
+                // These arms call exactly one host unconditionally, and each of
+                // those hosts answers with `option_i64`: `map_remove`,
+                // `map_first`, `map_pop_first`, `map_min`, `map_max`,
+                // `iter_last_index_of`, `list_binary_search`, `list_random`.
+                TBuiltinOp::RemoveMap
+                | TBuiltinOp::MapFirst
+                | TBuiltinOp::MapPopFirst
+                | TBuiltinOp::MapMin
+                | TBuiltinOp::MapMax
+                | TBuiltinOp::IterLastIndexOf
+                | TBuiltinOp::ListBinarySearch
+                | TBuiltinOp::ListRandom => true,
                 // Bytes get/first/next/read_byte → Option(U8) via result-arena ABI.
                 TBuiltinOp::ByteBufferMethod { method }
                     if matches!(
@@ -768,6 +797,8 @@ impl LowerCtx<'_, '_> {
                 {
                     true
                 }
+                // Everything else answers with the packed word, so its host must
+                // return `option_packed`, never `option_i64`.
                 _ => false,
             },
             TExprKind::HostCall(host) => matches!(
@@ -27617,6 +27648,33 @@ impl LowerCtx<'_, '_> {
                             .declare_func_in_func(self.host.print_str, self.b.func);
                         self.b.ins().call(print, &[val]);
                         return Ok(());
+                    }
+                    // Two different facts arrive here wearing the same type, and
+                    // only one of them is printable-nothing.
+                    //
+                    // `builtin_result_ty`
+                    // (crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs)
+                    // collapses "the sema return table has no row for this
+                    // receiver/method/arity" into the same `Unit` it uses for a
+                    // genuinely void method. It types exactly the method-shaped
+                    // nodes, so a `Unit` on one of those is a lookup miss — the
+                    // `JoinSep` arm above is one such miss, recovered by hand.
+                    // Printing nothing for the next one is a wrong answer no
+                    // output-only check can see, so refuse and let the interpreter
+                    // print it: a deopt is falsifiable, silence is not.
+                    //
+                    // A `Unit` on any other node is a real void value, which sema
+                    // admits to `print` (`is_unit_type`, Sema/calls/direct_calls.rs)
+                    // and which prints nothing. That case is preserved.
+                    if matches!(
+                        &inner.kind,
+                        TExprKind::BuiltinMethod { .. } | TExprKind::ClosureMethod { .. }
+                    ) {
+                        return Err(
+                            "jit print of a `Unit`-typed builtin method: the \
+                             builtin return table resolved no type for this receiver"
+                                .to_string(),
+                        );
                     }
                     return Ok(());
                 }

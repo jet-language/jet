@@ -842,14 +842,23 @@ pub(crate) fn resolve_builtin_op(
 /// c109 Phase 9: the resolved return type of a built-in collection/string method,
 /// from `Collections::builtin_method_return` (the sema table). Kept total per the
 /// design principle; rarely load-bearing in emit (a binding carries sema's `b.ty`),
-/// but resolved here so the TIR never guesses. Falls back to `Unit` for a void
-/// method or an unresolved receiver type (impossible for a covered call — sema
-/// validated it).
+/// but resolved here so the TIR never guesses.
+///
+/// The table answers three ways — `Some(Some(t))` a return type, `Some(None)` a
+/// genuinely void method, `None` no row for this receiver/method/arity — and the
+/// last two arrive in the TIR as the SAME `Unit`. That collapse is why
+/// `LowerCtx::emit_print` once printed nothing for `Url.path_segments().join(sep)`
+/// (a `None` row wearing a printable `Unit`), and the claim this doc used to make
+/// — that a missing row is impossible for a call sema validated — is what the
+/// `JoinSep` carve-out there disproves. Anything reading a `Unit` out of the TIR
+/// must therefore treat it as "void OR unresolved", never as "a value that
+/// renders as nothing".
 pub(crate) fn builtin_result_ty(method: &str, nargs: usize, recv_ty: Option<&Type>) -> Type {
     match recv_ty.and_then(|rt| crate::Collections::builtin_method_return(rt, method, nargs, false))
     {
         Some(Some(t)) => t,
-        _ => unit_type(),
+        // Void method and no-row both land on `Unit`; see the note above.
+        Some(None) | None => unit_type(),
     }
 }
 
