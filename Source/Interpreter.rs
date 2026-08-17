@@ -454,14 +454,16 @@ fn checked_bundle_with_entry(
                         if !matches!(selection, jet_jit::Job::JetJobSelection::Job(_)) {
                             return Err(vec![Diagnostic::error(
                                 "E1294",
-                                format!("no job named `{entry_fn}`"),
-                                "the first program subcommand must name a function marked `#Job`.".to_string(),
-                                "mark a function `#Job`, or check the subcommand spelling.".to_string(),
+                                jet_jit::Job::jet_job_unknown_what(entry_fn),
+                                jet_jit::Job::JET_JOB_UNKNOWN_WHY.to_string(),
+                                jet_jit::Job::JET_JOB_UNKNOWN_FIX.to_string(),
                                 None,
                             )
                             .with_detail(format!(
-                                "declared jobs: {}\n",
-                                specs.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ")
+                                "{}\n",
+                                jet_jit::Job::jet_job_declared_detail(
+                                    &specs.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+                                )
                             ))]);
                         }
                         jet_driver::Driver::swap_entry_point(&mut bundle, entry_fn);
