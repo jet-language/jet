@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2026,
-    "rev": 38003,
+    "rev": 38004,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132138,7 +132138,13 @@
       "plan": "Fix both defects, then run the whole target once to find what the abort has been hiding - the two known failures are only the tests reached before the process died.\n\nFor `covers_generic_optional_return`: establish whether the correct outcome is that lowering learns the construct (preferred, real capability) or that sema rejects it with a registered diagnostic (I3/I4). Do NOT make `covers` return true without proving lowering handles it; a wrong true in a coverage predicate already admitted an unsafe function to the JIT this epoch.\n\nFor `covers_labeled_loops`: find the unbounded recursion. Treat a stack-size increase as a non-fix.\n\nThen decide how this target stays runnable, because it silently rotted: it is not in the dev suite's build set, which is why two compile errors and two live defects sat undetected. Either it joins a routine target set or something asserts it compiles.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-17",
+          "by": "fable-e3-burndown",
+          "text": "PROGRESS at 1a4f7b0 (merged): the target now runs 186 tests, up from about 87 before, and both original defects are closed at their true causes. covers_labeled_loops was NOT unbounded recursion: the coverage walk is provably bounded (every stmt_in_subset and if_cond_in_subset arm recurses into a strictly smaller node, and the test nests only 4 levels). It was frame size against libtest's 2 MiB test thread - the test called Parser::parse and tir_covers directly, below all four funnels where CompilerStack installs the boundary for exactly this abort, whose doc names this exhaustion pair. Seven helpers now hop through CompilerStack::run_on_compiler_stack and COMPILER_STACK_SIZE was untouched. covers_generic_optional_return was the TEST using the wrong helper: bare Val(x) parses to Expr::EnumLit with an empty carrier and only sema rewrites it to Expr::Present, so the gate's rejection was correct; the assertion now runs through covers_after_sema and no gate was widened. STILL OPEN, criterion 3 not met. The abort moved rather than vanished, and it is now a DIFFERENT class: scheduler_host_tests::stream_drop_uses_the_shared_task_cancel_cleanup_path aborts with 'panic in a destructor during cleanup' then 'thread caused non-unwinding panic. aborting.' That is the third distinct abort shape this epoch has met, alongside error-5 (missing unwind info, cards 1995/1997) and genuine stack exhaustion. A panic in a Drop during unwinding is the mechanism card 2007 owns (cancel raised while already unwinding), so that stem is routed there rather than duplicated here. Seven newly-measured failures in the previously hidden 97: Codegen::TIR::tests::concurrency_method_names, covers_optional_return_and_chaining, covers_recursive_struct_construction, refined_collection_results_have_exact_tir_types, rejects_range_switch_over_non_ident_subject, and Codegen::tests::aot_ffi_host_installs_bridge_reporter, core_prelude_stays_split_by_runtime_ownership. These are pre-existing defects the abort had been hiding, not regressions."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -132182,7 +132188,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:57:33.754Z",
-      "updated": "2026-08-16T12:57:35.490Z",
+      "updated": "2026-08-17T01:23:12.184Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -176319,6 +176325,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T01:23:12.185Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c032bed5",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-17T01:20:12.044Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -179810,13 +179823,6 @@
       "action": "card.criteria-add",
       "ref": "c014nejk",
       "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:57:21.419Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c014nejk",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
     }
   ],
   "nextNum": 368,
