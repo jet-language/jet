@@ -2383,8 +2383,17 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
     })
 }
 
-/// Test hook: why `lower_jit_program` returned `None`.
-#[doc(hidden)]
+/// The two `lower_jit_program_fail_reason` answers that describe a real
+/// user-side missing entry point rather than a compiler defect: the program
+/// simply has nothing to run. Every OTHER reason means lowering itself failed
+/// on a program that does have an entry, which is an I2 internal compiler
+/// error, not a user diagnostic (card #2001). The dev interpreter boundary in
+/// `eval::run_bundle_at_stage` keys E2201 off exactly these two, so they are
+/// named here beside the strings they must stay equal to.
+pub const NO_RUNNABLE_ENTRY: &str = "no runnable entry";
+pub const CLI_ENTRY_MISSING_RUN: &str = "cli entry missing `run`";
+
+/// Why `lower_jit_program` returned `None`.
 pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
     if let Some(reason) = LAST_JIT_LOWER_FAILURE.with(|failure| failure.borrow_mut().take()) {
         return reason;
@@ -2419,7 +2428,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
                 .map(|_| super::mangle_generated("cli_main"))
         });
     let Some(selected) = selected else {
-        return "no runnable entry".to_string();
+        return NO_RUNNABLE_ENTRY.to_string();
     };
     let entry_check = if selected == super::mangle_generated("cli_main") {
         "run".to_string()
@@ -2439,7 +2448,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
     }
     if !saw_entry {
         return if selected == super::mangle_generated("cli_main") {
-            "cli entry missing `run`".to_string()
+            CLI_ENTRY_MISSING_RUN.to_string()
         } else {
             "selected entry is not a top-level function".to_string()
         };

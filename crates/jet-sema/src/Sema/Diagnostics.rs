@@ -858,10 +858,19 @@ pub(crate) fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
     }
 }
 
+/// The one "did you mean …?" candidate picker. Every caller has already
+/// reported that `name` does not exist, so a candidate EQUAL to `name` is
+/// never a fix — it tells the reader to write what was just refused, and it
+/// contradicts the message that named it missing. Distance 0 is therefore not
+/// a suggestion but evidence that the candidate set and the failed lookup
+/// disagree; the caller keeps its ordinary fix text instead (card #2002).
 pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String> {
     let mut best: Option<(String, usize)> = None;
     for cand in candidates {
         let d = edit_distance(name, cand);
+        if d == 0 {
+            continue;
+        }
         if d <= 2 && best.as_ref().map_or(true, |(_, bd)| d < *bd) {
             best = Some((cand.clone(), d));
         }

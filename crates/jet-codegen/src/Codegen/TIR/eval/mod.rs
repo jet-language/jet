@@ -4459,15 +4459,37 @@ fn run_bundle_at_stage(
     // the evaluator's worker and to named deopt. Wrapping this caller instead
     // would sit *over* the evaluator's `std::thread::scope` spawn, which is how
     // a checked-surface program ran against the reverted "2026" default.
-    let program = lower_interp_program(bundle).ok_or_else(|| {
-        crate::Sema::Diagnostics::render_registered(
-            "E2201",
-            "`jet dev` needs a `run` function to run".to_string(),
-            "`jet dev` runs a program; a library with no `run` has nothing to execute".to_string(),
-            "add `fn run() { … }`, or use `jet check <file>`".to_string(),
-            None,
-        )
-    })?;
+    //
+    // Two unrelated failures used to arrive here as one `None` and both were
+    // reported as a missing `run` (card #2001). They are separated now:
+    //
+    //  * the program really has no runnable entry — a user error, and the one
+    //    case E2201's text describes, so it keeps that text verbatim;
+    //  * lowering failed on a program that DOES have an entry — a compiler
+    //    defect. Telling that reader to add a function they already wrote sent
+    //    them to fix something that is not wrong and hid every defect reaching
+    //    this path, so it takes the branded internal-error rail with the real
+    //    reason and exits 101 (I2) instead of any user diagnostic.
+    let program = match lower_interp_program(bundle) {
+        Some(program) => program,
+        None => {
+            let reason = TIR::lower_jit_program_fail_reason(bundle);
+            if reason == TIR::NO_RUNNABLE_ENTRY || reason == TIR::CLI_ENTRY_MISSING_RUN {
+                return Err(crate::Sema::Diagnostics::render_registered(
+                    "E2201",
+                    "`jet dev` needs a `run` function to run".to_string(),
+                    "`jet dev` runs a program; a library with no `run` has nothing to execute"
+                        .to_string(),
+                    "add `fn run() { … }`, or use `jet check <file>`".to_string(),
+                    None,
+                ));
+            }
+            jet_foundation::ice!(
+                None,
+                "whole-program TIR lowering produced no program for the dev interpreter ({reason}) — compiler bug (I2/R7)"
+            )
+        }
+    };
     let mut globals = HashMap::new();
     let mut core_imports = HashMap::new();
     let persist = jet_foundation::Persist::prepare_bundle(bundle);
