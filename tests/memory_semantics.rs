@@ -64,6 +64,85 @@ fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
         "memory/copy_verb",
         include_str!("../examples/features/expected/memory/copy_verb.out"),
     );
+    // D-MEM-COPYSEM1=A criterion 2: the IMPLICIT half of the same rule. Every
+    // line of this golden is a read window entering an owning slot — an
+    // interpolation, an owned `String` parameter, and a returned `String` — so
+    // AOT, default `jet run`, and the forced interpreter must agree byte for
+    // byte, not only on the explicit `~` spelling above.
+    tir_support::assert_example_cli_tiers_agree(
+        "memory/string_view",
+        include_str!("../examples/features/expected/memory/string_view.out"),
+    );
+}
+
+/// D-MEM-COPYSEM1=A + I8/I9: the read-view materialization symbol has ONE home,
+/// `jet::Codegen::TIR::view_copy_symbol`. Before this guard the same four-arm
+/// type ladder was written out three times — the AOT emitter, the wasm emitter,
+/// and the JS emitter — so a rename or a new window shape could give one tier a
+/// different kernel than the others while every golden still passed.
+#[test]
+fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
+    use jet::AST::Type;
+    use jet::Codegen::TIR::{view_copy_owned_type, view_copy_symbol};
+
+    let view_of = |element: Type| Type::Apply {
+        name: "View".to_string(),
+        args: vec![element],
+    };
+    let str_view = view_of(Type::Named("str".to_string()));
+    let int_view = view_of(Type::Int);
+
+    // A string window and a list window are the only two shapes, and the
+    // symbol travels with the owned destination type sema chose.
+    assert_eq!(view_copy_symbol(&str_view), "jet_string_view_copy");
+    assert_eq!(view_copy_owned_type(&str_view), Some(Type::String));
+    assert_eq!(view_copy_symbol(&int_view), "jet_view_copy");
+    assert_eq!(
+        view_copy_owned_type(&int_view),
+        Some(Type::List(Box::new(Type::Int)))
+    );
+    // A range place keeps `[T]` at the Jet surface; a `string_view` local keeps
+    // `String`. Both still reach the same two kernels.
+    assert_eq!(
+        view_copy_symbol(&Type::List(Box::new(Type::Int))),
+        "jet_view_copy"
+    );
+    assert_eq!(view_copy_symbol(&Type::String), "jet_string_view_copy");
+    // Not a declared window: the caller keeps its own type.
+    assert_eq!(view_copy_owned_type(&Type::String), None);
+
+    // Both Prelude kernels declare exactly the symbols the table names, so the
+    // native/wasm and web tiers cannot drift apart from each other either.
+    let crate_root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src/Prelude/Core");
+    let rust_kernel = std::fs::read_to_string(crate_root.join("ViewCopy.rs")).unwrap();
+    let js_kernel = std::fs::read_to_string(crate_root.join("ViewCopy.js")).unwrap();
+    for symbol in ["jet_view_copy", "jet_string_view_copy"] {
+        assert!(
+            rust_kernel.contains(&format!("fn {symbol}")),
+            "Prelude/Core/ViewCopy.rs must declare {symbol}"
+        );
+        assert!(
+            js_kernel.contains(&format!("function {symbol}")),
+            "Prelude/Core/ViewCopy.js must declare {symbol}"
+        );
+    }
+
+    // No engine may re-derive the choice. Every tier reads the table above, so
+    // a copy-symbol literal outside the table and the Prelude is I8 drift.
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src");
+    for engine in [
+        src.join("Codegen/TIR/emit/expressions.rs"),
+        src.join("Codegen/Web.rs"),
+        src.join("Codegen/TIR/lower/lambdas.rs"),
+    ] {
+        let text = std::fs::read_to_string(&engine).unwrap();
+        assert!(
+            !text.contains("jet_string_view_copy(") && !text.contains("jet_view_copy("),
+            "{} must call view_copy_symbol instead of naming a copy kernel itself",
+            engine.display()
+        );
+    }
 }
 
 #[test]

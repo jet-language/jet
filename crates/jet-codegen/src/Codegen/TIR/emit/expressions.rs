@@ -25,6 +25,7 @@ use crate::Codegen::TIR::emit_tir_value_block;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::ListSpreadPart;
+use crate::Codegen::TIR::view_copy_symbol;
 use crate::Codegen::TIR::bin_match_scan_closure_ex;
 use crate::Codegen::TIR::str_match_scan_closure_ex;
 use crate::Codegen::TIR::TBuiltinOp;
@@ -1352,25 +1353,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // D-MEM-COPYSEM1=A: every read-view materialization calls the shared
-        // Prelude operation. The emitter only selects the typed adapter; copy
-        // policy and allocation semantics do not live in an engine.
+        // Prelude operation, named by the one `view_copy_symbol` table. The
+        // emitter only formats the call; copy policy, the symbol choice, and
+        // allocation semantics do not live in an engine.
         TExprKind::MaterializeView(recv) => {
-            let value = emit_tir_expr(recv, cx);
-            match &recv.ty {
-                crate::AST::Type::Apply { name, args }
-                    if name == "View"
-                        && matches!(args.as_slice(), [crate::AST::Type::Named(element)] if element == "str") =>
-                {
-                    format!("jet_string_view_copy({value})")
-                }
-                crate::AST::Type::Apply { name, .. } if name == "View" => {
-                    format!("jet_view_copy({value})")
-                }
-                crate::AST::Type::List(_) | crate::AST::Type::FixedList { .. } => {
-                    format!("jet_view_copy({value})")
-                }
-                _ => format!("jet_string_view_copy({value})"),
-            }
+            let symbol = view_copy_symbol(&recv.ty);
+            format!("{symbol}({})", emit_tir_expr(recv, cx))
         }
         // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. Mirrors
         // `emit_method_call`'s `METHOD_DISTINCT_RAW` early return byte-for-byte.
