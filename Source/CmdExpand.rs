@@ -62,7 +62,7 @@ const LENSES: &[Lens] = &[
     },
     Lens {
         name: "derive",
-        summary: "derived capabilities already attached to types (D-ONCE-DERIVE1)",
+        summary: "derived behavior already attached to types (D-ONCE-DERIVE1)",
         render: render_derive,
         render_json: render_derive_json,
     },

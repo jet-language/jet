@@ -693,7 +693,7 @@ impl<'a> Checker<'a> {
                                 };
                                 let fix = if info.param_conv.is_some() {
                                     format!(
-                                        "mark the parameter `{}: {}{}` with the write-capability marker `&` if the function should change it",
+                                        "mark the parameter `{}: {}{}` with the write-access marker `&` if the function should change it",
                                         name,
                                         Syntax::SIGIL_WRITE,
                                         info.ty.name()
@@ -709,7 +709,7 @@ impl<'a> Checker<'a> {
                                     "E0111",
                                     what,
                                     format!(
-                                        "only `{}` bindings and parameters marked with the write-capability marker `&` can be changed",
+                                        "only `{}` bindings and parameters marked with the write-access marker `&` can be changed",
                                         Syntax::SIGIL_BIND_MUT,
                                     ),
                                     fix,
@@ -898,9 +898,9 @@ impl<'a> Checker<'a> {
                                             ) {
                                                 (
                                                     "E0205",
-                                                    "an unmarked parameter gives read access only; assigning into it needs the write-capability marker `&`".to_string(),
+                                                    "an unmarked parameter gives read access only; assigning into it needs the write-access marker `&`".to_string(),
                                                     format!(
-                                                        "change the parameter to `{}: {}{}` with the write-capability marker `&`",
+                                                        "change the parameter to `{}: {}{}` with the write-access marker `&`",
                                                         root,
                                                         Syntax::SIGIL_WRITE,
                                                         info.ty.name()
@@ -920,7 +920,7 @@ impl<'a> Checker<'a> {
                                             self.diags.push(Diagnostic::error(
                                                 code,
                                                 format!(
-                                                    "cannot write to `{}` — it does not have the write-capability marker `&`",
+                                                    "cannot write to `{}` — it does not have the write-access marker `&`",
                                                     root
                                                 ),
                                                 why,
@@ -1038,7 +1038,7 @@ impl<'a> Checker<'a> {
                                                 "`{}` can be read with `[ ]` but not written — it has no `IndexMut` impl",
                                                 n
                                             ),
-                                            "bracket assignment needs `impl Type.IndexMut { fn set(&self, k, v) }` with the write-capability marker `&`"
+                                            "bracket assignment needs `impl Type.IndexMut { fn set(&self, k, v) }` with the write-access marker `&`"
                                                 .to_string(),
                                             format!(
                                                 "use `.set(key, value)` instead, or add `impl {n}.IndexMut`"
@@ -1084,7 +1084,7 @@ impl<'a> Checker<'a> {
                                                 self.diags.push(Diagnostic::error(
                                                     "E0202",
                                                     format!(
-                                                        "cannot write to `{}` — it does not have the write-capability marker `&`",
+                                                        "cannot write to `{}` — it does not have the write-access marker `&`",
                                                         root
                                                     ),
                                                     "assigning through `[ ]` edits the value; the binding must be declared mutable"
@@ -1259,22 +1259,22 @@ impl<'a> Checker<'a> {
                                         let is_self = root == Syntax::KW_SELF;
                                         let what = if is_self {
                                             format!(
-                                                "cannot edit `{}` — `{}` has read access only; the write-capability marker `&` is required",
+                                                "cannot edit `{}` — `{}` has read access only; the write-access marker `&` is required",
                                                 field,
                                                 Syntax::KW_SELF
                                             )
                                         } else {
-                                            format!("cannot edit `{}` — `{}` does not have the write-capability marker `&`", field, root)
+                                            format!("cannot edit `{}` — `{}` does not have the write-access marker `&`", field, root)
                                         };
                                         let fix = if is_self {
                                             format!(
-                                                "write the receiver with the write-capability marker `&`: `{}{}` to grant write access",
+                                                "write the receiver with the write-access marker `&`: `{}{}` to grant write access",
                                                 Syntax::SIGIL_WRITE,
                                                 Syntax::KW_SELF
                                             )
                                         } else if info.param_conv.is_some() {
                                             format!(
-                                                "mark the parameter with the write-capability marker `&`: `{}: {}{}` to grant write access",
+                                                "mark the parameter with the write-access marker `&`: `{}: {}{}` to grant write access",
                                                 root,
                                                 Syntax::SIGIL_WRITE,
                                                 info.ty.name()
@@ -1289,7 +1289,7 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0205",
                                             what,
-                                            "editing a field requires the write-capability marker `&` on the owning place".to_string(),
+                                            "editing a field requires the write-access marker `&` on the owning place".to_string(),
                                             fix,
                                             Some(*span),
                                         ));
@@ -1633,7 +1633,7 @@ impl<'a> Checker<'a> {
                                             "this function has read access only and does not own the value"
                                                 .to_string(),
                                             format!(
-                                                "return a copy: `return {}{};` — or take ownership with the move-capability marker `^`: `{}: {}{}`. \
+                                                "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
                                                  There's no borrow-return in v1 — to share the value without a full \
                                                  copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
                                                  once a real program needs shared ownership",

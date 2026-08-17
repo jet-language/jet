@@ -558,7 +558,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // actions (see OS_ACTIONS below) — declared once there, not here too.
     CommandSpec {
         name: "trust",
-        summary: "Review or change trusted capabilities",
+        summary: "Review or change trusted authority",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -994,7 +994,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
         help: "with build --target=web: show which code becomes JavaScript or WebAssembly",
     },
     // E2-M11 flags.
-    FlagSpec { long: "--capabilities-json", help: "with build: write used capabilities as JSON" },
+    FlagSpec { long: "--capabilities-json", help: "with build: write used authority as JSON" },
     FlagSpec { long: "--update-snapshots", help: "with test: replace expected snapshot output" },
     FlagSpec { long: "--coverage", help: "with test: show function and branch coverage" },
     FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },

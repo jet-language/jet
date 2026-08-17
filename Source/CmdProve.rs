@@ -680,7 +680,7 @@ fn preflight_capture_target(
             "E3625",
             "multiple core.time.now sites",
             "the current replay adapter has one bounded Time record and cannot prove request order for multiple sites",
-            "capture one Time request per target, or route time through an injected deterministic capability",
+            "capture one Time request per target, or route time through an injected deterministic input",
             json_mode,
         );
     }
@@ -690,7 +690,7 @@ fn preflight_capture_target(
                 "E3625",
                 &site.operation,
                 "the reachable call shape is opaque to the replay authority",
-                "route the operation through a supported deterministic capability, or remove it from the captured target",
+                "route the operation through a supported deterministic input, or remove it from the captured target",
                 json_mode,
             );
         };
@@ -699,7 +699,7 @@ fn preflight_capture_target(
                 "E3625",
                 &site.operation,
                 "the current replay adapter records only `core.time.now`; this Time operation would sleep or read an unrecorded clock",
-                "capture a target that uses `core.time.now`, or route the operation through an injected deterministic capability",
+                "capture a target that uses `core.time.now`, or route the operation through an injected deterministic input",
                 json_mode,
             );
         }
@@ -725,7 +725,7 @@ fn preflight_capture_target(
                     "E3625",
                     &site.operation,
                     &format!("replay capture has no authority adapter for the {} effect", other.name()),
-                    "route the operation through a supported deterministic capability, or change the capture target",
+                    "route the operation through a supported deterministic input, or change the capture target",
                     json_mode,
                 );
             }
@@ -748,7 +748,7 @@ fn preflight_replay_target(target: &Target, json_mode: bool) -> Result<(), i32> 
             "E3623",
             "replay diverged from captured authority",
             "the target requests more than one `core.time.now` site, but the artifact has one bounded Time record",
-            "recapture a target with one supported Time request, or route time through an injected deterministic capability",
+            "recapture a target with one supported Time request, or route time through an injected deterministic input",
             json_mode,
         );
         return Err(ExitCodes::USER_ERROR);

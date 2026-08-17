@@ -432,7 +432,7 @@ impl<'a> Checker<'a> {
                                     self.diags.push(Diagnostic::error(
                                         "E0302",
                                         format!(
-                                            "terminal capability key `{key}` looks like `{fact}`"
+                                            "terminal fact key `{key}` looks like `{fact}`"
                                         ),
                                         "preview string keys stay open, but close spellings of stable facts are probably typos"
                                             .to_string(),

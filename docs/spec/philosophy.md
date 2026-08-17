@@ -17,7 +17,7 @@ without ever encountering undefined behavior or memory unsafety.
 
 **Experts** can look behind the facade. When control is needed — raw memory,
 layout, volatile, custom allocators, unsafe operations — the expert opts in
-explicitly, takes responsibility, and gets the full capability. The compiler
+explicitly, takes responsibility, and gets the full power. The compiler
 does not prevent expert-tier work; it requires the expert to ask for it.
 
 The design principle: *footguns are opt-in, not opt-out.* Beginners never

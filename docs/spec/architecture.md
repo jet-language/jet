@@ -646,7 +646,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
   `Intrinsic` means that the evaluator implements a language value operation,
   not a second Core policy. `Host` means that the call crosses an effect or
-  capability boundary. Every listed semantic rule has one Prelude/Core home;
+  authority boundary. Every listed semantic rule has one Prelude/Core home;
   engines only marshal values to it.
 
   | Namespace | Class | Current semantic home or required action |
@@ -677,18 +677,18 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.encoding.toml` | Kernel | Typed TOML uses the shared codec kernel. |
   | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime/JIT marshal `DataTree` values. |
   | `core.encoding.yaml` | Kernel | Typed YAML uses the shared codec kernel. |
-  | `core.sys` | Host | Explicit comptime environment capability and policy boundary. |
+  | `core.sys` | Host | Explicit comptime environment authority and policy boundary. |
   | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |
-  | `core.files` | Host | Explicit comptime filesystem capability and policy boundary. |
+  | `core.files` | Host | Explicit comptime filesystem authority and policy boundary. |
   | `core.text.fmt` | Kernel | `Prelude/Core/Fmt.rs` owns number, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
-  | `core.term` | Host | I/O capability boundary; pure progress values use `Core/Progress.rs`. |
+  | `core.term` | Host | I/O authority boundary; pure progress values use `Core/Progress.rs`. |
   | `core.math.abs: non-numeric argument` | Mixed | Numeric argument validation stays with the shared math rules. |
   | `core.math` | Mixed | `MathLibPure.rs` owns residual integer, gcd/lcm, factorial, and erf-family rules; true numeric intrinsics remain intrinsic. |
   | `core.net.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
-  | `core.net` | Mixed | `Prelude/Core/NetPure.rs` owns IP/socket parse and field rules; sockets and DNS stay capability-bound. |
+  | `core.net` | Mixed | `Prelude/Core/NetPure.rs` owns IP/socket parse and field rules; sockets and DNS stay authority-bound. |
   | `Path` / `core.files` | Kernel + Host | `Prelude/Core/Path.rs` owns lexical join/parent/extension/stem/normalize rules; filesystem work stays host-bound and accepts `String | Path`. |
-  | `core.perf` | Host | Runtime performance capability; comptime rejects unavailable calls. |
-  | `core.process` | Host | Process capability boundary and REPL host adapter. |
+  | `core.perf` | Host | Runtime performance authority; comptime rejects unavailable calls. |
+  | `core.process` | Host | Process authority boundary and REPL host adapter. |
   | `core.math.random` | Mixed | `Prelude/Core/SeededRandom.rs` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |
   | `core.game.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
   | `core.reactive.loadable` | Kernel | `Prelude/Core/Loadable.rs` owns tag/presence rules; typed payloads and handles remain adapters. |
@@ -702,7 +702,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.data.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
   | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
   | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
-  | `core.testing` | Mixed | Shared deterministic capabilities call Prelude; harness and host work stay adapters. |
+  | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |
   | `core.text` | Kernel | `Prelude/CoreLib/Top/Text.rs` plus Unicode tables owns text/Unicode rules, including scalar names; `TextLite` marshals values. |
   | `core.text.ends_any: non-list argument` | Kernel | Text argument validation stays with the text kernel. |
   | `core.text.starts_any: non-list argument` | Kernel | Text argument validation stays with the text kernel. |

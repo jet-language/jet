@@ -2,7 +2,7 @@
 //
 // A `fn … =[]=>` rejects ambient wall-clock / OS-RNG (`time.now()`, `random.int()`)
 // because they break reproducibility (E3403). To use time or randomness inside a
-// pure function, take a deterministic capability as a PARAMETER — a `Clock` or
+// pure function, take a deterministic input as a PARAMETER — a `Clock` or
 // `Rng` the caller seeds — and read THROUGH it. The nondeterminism becomes the
 // caller's explicit, seeded choice, so the result is the same on every machine.
 //
@@ -11,7 +11,7 @@
 use core.time as time
 use core.math.random as random
 
-// Pure: reads time + randomness only through the injected capabilities.
+// Pure: reads time + randomness only through the injected inputs.
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `&Rng`.
 fn roll_at(clock: Clock, rng: &Rng) =[]=> String {
     ts :: clock.now()

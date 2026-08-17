@@ -21,8 +21,8 @@ Every diagnostic has four parts:
 - **why** — the rule behind the error, so the user learns the model.
 - **fix** — a concrete next step, copy-pasteable when possible.
 
-`&` and `^` each have two readings: `&` is the write-capability marker or the
-bitwise and operator, and `^` is the move-capability marker or the power
+`&` and `^` each have two readings: `&` is the write-access marker or the
+bitwise and operator, and `^` is the move marker or the power
 operator. Bitwise xor is `~|`. When a diagnostic shows one of these signs, its
 what/why names the reading; the entries below refer to this rule instead of
 repeating the distinction.
@@ -153,7 +153,7 @@ renumbered, and no new `W` code may be allocated.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `defer` only schedules a consuming resource close ``. | Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked. | Write `defer close(^resource)` with the move-capability marker `^`. |
+| `` `defer` only schedules a consuming resource close ``. | Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked. | Write `defer close(^resource)` with the move marker `^`. |
 
 ## Error code registry
 
@@ -187,7 +187,7 @@ renumbered, and no new `W` code may be allocated.
 | E0026 | parse | *retired by D-S14-PAUSE* (was: `throw`/`raise` teaching) |
 | E0027 | parse | *retired by D-S14-PAUSE* (was: `append` teaching) |
 | E0028 | parse | *retired by D-S14-PAUSE* (was: `Vec`/`dict` teaching) |
-| E0029 | parse | two capability markers on one parameter (D-CAP7/D-MEM1) |
+| E0029 | parse | two access markers on one parameter (D-CAP7/D-MEM1) |
 | E0030 | parse | *retired by D-S14-PAUSE* (was: `as` teaching) |
 | E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0032 | parse | *retired by D-S14-PAUSE* (was: lambda teaching) |
@@ -215,7 +215,7 @@ renumbered, and no new `W` code may be allocated.
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0056 | parse | *retired by D-S14-PAUSE* (was: `mut` capability keyword teaching) |
 | E0057 | parse | retired `take(...)` closure capture prefix; captures are implicit (D-ARROW-CONTROL1) |
-| E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → the write-capability marker `&`; raw-reference return spelling `-> &T` no longer exists to point at) |
+| E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → the write-access marker `&`; raw-reference return spelling `-> &T` no longer exists to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Scrub(Tag) fn` (D-TAG-SURFACE1) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
@@ -279,7 +279,7 @@ renumbered, and no new `W` code may be allocated.
 | E0135 | sema  | a compile-time literal outside a range type's declared bounds (D-RANGETYPE1) |
 | E0136 | sema  | a runtime value constructed into a range type without the fallible `?` form (D-RANGETYPE1) |
 | E0137 | parse | a range type's declared bounds are empty/reversed (`lo > hi`) (D-RANGETYPE1) |
-| E0138 | sema  | an operation used on a nominal `distinct` type whose capability bundles don't grant it (D-CAPBUNDLE1) |
+| E0138 | sema  | an operation used on a nominal `distinct` type whose operation bundles don't grant it (D-CAPBUNDLE1) |
 | E0139 | sema  | a `#Pre`/`#Post` contract condition uses an effect (D-PREPOST1) |
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
 | E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
@@ -309,24 +309,24 @@ renumbered, and no new `W` code may be allocated.
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
 | L0152 | sema  | typestate: two paths meet and leave one value in different states, so it is untracked from there (D-STATE1, D-FACT-FLOW1, warning) |
-| E0201 | sema  | the move-capability marker `^` is required; value can't be copied |
-| E0202 | sema  | the write-capability marker `&` is required at call site — write access not granted |
-| E0203 | sema  | move-capability marker `^` used on a non-consuming parameter |
+| E0201 | sema  | the move marker `^` is required; value can't be copied |
+| E0202 | sema  | the write-access marker `&` is required at call site — write access not granted |
+| E0203 | sema  | move marker `^` used on a non-consuming parameter |
 | E0204 | sema  | same value used while `mut` is active in one call |
-| E0205 | sema  | `self.field = v` without the write-capability marker `&` on the receiver (D-MUTSELF1) |
+| E0205 | sema  | `self.field = v` without the write-access marker `&` on the receiver (D-MUTSELF1) |
 | E0206 | sema  | *retired by D-MEM1/S3* (was: `view` return can't point at this value; raw-reference return spelling `-> &T` no longer exists) |
 | E0207 | sema  | *retired by D-MEM1/S3* (was: a stored raw-reference spelling `&T` field's owner ambiguous, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
-| E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without the move-capability marker `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
+| E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without the move marker `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
 | E0211 | sema  | `~x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-SHAPE-COPY1=A, supersedes D-CAP2/D-MEM1/S4) |
 | E0212 | sema  | an owner is moved, replaced, or resized while a live view still points into its storage (D-MEM1 S9, card #649) |
-| E0213 | sema  | the write-capability marker `&` is not on a place — a name plus maximal field/index/range projections (D-SHAPE-PLACE1=A) |
+| E0213 | sema  | the write-access marker `&` is not on a place — a name plus maximal field/index/range projections (D-SHAPE-PLACE1=A) |
 | E0214 | sema  | teaching: retired `.view(a..b)` → bare range place `[a..b]` (D-SHAPE-PLACE1=A) |
 | E0215 | sema  | `SharedGuard.map` projection is not a stable stored field place (D-SHAREDGUARD1) |
 | E0216 | sema  | `SharedGuard.split` projections overlap or are not stable stored field places (D-SHAREDGUARD1) |
 | E0217 | sema  | a Cell guard is stored in an unsupported aggregate or captured by a lambda (D-LOCALCELL1=A) |
-| E0218 | sema  | `mem.pin` was given a value instead of a write window made with the write-capability marker `&` (D-PIN1=A) |
+| E0218 | sema  | `mem.pin` was given a value instead of a write window made with the write-access marker `&` (D-PIN1=A) |
 | E0219 | sema  | a pinned place is moved, replaced, or resized while a pin is still live (D-PIN1=A) |
 | E0220 | sema  | a place is read through its owner while an exclusive write window / pin into it is still live (card #1361, I2) |
 | E0221 | sema  | a struct field’s strong `Shared` edge can form a reference cycle (D-SHARED-CYCLE1=C) |
@@ -503,8 +503,8 @@ renumbered, and no new `W` code may be allocated.
 | E0741 | sema  | an effect used inside a `#Caps(…)` region is not in its cap list (D-EFF1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
-| E0711 | sema  | the capability handle bound by a `#Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
-| E0712 | sema  | an effect used inside a `#Grant(…)` region has no capability — it isn't in the grant's list (D-SCAP1) |
+| E0711 | sema  | the `Authority` handle bound by a `#Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
+| E0712 | sema  | an effect used inside a `#Grant(…)` region has no authority — it isn't in the grant's list (D-SCAP1) |
 | E0721 | sema  | a tagged value reaches a destination denied by that tag declaration (D-TAG-SURFACE1) |
 | E0722 | sema  | a `#Credential` value reaches a log, display, or serialization destination (D-TAG-SURFACE1) |
 | E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
@@ -524,7 +524,7 @@ renumbered, and no new `W` code may be allocated.
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
-| E-APP-TARGET-CAPABILITY | sema | an App capability is not available for the resolved target (D-APP-UNIFY1=B) |
+| E-APP-TARGET-FEATURE | sema | an App feature is not available for the resolved target (D-APP-UNIFY1=B) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
 | E-OSTARGET-BUILD-CONTEXT | sema | an `@if … == { }` OS dispatch's subject is not `@build.os` (D-OSTARGET2) |
@@ -648,7 +648,7 @@ renumbered, and no new `W` code may be allocated.
 | E0920 | retired | `#InlineAlways` condensed into `#Inline(Always)`; one marker cannot conflict with itself |
 | E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
 | E0922 | sema | body-level `derive Debug;` remains retired; use the signed type marker or a hand implementation (D-AUTODERIVE-SYNTAX1=D) |
-| E0929 | parse | body-level `derive X;` is retired; request the capability with `#X` and reserve `derive` for provider definitions (D-ONCE-DERIVE1=A) |
+| E0929 | parse | body-level `derive X;` is retired; request the derive with `#X` and reserve `derive` for provider definitions (D-ONCE-DERIVE1=A) |
 | E0925 | parse | `#Job`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Job` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad canonical Time unit, non-positive or out-of-range duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
@@ -656,7 +656,7 @@ renumbered, and no new `W` code may be allocated.
 | E0938 | sema | `#Memo` requires a pure function (D-MEMO1=A) |
 | E0939 | sema | `#Memo` argument is not hashable (D-MEMO1=A) |
 | E0940 | sema | `#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A) |
-| E0931 | parse | `!` is used on a marker other than a structurally auto-derived capability (D-META-AUTO1=A, D-AUTODERIVE-SYNTAX1=D) |
+| E0931 | parse | `!` is used on a marker other than a structurally auto-derived trait (D-META-AUTO1=A, D-AUTODERIVE-SYNTAX1=D) |
 | E0928 | sema  | a `#Job fn` collides with a reserved lifecycle/CLI name or another job in the same scope (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C) |
 | E0951 | sema  | **retired** (D-META-EFFECT1 c3, 2026-08-07): comptime purity and the run-time `=[]=>` check are one call-graph walk now; redirected to E3401 |
 | E0952 | sema  | comptime budget exhausted (fuel) |
@@ -812,7 +812,7 @@ renumbered, and no new `W` code may be allocated.
 | E1255 | jet   | an untrusted project environment or build hook hit a non-interactive path with no `--trust`/exact grant (U19, D-JPK-DEVCOMPOSE1, D-JPK-BUILDSCRIPT1) |
 | E1256 | jet   | bounded native projection cannot translate a foreign flake/devShell surface into Jet facts (U16) |
 | E1257 | jet   | a `target: sandbox` package's exported interface changed incompatibly since the last frozen build (D-PLUGIN-VERSION1=A) |
-| E1258 | jet   | a `target: sandbox` package's own code uses an effect — sandboxes are deny-by-default, zero host capabilities (D-PLUGIN1=B) |
+| E1258 | jet   | a `target: sandbox` package's own code uses an effect — sandboxes are deny-by-default, zero host authority (D-PLUGIN1=B) |
 | E1259 | jet   | couldn't build a sandbox's WASM Component — missing/failed `rustc`/`wasm-tools` toolchain (D-DEP-WASM1=A) |
 | E1260 | jet   | a sandbox's exported `pub fn` isn't all-`Int` or all-`Float` (v1 sandbox scope, D-PLUGIN-EXPORT1=A) |
 | E1261 | jet   | a dev-supervised service never became healthy within the readiness timeout (U12) |
@@ -931,7 +931,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0074 | This collecting loop produces incompatible item types. | One collecting loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This collecting loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
-| E0077 | This scoped grant uses the retired body binding. | The capability handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: FS, Net) { ... }`. |
+| E0077 | This scoped grant uses the retired body binding. | The `Authority` handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: FS, Net) { ... }`. |
 | E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
 | E0079 | This effect-only loop uses a result exit. | A break payload makes an effect-only loop a value expression. | Bind the loop with `::`, or remove the payload. |
 | E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
@@ -1170,7 +1170,7 @@ named cell.
 | E0213 | A read or write window starts from something that is not a place. | Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying. | Bind the call or temporary to a name first, then take the window from that name. |
 | E0214 | `.view(a..b)` uses the retired list-window spelling. | Place access follows the sigil reading rule above. | Replace `value.view(a..b)` with `value[a..b]`. |
 | E0217 | A Cell guard is stored inside an unsupported value or captured by a lambda. | A Cell guard is a temporary loan handle. Storing it inside another value could keep the loan after its local scope ends. | Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections. |
-| E0218 | `mem.pin` needs a write window made with the write-capability marker `&` into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with the write-capability marker; see the sigil reading rule above. | Write `mem.pin(&place)` with the write-capability marker `&`. |
+| E0218 | `mem.pin` needs a write window made with the write-access marker `&` into the place being pinned. | A pin promises one storage location will not move, so it has to name that location with the write-access marker; see the sigil reading rule above. | Write `mem.pin(&place)` with the write-access marker `&`. |
 | E0219 | A pinned place is moved, replaced, or resized while a pin is still live. | The pin promises that storage keeps its address; moving or replacing it would leave every stored address pointing at the old place. | Finish using the pin before changing the place, or narrow the pin's scope. |
 | E0220 | A place is read through its owner while an exclusive write window into it is still live. | An exclusive window (a pin or a mutable view) already gives write access to that storage; reading the owner beside it would be rejected after lowering. | Read or edit through the live window name instead of the owner. |
 | E0221 | A struct field’s strong `Shared` edge can form a reference cycle. | Strong `Shared` handles keep each other alive; a cycle through them never frees. | Use `Shared.Weak<T>` for intentional back-edges, or store an id instead of a strong handle. |
@@ -1303,12 +1303,12 @@ server built on top. E28xx is the block for M10.
 | E2806 | Convention file `{path}` has no `fn page`. | Files under a `.routes(from:)` root must declare `fn page` or start with `_` to opt out. A file without a page would register an endpoint the compiler cannot analyze. | Add `fn page()`, rename the file with a leading `_`, or remove it from the routes directory. |
 | E2807 | Route `{path}` is registered both by `{a}` and `{b}`. | Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1). | Remove one registration, or rename the convention file. |
 | E2810 | `{kind}` `{name}` is not a statically known handler. | D-WEBAPP1 records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge. | Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees. |
-| E-APP-TARGET-CAPABILITY | App capability `.{capability}` needs target `{required}`, but the resolved target is `{target}`. | App is one type across targets, but each capability must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9). | Choose a build target that supports `.{capability}` (for example `#Target(JS)` for browser capabilities or a native target for server capabilities), or remove that capability. |
+| E-APP-TARGET-FEATURE | App feature `.{feature}` needs target `{required}`, but the resolved target is `{target}`. | App is one type across targets, but each feature must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9). | Choose a build target that supports `.{feature}` (for example `#Target(JS)` for browser features or a native target for server features), or remove that feature. |
 | L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `task { … }` so each connection runs in its own task. |
 
 ## Testing and tooling diagnostics (E2-M11)
 
-Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, and capability summaries. E29xx is the block for M11.
+Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, and authority summaries. E29xx is the block for M11.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -1328,7 +1328,7 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E3622 | replay artifact is corrupt | Magic, header, frame hash, or footer verification failed. | Pass an intact `.jetproof-replay` path. |
 | E3623 | replay diverged from captured authority | The next recorded authority, consumed-record count, or captured run outcome does not match the current producer run. | Recapture with `--capture`, then replay the same target identity. |
 | E3624 | replay target cardinality is not one | Capture or replay selected zero or multiple runnable target members. | Select one runnable file or package target. |
-| E3625 | replay capture cannot model `{operation}` | The reachable operation has no bounded replay adapter, including opaque, native, task, or unsupported effect boundaries. | Route the operation through a supported deterministic capability, or remove it from the captured target. |
+| E3625 | replay capture cannot model `{operation}` | The reachable operation has no bounded replay adapter, including opaque, native, task, or unsupported effect boundaries. | Route the operation through a supported deterministic input, or remove it from the captured target. |
 | E3626 | replay capture lacks `{effect}` authority | The operation's existing lexical or invocation authority is missing; capture never grants it implicitly. | Add the exact existing authority or change the target before capture. |
 | E3627 | replay capture refused sensitive data | Safe capture refuses reachable Rand/IO/Net; sensitive capture needs TTY consent. | Use `--capture` for Time-only, or run `--capture-sensitive` interactively. |
 | E3628 | replay capture exceeded its artifact limit | The replay contained no usable authority or exceeded the bounded frame/payload/record budget. | Reduce the captured target or recapture a bounded artifact. |
@@ -1484,7 +1484,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3101 | `{op}` can only run inside an `#Unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `#Unsafe("why this is safe") { … }`. |
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
 | E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Unsafe("…") { … }`. |
-| E3104 | Retired allocator-specific use-after-free diagnostic. | Terminal release now uses ordinary consuming `close(^allocator)` through the move-capability marker `^`. | Follow E0121 and acquire a new allocator after close. |
+| E3104 | Retired allocator-specific use-after-free diagnostic. | Terminal release now uses ordinary consuming `close(^allocator)` through the move marker `^`. | Follow E0121 and acquire a new allocator after close. |
 | E3105 | Organization or package policy forbids unsafe code. | A lexical gate cannot widen the effective safety floor. | Remove the operation or have the policy owner change the outer policy. |
 | E3106 | This unsafe gate must choose a permitted obligation mode. | `.PerSite` requires `.Track`/`.Skip`, and `.Skip` has no ambient meaning outside `.PerSite`. | Add `obligations: .Track`, or use `.Skip` only under a package `.PerSite` policy. |
 | E3107 | `{operation}` is missing unsafe obligations: `{obligations}`. | Effective `.Obligations` policy requires a typed proof immediately after each low-level operation. | Add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset. |
@@ -1592,11 +1592,11 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) =[]=>`, `fn render(self) =[GPU]=>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0743 | Dynamic call `{trait}::{method}` has no effect bound. | A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound (D-EFF3). | Declare an effect row on the trait method, such as `=[]=>` for pure dispatch, or move the dynamic call outside the bounded function. |
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `=[]=>` for an empty row or `=[Effects]=>` for a bounded row. |
-| E0711 | The capability `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants a capability into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
-| E0712 | This `#Grant` region uses the effect `{effect}`, which it has no capability for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no capability backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
+| E0711 | The `Authority` handle `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants an `Authority` into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
+| E0712 | This `#Grant` region uses the effect `{effect}`, which it has no authority for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no authority backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
 | E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
 | E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
-| E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function. |
+| E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function. |
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, subprocess, or foreign effect leaves external state a rollback can't take back unless the foreign binding declares a compensating undo (D-TXN2, D-BOUND-UNDO1). | Move the call after the block, register it with `<handle>.on_commit(() => { … })`, or declare `#Undo(inverse)` on the foreign binding. |
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `fn(…) =[]=>` parameter demands a pure callback, and a `fn(…) =[E]=>` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `fn … =[]=>` for a pure parameter), or widen the parameter's effect bound. |
 | E0748 | `=[via {param}]=>` on `{fn}` names no such parameter or a parameter that isn't a callback. | `=[via f]=>` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `=[via …]=>` annotation. |
@@ -1706,7 +1706,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0156 | this operation would loosen `{plane}`. | knowledge only tightens silently; loosening `{plane}` must be named with a written gate. | write `{gate}(value)` at this boundary. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |
-| E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-capability marker `&` if the function should change it. |
+| E0161 | `{what}` | Increment and decrement edit the binding or field in place; see the sigil reading rule above (D-INCR1). | Declare with `:=` or mark the parameter with the write-access marker `&` if the function should change it. |
 | E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
 | E0163 | increment and decrement can't target an indexed slot. | An indexed read can panic when a map key is missing, so the update needs a default value. | Write a total update, such as `map[key] = (map.get(key) ?? 0) {op} 1`. |
 | E0164 | compound assignment can't target an indexed slot. | A compound update reads an indexed slot before it writes; that read can panic when a map key is missing. | Write a total update, such as `map[key] = (map.get(key) ?? 0) {op} 1`. |
@@ -1901,7 +1901,7 @@ front-end `.jet` diagnostics).
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
 | E1256 | `{cmd}` cannot project the foreign environment. | The bounded native evaluator could not translate the foreign `flake.nix`/`devenv.nix` surface into Jet facts (U16). Jet does not shell out to an installed Nix binary for this path. | Use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`. |
 | E1257 | This sandbox's exported interface changed incompatibly. | A `target: sandbox` package's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1=A) — a prior build's `.jet/cache/api` snapshot shows an export was removed or its signature changed. Adding a new export is always compatible. | Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze). |
-| E1258 | A sandbox can't use any effect. | This package builds as `target: sandbox` (D-PLUGIN1=B) — sandboxes run with zero host capabilities (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the sandbox into the host program that loads it. |
+| E1258 | A sandbox can't use any effect. | This package builds as `target: sandbox` (D-PLUGIN1=B) — sandboxes run with zero host authority (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the sandbox into the host program that loads it. |
 | E1259 | Couldn't build the sandbox's WASM Component. | Building a `target: sandbox` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |
 | E1260 | A sandbox's exported function has an unsupported signature. | v1 sandbox exports (D-PLUGIN-EXPORT1=A) support only functions whose parameters and return type are all `Int` or all `Float` — Bool/Text need more of the Component Model's ABI machinery, a real follow-on rather than this increment's scope. | Narrow the signature to all-`Int`/all-`Float`, or drop `pub` if this function isn't meant to be called across the sandbox boundary. |
 | E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `run`/`ready` declarations are correct, or raise the timeout isn't configurable yet — fix the service itself. |
@@ -1966,8 +1966,8 @@ front-end `.jet` diagnostics).
 | E3501 | `fn build` must take one `BuildContext` and return `BuildPlan ?`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) => BuildPlan ?`. |
 | E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet inspect graph` and `jet inspect explain-build`. |
 | E3503 | This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy. | Build authority must pass all three independent checks before any probe or action executes. | Declare the effect, gate the ambient operation with `#Impure("reason")`, and grant the effect through CLI/package/workspace policy. |
-| E3504 | Build action `{action}` asks for ungranted `{capability}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
-| E3505 | Typed build probe or sandboxed action execution failed. | Actions run only after graph validation, in a bubblewrap sandbox with declared inputs, outputs, tools, environment, capabilities, and probes. Jet does not fall back to ambient execution. | Fix the named command, probe, toolchain, input/output declaration, or enable a supported sandbox. |
+| E3504 | Build action `{action}` asks for ungranted `{right}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
+| E3505 | Typed build probe or sandboxed action execution failed. | Actions run only after graph validation, in a bubblewrap sandbox with declared inputs, outputs, tools, environment, authority, and probes. Jet does not fall back to ambient execution. | Fix the named command, probe, toolchain, input/output declaration, or enable a supported sandbox. |
 | E3520 | Two build entries for one package: both source sites are shown. | One package has one build authority, so policy and provenance have one auditable home. | Keep one `fn build` and remove every other entry. |
 | E3521 | Two writers at the same contribution layer gave different values for `{fact}`; both source locations are shown. | Cross-layer overrides are legal, but same-layer disagreement is ambiguous and cannot be selected by source order. | Make the named writers agree, or move one value to a more explicit contribution layer. |
 | E3510 | `b.generate("{name}")` would shadow the module at `{path}`. | Generation is additive: what you wrote is always what compiles. | Rename the generated module, or delete the hand-written one. |
@@ -2174,15 +2174,15 @@ did not restore the older body-level derive statement.
 |------|-----|-----|
 | `` `derive Debug` inside a type body is retired ``. | Signed type markers are the one control for compiler-generated Debug implementations. | Write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand. |
 
-### E0929 — body-level capability derive is retired (D-ONCE-DERIVE1=A)
+### E0929 — body-level derive is retired (D-ONCE-DERIVE1=A)
 
 The ratified spelling law leaves `derive` with one job: defining a provider
-(`derive T.Trait { … }`). A type requests a built-in or user capability with
+(`derive T.Trait { … }`). A type requests a built-in or user derive with
 the marker before its declaration.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `derive {Trait}` inside a type body is retired ``. | Capability requests have one marker spelling, while `derive` defines providers. | Write `#{Trait}` before the type. |
+| `` `derive {Trait}` inside a type body is retired ``. | Derive requests have one marker spelling, while `derive` defines providers. | Write `#{Trait}` before the type. |
 
 ### E0925 — `#Job`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
 
@@ -2270,7 +2270,7 @@ pointer to `docs/spec/syntax-decisions.md`.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for structurally auto-derived capabilities. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
+| `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for structurally auto-derived traits. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
 
 ### E0928 — `#Job fn` uses a reserved or colliding name (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C)
 

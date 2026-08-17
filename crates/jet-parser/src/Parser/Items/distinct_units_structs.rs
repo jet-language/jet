@@ -140,8 +140,8 @@ impl<'a> Parser<'a> {
                         "@",
                         attr
                     ),
-                    "only the four capability bundles — `#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase` — are supported before a distinct type".to_string(),
-                    "use one of the four capability bundles, or remove the attribute".to_string(),
+                    "only the four operation bundles — `#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase` — are supported before a distinct type".to_string(),
+                    "use one of the four operation bundles, or remove the attribute".to_string(),
                     Some(attr_span),
                 ));
             }

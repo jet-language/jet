@@ -1237,8 +1237,8 @@ impl<'a> Parser<'a> {
             self.expect_ident(&format!("`#{}`", Syntax::KW_GRANT))?;
             self.expect(TokKind::LParen, "after `#Grant`")?;
             let (binding, binding_span) =
-                self.expect_ident("as the scoped capability handle")?;
-            self.expect(TokKind::Colon, "after the scoped capability handle")?;
+                self.expect_ident("as the scoped authority handle")?;
+            self.expect(TokKind::Colon, "after the scoped authority handle")?;
             let mut caps = Vec::new();
             let mut marker_args = Vec::new();
             loop {
@@ -1288,7 +1288,7 @@ impl<'a> Parser<'a> {
         self.diags.push(Diagnostic::error(
             "E0077",
             "this scoped grant uses the retired body binding".to_string(),
-            "the capability handle is part of the grant header; `->` is reserved for selected or yielded values"
+            "the `Authority` handle is part of the grant header; `->` is reserved for selected or yielded values"
                 .to_string(),
             "write `#Grant(caps: FS, Net) { ... }`".to_string(),
             Some(marker.span),
@@ -1306,7 +1306,7 @@ impl<'a> Parser<'a> {
             &format!("after `#{}(…)`", Syntax::KW_GRANT),
         )?;
         // Retired spelling: `{ caps -> … }`.
-        let (binding, binding_span) = self.expect_ident("for the capability handle name")?;
+        let (binding, binding_span) = self.expect_ident("for the authority handle name")?;
         self.expect(
             TokKind::Arrow,
             &format!(
@@ -1950,8 +1950,8 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         "`defer` only schedules a consuming resource close".to_string(),
-                        "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through the move-capability marker `^`".to_string(),
-                        "write `defer close(^resource)` with the move-capability marker `^`".to_string(),
+                        "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through the move marker `^`".to_string(),
+                        "write `defer close(^resource)` with the move marker `^`".to_string(),
                         Some(Span::new(defer_span.start, close.span().end)),
                     ));
                 }

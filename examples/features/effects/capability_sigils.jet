@@ -1,4 +1,4 @@
-// Access-capability sigils (D-MEM1): the capability rides the type — `&T` write,
+// Access sigils (D-MEM1): the access marker rides the type — `&T` write,
 // `^T` move/take — and the call site mirrors it. Receivers carry the sigil on
 // `self`. Plain `T` / `self` is read (the default, no sigil).
 struct Player {
@@ -22,7 +22,7 @@ impl Player {
 
 fn run() {
     p := Player.{hp: 100, name: "Aria"}
-    damage(&p, 30)  // call site mirrors the `&` write capability
+    damage(&p, 30)  // call site mirrors the `&` write access
     report(p)  // plain read, no sigil
     p.heal(10)  // receiver `&self`, clean method-call syntax
     print(p.show())

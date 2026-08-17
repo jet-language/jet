@@ -565,7 +565,7 @@ pub fn e0929(trait_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0929",
         format!("`derive {trait_name}` inside a type body is retired"),
-        "a capability request has one spelling: the marker before the type; `derive` defines providers"
+        "a derive request has one spelling: the marker before the type; `derive` defines providers"
             .to_string(),
         format!("write `#{trait_name}` before the type"),
         Some(span),

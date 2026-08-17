@@ -188,7 +188,7 @@ impl<'a> Checker<'a> {
                         };
                         let fix = if info.param_conv.is_some() {
                             format!(
-                                "mark the parameter `{}: {}{}` with the write-capability marker `&` if the function should change it",
+                                "mark the parameter `{}: {}{}` with the write-access marker `&` if the function should change it",
                                 name,
                                 Syntax::SIGIL_WRITE,
                                 info.ty.name()
@@ -204,7 +204,7 @@ impl<'a> Checker<'a> {
                             "E0161",
                             what,
                             format!(
-                                "only `{}` bindings and parameters with the write-capability marker `&` can use `++`/`--`",
+                                "only `{}` bindings and parameters with the write-access marker `&` can use `++`/`--`",
                                 Syntax::SIGIL_BIND_MUT,
                             ),
                             fix,
@@ -246,19 +246,19 @@ impl<'a> Checker<'a> {
                                 let is_self = root == Syntax::KW_SELF;
                                 let what = if is_self {
                                     format!(
-                                        "cannot edit `{}` — `{}` has read access only; the write-capability marker `&` is required",
+                                        "cannot edit `{}` — `{}` has read access only; the write-access marker `&` is required",
                                         field,
                                         Syntax::KW_SELF
                                     )
                                 } else {
                                     format!(
-                                        "cannot edit `{}` — `{}` does not have the write-capability marker `&`",
+                                        "cannot edit `{}` — `{}` does not have the write-access marker `&`",
                                         field, root
                                     )
                                 };
                                 let fix = if is_self {
                                     format!(
-                                        "write the receiver with the write-capability marker `&`: `{}{}` to grant write access",
+                                        "write the receiver with the write-access marker `&`: `{}{}` to grant write access",
                                         Syntax::SIGIL_WRITE,
                                         Syntax::KW_SELF
                                     )

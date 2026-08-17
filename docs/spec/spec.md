@@ -700,27 +700,27 @@ Aliasing rule, stated for humans: *while something is being changed, nobody
 else may be looking at it.* Foreign `read`/`write` spellings are paused under
 D-S14-PAUSE and get ordinary parse errors.
 
-## Access capability sigils (D-MEM1)
+## Access sigils (D-MEM1)
 
-The capability is a prefix sigil on the **type**, not the name. Two sigils
+The access marker is a prefix sigil on the **type**, not the name. Two sigils
 ship in v1 (unmarked read is the default, not a sigil):
 
-| Sigil | Capability | Compiles to Rust |
+| Sigil | Access | Compiles to Rust |
 |-------|-----------|-------------------|
 | `T` (bare) | read — callee only reads; enforced, never elevated | `x: &T` |
 | `&T` | write — exclusive edit access | `x: &mut T` |
 | `^T` | take — ownership moves to callee | `x: T` |
 
-`~` is the copy sigil (D-SHAPE-COPY1=A, below), not a parameter capability —
+`~` is the copy sigil (D-SHAPE-COPY1=A, below), not a parameter access marker —
 it has no arm in this table. Raw-pointer access (`p.*` postfix deref, prefix
 `*x`) is a separate, `#Unsafe`-gated mechanism (D-CAP9) — also not a
-parameter capability; the compiler's `AccessConvention` enum keeps dead
+parameter access marker; the compiler's `AccessConvention` enum keeps dead
 `Share`/`Raw` variants internally, inert until a future tier reactivates
 them.
 
 ### Placement
 
-Capability rides the type on the parameter:
+The access marker rides the type on the parameter:
 
 ```jet
 fn damage(p: &Player, amount: Int) {   // &Player: write; Int: read (bare)
@@ -728,7 +728,7 @@ fn damage(p: &Player, amount: Int) {   // &Player: write; Int: read (bare)
 }
 ```
 
-The call site mirrors the sigil — the capability is always visible where
+The call site mirrors the sigil — the access marker is always visible where
 mutation or movement happens:
 
 ```jet
@@ -738,25 +738,25 @@ close(^file)      // ^ mirrors ^File — file is consumed
 
 ### Optional composition
 
-A capability sigil composes with `?` (optional presence) directly: `&User?`
+An access marker composes with `?` (optional presence) directly: `&User?`
 means "write access over an optional User", `^Texture?` means "take an
 optional Texture". The sigil and `?` follow the same type-side grammar as
 any other type annotation — the sigil is the parameter prefix, `?` is the
 type suffix.
 
-### E0029 — two capability markers
+### E0029 — two access markers
 
-Placing more than one capability sigil on a single parameter is a parse error:
+Placing more than one access marker on a single parameter is a parse error:
 
 ```
-error[E0029]: two capability markers on one parameter
+error[E0029]: two access markers on one parameter
   --> file.jet:3:12
    |
  3 | fn bad(p: &^Player) { … }
-   |           ^^ remove one capability marker
+   |           ^^ remove one access marker
 ```
 
-Access capabilities use sigils only: bare `T` (read), `&T` (write), `^T`
+Access markers use sigils only: bare `T` (read), `&T` (write), `^T`
 (take) — no fourth spelling.
 
 ## M3 — data & methods (done)
@@ -2072,7 +2072,7 @@ Smaller binaries than the default speed-oriented profile (`tests/release_gates.r
 `examples/features/collections/wordcount.jet`).
 
 **`jet self lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
-Capabilities: full-document diagnostics on open/change (real front end, including
+Features: full-document diagnostics on open/change (real front end, including
 import graph from disk with an in-memory overlay for the open buffer), S14
 teaching-error quick-fixes (`Diagnostic.edit`), and formatting via `jet fmt`.
 Scripted tests: `tests/lsp.rs`.
@@ -2313,7 +2313,7 @@ any remaining crossing-proof failure keeps the shared **E1102** diagnostic.
 `task ^name { ... }` explicitly consumes `name` into that child. It uses the
 same crossing prover as an ordinary capture; after the child is created,
 using `name` is the normal **E0121** use-after-move. This capture spelling is
-task-only; `^` on an ordinary call argument keeps its existing move-capability
+task-only; `^` on an ordinary call argument keeps its existing move
 meaning. `Shared` and `Cell` keep their existing synchronized and local-only
 semantics.
 
@@ -3738,7 +3738,7 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
 - `layout` (D-LAYOUT-FACTS1=B) — compiler-owned type layout facts. Physical
   byte facts remain optional; when absent, the lens names the registered
   diagnostic and the reason.
-- `derive` (D-ONCE-DERIVE1) — capabilities already attached to structs,
+- `derive` (D-ONCE-DERIVE1) — behavior already attached to structs,
   enums, and distinct types, with their checked identity and source span.
 - `callable-signature` (D-CALLPOLICY1=E) — the complete checked callable
   contract: public labels and local names, defaults, access modes, zones,
@@ -4048,7 +4048,7 @@ E1260; Bool is a trivial follow-on, Text needs the Component Model's
 memory-based string ABI, a real future increment). The wasmtime host embedded
 via the FFI-bridge pattern (`crates/jet-driver/src/Prelude/Plugin.rs`,
 runtime-side only, I6) registers **zero host imports** — deny-by-default
-capabilities: a sandbox that tried to touch the filesystem, network, or clock
+authority: a sandbox that tried to touch the filesystem, network, or clock
 simply fails to instantiate at load time, reported as a clean `Err`, never a
 crash (I2). A sandbox's own code may not use any effect either — caught at
 build time as E1258, not deferred to that runtime failure.
@@ -4064,7 +4064,7 @@ silently; removing or changing an export is E1257, naming the exact delta.
 
 Full worked example: `examples/features/packages/sandbox_mathkit/` (a
 `sandbox_src/` package + a host `main.jet`; golden-enforced, I5). New
-diagnostics: E1257 (interface changed incompatibly), E1258 (capability
+diagnostics: E1257 (interface changed incompatibly), E1258 (authority
 denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
 shape) — see docs/spec/diagnostics.md.
 
@@ -4118,7 +4118,7 @@ fn run() { print("hello") }
 Action dependencies come from target dependencies and declared file
 producer/consumer edges. Ready nodes run concurrently in deterministic stages;
 `linker`, `console`, `gpu`, and named resource pools serialize. Cached actions
-key declared input content, argv, environment, capabilities, toolchain, probes,
+key declared input content, argv, environment, authority, toolchain, probes,
 resource pools, plugins, and generated-source hashes. Cache hits restore only
 declared outputs from the local CAS.
 
@@ -4128,7 +4128,7 @@ enter its writable work tree; only declared outputs return. Network remains
 unshared unless both source and policy grant `Net`. A missing sandbox is E3505,
 not an unsandboxed run. Single-file authority uses the ratified per-effect
 flags (`--allow-exec`, `--allow-fs`, `--allow-net`, and the remaining D-EFF4
-names). Package/workspace policy can grant or cap the same capability set.
+names). Package/workspace policy can grant or cap the same authority set.
 The vocabulary is one closed typed ten-effect enum shared by sema, policy,
 CLI, graph, cache, and executor. Every effectful `b.action`/`b.probe` call must
 be inside its active `#Impure("reason")` region. Signature declaration and
@@ -4180,7 +4180,7 @@ worker identity.
 WASM build plugins enter through the packaged manifest/component loader or the
 typed in-memory test seam. The loader verifies a regular non-symlink file, the
 Component Model binary envelope, the fixed API version, and its SHA-256 digest
-before application. Capability grants are checked per plugin and the graph is
+before application. Authority grants are checked per plugin and the graph is
 rolled back on every rejected contribution, so a hostile plugin cannot leave
 partial actions, targets, or generated modules behind. Packaged manifests are
 bounded to 64 KiB and components to 64 MiB; request and response pipes are
@@ -4189,7 +4189,7 @@ reject symlinks and non-regular package files.
 
 Legacy CMake, Make, Gradle, npm, and Cargo support remains an explicit Tier-2
 wrapper. `LegacyWrapperSpec::from_project_file` parses the wrapper's canonical
-root file into the typed command, paths, capabilities, environment, cache,
+root file into the typed command, paths, authority, environment, cache,
 kind, pools, and provenance fields. It records the file as a typed action
 input, rejects links, oversized/non-UTF-8 files, and unsupported constructs,
 and records the bounded non-symlink project source closure as typed inputs;

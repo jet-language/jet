@@ -649,13 +649,13 @@ impl<'a> Parser<'a> {
                         if convention != AccessConvention::Read {
                             self.diags.push(Diagnostic::error(
                                 "E0029",
-                                format!("`{}` has two capability markers", name),
+                                format!("`{}` has two access markers", name),
                                 format!(
-                                    "{} before the parameter name conflicts with {} on its type; a parameter can declare only one capability",
-                                    Syntax::capability_label(convention.sigil()),
-                                    Syntax::capability_label(type_cap.sigil()),
+                                    "{} before the parameter name conflicts with {} on its type; a parameter can declare only one access marker",
+                                    Syntax::access_label(convention.sigil()),
+                                    Syntax::access_label(type_cap.sigil()),
                                 ),
-                                "keep one capability marker on the type or receiver and remove the other".to_string(),
+                                "keep one access marker on the type or receiver and remove the other".to_string(),
                                 Some(name_span),
                             ));
                         }
@@ -794,12 +794,12 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0103",
                         format!("`#{}` must mark a bare-read parameter", Syntax::MARKER_ROOT),
-                        "dot-call syntax never hides a write or move capability behind the receiver"
+                        "dot-call syntax never hides write access or a move behind the receiver"
                             .to_string(),
                         format!(
-                            "remove the {} or {} from the `#{}` parameter",
-                            Syntax::WRITE_CAPABILITY_LABEL,
-                            Syntax::MOVE_CAPABILITY_LABEL,
+                            "remove {} or {} from the `#{}` parameter",
+                            Syntax::WRITE_ACCESS_LABEL,
+                            Syntax::MOVE_MARKER_LABEL,
                             Syntax::MARKER_ROOT
                         ),
                         Some(p.name_span),

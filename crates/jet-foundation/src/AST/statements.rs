@@ -281,7 +281,7 @@ pub enum Stmt {
     /// capability is **revoked at scope end** by the RAII rule (S63) — the handle
     /// is bound only for the block's extent. The dual of `#Caps`: `#Caps`
     /// *restricts* a region to a set, `#grant` *authorizes* one. An effect used
-    /// inside the block that the grant doesn't cover has no capability backing it
+    /// inside the block that the grant doesn't cover has no authority backing it
     /// (E0712); letting the handle escape (returned, stored, captured) is E0711.
     /// A lexical scope emitted as a plain Rust block — the grant/revoke is a
     /// compile-time capability fact, erased in codegen (I3).
