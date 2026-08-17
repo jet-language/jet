@@ -626,7 +626,9 @@ impl<'a> Checker<'a> {
                 Some(payload)
             }
             OrFallback::Block { body, value, .. } => {
-                self.check_block(body, false);
+                // A `??` fallback block runs only on the failure path, so a
+                // `return` inside it does not end the enclosing block (#2006).
+                self.check_conditional_block(body, false);
                 let saved = self.expected_type.clone();
                 self.expected_type = Some(payload.clone());
                 let value_ty = self.infer(value);
@@ -826,7 +828,7 @@ impl<'a> Checker<'a> {
                 value,
                 span: fallback_span,
             } => {
-                self.check_block(body, false);
+                self.check_conditional_block(body, false);
                 self.infer(value);
                 self.diags.push(Diagnostic::error(
                     "E0405",
