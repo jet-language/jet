@@ -318,13 +318,17 @@ fn compiled_binary_output_with_stdin(
     )
 }
 
-fn try_compiled_binary_output(
+/// Builds the AOT binary and stops. #2016: a service entry serves until it is
+/// stopped, so the gate cannot RUN it, but its AOT compile is still the proof
+/// that the stem is real. Splitting build from run is what lets the gate keep
+/// that proof while leaving the stem out of the run universe.
+fn try_compiled_binary_build(
     dir: &std::path::Path,
     tag: &str,
     i: usize,
     stem: &str,
     file: &str,
-) -> Option<ProgramOutput> {
+) -> Option<std::path::PathBuf> {
     let src = fs::read_to_string(file).ok()?;
     let compiled = jet::compile_with_path(&src, file).ok()?;
     let rs = dir.join(format!("jet_{tag}_{i}.rs"));
@@ -361,6 +365,17 @@ fn try_compiled_binary_output(
     if !out.status.success() {
         return None;
     }
+    Some(bin)
+}
+
+fn try_compiled_binary_output(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+) -> Option<ProgramOutput> {
+    let bin = try_compiled_binary_build(dir, tag, i, stem, file)?;
     let run = command_output_with_timeout(
         Command::new(&bin),
         DEV_DIFF_TIMEOUT,
@@ -9089,6 +9104,22 @@ fn cranelift_three_way_differential_battery_inner() {
             no_golden.push(stem.clone());
             continue;
         }
+        // #2016: a service entry serves until it is stopped, so running it here
+        // spends the battery's timeout and, for the three `App` examples, races
+        // a fixed port. Held back by the DERIVED predicate rather than by name,
+        // so a fourth service example is classified instead of being discovered
+        // by a timeout. Still counted with a reason, per the #1998 rule.
+        {
+            let path = example_path(stem);
+            let file = path.to_string_lossy().to_string();
+            if let Ok(mut bundle) = jet::Loader::load_entry(&file) {
+                let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+                if jet::AST::bundle_serves_until_stopped(&bundle) {
+                    held_back.push(format!("{stem}: service entry serves until stopped"));
+                    continue;
+                }
+            }
+        }
         // JIT lowers only `tir_covers` entry-module funcs; AOT still walks every
         // top-level item. `web/app_hello` keeps unused web.page/app helpers that
         // miss the TIR gate (ICE on `home`) while `run` stays resident-JIT safe.
@@ -9298,6 +9329,31 @@ fn classify_corpus_stem(
         };
     }
 
+    // #2016: a service entry serves until it is stopped, so it has no
+    // terminating observable for a three-tier differential to compare, and
+    // running it costs the gate its whole timeout. It leaves the RUN universe
+    // and stays in the COMPILE universe: the AOT build below is the only proof
+    // left that the stem is real, so a build failure is asserted, not skipped.
+    //
+    // The reason is DERIVED from the program, never a stem list. Before this,
+    // "entry returns App" lived as four private copies with no shared
+    // predicate, which is why nothing forced the gate to notice when three
+    // examples became services.
+    if jet::AST::bundle_serves_until_stopped(&bundle) {
+        let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+        let worker_dir = dir.join(format!("w{worker}"));
+        assert!(
+            try_compiled_binary_build(&worker_dir, "corpus_gate_service", 0, stem, &file).is_some(),
+            "`{stem}` is a service entry outside the gate's run universe, so its AOT compile is \
+             the only proof left: that compile failed"
+        );
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::GateExcluded,
+            detail: "service entry serves until stopped".to_string(),
+        };
+    }
+
     if example_has_err_golden(stem) {
         return CorpusGateRecord {
             stem: stem.to_string(),
@@ -9483,6 +9539,22 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
         ),
     };
     records.sort_by(|left, right| left.stem.cmp(&right.stem));
+
+    // #2016 + #1998 rule: an excluded stem carries a named reason AND is
+    // counted, so the number can only shrink. A bare skip list is what let
+    // stems leave a gate's universe unnoticed; a ceiling makes leaving cost a
+    // reviewed edit. Raising this is not a fix — drive the stem instead.
+    const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
+    let excluded = records
+        .iter()
+        .filter(|record| record.class == CorpusGateClass::GateExcluded)
+        .count();
+    assert!(
+        excluded <= CORPUS_GATE_EXCLUDED_CEILING,
+        "the corpus gate excludes {excluded} stem(s) but the ceiling is \
+         {CORPUS_GATE_EXCLUDED_CEILING}; exclusions may only SHRINK. Drive the stem instead of \
+         excluding it, or lower the ceiling in the same reviewed diff"
+    );
     records
 }
 
