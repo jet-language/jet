@@ -18,6 +18,10 @@ mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
 }
 
+mod encoding_error_rt {
+    include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+}
+
 mod inline_range_rt {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
@@ -1829,11 +1833,14 @@ fn jet_jit_yaml_to_string(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
-/// Mirror `jet_std::EncodingError::display_text` for `{err}` interp.
+/// Marshal the resident `EncodingError` record into the one Prelude rendering
+/// AOT's `impl JetShow for EncodingError` embeds. The index tables and the
+/// Option ABI decode below are this host's ABI adapter; the text ladder is not
+/// re-encoded here (I9).
 fn jet_jit_encoding_error_show(handle: i64) -> i64 {
     const FORMAT: &[&str] = &["JSON", "JSONL", "CSV", "XML", "CBOR"];
     const KIND: &[&str] = &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"];
-    let text = Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let format = rt.heap.record_get_int(handle, 0).unwrap_or(0) as usize;
         let kind = rt.heap.record_get_int(handle, 1).unwrap_or(0) as usize;
         let byte_offset = rt.heap.record_get_int(handle, 2).unwrap_or(0);
@@ -1843,23 +1850,18 @@ fn jet_jit_encoding_error_show(handle: i64) -> i64 {
         let reason_id = rt.heap.record_get_string(handle, 6).unwrap_or(0);
         let path = rt.heap.clone_string(path_id).unwrap_or_default();
         let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
-        let format_s = FORMAT.get(format).copied().unwrap_or("?");
-        let kind_s = KIND.get(kind).copied().unwrap_or("?");
-        let mut out = format!("{format_s} {kind_s} at byte {byte_offset}");
         // Option ABI: 0 = None, else bits+1.
-        if line != 0 {
-            out.push_str(&format!(", line {}", line - 1));
-        }
-        if column != 0 {
-            out.push_str(&format!(", column {}", column - 1));
-        }
-        if !path.is_empty() {
-            out.push_str(&format!(", path {path}"));
-        }
-        out.push_str(&format!(": {reason}"));
+        let out = encoding_error_rt::jet_encoding_error_kernel_show(
+            FORMAT.get(format).copied().unwrap_or("?"),
+            KIND.get(kind).copied().unwrap_or("?"),
+            byte_offset,
+            (line != 0).then(|| line - 1),
+            (column != 0).then(|| column - 1),
+            &path,
+            &reason,
+        );
         rt.heap.alloc_string(out)
-    });
-    text
+    })
 }
 
 /// Mirror `jet_std::FieldError` list rendering for resident `print(errors)`.

@@ -1219,6 +1219,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"));
+    out.push_str(include_str!("../Prelude/Core/EncodingError.rs"));
     out.push_str(include_str!("../Prelude/Core/EncodingBase.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/SHA256Raw.rs"));

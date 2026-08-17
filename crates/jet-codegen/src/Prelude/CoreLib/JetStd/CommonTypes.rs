@@ -113,18 +113,15 @@
             self.cause.clone()
         }
         fn display_text(&self) -> String {
-            let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
-            if let Ok(line) = self.line {
-                out.push_str(&format!(", line {line}"));
-            }
-            if let Ok(column) = self.column {
-                out.push_str(&format!(", column {column}"));
-            }
-            if !self.path.is_empty() {
-                out.push_str(&format!(", path {}", self.path));
-            }
-            out.push_str(&format!(": {}", self.reason));
-            out
+            super::jet_encoding_error_kernel_show(
+                &format!("{:?}", self.format),
+                &format!("{:?}", self.kind),
+                self.byte_offset,
+                self.line.as_ref().ok().copied(),
+                self.column.as_ref().ok().copied(),
+                &self.path,
+                &self.reason,
+            )
         }
     }
     impl std::fmt::Display for EncodingError {

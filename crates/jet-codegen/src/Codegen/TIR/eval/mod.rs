@@ -3031,10 +3031,27 @@ impl<'a> EvalCtx<'a> {
                 CtValue::Enum { type_name, .. } | CtValue::Struct { type_name, .. },
             ) = (&func.ret, &mut value)
             {
-                if crate::Codegen::nominal_leaf(type_name)
-                    == crate::Codegen::nominal_leaf(expected)
-                {
-                    *type_name = expected.clone();
+                let leaf = crate::Codegen::nominal_leaf(type_name);
+                if leaf == crate::Codegen::nominal_leaf(expected) {
+                    // A Core type is DECLARED by its leaf. `use core.encoding as
+                    // encoding` spells the annotation `encoding.EncodingError`,
+                    // but every Prelude table, show selector and nominal equality
+                    // is keyed on that declared leaf, so adopting the alias
+                    // spelling here leaves the returned value unequal to the
+                    // identical literal and unreachable for the shared Core
+                    // display. Resolve onto the leaf, the same direction the JIT
+                    // resolves through `jit::types_meta::core_alias_leaf`. A user
+                    // record owns its spelling and keeps the annotated one, which
+                    // is what its own method keys use.
+                    let core_leaf = expected.contains('.')
+                        && !self.struct_fields.contains_key(leaf)
+                        && crate::Codegen::core_rust_type_name(leaf).is_some();
+                    let resolved = if core_leaf {
+                        leaf.to_string()
+                    } else {
+                        expected.clone()
+                    };
+                    *type_name = resolved;
                 }
             }
             value
@@ -4416,6 +4433,15 @@ fn run_bundle_at_stage(
     gates: jet_foundation::Policy::GateSet,
     stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
+    // The edition is a package fact, not an ambient one. Sema chose every
+    // edition-gated signature under `with_package_edition(&bundle.edition)`
+    // (`Sema/Bundle/Pipeline.rs`), and that scope has closed by the time the
+    // program runs, so a fresh thread-local read here answers the reverted
+    // "2026" default and picks the unchecked `core.data` surface for a program
+    // sema typed as checked. AOT (`Codegen/mod.rs`) and JIT lowering
+    // (`Codegen/TIR/mod.rs`) already re-establish the bundle edition for the
+    // same reason; the interpreter is the third tier of the same mechanism.
+    jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     let program = lower_interp_program(bundle).ok_or_else(|| {
         crate::Sema::Diagnostics::render_registered(
             "E2201",
@@ -4492,6 +4518,7 @@ fn run_bundle_at_stage(
         Some(bundle),
         bundle.package_guarantees.harden,
     )
+    })
 }
 
 fn eval_expr_hook(

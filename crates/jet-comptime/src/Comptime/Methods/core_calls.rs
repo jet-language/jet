@@ -118,6 +118,10 @@ mod encoding_base_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
 }
 
+mod encoding_error_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+}
+
 mod fmt_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Fmt.rs");
 }
