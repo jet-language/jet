@@ -1606,36 +1606,6 @@ fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
     );
 }
 
-fn assert_cranelift_deopts_on_gap(src: &str, tag: &str) {
-    if skip_if_cranelift_host_unsupported() {
-        return;
-    }
-    let p = std::env::temp_dir().join(format!("jet_jit_gap_{tag}.jet"));
-    fs::write(&p, src).unwrap();
-    let shown = p.to_string_lossy().to_string();
-    let bundle = checked_bundle_from_path(&shown);
-    jet_jit::reset_jit_trace_for_test();
-    let mut backend = CraneliftBackend::new();
-    match backend.run(&bundle, false) {
-        RunOutcome::Ran { .. } => {
-            assert!(
-                jet_jit::deopt_invoked_for_test(),
-                "tiered cranelift should deopt for `{tag}`"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "deopt must not trip forbidden fallback for `{tag}`"
-            );
-        }
-        RunOutcome::Problems(diags) => {
-            assert!(
-                !jet_jit::is_e2211(&diags),
-                "E2211 retired for `{tag}`: {diags:?}"
-            );
-        }
-    }
-}
-
 fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
     let p = std::env::temp_dir().join(format!("jet_jit_result_{tag}.jet"));
     fs::write(&p, src).unwrap();

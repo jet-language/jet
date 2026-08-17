@@ -5892,11 +5892,42 @@ fn multi_head_duplicate_head_l0301_keeps_first_match_across_runtime_tiers() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The three plain parameter modes across a call boundary: `read` (by value),
+/// `&` (write-back), and `^` (take).
+///
+/// This was an `assert_cranelift_deopts_on_gap` case from the era when the
+/// resident tier had no user-call write-back at all. It has one now — the
+/// interpreter-side boundary right below this test only stays honest because
+/// resolved user calls DO carry write-back — so the tier compiles this whole
+/// body natively and correctly declines to deopt. The assertion follows the
+/// coverage.
+///
+/// The tier assertions are the point, not decoration (the `float_lists`
+/// lesson): a re-opened write-back gap is silent, because the deopt still
+/// prints the right answer. `jit_executed_for_test` proves the resident engine
+/// ran it, the deopt/fallback pair proves no arm went back to the interpreter,
+/// and the helper compares stdout against the pure-interpreter baseline, so a
+/// write-back that lands in the wrong slot fails too.
 #[test]
 fn cranelift_matches_plain_parameter_read_write_and_take_modes() {
-    assert_cranelift_deopts_on_gap(
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    // The interpreter baseline inside the helper runs on `InterpreterBackend`,
+    // which never touches these thread-local flags, so resetting here is safe.
+    jet_jit::reset_jit_trace_for_test();
+    assert_cranelift_matches_interpreter(
         "fn read(text: String) { print(text) }\nfn edit(values: &[Int]) { values[0] = 9 }\nfn consume(text: ^String) { print(text) }\nfn run() {\n    text :: \"hello\"\n    values := [1, 2]\n    read(text)\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}\n",
         "plain_parameter_modes",
+    );
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "plain_parameter_modes must reach the resident Cranelift tier"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "plain_parameter_modes must stay native: a deopt here means read/&/^ \
+         parameter passing left the resident tier"
     );
 }
 
@@ -5946,11 +5977,34 @@ fn interpreter_writeback_boundary_only_opens_for_resolved_user_functions() {
     assert!(boundary.what.contains("writeback"), "{boundary:?}");
 }
 
+/// A fixed `&` write-back parameter beside a variadic pack, read inside the
+/// callee (`extras.len()`).
+///
+/// Same stale premise as `cranelift_matches_plain_parameter_read_write_and_take_modes`
+/// above: this was an `assert_cranelift_deopts_on_gap` case from the era with
+/// no resident user-call write-back, and the tier now compiles the whole body
+/// natively, so it correctly declines to deopt. Native execution plus stdout
+/// equality against the pure interpreter is strictly stronger than the old
+/// deopt check, which never compared output at all: it catches both a
+/// re-opened gap and a variadic count that arrives wrong in the callee.
 #[test]
 fn cranelift_matches_variadic_fixed_writeback() {
-    assert_cranelift_deopts_on_gap(
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    jet_jit::reset_jit_trace_for_test();
+    assert_cranelift_matches_interpreter(
         "fn edit(values: &[Int], extras: ...Int) { values[0] = extras.len() }\nfn run() {\n    values := [0]\n    edit(&values, 7, 8)\n    print(values[0])\n}\n",
         "variadic_fixed_writeback",
+    );
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "variadic_fixed_writeback must reach the resident Cranelift tier"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "variadic_fixed_writeback must stay native: a deopt here means variadic \
+         calls with a write-back parameter left the resident tier"
     );
 }
 
