@@ -2309,6 +2309,13 @@ fn compile_bundle_path_build_on_compiler_stack(
     overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    // c121: with `JET_TIMING=1` every build writes `jet-timing.json`
+    // (docs/spec/spec.md), and the `CompilerProbe` compile-latency budget
+    // provider reads that report beside `build/jet-timing-backend.json`. This
+    // pipeline laps the same `PhaseTiming` stopwatch, and writes through the
+    // one `PhaseTimer::write_to` mechanism, that the non-build pipeline uses.
+    let timing = crate::PhaseTiming::enabled();
+    let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let direct_package_overlay = if overlay.is_none() {
         package_manifest_build_overlay(file)?
     } else {
@@ -2483,6 +2490,10 @@ fn compile_bundle_path_build_on_compiler_stack(
             return Err(vec![bad_build_signature(build.name_span)]);
         }
     }
+    if timing {
+        // lex + parse + module resolution, including the package build entry
+        timer.lap("load");
+    }
 
     // Build code is compiler-host code. Target restrictions apply only after
     // the selected runtime program replaces it.
@@ -2504,6 +2515,9 @@ fn compile_bundle_path_build_on_compiler_stack(
             .collect(),
         build_span.is_some(),
     )?;
+    if timing {
+        timer.lap("sema");
+    }
     // The cache capability is constructed only after parser, sema, policy,
     // extension, and diagnostic classification have all succeeded.
     let front_end_completion = crate::Comptime::Build::FrontEndCompletion::all_complete();
@@ -3063,6 +3077,11 @@ fn compile_bundle_path_build_on_compiler_stack(
         )?;
         lints.extend(planned_lints);
     }
+    if timing {
+        // Build-entry plan evaluation, generated sources, and the re-check of
+        // the planned program. Near zero when no build entry was selected.
+        timer.lap("build_plan");
+    }
 
     if let Some(provenance) = generated_lock_provenance.take() {
         crate::Lock::record_generated_inputs(
@@ -3120,6 +3139,9 @@ fn compile_bundle_path_build_on_compiler_stack(
         None => crate::FFI::prepare(&bundle),
     }
     .map_err(|diags| diags)?;
+    if timing {
+        timer.lap("ffi");
+    }
     if options.web_target {
         let misses = crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref());
         if !misses.is_empty() {
@@ -3159,6 +3181,11 @@ fn compile_bundle_path_build_on_compiler_stack(
     } else {
         None
     };
+    if timing {
+        timer.lap("codegen");
+        timer.metric("rust_bytes", rust.len() as u128);
+        timer.write_to(&bundle.project_root);
+    }
     let capabilities = crate::Capabilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
