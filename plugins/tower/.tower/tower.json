@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2026,
-    "rev": 38018,
+    "rev": 38021,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132073,6 +132073,11 @@
         {
           "at": "2026-08-17",
           "by": "fable-e3-burndown",
+          "text": "CORROBORATED from a second direction at b3c8235cc. A lane working the json_coerce failure independently reached the same root cause and quantified the family: the re-derived corpus gate ledger shows E2402 rows for roughly 20 more corpus stems on the identical unmigrated D-FAIL-CONV1 pattern (serde/json, serde/encoding, net/dns_lookup and siblings). It also proved the decode surface itself is NOT at fault: the ledger row for serde/json_coerce reads E2402 rather than E1004, and that row was re-derived AFTER the untyped-decode arm landed, so json.decode(raw) does type as DataTree ? JSONError and the failure is purely the missing conversion from JSONError into the default Err. One example was migrated as the ratified explicit form to prove the shape works: examples/features/serde/json_coerce.jet now declares fn run() ? JSONError and the ledger records it as 'parity', i.e. agreeing across all three tiers. That is option B of ballot D-FAIL-CONV2 demonstrated on one stem. The remaining ~20 stay unmigrated pending the owner's choice, because doing them per-example is what this card's criterion 4 forbids."
+        },
+        {
+          "at": "2026-08-17",
+          "by": "fable-e3-burndown",
           "text": "Root cause established by lane audit, verdict (b) real frontend defect and NOT a harness gap. The oracle (tests/dev.rs:772+781) and the corpus gate (tests/dev.rs:9274+9288) call the identical Loader::load_entry then Sema::check_bundle(CompileMode::Run) pair, so no package or manifest context differs and there is nothing for the harness to reconstruct. Commit d1aaf936e (2026-08-14) mechanically rewrote x ?? panic(...) into x? and fn run() into fn run() ? across 39 net and serde files. That surface had been deleted 8 days earlier by D-FAIL-CONV1=A, which removed the implicit trait rail so sema now accepts only a declared impl X => Err plus the single Prelude String => Err arm. That is exactly why net/url_mime (errors are ? String) is covered while net/dns_lookup (? NetError) is not. It landed invisible because typechecked_example_stems() at tests/dev.rs:565-575 silently drops every sema-failing stem and feeds the filtered list to the dev default battery - the same hole #1998 closed in observe_jit_coverage and #2012 closed in jit_covered_example_stems, in a third oracle. That third hole is routed to the tests/dev.rs owner this wave. Also recorded: tests/jit_corpus_gate.txt last changed 2026-08-13, the day BEFORE the migration, so its resident_jit rows for these stems were never re-observed and are stale (card #2013). BLOCKED on ballot D-FAIL-CONV2: both remaining fixes are owner-gated. Option A ships one Prelude conversion, which is an unratified user-facing policy; option B corrects 28 examples, which this card's own criterion 4 forbids as a per-example fix. OUT_OF_UNIVERSE_CEILING deliberately left at 81 - on outcome A it drops by exactly the recovered count, and only an oracle run after the fix is an honest source for that number."
         }
       ],
@@ -132121,6 +132126,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-16T12:54:03.698Z"
+        },
+        {
+          "n": 6,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T05:40:48.145Z"
+        },
+        {
+          "n": 7,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T05:40:48.146Z"
+        },
+        {
+          "n": 8,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T05:40:48.146Z"
+        },
+        {
+          "n": 9,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T05:40:48.146Z"
         }
       ],
       "refs": [],
@@ -132128,7 +132169,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:54:01.076Z",
-      "updated": "2026-08-17T01:14:19.477Z",
+      "updated": "2026-08-17T06:05:01.483Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -132519,7 +132560,13 @@
       "plan": "Get the actual diff per stem first: the gate prints AOT and interpreter output side by side, so run the gate and read the three comparisons before forming a theory.\n\nThen per stem, establish whether the interpreter re-derives a rendering or policy fact that the Prelude owns. Per I9 the interpreter ambient and the TIR evaluator are marshalling adapters; a divergence in printed bytes is almost always a second renderer. This session has already found four instances of exactly that shape: a stubbed json decoder plus a duplicate csv ladder, a host terminal path, a per-tier env lookup, and Duration show text living only in AOT.\n\nDo not fix by editing a golden or by relaxing the gate's interpreter arm. If a stem's interpreter output is the CORRECT one and AOT is wrong, say so explicitly with evidence rather than assuming AOT is the oracle.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-17",
+          "by": "fable-e3-burndown",
+          "text": "MEASURED at b3c8235cc: the strict corpus gate went from five classification failures to at most one. serde/encoding_stream_types and types/unit_literals are fixed (a missing Duration arm in CorePureParity fell through to debug_rust printing 'Duration { ns: 700000000 }'; an alias/leaf retype broke derived PartialEq and an 'at byte' ladder existed three times, now one Prelude kernel). tooling/data_plot is fixed at its real cause: the interpreter runs the program body on a freshly spawned scoped worker and PACKAGE_EDITION is thread-local, so an earlier wrap placed OVER the spawn never reached the worker; the edition is now carried as a bundle fact on JitProgram and established inside the worker, matching the standing rule stated in jet-driver and jet-sema. web/app_hello left the run universe by a derived predicate (card 2016)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -132572,7 +132619,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T23:57:08.816Z",
-      "updated": "2026-08-16T23:57:11.023Z",
+      "updated": "2026-08-17T06:05:00.853Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -174639,8 +174686,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-17T01:14:04.816Z"
+      "status": "ratified",
+      "created": "2026-08-17T01:14:04.816Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-17"
     },
     {
       "id": "D-AUTHORITY-WORD2",
@@ -176500,6 +176549,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-17T06:05:01.484Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dr8aqt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-17T06:05:00.853Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0m7k8pa",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-17T05:40:48.146Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FAIL-CONV2",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-17T05:40:48.146Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#9 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-17T05:40:48.146Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#8 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-17T05:40:48.146Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#7 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-17T05:40:48.146Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dr8aqt",
+      "note": "#6 Syntax.rs entry updated"
+    },
     {
       "at": "2026-08-17T04:10:04.227Z",
       "by": "fable-e3-burndown",
@@ -179950,55 +180048,6 @@
       "action": "card.criteria-add",
       "ref": "c0ufm0hy",
       "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:12.355Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ufm0hy",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:11.782Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0ufm0hy",
-      "note": "JIT F5: Lambda captures not installed in the JIT local table"
-    },
-    {
-      "at": "2026-08-15T18:58:11.049Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0d9tenn",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:09.979Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0d9tenn",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:09.018Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0d9tenn",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:08.588Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0d9tenn",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:07.395Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0d9tenn",
-      "note": "plan"
     }
   ],
   "nextNum": 368,
