@@ -4968,6 +4968,15 @@ impl<'a> EvalCtx<'a> {
             });
         }
         // D-MIGRATE3=A: typed text-codec decode uses the resolved return type.
+        // The UNTYPED lenient `json.decode(text)` form is NOT that call: AOT
+        // routes it to `jet_std_json_decode_lenient` (emit `core_calls.rs`,
+        // keyed off this same `enc_ok_is_json`), whose D-JSON3 coercion audit
+        // has no runtime log-effect seam here. Claiming it through the typed
+        // decoder would run the program and silently drop that observable
+        // effect, so the lenient form falls through to the shared core-call
+        // adapter and keeps its registered refusal (`jet-comptime`
+        // `Methods/core_calls.rs`, `("core.encoding.json", "decode")`).
+        // One predicate decides the lenient/typed split on every tier (I9).
         if matches!(
             module,
             "core.encoding.json"
@@ -4975,6 +4984,9 @@ impl<'a> EvalCtx<'a> {
                 | "core.encoding.yaml"
                 | "core.encoding.csv"
         ) && matches!(method, "decode" | "decode_traced")
+            && !(module == "core.encoding.json"
+                && method == "decode"
+                && crate::Codegen::TIR::emit::enc_ok_is_json(&expr.ty))
         {
             return self.eval_typed_codec_decode(module, method, &expr.ty, &argv, source_span);
         }
@@ -5947,8 +5959,24 @@ impl<'a> EvalCtx<'a> {
                 let mut result = eval_builtin(op, &mut r, argv, self.span())?;
                 if let Some((source_items, description, format, started_at, source_pulls, source_tail, total, known_total)) = progress {
                     if progress_lazy_builtin(op) {
-                        let CtValue::List(items) = result else {
-                            return Err(unsupported("progress adapter result", self.span()));
+                        // A lazy adapter may hand back either a plain List or
+                        // the evaluator's erased Iter carrier — `zip` builds
+                        // one (`eval_zip_family` -> `progress_iter_value`), and
+                        // the receiver paths above already unwrap it. Demanding
+                        // a bare List here refused `io.progress(…).zip(…)` with
+                        // an E2201 boundary for a chain the evaluator runs.
+                        let carrier = progress_iter_parts(&result);
+                        let items = match carrier {
+                            Some((items, _)) => items,
+                            None => match result {
+                                CtValue::List(items) => items,
+                                _ => {
+                                    return Err(unsupported(
+                                        "progress adapter result",
+                                        self.span(),
+                                    ))
+                                }
+                            },
                         };
                         let (pulls, tail) = progress_builtin_plan(
                             op,
