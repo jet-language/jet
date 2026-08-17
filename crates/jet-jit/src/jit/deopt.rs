@@ -331,6 +331,8 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
     TIR::install_comptime_bridge();
     let started = Instant::now();
     let mut sink = DevSink::new();
+    // Per-run buffer, cleared like the sink (see `resident_invoke`).
+    jet_foundation::Outcome::jet_journey_reset();
     let outcome = jet_codegen::Comptime::with_ambient(
         Some(crate::ambient_interp::ambient_core_call),
         Some(crate::ambient_interp::ambient_handle),
@@ -345,8 +347,10 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                     .to_jet_err()
                     .map(|error| jet_foundation::Outcome::jet_render_err(&error))
                     .unwrap_or_else(|| error.jet_show());
-                sink.stderr.push_str(&rendered);
-                sink.stderr.push('\n');
+                // Same report edge as AOT, the resident tier, and the pure
+                // interpreter: drain the accumulated E3002 journey here.
+                sink.stderr
+                    .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
                 RunOutcome::Ran {
                     stdout: sink.stdout,
                     stderr: sink.stderr,

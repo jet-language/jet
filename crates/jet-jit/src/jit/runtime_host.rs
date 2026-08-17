@@ -1511,18 +1511,21 @@ fn jet_jit_contract_fail(msg: i64, file: i64, line: i64, kind: i64) -> i64 {
     })
 }
 
+/// E3002 frames ACCUMULATE here and are printed once at the entry boundary
+/// (`resident.rs` -> `jet_journey_report`), exactly as the AOT Prelude's
+/// `jet_trace_err` does. Pushing the frame onto `rt.stderr` here was a second
+/// reporting policy: a failure later recovered by `??` still printed its
+/// journey under the resident tier while AOT printed nothing (I9).
 fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+        let _ = jet_foundation::Outcome::jet_journey_frame(
             &file,
             line as u32,
             &fn_name,
-            || String::new(),
-        ) {
-            rt.stderr.push_str(&frame);
-        }
+            String::new,
+        );
     });
 }
 
@@ -1531,14 +1534,12 @@ fn jet_jit_trace_err_note(file: i64, line: i64, fn_name: i64, note: i64) {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
         let note = rt.heap.clone_string(note).unwrap_or_default();
-        if let Some(frame) = jet_foundation::Outcome::jet_journey_frame(
+        let _ = jet_foundation::Outcome::jet_journey_frame(
             &file,
             line as u32,
             &fn_name,
             || note,
-        ) {
-            rt.stderr.push_str(&frame);
-        }
+        );
     })
 }
 

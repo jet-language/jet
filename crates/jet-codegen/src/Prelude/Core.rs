@@ -718,12 +718,7 @@ fn jet_entry_error_text_show<E: JetShow>(error: &E) -> String {
 }
 
 fn jet_entry_report(error: String) -> String {
-    let journey = jet_journey_take();
-    let mut report = format!("{journey}{error}");
-    if !report.ends_with('\n') {
-        report.push('\n');
-    }
-    report
+    jet_journey_report(&error)
 }
 
 fn jet_entry_error_exit(error: String) -> ! {

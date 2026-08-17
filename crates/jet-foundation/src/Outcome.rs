@@ -137,6 +137,24 @@ pub fn jet_journey_take() -> String {
     JET_JOURNEY_FRAMES.with(|frames| std::mem::take(&mut *frames.borrow_mut()))
 }
 
+/// The one report-edge policy for a failure that escapes the entry (D-FAIL-EDGE1).
+///
+/// A journey frame is ACCUMULATED at each `?` and printed only here, so a
+/// failure recovered by `??` or a `.Err(e)` arm reports nothing. Every engine
+/// marshals to this symbol: `jet_entry_report` in the AOT Prelude, the resident
+/// Cranelift entry boundary, the interpreter boundary, and the deopt boundary.
+/// Each of those printed frames eagerly at the `?` site before this existed,
+/// which made a handled error print a report on stderr under those tiers and
+/// nothing under AOT (I9).
+pub fn jet_journey_report(error: &str) -> String {
+    let journey = jet_journey_take();
+    let mut report = format!("{journey}{error}");
+    if !report.ends_with('\n') {
+        report.push('\n');
+    }
+    report
+}
+
 pub fn jet_journey_frame<F: FnOnce() -> String>(
     file: &str,
     line: u32,

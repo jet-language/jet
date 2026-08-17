@@ -375,6 +375,10 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         runtime.stderr.clear();
         runtime.results.clear();
         runtime.errors.clear();
+        // The E3002 journey is a per-run buffer now that it drains at the report
+        // edge, so it clears with the others: a failure this run recovered must
+        // not prefix the next in-process run's report.
+        jet_foundation::Outcome::jet_journey_reset();
         let ptr: *mut JitRuntime = runtime;
         Concurrency::set_active_runtime(Some(ptr));
         let entry_app = if main_returns_result {
@@ -477,8 +481,12 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                             .clone_string(result.bits as i64)
                             .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?
                     };
-                    runtime.stderr.push_str(&message);
-                    runtime.stderr.push('\n');
+                    // One report edge, shared with `jet_entry_report` in the
+                    // AOT Prelude: the accumulated E3002 journey prefixes the
+                    // rendered error, and only an escaping failure reports.
+                    runtime
+                        .stderr
+                        .push_str(&jet_foundation::Outcome::jet_journey_report(&message));
                     return Ok(RunOutcome::Ran {
                         stdout: runtime.stdout.clone(),
                         stderr: runtime.stderr.clone(),
