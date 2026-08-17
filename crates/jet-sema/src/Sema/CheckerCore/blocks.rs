@@ -39,6 +39,29 @@ impl<'a> Checker<'a> {
                 self.pop_scope();
             }
         }
+
+        /// Check a body that may not run at all: a lambda or `task { … }` body,
+        /// or a `??` fallback block. A `return` inside such a body still returns
+        /// the enclosing function (that targeting is correct and the corpus
+        /// depends on it), but only when the body runs — so it is a CONDITIONAL
+        /// return, not an unconditional one. Statements after the construct stay
+        /// reachable.
+        ///
+        /// Without this, `check_stmt` sees `flow.reachable == false` for every
+        /// following statement and restores the pre-statement facts, discarding
+        /// each later declaration and reporting it as `nothing named X exists
+        /// here`. One `return` inside a task body buried its own real error under
+        /// eleven phantom E0107/E0003 reports (card #2006).
+        ///
+        /// Inline bodies (`#Unsafe`, `region`, `policy`, comptime blocks) run
+        /// unconditionally and deliberately keep `check_block`; loop bodies and
+        /// switch arms already isolate reachability through their own joins
+        /// (`FlowFacts::after_loop`, `merge_states`).
+        pub(crate) fn check_conditional_block(&mut self, stmts: &mut [Stmt], new_scope: bool) {
+            let reachable = self.flow.reachable;
+            self.check_block(stmts, new_scope);
+            self.flow.reachable = reachable;
+        }
     
         /// E0209 liveness gate (was D-L0201): returns `true` when `name` is
         /// referenced in any statement that follows the current statement in the

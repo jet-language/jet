@@ -55,3 +55,62 @@ fn run() {
         output.lints
     );
 }
+
+/// Every diagnostic code a source produces, whether it compiled or not.
+fn all_codes(source: &str) -> Vec<String> {
+    match jet::compile(source) {
+        Ok(output) => output
+            .lints
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect(),
+        Err(diagnostics) => diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect(),
+    }
+}
+
+/// Card #2006: a `return` inside a `task { … }` body is a CONDITIONAL return of
+/// the enclosing function — the body may run later or not at all — so every
+/// statement after the task stays reachable. Before the fix the body's `return`
+/// left `flow.reachable == false` in the ENCLOSING block, so `check_stmt`
+/// restored the pre-statement facts for each following statement and discarded
+/// its declaration: one mistake inside a task body buried its own real error
+/// under eleven phantom `nothing named X exists here` reports.
+#[test]
+fn a_return_inside_a_task_body_keeps_later_declarations() {
+    let valueless = r#"
+fn run() {
+    child :: task { return }
+    later :: 7
+    print(later)
+    child.detach()
+}
+"#;
+    let codes = all_codes(valueless);
+    assert!(
+        codes.iter().all(|code| code != "E0107" && code != "E0102"),
+        "a task-body return must not erase later declarations: {codes:?}"
+    );
+
+    // The same program with a real mistake inside the task body: the mistake is
+    // reported, and nothing after the task is reported as undeclared.
+    let mistaken = r#"
+fn run() {
+    child :: task { return "child" }
+    later :: 7
+    print(later)
+    child.detach()
+}
+"#;
+    let codes = all_codes(mistaken);
+    assert!(
+        codes.iter().all(|code| code != "E0107" && code != "E0102"),
+        "the real error must not drag a phantom name cascade behind it: {codes:?}"
+    );
+    assert!(
+        !codes.is_empty(),
+        "the return handing a value back from a Unit `run` is still an error"
+    );
+}

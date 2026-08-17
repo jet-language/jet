@@ -606,7 +606,10 @@ use std::collections::HashSet;
                     }
                 }
                 LambdaBody::Block(stmts) => {
-                    self.check_block(stmts, false);
+                    // The body may never run (a spawned task, a callback), so a
+                    // `return` inside it is a conditional return of the enclosing
+                    // function, not an unconditional one (card #2006).
+                    self.check_conditional_block(stmts, false);
                     let mut last_ret = None;
                     for s in stmts.iter_mut().rev() {
                         match s {
