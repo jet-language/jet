@@ -106,8 +106,11 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
 /// with backend attribution — never silent fallback. Each AOT-oracle case
 /// compares pure-interpreter, default tiered, and optimized AOT
-/// stdout/stderr/exit byte-for-byte (D-ONECORE1=A). AOT-green examples that
-/// fail default tiered run land in shrink-only `run_tier_broken`
+/// stdout/stderr/exit byte-for-byte (D-ONECORE1=A). An AOT-green example whose
+/// default tiered run REFUSES to run it lands in `run_tier_broken`, which must
+/// hold exactly `RUN_TIER_BROKEN_HELD_OUT`; one that runs but disagrees with the
+/// oracle lands in `tier_divergent`, which must stay empty. Recording both facts
+/// in one section made the run-tier message false for the divergences
 /// (D-VERDICT-1254-1 / D-LENS-RUN1).
 /// parity: guard tests/dev_corpus_gate.rs::example_corpus_strict_jit_aot_differential_gate
 ///
@@ -133,7 +136,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             .expect("write tests/jit_corpus_gate.txt");
         }
         eprintln!(
-            "c727 corpus gate: {} examples ({} resident JIT, {} deopt-interp, {} run-tier-broken)",
+            "c727 corpus gate: {} examples ({} resident JIT, {} deopt-interp, {} run-tier-broken, {} tier-divergent)",
             records.len(),
             records
                 .iter()
@@ -146,6 +149,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             records
                 .iter()
                 .filter(|r| r.class == CorpusGateClass::RunTierBroken)
+                .count(),
+            records
+                .iter()
+                .filter(|r| r.class == CorpusGateClass::TierDivergent)
                 .count(),
         );
         return;
@@ -166,19 +173,53 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         // nonexistent row reads exactly like a classification that changed.
         assert_corpus_gate_manifest_covers_corpus();
     }
-    // Hard floor: run_tier_broken must stay empty. A regression that moves an
-    // AOT-green example into that class must fail even if the manifest is
-    // regenerated (D-VERDICT-1254-1 / D-LENS-RUN1).
-    let broken: Vec<&str> = records
+    // Hard floor, independent of the ledger: the run-tier class holds exactly the
+    // stems named in `RUN_TIER_BROKEN_HELD_OUT` and nothing else. A regression
+    // that moves an AOT-green example into the class fails here even if the
+    // manifest is regenerated, and a fixed hold-out fails too, so the list cannot
+    // outlive its defect (D-VERDICT-1254-1 / D-LENS-RUN1).
+    let broken: Vec<(&str, &str)> = records
         .iter()
         .filter(|r| r.class == CorpusGateClass::RunTierBroken)
-        .map(|r| r.stem.as_str())
+        .map(|r| (r.stem.as_str(), r.detail.as_str()))
+        .collect();
+    // `JET_CORPUS_GATE_FILTER` narrows which stems were classified at all, so a
+    // hold-out the run never visited is not evidence of a fix.
+    let classified: std::collections::HashSet<&str> =
+        records.iter().map(|r| r.stem.as_str()).collect();
+    let held_out: Vec<(&str, &str)> = RUN_TIER_BROKEN_HELD_OUT
+        .iter()
+        .filter(|(stem, _, _)| classified.contains(stem))
+        .map(|(stem, codes, _)| (*stem, *codes))
+        .collect();
+    assert_eq!(
+        broken,
+        held_out,
+        "JIT/AOT run-tier regression: the AOT-green example(s) whose default `jet run` REFUSES \
+         to run them are not the held-out set. New entries are the defect; a vanished entry is \
+         fixed and must leave RUN_TIER_BROKEN_HELD_OUT in the same diff. Held out: {}",
+        RUN_TIER_BROKEN_HELD_OUT
+            .iter()
+            .map(|(stem, codes, why)| format!("{stem} ({codes}) — {why}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    );
+    // The other half of the same law, and the reason it used to read false: a
+    // stem that RAN under both tiers with different observables is a divergence,
+    // not a refusal. It stays empty — default tiered output must equal optimized
+    // AOT output byte for byte (D-ONECORE1=A), the same law
+    // `tests/jit_gaps.txt::parity_divergences` states.
+    let divergent: Vec<String> = records
+        .iter()
+        .filter(|r| r.class == CorpusGateClass::TierDivergent)
+        .map(|r| format!("{} ({})", r.stem, r.detail))
         .collect();
     assert!(
-        broken.is_empty(),
-        "JIT/AOT run-tier parity regression: AOT-green example(s) fail under default \
-         `jet run` (run_tier_broken must stay empty): {}",
-        broken.join(", ")
+        divergent.is_empty(),
+        "JIT/AOT tier divergence: AOT-green example(s) also ran under default `jet run`, but the \
+         named stream(s) disagree with the optimized AOT oracle (tier_divergent must stay \
+         empty): {}",
+        divergent.join(", ")
     );
     assert_eq!(
         records, expected,
@@ -197,7 +238,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         })
         .collect();
     eprintln!(
-        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp), {} run-tier-broken",
+        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp), {} run-tier-broken, {} tier-divergent",
         records.len(),
         aot_oracle.len(),
         records
@@ -211,6 +252,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         records
             .iter()
             .filter(|r| r.class == CorpusGateClass::RunTierBroken)
+            .count(),
+        records
+            .iter()
+            .filter(|r| r.class == CorpusGateClass::TierDivergent)
             .count(),
     );
     write_corpus_gate_report(&records, started.elapsed());
