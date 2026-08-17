@@ -2250,7 +2250,12 @@ module env.full {
     assert!(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}");
     assert!(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}");
     assert!(stdout.contains("\"services\":[{\"name\":\"redis\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"tasks\":[\"lint\"]"), "stdout: {stdout}");
+    // D-JOB-NAME2=B (card #1448): the merged `tasks` key is gone. `lint` is the
+    // project's own `#Job fn`, so it reports under `jobs`; this env declares no
+    // `checks:` hook records, so the environment's key is present but empty.
+    // Both keys always appear, so a consumer reads the one it means.
+    assert!(stdout.contains("\"checks\":[],\"jobs\":[\"lint\"]"), "stdout: {stdout}");
+    assert!(!stdout.contains("\"tasks\":[\"lint\"]"), "stdout: {stdout}");
     assert!(stdout.contains("\"variables\":[{\"name\":\"MODE\""), "stdout: {stdout}");
 
     let full = jetpack()
