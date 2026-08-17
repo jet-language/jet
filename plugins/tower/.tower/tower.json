@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2026,
-    "rev": 38039,
+    "nextNum": 2027,
+    "rev": 38044,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132699,6 +132699,67 @@
       "created": "2026-08-17T01:20:09.905Z",
       "updated": "2026-08-17T01:20:12.044Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0xwtrld",
+      "num": 2026,
+      "title": "Audit the 122-fixture blanket bless for dropped diagnostics",
+      "body": "Bless commit 6fd88282b (2026-08-15, \"test(diagnostics): bless the drifted UI and lint snapshot corpus\") rewrote 122 fixture files while touching ZERO crate source: git show --stat 6fd88282b -- crates/ is empty. A blanket UPDATE_EXPECT=1 therefore recorded whatever the compiler printed that day as correct, with no change in the compiler to justify it.\n\nOne of those 122 was measured this session and was a REAL suppression. tests/ui/core_consuming_borrowed_field.stderr went from 55 lines to 15, dropping five E0209 'implicit clone' diagnostics for indexed borrowed places (e.items[0].text, e.items[i + 1].text, e.items[pick()].text, e.items[-(-i)].text, and an if-indexed place that renders as the unspellable 'implicit clone of this consumed expression'). The file had been 55 lines continuously since f25f0a4b7 on 2026-07-11 and was still 55 at 61d162c95 on 2026-08-14. Per crates/jet-sema/src/Sema/CheckerCoreLib/arg_expect.rs:261-293 the SAME block that sets arg.flags.implicit_clone = true pushes the diagnostic, so the 15-line snapshot asserted five clones that codegen still silently inserts - the exact defect four commits on 2026-07-11 closed while growing that fixture 23 to 31 to 47 to 55.\n\nPer I4 a diagnostic is a product and its snapshot is the contract. A bless with no source change is a contract rewrite with no author. The restore is committed; the other 121 files are unaudited.\n\nThe harness supports scoped blessing - UPDATE_EXPECT=<substring> updates only matching fixtures (tests/diagnostic_snapshots.rs:900-906) - so the blanket form was avoidable, and validate_scoped_update at :908 already exists to catch a selector that matches nothing.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A shrink-only line-count floor exists per fixture family, or an equivalent mechanism, so a future bless cannot silently reduce a fixture's diagnostic count without failing a test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T08:46:48.731Z"
+        },
+        {
+          "n": 2,
+          "text": "Each of the 121 unaudited files from 6fd88282b is compared against its pre-bless content and classified: justified by a real compiler change, or a suppression to restore",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T08:46:49.215Z"
+        },
+        {
+          "n": 3,
+          "text": "Every restored fixture's diagnostics are verified to still fire by an observed cargo test --test diagnostic_snapshots run, not by reading the producer",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T08:46:49.686Z"
+        },
+        {
+          "n": 4,
+          "text": "The blanket-bless hazard is closed at its cause: either UPDATE_EXPECT=1 is removed in favour of the scoped form, or its use requires a recorded reason naming the compiler change that justifies it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T08:46:50.171Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T08:46:37.484Z",
+      "updated": "2026-08-17T08:46:50.171Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -176558,6 +176619,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T08:46:50.171Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0xwtrld",
+      "note": "#4 The blanket-bless hazard is closed at its cause: either UPDA"
+    },
+    {
+      "at": "2026-08-17T08:46:49.686Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0xwtrld",
+      "note": "#3 Every restored fixture's diagnostics are verified to still f"
+    },
+    {
+      "at": "2026-08-17T08:46:49.216Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0xwtrld",
+      "note": "#2 Each of the 121 unaudited files from 6fd88282b is compared a"
+    },
+    {
+      "at": "2026-08-17T08:46:48.731Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0xwtrld",
+      "note": "#1 A shrink-only line-count floor exists per fixture family, or"
+    },
+    {
+      "at": "2026-08-17T08:46:37.484Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0xwtrld",
+      "note": "Audit the 122-fixture blanket bless for dropped diagnostics"
+    },
+    {
       "at": "2026-08-17T08:29:49.424Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -180021,41 +180117,6 @@
       "action": "card.update",
       "ref": "c0uig3ju",
       "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:22.670Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0uig3ju",
-      "note": "JIT F9: Core-call host adapters missing (files/log)"
-    },
-    {
-      "at": "2026-08-15T18:58:22.250Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0levnfe",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:21.823Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0levnfe",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:21.384Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0levnfe",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:20.966Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0levnfe",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
     }
   ],
   "nextNum": 368,
