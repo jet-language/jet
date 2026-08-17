@@ -5,20 +5,34 @@
     /// Parse `src` (no full sema needed — `tir_covers` is structural plus
     /// program-table lookups that `build_cx` fills) and return whether the
     /// named function is covered by the Phase-1 TIR gate.
+    ///
+    /// The gate is a mutually recursive descent whose debug frames are hundreds
+    /// of KiB each (`lower_method_call_impl` 528 KiB, `lower_stmt_plan` 256 KiB,
+    /// measured in `tests/dev.rs::resident_jit_safe_increment_decrement`), so a
+    /// few levels of source nesting exhaust libtest's 2 MiB test thread and abort
+    /// the whole binary — every test ordered after the aborting one is never
+    /// measured. Jet owns exactly one boundary for that abort,
+    /// `jet_foundation::CompilerStack`, installed at the four public funnels
+    /// (sema's bundle check, the driver's compile/load funnels,
+    /// `TIR::lower_jit_program`, `jet_jit`'s bundle entries). A unit test reaches
+    /// the descent below all four, so every helper here makes the same hop. It is
+    /// re-entrant, so the ones that run sema first cost one thread-local read.
     fn covers(src: &str, fn_name: &str) -> bool {
-        let (toks, lex_diags) = crate::Lexer::lex(src);
-        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
-        let prog = crate::Parser::parse(&toks).expect("parse failed");
-        let cx = build_cx(&prog, src, "test.jet");
-        let f = prog
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Func(f) if f.name == fn_name => Some(f),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no fn {fn_name}"));
-        tir_covers(f, &cx)
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (toks, lex_diags) = crate::Lexer::lex(src);
+            assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+            let prog = crate::Parser::parse(&toks).expect("parse failed");
+            let cx = build_cx(&prog, src, "test.jet");
+            let f = prog
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    Item::Func(f) if f.name == fn_name => Some(f),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no fn {fn_name}"));
+            tir_covers(f, &cx)
+        })
     }
 
     #[test]
@@ -132,63 +146,73 @@
         bundle
     }
 
+    /// Compiler worker required; see `covers`.
     fn covers_after_sema(src: &str, fn_name: &str) -> bool {
-        let bundle = checked_bundle(src);
-        let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
-        let f = module
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Func(f) if f.name == fn_name => Some(f),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no fn {fn_name}"));
-        tir_covers(f, &cx)
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let bundle = checked_bundle(src);
+            let module = &bundle.modules[bundle.entry];
+            let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+            let f = module
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    Item::Func(f) if f.name == fn_name => Some(f),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no fn {fn_name}"));
+            tir_covers(f, &cx)
+        })
     }
 
+    /// Compiler worker required; see `covers`.
     fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
-        let bundle = checked_bundle(src);
-        let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
-        let f = module
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::Func(f) if f.name == fn_name => Some(f),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no fn {fn_name}"));
-        lower_func(f, &cx)
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let bundle = checked_bundle(src);
+            let module = &bundle.modules[bundle.entry];
+            let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+            let f = module
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Func(f) if f.name == fn_name => Some(f),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no fn {fn_name}"));
+            lower_func(f, &cx)
+        })
     }
 
     #[test]
     fn default_parameter_call_sites_are_tir_covered() {
-        install_comptime_bridge();
-        let source = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/features/basics/default_refs.jet"
-        ));
-        let bundle = checked_bundle(source);
-        let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(&module.items, source, "default_refs.jet", None, &HashMap::new());
-        let function = module
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::Func(function) if function.name == "run" => Some(function),
-                _ => None,
-        })
-            .expect("default_refs must define run");
-        assert!(tir_covers(function, &cx));
-        let tir = lower_func(function, &cx);
-        let mut generated = String::new();
-        crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
-        let binder_ref_prefix = crate::Codegen::mangle_generated("binder_ref_");
-        assert!(
-            !generated.contains(&binder_ref_prefix),
-            "unlowered default reference: {generated}"
-        );
+        // Compiler worker required; see `covers`.
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            install_comptime_bridge();
+            let source = include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../examples/features/basics/default_refs.jet"
+            ));
+            let bundle = checked_bundle(source);
+            let module = &bundle.modules[bundle.entry];
+            let cx =
+                build_cx_items(&module.items, source, "default_refs.jet", None, &HashMap::new());
+            let function = module
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Func(function) if function.name == "run" => Some(function),
+                    _ => None,
+                })
+                .expect("default_refs must define run");
+            assert!(tir_covers(function, &cx));
+            let tir = lower_func(function, &cx);
+            let mut generated = String::new();
+            crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
+            let binder_ref_prefix = crate::Codegen::mangle_generated("binder_ref_");
+            assert!(
+                !generated.contains(&binder_ref_prefix),
+                "unlowered default reference: {generated}"
+            );
+        });
     }
 
     #[test]
@@ -431,24 +455,27 @@ fn run() {
     /// here we exercise the sema-independent structural gating (self receiver,
     /// static shape, param/return types, the `self`-assignment exclusion).
     fn covers_method(src: &str, type_name: &str, method: &str) -> bool {
-        let (toks, lex_diags) = crate::Lexer::lex(src);
-        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
-        let prog = crate::Parser::parse(&toks).expect("parse failed");
-        let cx = build_cx(&prog, src, "test.jet");
-        let methods: &[Func] = prog
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Struct(s) if s.name == type_name => Some(s.methods.as_slice()),
-                Item::Enum(e) if e.name == type_name => Some(e.methods.as_slice()),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no type {type_name}"));
-        let f = methods
-            .iter()
-            .find(|m| m.name == method)
-            .unwrap_or_else(|| panic!("no method {type_name}.{method}"));
-        tir_covers_method(f, type_name, &cx)
+        // Compiler worker required; see `covers`.
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (toks, lex_diags) = crate::Lexer::lex(src);
+            assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+            let prog = crate::Parser::parse(&toks).expect("parse failed");
+            let cx = build_cx(&prog, src, "test.jet");
+            let methods: &[Func] = prog
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    Item::Struct(s) if s.name == type_name => Some(s.methods.as_slice()),
+                    Item::Enum(e) if e.name == type_name => Some(e.methods.as_slice()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no type {type_name}"));
+            let f = methods
+                .iter()
+                .find(|m| m.name == method)
+                .unwrap_or_else(|| panic!("no method {type_name}.{method}"));
+            tir_covers_method(f, type_name, &cx)
+        })
     }
 
     #[test]
@@ -546,21 +573,24 @@ fn make(n: String) => Person {
         alias: &str,
         module: &str,
     ) -> bool {
-        let (toks, lex_diags) = crate::Lexer::lex(src);
-        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
-        let prog = crate::Parser::parse(&toks).expect("parse failed");
-        let mut cx = build_cx(&prog, src, "test.jet");
-        cx.core_imports
-            .insert(alias.to_string(), module.to_string());
-        let f = prog
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Func(f) if f.name == fn_name => Some(f),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no fn {fn_name}"));
-        tir_covers(f, &cx)
+        // Compiler worker required; see `covers`.
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (toks, lex_diags) = crate::Lexer::lex(src);
+            assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+            let prog = crate::Parser::parse(&toks).expect("parse failed");
+            let mut cx = build_cx(&prog, src, "test.jet");
+            cx.core_imports
+                .insert(alias.to_string(), module.to_string());
+            let f = prog
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    Item::Func(f) if f.name == fn_name => Some(f),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no fn {fn_name}"));
+            tir_covers(f, &cx)
+        })
     }
 
     #[test]
@@ -579,22 +609,25 @@ fn make(n: String) => Person {
     /// byte-parity diff are the authoritative proof (the TIR feature integration
     /// targets); this exercises the gate.
     fn covers_with_foreign(src: &str, fn_name: &str, foreign: &[(&str, &str)]) -> bool {
-        let (toks, lex_diags) = crate::Lexer::lex(src);
-        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
-        let prog = crate::Parser::parse(&toks).expect("parse failed");
-        let mut cx = build_cx(&prog, src, "test.jet");
-        for (ty, module) in foreign {
-            cx.foreign_types.insert(ty.to_string(), module.to_string());
-        }
-        let f = prog
-            .items
-            .iter()
-            .find_map(|i| match i {
-                Item::Func(f) if f.name == fn_name => Some(f),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no fn {fn_name}"));
-        tir_covers(f, &cx)
+        // Compiler worker required; see `covers`.
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (toks, lex_diags) = crate::Lexer::lex(src);
+            assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+            let prog = crate::Parser::parse(&toks).expect("parse failed");
+            let mut cx = build_cx(&prog, src, "test.jet");
+            for (ty, module) in foreign {
+                cx.foreign_types.insert(ty.to_string(), module.to_string());
+            }
+            let f = prog
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    Item::Func(f) if f.name == fn_name => Some(f),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no fn {fn_name}"));
+            tir_covers(f, &cx)
+        })
     }
 
     #[test]
@@ -2056,16 +2089,29 @@ fn nope(x: U8) {
 
     #[test]
     fn covers_generic_optional_return() {
-        // c109 Phase 30: a generic fn with a `T?` return whose payload is a type var
-        // (`largest<T: Comparable>() -> (T?)`). Before Phase 30 the `T?` payload was
-        // excluded (`fallible_payload_covered` admitted no type var) — now it routes.
-        // Body is a structural `Val(x)` (a type-var payload `Some(user_x)`).
+        // c109 Phase 30: a generic fn with a `T?` return whose payload is a type
+        // var. `fallible_payload_covered` routes the payload through
+        // `is_type_var_param_ty` (subset/types.rs), so the signature is covered;
+        // before Phase 30 the `T?` payload admitted no type var.
+        //
+        // The body needs the full front end, so this asserts through
+        // `covers_after_sema`. A bare `Val(x)` parses to an `Expr::EnumLit` with
+        // an EMPTY carrier type (jet-parser `Parser/Expressions/primary.rs`);
+        // only sema rewrites it to `Expr::Present`
+        // (`Sema/CheckerInfer/expr.rs`), and lowering projects the unowned form
+        // only for a comptime eval fragment
+        // (`normalize_eval_fragment_return`). So the gate's `Expr::EnumLit` arm
+        // is right to reject the unresolved node, and the covered shape is the
+        // sema-resolved one — the same `return Val(best)` that
+        // `examples/features/types/traits.jet::largest<T: Comparable>` compiles.
         let src = "\
-fn opt_id<T: Comparable>(x: T) => (T?) {
+fn opt_id<T>(x: ^T) => (T?) {
     return Val(x)
 }
+fn run() {
+}
 ";
-        assert!(covers(src, "opt_id"));
+        assert!(covers_after_sema(src, "opt_id"));
     }
 
     #[test]
