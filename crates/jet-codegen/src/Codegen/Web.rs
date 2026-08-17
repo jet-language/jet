@@ -129,7 +129,7 @@ pub fn emit_web(
     // D-FAIL-EDGE1: a native App entry still passes the web build front
     // door, but its browser artifact carries the same typed edge vocabulary as
     // ordinary web code. The server graph remains a native concern.
-    if bundle_has_app_entry(bundle) {
+    if crate::AST::bundle_serves_until_stopped(bundle) {
         return Ok(emit_app_shell(bundle));
     }
     let source_marker = js_source_marker(bundle);
@@ -283,7 +283,7 @@ pub fn validate_web_tir_support(
     // The App runtime is a native server edge. Its browser artifact uses
     // the typed edge vocabulary, but its server builder is not ordinary
     // browser TIR and must not be reported as a web-TIR gap.
-    if bundle_has_app_entry(bundle) {
+    if crate::AST::bundle_serves_until_stopped(bundle) {
         return Vec::new();
     }
     let extern_funcs = bundle_extern_funcs(bundle);
@@ -310,26 +310,6 @@ pub fn validate_web_tir_support(
         );
     }
     diags
-}
-
-fn bundle_has_app_entry(bundle: &ProgramBundle) -> bool {
-    let Some(module) = bundle.modules.get(bundle.entry) else {
-        return false;
-    };
-    module.items.iter().any(|item| match item {
-        Item::Func(function) if function.name == "run" => returns_app(function.return_type.as_ref()),
-        _ => false,
-    })
-}
-
-fn returns_app(ty: Option<&Type>) -> bool {
-    match ty {
-        Some(Type::Named(name)) => name == "App",
-        Some(Type::Result { ok, .. }) => {
-            matches!(ok.as_ref(), Type::Named(name) if name == "App")
-        }
-        _ => false,
-    }
 }
 
 fn emit_app_shell(bundle: &ProgramBundle) -> WebArtifacts {

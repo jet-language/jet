@@ -1163,7 +1163,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .return_type
                 .as_ref()
                 .and_then(|ty| entry_error(cx, ty)),
-            output.return_type.as_ref().is_some_and(returns_app),
+            output.return_type.as_ref().is_some_and(crate::AST::type_is_app),
             output.kind == crate::AST::OutputKind::Service,
         )
     } else if let Some(run_fn) = run_fn {
@@ -1181,7 +1181,7 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .return_type
                 .as_ref()
                 .and_then(|ty| entry_error(cx, ty)),
-            run_fn.return_type.as_ref().is_some_and(returns_app),
+            run_fn.return_type.as_ref().is_some_and(crate::AST::type_is_app),
             false,
         )
     } else {
@@ -1404,7 +1404,7 @@ fn emit_job_wrapper(
     let serve_app = function
         .return_type
         .as_ref()
-        .is_some_and(returns_app);
+        .is_some_and(crate::AST::type_is_app);
     out.push_str(&format!("fn {wrapper}(__program: &str, __argv: &[String]) {{\n"));
     if params.is_empty() {
         out.push_str("    if __argv.get(1).is_some_and(|arg| arg == \"--help\") {\n        println!(\"Usage: {}\", jet_args_source_program_name(__program));\n        return;\n    }\n");
@@ -1612,14 +1612,6 @@ fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
     } else {
         EntryError::Rust
     })
-}
-
-fn returns_app(ty: &Type) -> bool {
-    match ty {
-        Type::Named(name) => name == "App",
-        Type::Result { ok, .. } => matches!(ok.as_ref(), Type::Named(name) if name == "App"),
-        _ => false,
-    }
 }
 
 /// D-UNIONTYPE1=A: emit one compiler-generated enum per canonical anonymous

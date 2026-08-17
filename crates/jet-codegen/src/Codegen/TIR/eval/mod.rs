@@ -3779,16 +3779,6 @@ fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
     program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
 }
 
-fn returns_app(ty: Option<&Type>) -> bool {
-    match ty {
-        Some(Type::Named(name)) => name == "App",
-        Some(Type::Result { ok, .. }) => {
-            matches!(ok.as_ref(), Type::Named(name) if name == "App")
-        }
-        _ => false,
-    }
-}
-
 fn serve_entry_value(ctx: &mut EvalCtx<'_>, value: CtValue) -> Result<CtValue, Diagnostic> {
     match value {
         CtValue::Failed(report) => Ok(CtValue::Failed(report)),
@@ -4271,7 +4261,7 @@ fn run_program_with_structs_on_stack(
     };
     let result = ctx.with_task_dispatcher(|ctx| {
         let result = ctx.run_func(entry, entry_args, &mut scope);
-        if returns_app(entry.ret.as_ref()) {
+        if entry.ret.as_ref().is_some_and(crate::AST::type_is_app) {
             result.and_then(|value| serve_entry_value(ctx, value))
         } else {
             result
