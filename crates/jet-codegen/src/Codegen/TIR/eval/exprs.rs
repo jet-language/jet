@@ -469,8 +469,23 @@ fn stable_address_parts(parts: &[&[u8]]) -> i64 {
 }
 
 /// jet-jit shares this for tier-identical address identity.
+///
+/// The identity is minted ALIGNED. It stands in for storage the AOT tier holds
+/// at a real machine address, and `jet_sentry_check` judges the same alignment
+/// obligation on every tier (D-MEM-SENTRY1), so an identity carrying a stray low
+/// bit reports R0803 for an ordinary `*Int.{*cell}` where AOT reports nothing —
+/// a fault invented by the stand-in, not by the program. 16 is above every
+/// alignment `sentry_layout` can ask for. Address arithmetic ON TOP of an
+/// identity (`mem.address_of(cell) + 1`) is still misaligned exactly as it is on
+/// a real address, so a genuine R0803 keeps firing.
 pub fn stable_place_address(key: &str) -> i64 {
-    stable_address_parts(&[key.as_bytes()])
+    const PLACE_ALIGNMENT: i64 = 16;
+    let identity = stable_address_parts(&[key.as_bytes()]) & !(PLACE_ALIGNMENT - 1);
+    if identity == 0 {
+        PLACE_ALIGNMENT
+    } else {
+        identity
+    }
 }
 
 /// One computed-field memo slot identity shared by JIT getter probes and

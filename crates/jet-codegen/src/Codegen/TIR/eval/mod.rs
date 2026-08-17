@@ -1547,6 +1547,53 @@ struct YieldConsumer<'a> {
 }
 
 impl<'a> EvalCtx<'a> {
+    /// D-DEADLINE1 / I2: a `#Context(deadline: …)` budget blown at a wait point
+    /// the JOINING PARENT owns is a program-side stop, not a compiler boundary.
+    /// AOT (`SchedulerHost.rs::jet_deadline_exceeded`) and the resident JIT
+    /// (`jet-jit/src/Concurrency.rs::record_deadline_interrupt`) both keep
+    /// everything the program already printed, write the one Prelude-rendered
+    /// E3003 report to stderr, and stop with 70 — the shape pinned by
+    /// `examples/features/expected/concurrency/deadline_context.{out,err.out}`
+    /// and by `assert_concurrency_and_game_three_way`. Rendering a registered
+    /// diagnostic instead made the interpreter answer `RunOutcome::Problems`,
+    /// which drops that stdout and that exit code, so the interpreter tier
+    /// disagreed with every other tier about the same program. This is the same
+    /// seam `runtime_stop` and the panic/require stops use: with no sink there is
+    /// no run to stop, so comptime still sees the registered row at its span.
+    ///
+    /// A CHILD task's blown deadline is NOT a process stop: `task_failure_value`
+    /// reads the E3003 code to build `TaskFailure.DeadlineBlown` (D-CONC-FAIL1=A),
+    /// so a child keeps the plain diagnostic exactly as the panic sites do.
+    fn deadline_stop(&self, deadline: crate::task_group::JetTaskDeadline) -> Diagnostic {
+        let registered = || {
+            crate::Sema::Diagnostics::render_registered(
+                "E3003",
+                deadline.what.clone(),
+                deadline.why.clone(),
+                deadline.fix.clone(),
+                Some(self.span()),
+            )
+        };
+        if self.task_cancel.is_some() {
+            return registered();
+        }
+        let Some(sink) = self.sink.as_ref() else {
+            return registered();
+        };
+        let mut rendered = deadline.render();
+        if !rendered.ends_with('\n') {
+            rendered.push('\n');
+        }
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
+        sink.stderr.push_str(&rendered);
+        sink.exit_code = Some(70);
+        crate::Sema::Diagnostics::soft_exit(
+            "70".to_string(),
+            "runtime stop E3003".to_string(),
+            Some(self.span()),
+        )
+    }
+
     fn scheduler_wait<T>(
         &self,
         wait_kind: &str,
@@ -1564,16 +1611,9 @@ impl<'a> EvalCtx<'a> {
                     Some(self.span()),
                 ))
             }
-            crate::scheduler::JetSchedulerWait::Deadline(_) => {
-                let deadline = crate::task_group::jet_task_deadline(wait_kind);
-                Err(crate::Sema::Diagnostics::render_registered(
-                    "E3003",
-                    deadline.what,
-                    deadline.why,
-                    deadline.fix,
-                    Some(self.span()),
-                ))
-            }
+            crate::scheduler::JetSchedulerWait::Deadline(_) => Err(
+                self.deadline_stop(crate::task_group::jet_task_deadline(wait_kind)),
+            ),
             crate::scheduler::JetSchedulerWait::Panicked(message) => {
                 Err(task_child_panic(message, self.span()))
             }
@@ -1596,13 +1636,7 @@ impl<'a> EvalCtx<'a> {
         match crate::task_group::jet_task_wait_policy(deadline, cancelled, self.shield_depth > 0) {
             Ok(()) => Ok(()),
             Err(crate::task_group::JetTaskWaitInterrupt::Deadline(deadline)) => {
-                Err(crate::Sema::Diagnostics::render_registered(
-                    "E3003",
-                    deadline.what,
-                    deadline.why,
-                    deadline.fix,
-                    Some(self.span()),
-                ))
+                Err(self.deadline_stop(deadline))
             }
             Err(crate::task_group::JetTaskWaitInterrupt::Cancelled) => {
                 Err(crate::Sema::Diagnostics::task_cancelled(Some(self.span())))
