@@ -25,7 +25,21 @@ unsafe extern "C" {
 #[cfg(unix)]
 const RTLD_NOW: c_int = 2;
 
-extern "C" fn jit_ffi_reporter(message: *const u8, len: usize) {
+/// The bridge's panic reporter, as a plain Rust `fn`.
+///
+/// D-JITUNWIND1 (#1995 / #1997): the `extern "C"` frame the bridge actually
+/// calls is the shim `host_seam::guarded` generates below, never this body. That
+/// is the whole point of the rule — rustc gives an `extern "C"` *body* an
+/// abort-on-unwind shim, so had this stayed `extern "C" fn` a panic raised here
+/// would die as `thread caused non-unwinding panic` at its own edge, before any
+/// guarded seam below it could catch.
+///
+/// This seam is worth naming because the bridge calls it *precisely* when
+/// something already went wrong: a foreign function failed inside a `*_cabi`
+/// trampoline that generated code called, so a Cranelift frame is on the stack
+/// below every line of this body — the lossy decode's allocation, the
+/// `ACTIVE_RUNTIME` borrow, and `set_trap`'s report formatting alike.
+fn ffi_reporter(message: *const u8, len: usize) {
     let message = if message.is_null() {
         "a foreign function panicked".into()
     } else {
@@ -170,13 +184,16 @@ fn load_cdylib(
                 path.display()
             ));
         }
+        // The reporter the bridge stores is the generated no-unwind shim, whose
+        // C signature is `ffi_reporter`'s own (D-JITUNWIND1). The setter is
+        // typed to take that address rather than a `fn` item so the shim is the
+        // only thing this crate can pass: a raw `ffi_reporter as *const u8` here
+        // would be the unguarded boundary
+        // `tests/jit_no_unwind_boundary.rs` scans for.
         let set_reporter = unsafe {
-            std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(extern "C" fn(*const u8, usize)),
-            >(setter_ptr)
+            std::mem::transmute::<*mut c_void, unsafe extern "C" fn(*const u8)>(setter_ptr)
         };
-        unsafe { set_reporter(jit_ffi_reporter) };
+        unsafe { set_reporter(crate::host_seam::guarded(ffi_reporter)) };
         let free_name = CString::new("jet_ffi_cabi_free").unwrap();
         let free_ptr = unsafe { dlsym(handle, free_name.as_ptr()) };
         let free_fn = if free_ptr.is_null() {
@@ -394,7 +411,11 @@ mod tests {
         let source = include_str!("Ffi.rs");
         let load = source.find("dlopen(c_path.as_ptr(), RTLD_NOW)").unwrap();
         let reporter = source.find("CString::new(\"jet_ffi_set_reporter\")").unwrap();
-        let install = source.find("set_reporter(jit_ffi_reporter)").unwrap();
+        // The installed reporter is the generated no-unwind shim, so this also
+        // pins that the bridge never receives a bare `extern "C"` body (#1995).
+        let install = source
+            .find("set_reporter(crate::host_seam::guarded(ffi_reporter))")
+            .unwrap();
         assert!(load < reporter && reporter < install);
     }
 }
