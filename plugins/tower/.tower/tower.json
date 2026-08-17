@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2029,
-    "rev": 38100,
+    "nextNum": 2030,
+    "rev": 38105,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132871,6 +132871,67 @@
       "created": "2026-08-17T10:07:03.960Z",
       "updated": "2026-08-17T10:07:05.236Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0h3ex5k",
+      "num": 2029,
+      "title": "A JIT safety predicate answers covered when lowering produced nothing",
+      "body": "crates/jet-jit/src/jit/api_debug.rs:309-314 resident_jit_func_safety_detail returns None - which every caller reads as the COVERED, nothing-to-report answer - when lower_jit_program yields no program at all. So a total lowering failure and a clean bill of health are the same value.\n\nThis is a green-on-failure predicate, the exact mechanism class that hid defects for weeks in this epoch. The pattern has now been found four times: a corpus battery skipped a stem whose Loader or Sema pass errored and counted it nowhere; a ledger recorded a stem as compile_covered while the coverage oracle could not see it; a gate filed a broken AOT baseline under a benign expected_exit heading and dropped the stem from the differential entirely; and jit_covered_example_stems dropped three classes of stem silently. Each time the visible symptom was a green check standing in for an absent measurement.\n\nPer AGENTS.md the fresh-context review explicitly checks for false-green evidence, and this is a live instance in the compiler's own tooling rather than in a test.\n\nFound by the lane that closed the E2201 mis-blame card (#2001), whose criterion 4 asked whether any OTHER post-lowering precondition shares that defect. This is the answer to that question, recorded rather than absorbed. The card also names a second, smaller I4 gap found in the same audit: jet-debug/src/lib.rs:494-504 prints a no-run-to-debug message that carries no registered diagnostic code.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "resident_jit_func_safety_detail distinguishes lowering-produced-nothing from nothing-to-report, so a total lowering failure can never read as covered",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T11:10:25.970Z"
+        },
+        {
+          "n": 2,
+          "text": "Every caller of that function handles the failure case explicitly rather than inheriting the covered reading",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T11:10:26.485Z"
+        },
+        {
+          "n": 3,
+          "text": "The no-run-to-debug message in jet-debug carries a registered diagnostic code with what/why/fix text and a UI snapshot, per I4",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T11:10:26.990Z"
+        },
+        {
+          "n": 4,
+          "text": "A test drives the lowering-produced-nothing path and asserts the predicate does NOT answer covered",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-17T11:10:27.503Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-17T11:10:16.525Z",
+      "updated": "2026-08-17T11:10:27.504Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -176756,6 +176817,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T11:10:27.504Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h3ex5k",
+      "note": "#4 A test drives the lowering-produced-nothing path and asserts"
+    },
+    {
+      "at": "2026-08-17T11:10:26.991Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h3ex5k",
+      "note": "#3 The no-run-to-debug message in jet-debug carries a registere"
+    },
+    {
+      "at": "2026-08-17T11:10:26.485Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h3ex5k",
+      "note": "#2 Every caller of that function handles the failure case expli"
+    },
+    {
+      "at": "2026-08-17T11:10:25.970Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0h3ex5k",
+      "note": "#1 resident_jit_func_safety_detail distinguishes lowering-produ"
+    },
+    {
+      "at": "2026-08-17T11:10:16.526Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0h3ex5k",
+      "note": "A JIT safety predicate answers covered when lowering produced nothing"
+    },
+    {
       "at": "2026-08-17T11:02:02.127Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -180219,41 +180315,6 @@
       "action": "card.update",
       "ref": "c02ur7xi",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-15T18:59:09.210Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05m3i37",
-      "note": "#4 A regression test pins the emitted shape so invalid CLIF at "
-    },
-    {
-      "at": "2026-08-15T18:59:08.773Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05m3i37",
-      "note": "#3 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:59:08.362Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05m3i37",
-      "note": "#2 The fix is in Jet's CLIF emission, not a decline: no stem is"
-    },
-    {
-      "at": "2026-08-15T18:59:07.937Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05m3i37",
-      "note": "#1 The emitted CLIF passes Cranelift's verifier for collections"
-    },
-    {
-      "at": "2026-08-15T18:59:07.462Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05m3i37",
-      "note": "plan"
     }
   ],
   "nextNum": 368,
