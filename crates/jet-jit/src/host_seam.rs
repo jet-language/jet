@@ -43,12 +43,26 @@
 //!   `extern "C"` shim with the seam's exact C signature whose body runs the
 //!   seam inside [`guard_seam`]. So the one canonical per-symbol declaration
 //!   card #1633 established is also the boundary's generator, and a new host
-//!   symbol cannot be declared without one.
-//! * `tests/jit_no_unwind_boundary.rs` is the mechanical check: no
-//!   `extern "C" fn jet_*` may be defined in this crate at all, every seam
-//!   named by `host_fns!` must exist, no host address may escape except through
-//!   [`guarded_addr`], and the macro itself must still emit the guard. A
-//!   guarantee that depends on someone remembering is not a guarantee.
+//!   symbol cannot be declared without one. A callback handed to a *foreign*
+//!   library rather than to generated code takes the same route by hand —
+//!   `Ffi.rs` gives the bridge `guarded(ffi_reporter)`, never an `extern "C"`
+//!   body of its own.
+//! * `tests/jit_no_unwind_boundary.rs` is the mechanical check, and it is a rule
+//!   about frames rather than about names: **no `extern` fn may be defined in
+//!   this crate at all**, whatever its ABI or its name, except the shim below.
+//!   Every seam named by `host_fns!` must exist, no host address may escape
+//!   except through [`guarded_addr`], and the macro itself must still emit the
+//!   guard. A guarantee that depends on someone remembering is not a guarantee —
+//!   and neither is one that depends on a name prefix: the check's first form
+//!   banned `extern "C" fn jet_*`, and `Ffi.rs`'s `jit_ffi_reporter` sat outside
+//!   that family until the rule stopped being a name (#1995).
+//! * The one carve-out is a process signal handler (`CoreHost.rs`), which the
+//!   kernel enters on a borrowed stack that may have a JIT frame under it.
+//!   [`guard_seam`] is the wrong tool there — it reaches
+//!   `jet_scheduler_install_panic_hook`, which takes the process panic-hook lock
+//!   and allocates on first call, so catching inside a handler would trade an
+//!   unreachable panic for a reachable deadlock. Such a handler must be
+//!   panic-free instead, and the check pins the statements its body may contain.
 //!
 //! # The two aborts this replaces, which are not the same abort
 //!

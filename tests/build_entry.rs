@@ -2367,3 +2367,96 @@ fn build_entry_program_runs_the_same_on_every_tier() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Tower card 2008, the enforcing half. The projection above holds only because
+/// of a *pairing* that nothing checked: sema skips
+/// `strip_build_only_entries` when `allow_compiler_api` is set
+/// (`Sema/Bundle/Pipeline.rs`), on the stated ground that the build session's
+/// caller still holds an index into the entry module's items and removes the
+/// entry itself once the build has run (`Driver/mod.rs`).
+///
+/// So the invariant is not "sema always strips". It is "the one check that keeps
+/// its build entry has exactly one caller, and that caller strips
+/// unconditionally." Written as a comment, that pairing is review discipline and
+/// rots the moment a second caller appears — and the failure mode is not a
+/// diagnostic but an `emit_func` internal compiler error on a program sema just
+/// accepted, which is what this card is. Check it instead.
+///
+/// A source scan, deliberately: the hole is a *missing* call, and no runtime
+/// fixture can prove the absence of a caller that does not exist yet.
+#[test]
+fn the_compiler_api_exemption_stays_paired_with_the_drivers_projection() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let pipeline =
+        fs::read_to_string(root.join("crates/jet-sema/src/Sema/Bundle/Pipeline.rs")).unwrap();
+    let driver = fs::read_to_string(root.join("crates/jet-driver/src/Driver/mod.rs")).unwrap();
+    let sema_entry = fs::read_to_string(root.join("crates/jet-sema/src/Sema/Bundle.rs")).unwrap();
+
+    let code = |text: &str| -> Vec<String> {
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+            .map(str::to_string)
+            .collect()
+    };
+
+    // One conditional exemption, in the one place, spelled the one way.
+    let exemptions: Vec<_> = code(&pipeline)
+        .into_iter()
+        .filter(|line| line.contains("allow_compiler_api") && line.starts_with("if "))
+        .collect();
+    assert_eq!(
+        exemptions,
+        vec!["if !allow_compiler_api && mode != CompileMode::Check {".to_string()],
+        "the build-entry projection may be skipped for exactly two reasons — the \
+         build session's own check, and `jet check`/LSP, which emits no code. A \
+         third condition, or a second site, hands codegen a build entry again \
+         (Tower card 2008, I2/I3)."
+    );
+
+    // ... and it is the projection that the conditional guards, not something
+    // else that happens to mention the flag.
+    let guarded_line = code(&pipeline)
+        .windows(2)
+        .find(|pair| pair[0].contains("if !allow_compiler_api"))
+        .map(|pair| pair[1].clone())
+        .expect("the exemption guards a statement");
+    assert!(
+        guarded_line.contains("strip_build_only_entries(bundle)"),
+        "the `allow_compiler_api` conditional must guard the projection itself; \
+         it now guards `{guarded_line}`"
+    );
+
+    // The check that keeps its entry has one caller ...
+    let callers = code(&driver)
+        .iter()
+        .filter(|line| line.contains("check_bundle_with_effect_facts_for_build("))
+        .count()
+        + code(&sema_entry)
+            .iter()
+            .filter(|line| line.contains("check_bundle_with_effect_facts_for_build("))
+            .filter(|line| !line.contains("pub fn "))
+            .count();
+    assert_eq!(
+        callers, 1,
+        "`check_bundle_with_effect_facts_for_build` is the only check that leaves \
+         a build entry in the bundle. Every caller must remove it afterwards, so \
+         a second caller must be paired by hand and this assertion updated \
+         deliberately."
+    );
+
+    // ... and that caller removes the entry unconditionally, at the top level of
+    // the function rather than inside a branch that a later edit could narrow.
+    let unconditional = driver.lines().any(|line| {
+        line.trim() == "crate::Sema::strip_build_only_entries(&mut bundle);"
+            && line.len() - line.trim_start().len() == 4
+    });
+    assert!(
+        unconditional,
+        "the driver must project build-only entries out unconditionally. Moving \
+         that call under `if build_run.is_some()` or `if options.execute` \
+         restores the original defect for the inspect-only and package-check \
+         paths, where `emit_func` raises an internal compiler error instead of \
+         any diagnostic (Tower card 2008)."
+    );
+}

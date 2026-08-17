@@ -23,15 +23,22 @@
 //!    abort-on-unwind shim, so a panic inside one dies at that body's own edge
 //!    as `thread caused non-unwinding panic` — a *different* abort from error
 //!    5, and one no wrapper above it could ever catch. So a boundary can only
-//!    be added by replacing the C frame. An `extern "C" fn jet_*` in this crate
-//!    is therefore an unguardable seam by construction.
+//!    be added by replacing the C frame. **Any** `extern` fn defined in this
+//!    crate is therefore an unguardable seam by construction, whatever its ABI
+//!    and whatever it is called; the two exceptions are stated positively, as
+//!    the shim that *is* the boundary and the signal handlers that cannot
+//!    panic. The first form of this check banned `extern "C" fn jet_*` only,
+//!    and `Ffi.rs`'s `jit_ffi_reporter` — the frame a foreign library enters
+//!    when a foreign function has already failed, with a Cranelift frame below
+//!    it — sat outside that family for as long as the family was the rule.
 //! 2. The only `extern "C"` frames generated code can reach are the shims
 //!    `host_seam::guarded` builds, and the only ways to reach one are the
 //!    single `builder.symbol` call inside `host_fns!` and `guarded_addr`. Any
-//!    other route from a `jet_*` function to an address is an escape.
+//!    other route from a host function to an address is an escape.
 //! 3. The generator must still generate the guard. Without this, reverting one
 //!    line of `host_fns!` would silently unguard every symbol and leave every
-//!    other test green.
+//!    other test green — and the same is true of the shim's own body, which is
+//!    why check 1's `host_seam.rs` exemption is pinned rather than assumed.
 //!
 //! Run: `scripts/agent/jet-env cargo test --test jit_no_unwind_boundary`
 
@@ -101,24 +108,118 @@ fn code_lines(sources: &[(String, String)]) -> Vec<(String, usize, String)> {
     out
 }
 
-/// Check 1: an `extern "C"` seam body cannot be guarded from outside, so this
-/// crate may not define one for a `jet_*` symbol — or for a macro-generated
-/// name, which is the same hole wearing a metavariable.
+/// The `extern` fn *definitions* this crate compiles, as
+/// `(label, line, name, text)`.
+///
+/// A `fn`-pointer type (`type Pred = unsafe extern "C" fn(i64) -> i8`) and a
+/// foreign declaration inside an `unsafe extern "C" { … }` block both have no
+/// name in this position, so neither matches. What is left is exactly the set of
+/// C frames this crate itself puts on the stack.
+fn extern_fn_definitions(sources: &[(String, String)]) -> Vec<(String, usize, String, String)> {
+    let mut out = Vec::new();
+    for (label, number, line) in code_lines(sources) {
+        let Some(at) = line.find("extern \"") else { continue };
+        let rest = &line[at + 8..];
+        let Some(close) = rest.find('"') else { continue };
+        let tail = rest[close + 1..].trim_start();
+        let Some(tail) = tail.strip_prefix("fn ") else { continue };
+        // `$` is a name here too: `extern "C" fn $name(…)` inside a macro is the
+        // same unguardable body wearing a metavariable, and it must not read as
+        // an anonymous `fn`-pointer type and slip past.
+        let name: String = tail
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+            .collect();
+        if name.is_empty() {
+            continue;
+        }
+        out.push((label, number, name, line.trim().to_string()));
+    }
+    out
+}
+
+/// Check 1: an `extern "C"` seam body cannot be guarded from outside, so a C
+/// frame this crate compiles is an unguardable seam unless it *is* the boundary.
+///
+/// The polarity matters in both directions, so the permitted set is stated
+/// positively and is two entries long:
+///
+/// * `host_seam.rs` holds the generated shim — the boundary itself.
+/// * [`SIGNAL_HANDLERS`] are entered by the kernel, not by generated code, and
+///   cannot panic at all. They are pinned by
+///   `the_os_signal_handlers_stay_panic_free_without_a_catch`, not trusted.
+///
+/// Every other `extern` fn definition is a hole, whatever it is called. The
+/// previous form of this check banned `extern "C" fn jet_*` only, and
+/// `Ffi.rs`'s `jit_ffi_reporter` — a C frame the bridge calls when a foreign
+/// function already failed, with a Cranelift frame below it — sat outside that
+/// name for exactly as long as the name was the rule (#1995).
 fn unguardable_seam_definitions(sources: &[(String, String)]) -> Vec<String> {
-    code_lines(sources)
+    extern_fn_definitions(sources)
         .into_iter()
-        .filter(|(_, _, line)| {
-            line.contains("extern \"C\" fn jet_")
-                || line.contains("extern \"C-unwind\" fn jet_")
-                || line.contains("extern \"C\" fn $")
-                || line.contains("extern \"C-unwind\" fn $")
+        .filter(|(label, _, name, _)| {
+            label.as_str() != "host_seam.rs" && !SIGNAL_HANDLERS.contains(&name.as_str())
         })
-        .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+        .map(|(label, number, _, line)| format!("{label}:{number}: {line}"))
         .collect()
 }
 
-/// Check 2: a `jet_*` function reaching an address by any route other than
+/// The two OS signal handlers, which are the only C frames in this crate that
+/// are neither the boundary nor routed through it. They must stay that way: a
+/// signal handler runs on a borrowed stack that may have a JIT frame under it,
+/// and `guard_seam` is the wrong tool there — `jet_scheduler_install_panic_hook`
+/// takes the process panic-hook lock and allocates on first call, so catching
+/// inside a handler would trade an unreachable panic for a reachable deadlock.
+/// The guarantee is that the bodies cannot panic, and it is checked, not stated.
+const SIGNAL_HANDLERS: &[&str] = &["unix_mark", "windows_mark"];
+
+/// The complete set of statements a signal handler body may contain. Anything
+/// that allocates, locks, formats, or reports would raise a panic in a frame
+/// that may sit above JIT code — and would do it from a context where the
+/// conversion boundary cannot be used.
+const SIGNAL_HANDLER_STATEMENTS: &[&str] =
+    &["note_interrupt();", "if kind == 0 {", "1", "} else {", "0", "}"];
+
+/// The statements inside the definition that starts on `line_index`: the text
+/// between its opening brace and the matching close, trimmed, blank lines and
+/// line comments dropped.
+fn definition_body(text: &str, line_index: usize) -> Vec<String> {
+    let from: String = text
+        .lines()
+        .skip(line_index - 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let open = from.find('{').expect("an extern fn definition has a body");
+    let mut depth = 0usize;
+    let mut end = from.len();
+    for (at, ch) in from[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = open + at;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    from[open + 1..end]
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Check 2: a host function reaching an address by any route other than
 /// `host_seam::guarded` / `guarded_addr` is an unguarded boundary.
+///
+/// Both name families this crate uses, not just one: the seams `host_fns!`
+/// declares are `jet_*`, and the callbacks it hands to foreign libraries are
+/// `jit_*` (`Ffi.rs`). Scanning one prefix let the second family escape (#1995).
 fn host_address_escapes(sources: &[(String, String)]) -> Vec<String> {
     code_lines(sources)
         .into_iter()
@@ -137,12 +238,12 @@ fn host_address_escapes(sources: &[(String, String)]) -> Vec<String> {
                 // The cast operand is the identifier just before ` as `. A
                 // parenthesised operand ends in `)`, which yields an empty
                 // token: those already went through `guarded_addr`.
-                line[..at]
+                let operand = line[..at]
                     .trim_end()
                     .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
                     .next()
-                    .unwrap_or("")
-                    .starts_with("jet_")
+                    .unwrap_or("");
+                operand.starts_with("jet_") || operand.starts_with("jit_")
             })
         })
         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
@@ -164,14 +265,65 @@ fn no_unguardable_extern_c_seam_is_defined_in_the_jit_crate() {
     let offenders = unguardable_seam_definitions(&jit_crate_sources());
     assert!(
         offenders.is_empty(),
-        "an `extern \"C\"` host seam cannot be guarded: rustc aborts an escaping \
-         unwind at the body's own edge (`thread caused non-unwinding panic`), \
-         before the shim `host_seam::guarded` builds could catch it. Make the \
-         seam a plain `fn` and let `host_fns!` generate its `extern \"C\"` \
-         boundary (crates/jet-jit/src/host_seam.rs, docs/spec/architecture.md \
-         R13). Offending definitions:\n{}",
+        "an `extern \"C\"` frame this crate compiles cannot be guarded from \
+         outside: rustc aborts an escaping unwind at the body's own edge \
+         (`thread caused non-unwinding panic`), before the shim \
+         `host_seam::guarded` builds could catch it. Both directions are bugs, \
+         so say which rail the new definition belongs on:\n\
+         \x20 - generated code calls it -> make it a plain `fn` and let \
+         `host_fns!` generate its boundary;\n\
+         \x20 - foreign code calls it -> make it a plain `fn` and hand out \
+         `host_seam::guarded(f)`, as `Ffi.rs` does for the bridge reporter;\n\
+         \x20 - the kernel calls it -> it is a signal handler, and it must be \
+         panic-free rather than guarded (see `SIGNAL_HANDLERS`).\n\
+         (crates/jet-jit/src/host_seam.rs, docs/spec/architecture.md R13.) \
+         Offending definitions:\n{}",
         offenders.join("\n")
     );
+}
+
+/// The other half of check 1's permitted set, stated as a proof rather than a
+/// name. A signal handler may interrupt a JIT frame, so a panic raised in one is
+/// the very abort this file exists to prevent — but the conversion boundary is
+/// unavailable there (`SIGNAL_HANDLERS` says why), so the only guarantee left is
+/// that the body cannot panic. Pin it.
+#[test]
+fn the_os_signal_handlers_stay_panic_free_without_a_catch() {
+    let sources = jit_crate_sources();
+    let handlers: Vec<_> = extern_fn_definitions(&sources)
+        .into_iter()
+        .filter(|(_, _, name, _)| SIGNAL_HANDLERS.contains(&name.as_str()))
+        .collect();
+    assert_eq!(
+        handlers.len(),
+        SIGNAL_HANDLERS.len(),
+        "check 1 exempts {:?}, so every one of them must exist to be checked; \
+         found {:?}",
+        SIGNAL_HANDLERS,
+        handlers
+            .iter()
+            .map(|(_, _, name, _)| name.as_str())
+            .collect::<Vec<_>>()
+    );
+    for (label, number, name, _) in handlers {
+        let text = sources
+            .iter()
+            .find(|(candidate, _)| *candidate == label)
+            .map(|(_, text)| text.as_str())
+            .expect("the handler's own file");
+        for statement in definition_body(text, number) {
+            assert!(
+                SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str()),
+                "{label}:{number}: `{name}` gained the statement `{statement}`, \
+                 which is not one of {:?}. A signal handler runs on a borrowed \
+                 stack that may have a JIT frame under it: anything that \
+                 allocates, locks, formats or reports can panic there, and \
+                 `guard_seam` cannot be used to catch it. Move the work to the \
+                 thread that drains the queue instead of widening this list.",
+                SIGNAL_HANDLER_STATEMENTS
+            );
+        }
+    }
 }
 
 #[test]
@@ -213,6 +365,27 @@ fn the_host_fns_macro_still_generates_the_boundary() {
         !lib.contains("builder.symbol($symbol, $host_fn as *const u8)"),
         "the pre-#1997 unguarded registration is back in `host_fns!`"
     );
+    // `host_seam.rs` is the one file check 1 exempts, because the shim it
+    // generates is the boundary. That exemption is only sound while the shim
+    // still runs the seam inside the conversion, so pin the body: without this,
+    // dropping `guard_seam` from the shim would unguard every symbol at once and
+    // leave the exemption looking like a rule.
+    let seam = sources
+        .iter()
+        .find(|(label, _)| label.as_str() == "host_seam.rs")
+        .map(|(_, text)| text.as_str())
+        .expect("crates/jet-jit/src/host_seam.rs");
+    assert!(
+        seam.contains("guard_seam(move || zero_sized_callee::<F>()"),
+        "the generated shim must still run the seam inside `guard_seam`; \
+         without it every `extern \"C\"` shim is a bare unguarded seam again \
+         and check 1's `host_seam.rs` exemption hides it (#1997)."
+    );
+    assert!(
+        seam.contains("jet_scheduler_catch_foreign_boundary"),
+        "`guard_seam` must keep converting through the shared Prelude boundary \
+         rather than a second engine-local catch (I8/I9)."
+    );
 }
 
 /// The checks above only earn their keep if they actually trip. Seeded text,
@@ -238,6 +411,74 @@ fn the_boundary_scan_trips_on_seeded_violations() {
         unguardable_seam_definitions(&seeded_macro_seam).len(),
         1,
         "the seam scan must catch a macro-generated `extern \"C\"` seam"
+    );
+
+    // The name is not the rule: `Ffi.rs`'s bridge reporter was an `extern "C"`
+    // body outside the `jet_*` family for as long as the family was the rule.
+    let seeded_foreign_callback = vec![(
+        "Seeded.rs".to_string(),
+        "extern \"C\" fn jit_ffi_seeded(m: *const u8, n: usize) { report(m, n) }\n".to_string(),
+    )];
+    assert_eq!(
+        unguardable_seam_definitions(&seeded_foreign_callback).len(),
+        1,
+        "the seam scan must catch an `extern \"C\"` callback handed to a foreign \
+         library, whatever it is called (#1995)"
+    );
+
+    // A `"system"` handler and a `"C-unwind"` body are the same hole in a
+    // different ABI, and both must be seen.
+    let seeded_other_abis = vec![(
+        "Seeded.rs".to_string(),
+        concat!(
+            "    unsafe extern \"system\" fn seeded_mark(kind: u32) -> i32 { 0 }\n",
+            "    extern \"C-unwind\" fn seeded_unwinding(a: i64) -> i64 { a }\n",
+        )
+        .to_string(),
+    )];
+    assert_eq!(
+        unguardable_seam_definitions(&seeded_other_abis).len(),
+        2,
+        "the seam scan must not be ABI-specific"
+    );
+
+    // A `fn`-pointer TYPE is not a body: this crate transmutes JIT code
+    // addresses to these on every callback, and flagging them would be a wrong
+    // refusal, which is equally a bug.
+    let type_only = vec![(
+        "Seeded.rs".to_string(),
+        concat!(
+            "type SpawnFn2 = extern \"C\" fn(i64, i64) -> i64;\n",
+            "    let f: unsafe extern \"C\" fn(i64) -> i8 = std::mem::transmute(ptr);\n",
+        )
+        .to_string(),
+    )];
+    assert!(
+        unguardable_seam_definitions(&type_only).is_empty(),
+        "the seam scan must not fire on a `fn`-pointer type: {:?}",
+        unguardable_seam_definitions(&type_only)
+    );
+
+    // The signal-handler body scan must trip on a statement that can panic.
+    let grown_handler = vec![(
+        "Seeded.rs".to_string(),
+        concat!(
+            "    extern \"C\" fn unix_mark(_: i32) {\n",
+            "        eprintln!(\"interrupt\");\n",
+            "        note_interrupt();\n",
+            "    }\n",
+        )
+        .to_string(),
+    )];
+    let (_, number, _, _) = extern_fn_definitions(&grown_handler)
+        .into_iter()
+        .find(|(_, _, name, _)| name == "unix_mark")
+        .expect("the seeded handler");
+    assert!(
+        definition_body(&grown_handler[0].1, number)
+            .iter()
+            .any(|statement| !SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str())),
+        "the handler body scan must catch a statement that can panic"
     );
 
     let seeded_escape = vec![(

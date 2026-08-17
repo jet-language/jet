@@ -757,9 +757,23 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
     seam's exact C signature whose body runs the seam inside `guard_seam`, and
     `builder.symbol` registers that shim. A new host symbol cannot be declared
     without one.
-  - `tests/jit_no_unwind_boundary.rs` is the check: no `extern "C" fn jet_*`
-    may be defined in `crates/jet-jit` at all, no host address may escape except
-    through `guarded_addr`, and the macro must still emit the guard.
+  - `tests/jit_no_unwind_boundary.rs` is the check, and it is a rule about
+    frames rather than about names: **no `extern` fn may be defined in
+    `crates/jet-jit` at all**, whatever its ABI or its name, except the shim
+    `host_seam.rs` generates. No host address may escape except through
+    `guarded_addr`, and the macro must still emit the guard. The first form of
+    this check banned `extern "C" fn jet_*` only, and a bridge callback named
+    `jit_ffi_reporter` — a C frame a foreign library enters when a foreign
+    function has already failed, with a Cranelift frame below it — sat outside
+    that name for exactly as long as the name was the rule.
+  - The one carve-out is a **process signal handler**, which the kernel enters
+    on a borrowed stack that may have a JIT frame under it. Conversion is the
+    wrong tool there: `guard_seam` reaches
+    `jet_scheduler_install_panic_hook`, which takes the process panic-hook lock
+    and allocates on first call, so catching inside a handler would trade an
+    unreachable panic for a reachable deadlock. A handler must therefore be
+    panic-free — its whole body notes one relaxed atomic — and the check pins
+    the permitted statements instead of trusting the name.
 
   Conversion targets the tier's **existing** status channel — a cancel or a
   blown deadline lands on the pending-interrupt channel `#Shield` already uses,
