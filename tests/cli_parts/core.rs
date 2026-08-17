@@ -331,7 +331,22 @@ fn jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects
         .output()
         .unwrap();
     assert!(!stripped.status.success());
-    assert!(String::from_utf8_lossy(&stripped.stderr).contains("unknown command `seed_data`"));
+    // The built binary refuses a stripped job with the same registered E1294
+    // wording the source tier uses, and advertises only what it can dispatch.
+    let stripped_stderr = String::from_utf8_lossy(&stripped.stderr);
+    assert!(stripped_stderr.contains("E1294"), "{stripped_stderr}");
+    assert!(
+        stripped_stderr.contains("no job named `seed_data`"),
+        "{stripped_stderr}"
+    );
+    assert!(
+        stripped_stderr.contains("declared jobs: greet"),
+        "{stripped_stderr}"
+    );
+    assert!(
+        !stripped_stderr.contains("seed_data, inspect_job"),
+        "a release binary must not advertise stripped jobs: {stripped_stderr}"
+    );
 
     let help = Command::new(jet()).arg("help").output().unwrap();
     assert!(help.status.success());

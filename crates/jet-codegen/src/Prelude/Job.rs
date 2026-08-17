@@ -92,16 +92,43 @@ pub fn jet_job_help(argv: &[String], jobs: &[(&str, JetJobScope)]) {
     print!("{}", jet_job_help_text(argv, jobs));
 }
 
+/// I4: the one registered E1294 wording (the `E1294` row in
+/// `Prelude/Diagnostics.jet`). The compiler tier renders it as a `Diagnostic`
+/// and a built binary renders it to stderr through `jet_job_unknown` below —
+/// one registered fact, two renderings, never two wordings.
+#[allow(dead_code)]
+pub const JET_JOB_UNKNOWN_WHY: &str =
+    "the first program subcommand must name a function marked `#Job`.";
+#[allow(dead_code)]
+pub const JET_JOB_UNKNOWN_FIX: &str =
+    "mark a function `#Job`, or check the subcommand spelling.";
+
+#[allow(dead_code)]
+pub fn jet_job_unknown_what(name: &str) -> String {
+    format!("no job named `{name}`")
+}
+
+/// The one label and separator a job refusal uses to advertise names. The
+/// caller picks the list, because the honest list is tier-dependent: the
+/// compiler tier names every declared job, while a built binary names only the
+/// scopes it can still dispatch.
+#[allow(dead_code)]
+pub fn jet_job_declared_detail(names: &[&str]) -> String {
+    format!("declared jobs: {}", names.join(", "))
+}
+
 fn jet_job_unknown(argv: &[String], jobs: &[(&str, JetJobScope)], name: &str) -> ! {
     let program = jet_args_source_program_name(argv.first().map(String::as_str).unwrap_or(""));
-    eprintln!("Error [E1294]: unknown command `{name}`");
+    let dispatchable = jobs
+        .iter()
+        .filter(|(_, scope)| jet_job_scope_visible(*scope))
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>();
+    eprintln!("Error [E1294]: {}", jet_job_unknown_what(name));
+    eprintln!(" Why: {JET_JOB_UNKNOWN_WHY}");
+    eprintln!(" Fix: {JET_JOB_UNKNOWN_FIX}");
+    eprintln!("{}", jet_job_declared_detail(&dispatchable));
     eprintln!("\nUsage: {program} <job> [options]");
-    eprintln!("\nknown jobs:");
-    for (name, scope) in jobs {
-        if jet_job_scope_visible(*scope) {
-            eprintln!("  {}", name);
-        }
-    }
     std::process::exit(2)
 }
 
