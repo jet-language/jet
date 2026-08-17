@@ -730,7 +730,7 @@ renumbered, and no new `W` code may be allocated.
 | E1327 | jetpack | an environment image references an unknown environment (D-ENV-IMAGE1) |
 | E1328 | sema | a typed service readiness probe has the wrong arguments or an unsafe path (D-JPK-SERVICEDEPTH1) |
 | E1329 | jetpack | a lifecycle hook is not explicitly trusted (D-ENV-LIFECYCLE2) |
-| E1330 | sema/jetpack | task metadata has the wrong shape or an unsafe project path (D-TASK-META1) |
+| E1330 | sema/jetpack | job metadata has the wrong shape or an unsafe project path (D-TASK-META1) |
 | E1331 | sema | an environment module import escapes its project root (D-ENV-FLAKEPARTS1) |
 | E1332 | sema | one environment preset or package generation is composed with conflicting definitions (D-ENV-PROFILE1/D-JPK-PROFILE1) |
 | E1333 | sema | a typed environment fact, language-pack selection, or dotenv declaration is invalid or conflicting (D-ENV-LIFECYCLE2/D-ENV-LANGPACK1) |
@@ -1022,7 +1022,7 @@ membership, generation, managed-file, service, or task state is applied.
 | E1327 | an environment image names an unknown environment | An image may project only a declared environment fact graph. | Declare the environment or change `from:` to an existing one. |
 | E1328 | a typed service readiness probe is invalid | Probe arguments and notify paths are checked before a process can start. | Use the documented `exec`, `http`, `notify`, or `tcp` shape and a project-relative path. |
 | E1329 | a lifecycle hook is not explicitly trusted | Hooks execute project commands during activation. | Set `trusted: true` after review and approve the changed environment. |
-| E1330 | task metadata or a task path is invalid | Task packages, cache inputs/outputs, cwd, and limits must be deterministic and project-contained. | Use the typed metadata shape and project-relative paths without `..`. |
+| E1330 | job metadata or a job path is invalid | Job packages, cache inputs/outputs, cwd, and limits must be deterministic and project-contained. | Use the typed metadata shape and project-relative paths without `..`. |
 | E1331 | an environment import escapes its root | One environment graph cannot import files outside its project boundary. | Use a relative import directory without `..` or an escaping symlink. |
 | E1332 | preset or generation definitions conflict | Composition cannot silently choose one definition's packages, variables, parents, or collision choices over another's. | Merge equal facts or give them different names. |
 | E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |

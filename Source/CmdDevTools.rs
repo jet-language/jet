@@ -119,7 +119,7 @@ pub(crate) fn run_dev(
     loop {
         std::thread::sleep(std::time::Duration::from_millis(120));
         if let Some(bundle) = &prev_bundle {
-            run_due_tasks(bundle, file, try_anyway, mode, &mut clock);
+            run_due_jobs(bundle, file, try_anyway, mode, &mut clock);
             sync_persist_bindings(bundle, &mut persist);
         }
         if let Some(receipt) = watch.poll() {
@@ -202,7 +202,7 @@ fn sync_persist_bindings(
 /// jetos timer projection are the production/OS consumers of the identical
 /// `#Every(…)` declaration — see the D-SCHEDULE1 row in
 /// docs/spec/syntax-decisions.md for the full three-consumer law.
-fn run_due_tasks(
+fn run_due_jobs(
     bundle: &jet::AST::ProgramBundle,
     file: &str,
     try_anyway: bool,

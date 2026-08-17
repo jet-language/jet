@@ -1101,15 +1101,15 @@ pub struct Func {
     /// D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can invoke as an
     /// argv subcommand (`jet run <entry> -- <name>`).
     /// Top-level only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
-    pub is_task: bool,
-    pub task_span: Option<Span>,
+    pub is_job: bool,
+    pub job_span: Option<Span>,
     /// D-TASK-META1=A: progressive typed metadata on a task marker. Bare
     /// tasks remain ordinary uncached functions; this record is absent for
     /// that beginner form.
-    pub task_metadata: Option<TaskMetadata>,
+    pub job_metadata: Option<JobMetadata>,
     /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Every(...)` — a
     /// declarative schedule on a `#Job fn`. `None` means unscheduled (a
-    /// plain task, invoked manually only). Legal only alongside `is_task`
+    /// plain task, invoked manually only). Legal only alongside `is_job`
     /// (E0925 otherwise). Compile-checked (E0926 on a bad argument), then
     /// carried as metadata for `jet dev`/service-runtime/jetos consumers —
     /// erased in codegen (I3), never a runtime value the generated fn sees.
@@ -1200,9 +1200,9 @@ impl Func {
             reactive_upgrades: Vec::new(),
             is_replayable: false,
             replayable_span: None,
-            is_task: false,
-            task_span: None,
-            task_metadata: None,
+            is_job: false,
+            job_span: None,
+            job_metadata: None,
             every: None,
             is_must_use: false,
             must_use_span: None,
@@ -1278,15 +1278,15 @@ pub fn bundle_serves_until_stopped(bundle: &super::ProgramBundle) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TaskMetadata {
+pub struct JobMetadata {
     /// D-JOB-SUBCMD1=C: the build tier in which a named job is exposed.
     pub scope: JobScope,
     pub packages: Vec<String>,
     pub cwd: Option<String>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    pub skip: Option<TaskSkip>,
-    pub cache: TaskCachePolicy,
+    pub skip: Option<JobSkip>,
+    pub cache: JobCachePolicy,
     pub limits: BTreeMap<String, String>,
 }
 
@@ -1303,12 +1303,12 @@ pub enum JobScope {
 /// D-TASK-META1=A: a task may be skipped unconditionally with an explicit
 /// reason, or only outside one closed host platform family.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskSkip {
+pub enum JobSkip {
     Always(String),
     UnlessPlatform { platform: String },
 }
 
-impl TaskSkip {
+impl JobSkip {
     /// Return the explicit reason when this skip rule excludes `host`.
     /// Platform names use the canonical Jet spellings (`Linux`, `MacOS`,
     /// `Windows`, and `FreeBSD`) and the same host suffixes as the target
@@ -1338,7 +1338,7 @@ fn matches_host_platform(expected: &str, host: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TaskCachePolicy {
+pub enum JobCachePolicy {
     #[default]
     Uncached,
     Local,

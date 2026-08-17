@@ -69,7 +69,7 @@ impl<'a> super::Checker<'a> {
                 obligation: "safe memory boundary",
                 span: f.unsafe_span.unwrap_or(marker.span),
             })
-        } else if f.is_reactive || f.is_task || f.inline_foreign.is_some() {
+        } else if f.is_reactive || f.is_job || f.inline_foreign.is_some() {
             Some(KernelFailure {
                 obligation: "effect-free function body",
                 span: marker.span,

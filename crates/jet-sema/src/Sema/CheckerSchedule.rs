@@ -162,7 +162,7 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
 
 /// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C).
 fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
-    let reserved = Syntax::TASK_RESERVED_LIFECYCLE.join(", ");
+    let reserved = Syntax::JOB_RESERVED_LIFECYCLE.join(", ");
     Diagnostic::error(
         "E0928",
         format!("`{name}` is a built-in lifecycle verb, not a job name"),
@@ -196,15 +196,15 @@ fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
 /// D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C: reject `#Job fn run|dev|build|test|bench`. Called alongside the
 /// `#Every` value check during registration.
 pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
-    if !f.is_task {
+    if !f.is_job {
         return Vec::new();
     }
-    if Syntax::TASK_RESERVED_LIFECYCLE.contains(&f.name.as_str()) {
-        let span = f.task_span.unwrap_or(f.name_span);
+    if Syntax::JOB_RESERVED_LIFECYCLE.contains(&f.name.as_str()) {
+        let span = f.job_span.unwrap_or(f.name_span);
         return vec![e0928_reserved_job_name(&f.name, span)];
     }
     if Syntax::JOB_RESERVED_CLI.contains(&f.name.as_str()) {
-        let span = f.task_span.unwrap_or(f.name_span);
+        let span = f.job_span.unwrap_or(f.name_span);
         return vec![Diagnostic::error(
             "E0928",
             format!("`{}` is reserved by Jet's command line", f.name),
@@ -223,9 +223,9 @@ pub(crate) fn check_job_collisions(modules: &[LoadedModule]) -> Vec<Diagnostic> 
     for module in modules {
         for item in &module.items {
             let Item::Func(function) = item else { continue };
-            if !function.is_task { continue }
+            if !function.is_job { continue }
             let scope = function
-                .task_metadata
+                .job_metadata
                 .as_ref()
                 .map(|metadata| metadata.scope)
                 .unwrap_or_default();

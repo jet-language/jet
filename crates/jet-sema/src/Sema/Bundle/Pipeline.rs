@@ -3054,7 +3054,7 @@ fn check_bundle_opts_for_output_inner(
     if bundle.modules.iter().any(|m| {
         m.items.iter().any(|i| {
             matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "CLI"))
-                || matches!(i, Item::Func(f) if f.is_task)
+                || matches!(i, Item::Func(f) if f.is_job)
         })
     }) {
         used_core.insert("core.args::spec".to_string());

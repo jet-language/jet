@@ -207,7 +207,7 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): run one `#Job fn` by name,
 /// the same way `run_checked` runs `fn run()` — the `jet dev` consumer
 /// (`Source/CmdDevTools.rs`'s due-job tick) calls this to invoke a scheduled
-/// job automatically. The caller has already filtered to `Func::is_task`
+/// job automatically. The caller has already filtered to `Func::is_job`
 /// fns pulled from this same checked bundle, so a missing name here is an
 /// internal-tooling mismatch, not a source error.
 pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
@@ -348,8 +348,8 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
         .items
         .iter()
         .filter_map(|item| match item {
-            Item::Func(f) if f.is_task => {
-                if f.task_metadata.as_ref().and_then(|metadata| {
+            Item::Func(f) if f.is_job => {
+                if f.job_metadata.as_ref().and_then(|metadata| {
                     metadata
                         .skip
                         .as_ref()
@@ -513,9 +513,9 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
         .items
         .iter()
         .filter_map(|item| match item {
-            Item::Func(function) if function.is_task => {
+            Item::Func(function) if function.is_job => {
                 let scope = match function
-                    .task_metadata
+                    .job_metadata
                     .as_ref()
                     .map(|metadata| metadata.scope)
                     .unwrap_or_default()
@@ -976,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn resident_jit_safe_task_examples() {
+    fn resident_jit_safe_job_examples() {
         // resident_jit_safe_bundle_detail walks large concurrency TIR graphs;
         // default test threads overflow after Epoch 3 JIT ratchet growth.
         std::thread::Builder::new()
@@ -1008,8 +1008,8 @@ mod tests {
                     assert!(detail.is_empty(), "{file} must be resident-safe: {detail}");
                 }
             })
-            .expect("spawn resident_jit_safe_task_examples thread")
+            .expect("spawn resident_jit_safe_job_examples thread")
             .join()
-            .expect("resident_jit_safe_task_examples thread panicked");
+            .expect("resident_jit_safe_job_examples thread panicked");
     }
 }

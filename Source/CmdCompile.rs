@@ -1116,7 +1116,7 @@ struct JobListing {
     name: String,
     doc: Option<String>,
     schedule: Option<String>,
-    metadata: Option<jet::AST::TaskMetadata>,
+    metadata: Option<jet::AST::JobMetadata>,
 }
 
 fn marker_string(marker: &jet::AST::Marker) -> Option<String> {
@@ -1159,7 +1159,7 @@ fn list_job_names(src: &str) -> Result<Vec<JobListing>, Vec<jet::Diagnostics::Di
         .items
         .iter()
         .filter_map(|i| match i {
-            jet::AST::Item::Func(f) if f.is_task => {
+            jet::AST::Item::Func(f) if f.is_job => {
                 let doc = prog
                     .applied_rules
                     .iter()
@@ -1172,7 +1172,7 @@ fn list_job_names(src: &str) -> Result<Vec<JobListing>, Vec<jet::Diagnostics::Di
                     name: f.name.clone(),
                     doc,
                     schedule: f.every.as_ref().and_then(schedule_text),
-                    metadata: f.task_metadata.clone(),
+                    metadata: f.job_metadata.clone(),
                 })
             }
             _ => None,

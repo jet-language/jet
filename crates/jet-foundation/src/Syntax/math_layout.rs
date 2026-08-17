@@ -706,7 +706,7 @@ pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 /// reuse — they already name Jet's built-in entry points (`fn run`/`fn dev`/
 /// `fn build`/`fn test`/`fn bench`).
 /// Sema rejects a collision as E0928.
-pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test", "bench"];
+pub const JOB_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test", "bench"];
 
 /// D-JOB-SUBCMD1=C: bare names reserved by Jet's command and flag surface.
 /// Job dispatch claims the first argv word before ordinary CLI parsing.

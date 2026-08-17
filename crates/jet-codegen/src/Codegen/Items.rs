@@ -1349,7 +1349,7 @@ fn emit_job_dispatch(
     let jobs: Vec<&Func> = items
         .iter()
         .filter_map(|item| match item {
-            Item::Func(function) if function.is_task => Some(function),
+            Item::Func(function) if function.is_job => Some(function),
             _ => None,
         })
         .collect();
@@ -1362,7 +1362,7 @@ fn emit_job_dispatch(
         let wrapper = mangle_generated(&format!("job_{}", function.name));
         emit_job_wrapper(cx, items, cli_items, function, &wrapper, out);
         let scope = match function
-            .task_metadata
+            .job_metadata
             .as_ref()
             .map(|metadata| metadata.scope)
             .unwrap_or_default()

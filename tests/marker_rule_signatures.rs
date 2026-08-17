@@ -253,22 +253,22 @@ fn task_metadata_binds_typed_platform_skip_limits_and_formats_stably() {
             .expect("build task");
         assert!(matches!(
             function
-                .task_metadata
+                .job_metadata
                 .as_ref()
                 .and_then(|metadata| metadata.skip.as_ref()),
-            Some(jet::AST::TaskSkip::UnlessPlatform { platform: actual })
+            Some(jet::AST::JobSkip::UnlessPlatform { platform: actual })
                 if actual == platform
         ));
         assert_eq!(
             function
-                .task_metadata
+                .job_metadata
                 .as_ref()
                 .and_then(|metadata| metadata.limits.get("cpu"))
                 .map(String::as_str),
             Some("2")
         );
         let skip = function
-            .task_metadata
+            .job_metadata
             .as_ref()
             .and_then(|metadata| metadata.skip.as_ref())
             .expect("typed task skip");

@@ -35,7 +35,7 @@ pub use items::{
     ImageFieldValue, FleetLit, FleetField, FleetFieldValue, HostEntry, VmTestLit, VmTestField,
     VmTestFieldValue, PerfLit, CompileWorkloadDecl, ProfileLit, BudgetDecl, BudgetField, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
     ProtocolDecl, StateDecl, EffectDecl, MarkerDecl, MarkerDeclParam, MarkerTextDecl, FactDecl, DeriveDef, DeriveBodyItem, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
-    TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, JobScope, TaskMetadata, TaskSkip, TaskCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
+    TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, JobScope, JobMetadata, JobSkip, JobCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
     DEFAULT_MEMO_BOUND, memo_bound_from_markers,
     type_is_app, app_entry_run_fn, bundle_serves_until_stopped,
     EveryArg, EverySchedule, EveryScheduleError, Param, ParamZone, StructLayout, CEnumTag,

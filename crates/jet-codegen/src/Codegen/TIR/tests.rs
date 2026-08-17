@@ -232,7 +232,7 @@
         assert_eq!(runs.len(), 1, "sema must materialize exactly one ordinary run");
         let run = runs[0];
         assert!(run.params.is_empty(), "implicit run must have no parameters");
-        assert!(!run.is_task && !run.is_unsafe && !run.is_reactive);
+        assert!(!run.is_job && !run.is_unsafe && !run.is_reactive);
         assert!(matches!(
             &run.return_type,
             Some(Type::Result { ok, err })
