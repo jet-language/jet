@@ -3489,7 +3489,10 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
     // counted, so the number can only shrink. A bare skip list is what let
     // stems leave a gate's universe unnoticed; a ceiling makes leaving cost a
     // reviewed edit. Raising this is not a fix — drive the stem instead.
-    const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
+    //
+    // #2013: the constant moved to module scope because the LEDGER needs the
+    // same ceiling as this live observation, and two copies of one ceiling is
+    // how a ledger drifts away from what was observed (AGENTS.md I8).
     let excluded = records
         .iter()
         .filter(|record| record.class == CorpusGateClass::GateExcluded)
@@ -3568,7 +3571,19 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          # Every top-level examples/features/<topic>/*.jet appears in exactly one section.\n\
          # Update only for intentional ratchet moves.\n\
          # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green\n\
-         # examples that fail default jet run. Record stem + diagnostic code only.\n\n",
+         # examples that fail default jet run. Record stem + diagnostic code only.\n\
+         #\n\
+         # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR\n\
+         # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many\n\
+         # stems this file classifies and how many it still says nothing about; both live\n\
+         # outside this file so a hand-edit cannot green the check by deleting the row that\n\
+         # fails. Rows may only GROW, unclassified stems may only SHRINK, and\n\
+         # tests/dev_corpus_gate.rs::corpus_gate_manifest_accounts_for_every_example checks\n\
+         # both with no run at all.\n\
+         #\n\
+         # Never hand-write a classification: a row states an OBSERVED tier. Regenerate with\n\
+         #   JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate \\\n\
+         #     example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture\n\n",
     );
     let classes = [
         CorpusGateClass::FrontendRejected,
@@ -3694,6 +3709,259 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
     }
     records.sort_by(|left, right| left.stem.cmp(&right.stem));
     records
+}
+
+/// How many stems `tests/jit_corpus_gate.txt` must classify (#2013).
+///
+/// A floor: rows may only GROW. The file states its own invariant — "Every
+/// top-level examples/features/<topic>/*.jet appears in exactly one section" —
+/// and until #2013 nothing outside the expensive gate checked it. On 2026-08-16
+/// the file held 374 rows against a 496-stem corpus: 122 stems had no row in ANY
+/// section, `tooling/data_plot` among them, while open cards cited its
+/// `resident_jit:` rows as current evidence about which tier runs a stem.
+///
+/// This lives here, outside the file it guards, for the same reason
+/// `COMPILE_COVERED_FLOOR` does: a hand-edit cannot green the ledger by deleting
+/// the row that fails. A row that LEAVES is either a deleted example — lower this
+/// in the same diff as the deletion — or the defect this pins.
+const CORPUS_GATE_ROW_FLOOR: usize = 374;
+
+/// How many examples the gate ledger is still allowed to say nothing about (#2013).
+///
+/// Shrink-only, exactly like `OUT_OF_UNIVERSE_CEILING` and for the same reason:
+/// every stem counted here is a stem no section names, so no reader can tell
+/// whether it runs resident, deopts, or fails. The count is DERIVED from the
+/// corpus walk on every run and never an allowlist, so a new example without a
+/// row raises it and fails. Burn it down with a regeneration run; raising it is
+/// not a fix.
+const CORPUS_GATE_UNCLASSIFIED_CEILING: usize = 122;
+
+/// How many stems the corpus gate may exclude outright (#2016 / #1998 / #2013).
+///
+/// One constant for two readers: `collect_corpus_gate_records` applies it to the
+/// live classification, `assert_corpus_gate_manifest_covers_corpus` applies it to
+/// the checked-in ledger. Exclusions may only SHRINK.
+const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
+
+/// The gate ledger's own stated invariant, asserted without an observed run (#2013).
+///
+/// The gate that owns `tests/jit_corpus_gate.txt` needs a Cranelift host and an
+/// AOT build per stem, and it returns green early where the host is unsupported,
+/// so the completeness of that file was only ever checked behind ~500
+/// classifications. This check reads the ledger and walks
+/// `examples/features/<topic>/`, nothing more, so a stem that falls out of every
+/// section fails on any host in milliseconds.
+///
+/// State the polarity plainly, because both directions are bugs:
+///
+/// - `CORPUS_GATE_ROW_FLOOR` may only grow — a vanished row is a stem that left
+///   the ledger.
+/// - `CORPUS_GATE_UNCLASSIFIED_CEILING` may only shrink — a stem with no row is
+///   a claim nobody made.
+///
+/// Nothing here decides which section a stem belongs in. This check cannot and
+/// must not classify: a classification needs an observed run, and the rows this
+/// file's sibling `tests/jit_gaps.txt` carries were falsified three times by
+/// exactly the hand-edit that guessing here would invite. Regenerate the rows
+/// from an observation:
+///
+/// ```text
+/// JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 \
+///   cargo test --test dev_corpus_gate example_corpus_strict_jit_aot_differential_gate \
+///   -- --exact --nocapture
+/// ```
+fn assert_corpus_gate_manifest_covers_corpus() {
+    let manifest = parse_corpus_gate_manifest();
+    let corpus = all_example_stems();
+    let audit = audit_corpus_gate_ledger(&manifest, &corpus);
+
+    // Printed on every run, pass or fail, for the same reason `jit_coverage_audit`
+    // prints its unjudged stems: the denominator is stated, never implied.
+    eprintln!(
+        "corpus gate ledger: {} of {} stem(s) classified; {} stem(s) in no section:",
+        audit.classified,
+        corpus.len(),
+        audit.unclassified.len()
+    );
+    for stem in &audit.unclassified {
+        eprintln!("  {stem}");
+    }
+
+    // Named apart, and named first: the gate's blob compare reports the first
+    // diverging record, so a row naming a file that does not exist reads exactly
+    // like a classification that changed. That is how the nonexistent stem
+    // `tooling/data_line` held a battery down for ten days.
+    assert!(
+        audit.ghosts.is_empty(),
+        "tests/jit_corpus_gate.txt names {} stem(s) with no \
+         examples/features/<topic>/<name>.jet file: {:?}. A nonexistent stem is a stale row to \
+         delete, never a classification that failed.",
+        audit.ghosts.len(),
+        audit.ghosts
+    );
+    assert!(
+        audit.duplicated.is_empty(),
+        "{} stem(s) appear in more than one section of tests/jit_corpus_gate.txt, breaking that \
+         file's own invariant that every top-level example appears in exactly one:\n{}",
+        audit.duplicated.len(),
+        audit.duplicated.join("\n")
+    );
+
+    // #2016 + #1998 rule applied to the ledger, not only to the live
+    // observation: a stem held out of the run tier carries a named reason AND is
+    // counted. `classify_corpus_stem` never emits one of those classes with an
+    // empty detail, so a bare stem in one of those sections is a hand-edit.
+    assert!(
+        audit.reasonless.is_empty(),
+        "{} row(s) in tests/jit_corpus_gate.txt hold a stem out of the run tier without saying \
+         why:\n{}\nA stem held out states its reason, or it is not held out — it is hidden.",
+        audit.reasonless.len(),
+        audit.reasonless.join("\n")
+    );
+
+    // The pin is an identity against the corpus, not a bare row count. With no
+    // ghosts and no duplicates, classified + unclassified IS the corpus, so
+    // neither pin below can be satisfied by moving a stem out of the accounting.
+    assert_eq!(
+        audit.classified + audit.unclassified.len(),
+        corpus.len(),
+        "gate ledger accounting is broken: {} classified + {} unclassified != {} discovered \
+         stem(s). The pins below only mean something while this identity holds.",
+        audit.classified,
+        audit.unclassified.len(),
+        corpus.len()
+    );
+    assert!(
+        corpus.len() >= EXAMPLE_CORPUS_FLOOR,
+        "the example corpus shrank to {} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem leaving \
+         `examples/features/<topic>/` shrinks every claim this ledger makes: restore it, or \
+         lower the floor in the same diff as the deletion.",
+        corpus.len()
+    );
+    assert!(
+        audit.classified >= CORPUS_GATE_ROW_FLOOR,
+        "tests/jit_corpus_gate.txt classifies {} stem(s) but the ratchet floor is \
+         {CORPUS_GATE_ROW_FLOOR}; rows may only GROW. A stem that lost its row did not change \
+         class — it left the ledger, and every card citing this file then cites a silence. \
+         Regenerate from an observed run; lower the floor only in the same diff as a deleted \
+         example.",
+        audit.classified
+    );
+    assert!(
+        audit.unclassified.len() <= CORPUS_GATE_UNCLASSIFIED_CEILING,
+        "{} example(s) appear in NO section of tests/jit_corpus_gate.txt (ceiling \
+         {CORPUS_GATE_UNCLASSIFIED_CEILING}), breaking that file's own invariant that every \
+         top-level example appears in exactly one:\n  {}\nThis count may only FALL. Regenerate \
+         the manifest from an observed run; a missing row is not a class change, and guessing \
+         one by hand is how the sibling ledger was falsified three times.",
+        audit.unclassified.len(),
+        audit.unclassified.join("\n  ")
+    );
+    assert!(
+        !audit.unclassified.is_empty() || CORPUS_GATE_UNCLASSIFIED_CEILING == 0,
+        "every example now carries a row: set CORPUS_GATE_UNCLASSIFIED_CEILING to 0 in the same \
+         diff, so the hole cannot reopen unnoticed"
+    );
+    assert!(
+        audit.excluded <= CORPUS_GATE_EXCLUDED_CEILING,
+        "tests/jit_corpus_gate.txt excludes {} stem(s) but the ceiling is \
+         {CORPUS_GATE_EXCLUDED_CEILING}; exclusions may only SHRINK. Drive the stem instead of \
+         excluding it, or lower the ceiling in the same reviewed diff",
+        audit.excluded
+    );
+}
+
+/// What the ledger accounts for, and what it does not (#2013).
+struct CorpusGateLedgerAudit {
+    /// Distinct stems the ledger names, each of which exists on disk.
+    classified: usize,
+    /// Rows in `gate_excluded:` — the same ceiling the live observation applies.
+    excluded: usize,
+    /// Rows naming a file that is not there.
+    ghosts: Vec<String>,
+    /// Stems named by more than one section, with the sections that claim them.
+    duplicated: Vec<String>,
+    /// Discovered examples no section names at all.
+    unclassified: Vec<String>,
+    /// Held-out rows with an empty reason.
+    reasonless: Vec<String>,
+}
+
+/// The whole law as a pure function, so a negative control can prove it fires.
+///
+/// `assert_corpus_gate_manifest_covers_corpus` is the only caller that reads the
+/// real ledger; this half takes both sides as arguments so
+/// `corpus_gate_ledger_audit_fires_on_a_missing_row` can hand it a corpus with a
+/// stem the manifest forgot. Without that, "the ledger is complete" would rest on
+/// an assertion nothing ever watched fail — which is exactly how the sibling
+/// ledger stayed green through three falsifications (#1509 c4 keeps the same
+/// negative control over `ledger_conflicts`).
+fn audit_corpus_gate_ledger(
+    manifest: &[CorpusGateRecord],
+    corpus: &[String],
+) -> CorpusGateLedgerAudit {
+    let discovered: std::collections::HashSet<&str> =
+        corpus.iter().map(String::as_str).collect();
+
+    // "exactly one section" has two halves, and nothing checked this one, so a
+    // regeneration that appended instead of replacing would read as agreement
+    // for whichever copy sorted first.
+    let mut sections: std::collections::BTreeMap<&str, Vec<&'static str>> =
+        std::collections::BTreeMap::new();
+    for record in manifest {
+        sections
+            .entry(record.stem.as_str())
+            .or_default()
+            .push(corpus_gate_section_name(&record.class));
+    }
+
+    let ghosts: Vec<String> = sections
+        .keys()
+        .filter(|stem| !discovered.contains(**stem))
+        .map(|stem| (*stem).to_string())
+        .collect();
+    let duplicated: Vec<String> = sections
+        .iter()
+        .filter(|(_, listed)| listed.len() > 1)
+        .map(|(stem, listed)| format!("  {stem}: {}", listed.join(", ")))
+        .collect();
+    let unclassified: Vec<String> = corpus
+        .iter()
+        .filter(|stem| !sections.contains_key(stem.as_str()))
+        .cloned()
+        .collect();
+    let reasonless: Vec<String> = manifest
+        .iter()
+        .filter(|record| {
+            matches!(
+                record.class,
+                CorpusGateClass::FrontendRejected
+                    | CorpusGateClass::GateExcluded
+                    | CorpusGateClass::NonRunnable
+                    | CorpusGateClass::ExpectedExit
+                    | CorpusGateClass::RunTierBroken
+            ) && record.detail.is_empty()
+        })
+        .map(|record| {
+            format!(
+                "  {}: in `{}:` with no reason",
+                record.stem,
+                corpus_gate_section_name(&record.class)
+            )
+        })
+        .collect();
+
+    CorpusGateLedgerAudit {
+        classified: sections.len() - ghosts.len(),
+        excluded: manifest
+            .iter()
+            .filter(|record| record.class == CorpusGateClass::GateExcluded)
+            .count(),
+        ghosts,
+        duplicated,
+        unclassified,
+        reasonless,
+    }
 }
 
 fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
