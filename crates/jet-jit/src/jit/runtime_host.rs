@@ -2712,10 +2712,19 @@ fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value as u64))
 }
 
+/// D-FAIL-CONV2=A: the refusal carries `RangeError`'s own reason, straight from
+/// the Prelude duration kernel, so the resident `RangeError` value is the same
+/// text AOT's `RangeError { reason }.jet_show()` gives. It used to be an empty
+/// zero payload, which had nothing for `{err}` to read.
 fn jet_jit_duration_from_int(value: i64, scale: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_from_int(value, scale) {
         Some(ms) => alloc_jit_result(rt, true, ms as u64),
-        None => alloc_jit_result(rt, false, 0),
+        None => {
+            let reason = rt
+                .heap
+                .alloc_string(duration_kernel::jet_duration_kernel_int_error_reason().to_string());
+            alloc_jit_result(rt, false, reason as u64)
+        }
     })
 }
 
@@ -2723,7 +2732,12 @@ fn jet_jit_duration_from_float(value: f64, scale: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         match duration_kernel::jet_duration_kernel_from_float(value, scale) {
             Some(value) => alloc_jit_result(rt, true, value as u64),
-            None => alloc_jit_result(rt, false, 0),
+            None => {
+                let reason = rt.heap.alloc_string(
+                    duration_kernel::jet_duration_kernel_float_error_reason().to_string(),
+                );
+                alloc_jit_result(rt, false, reason as u64)
+            }
         }
     })
 }

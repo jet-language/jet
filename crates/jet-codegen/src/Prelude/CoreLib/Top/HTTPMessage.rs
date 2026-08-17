@@ -122,6 +122,57 @@ fn jet_http_error_surface_parts(error: JetHTTPError) -> JetHTTPErrorSurfaceParts
     }
 }
 
+/// `true` when `jet_http_error_surface_parts` gives this ordinal a `Text`
+/// payload. An engine holding only the marshalled bits asks here instead of
+/// keeping its own copy of which variants carry a string.
+fn jet_http_error_surface_payload_is_text(ordinal: i64) -> bool {
+    (9..=19).contains(&ordinal)
+}
+
+/// The inverse of `jet_http_error_surface_parts`: rebuild the surface variant
+/// from the marshalled ordinal and its single payload, then render it through
+/// the one `Display` impl above.
+///
+/// D-FAIL-CONV2=A / I9: a resident tier that holds the packed carrier renders
+/// `{err}` by calling this, so the wording lives once — here — and the JIT, the
+/// interpreter and AOT cannot disagree about it.
+fn jet_http_error_surface_show(ordinal: i64, int_payload: i64, text_payload: &str) -> String {
+    let text = || text_payload.to_string();
+    let error = match ordinal {
+        0 => JetHTTPError::InvalidMethod,
+        1 => JetHTTPError::InvalidUrl,
+        2 => JetHTTPError::InvalidHeader,
+        3 => JetHTTPError::InvalidStatus,
+        4 => JetHTTPError::BodyConsumed,
+        5 => JetHTTPError::InvalidFraming,
+        6 => JetHTTPError::UnsupportedEncoding,
+        7 => JetHTTPError::Cancelled,
+        8 => JetHTTPError::BodyTooLarge { limit: int_payload },
+        9 => JetHTTPError::Resolve { host: text() },
+        10 => JetHTTPError::Connect { address: text() },
+        11 => JetHTTPError::TLS { stage: text() },
+        12 => JetHTTPError::Timeout { phase: text() },
+        13 => JetHTTPError::Proxy { stage: text() },
+        14 => JetHTTPError::Redirect { reason: text() },
+        15 => JetHTTPError::Protocol { version: text() },
+        16 => JetHTTPError::IO { operation: text() },
+        17 => JetHTTPError::Policy { reason: text() },
+        18 => JetHTTPError::ResourceUnavailable { resource: text() },
+        20 => JetHTTPError::UnsupportedTarget {
+            operation: match int_payload {
+                0 => JetHTTPOperation::ClientConnect,
+                1 => JetHTTPOperation::ServerBind,
+                _ => JetHTTPOperation::ServeListener,
+            },
+        },
+        // Ordinal 19 (`Internal`) lands here on its own text payload; any other
+        // ordinal means an engine handed back bits no `surface_parts` arm mints,
+        // which is an engine fault, never a user failure.
+        _ => JetHTTPError::Internal { incident_id: text() },
+    };
+    <JetHTTPError as JetDisplay>::jet_display(&error)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetHTTPMethod(String);
 

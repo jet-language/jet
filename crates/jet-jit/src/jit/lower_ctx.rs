@@ -9185,6 +9185,12 @@ impl LowerCtx<'_, '_> {
             Type::Apply { name, .. } if name == "KeyRef" => {
                 Ok(self.call_host(self.host.crypto.vault_key_ref_show, &[value]))
             }
+            // D-FAIL-CONV2=A: one route for the Core error family. `print(err)`
+            // and `"{err}"` both arrive here, and every carrier resolves to the
+            // Prelude display AOT calls, so no tier renders its own wording (I9).
+            Type::Named(name) if super::types_meta::core_error_carrier(name).is_some() => {
+                self.lower_core_error_show(value, name)
+            }
             Type::Named(name) => self.lower_jet_show_named_value(value, &ty, name),
             Type::Apply { name, .. } => self.lower_jet_show_named_value(value, &ty, name),
             Type::Tuple(_) => {
@@ -9195,6 +9201,35 @@ impl LowerCtx<'_, '_> {
             Type::Union(members) => self.lower_jet_show_union_value(value, members),
             other => Err(format!("jit JetShow type unsupported: {other:?}")),
         }
+    }
+
+    /// D-FAIL-CONV2=A: render one member of the Core error family. Each arm is a
+    /// marshalling shape (`types_meta::core_error_carrier`) over the SAME Prelude
+    /// display AOT emits for `{err}`; this lowering never formats the failure
+    /// itself (I9).
+    fn lower_core_error_show(
+        &mut self,
+        value: Value,
+        type_name: &str,
+    ) -> Result<Value, String> {
+        use super::types_meta::CoreErrorCarrier;
+        let carrier = super::types_meta::core_error_carrier(type_name)
+            .ok_or_else(|| format!("jit core error carrier unknown: {type_name}"))?;
+        Ok(match carrier {
+            // The host already rendered the Prelude text, so the resident value
+            // IS that string.
+            CoreErrorCarrier::Message => value,
+            CoreErrorCarrier::Encoding => {
+                self.call_host(self.host.encoding.encoding_error_show, &[value])
+            }
+            CoreErrorCarrier::Data => self.call_host(self.host.data.error_show, &[value]),
+            CoreErrorCarrier::PackedNet => {
+                self.call_host(self.host.net_http.net_error_show, &[value])
+            }
+            CoreErrorCarrier::PackedHttp => {
+                self.call_host(self.host.net_http.http_error_show, &[value])
+            }
+        })
     }
 
     fn lower_civil_show_value(&mut self, value: Value) -> Value {
@@ -10361,9 +10396,13 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(push_ref, &[buf_id, text]);
                 return Ok(());
             }
-            if type_name == "EncodingError" {
+            // D-FAIL-CONV2=A / I8: the rest of the Core error family renders
+            // through the one shared show route `print` takes — AOT emits
+            // `print(x)` as `({x}).jet_show()`, and `"{x}"` lowers to the same
+            // display — instead of a rung per carrier here.
+            if super::types_meta::core_error_carrier(type_name).is_some() {
                 let recv = self.lower_expr(expr)?;
-                let text = self.call_host(self.host.encoding.encoding_error_show, &[recv]);
+                let text = self.lower_core_error_show(recv, type_name)?;
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -10377,15 +10416,6 @@ impl LowerCtx<'_, '_> {
                     .ins()
                     .iconst(types::I64, i64::from(type_name == "GameSound"));
                 let text = self.call_host(self.host.game.asset_show, &[kind, recv]);
-                let push_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_push_str, self.b.func);
-                self.b.ins().call(push_ref, &[buf_id, text]);
-                return Ok(());
-            }
-            if type_name == "DataError" {
-                let recv = self.lower_expr(expr)?;
-                let text = self.call_host(self.host.data.error_show, &[recv]);
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);

@@ -1641,8 +1641,59 @@ pub(crate) fn core_alias_leaf(type_name: &str) -> Option<&str> {
     let (_, leaf) = type_name.rsplit_once('.')?;
     let known = CORE_STRUCTS.contains_key(leaf)
         || PRELUDE_ENUM_VARIANTS.contains_key(leaf)
+        || core_error_carrier_declared(leaf).is_some()
         || jet_foundation::StructuralDebug::jet_debug_field_metadata(leaf).is_some();
     known.then_some(leaf)
+}
+
+/// How the resident tier CARRIES a member of the Core error family that reaches
+/// the shared show route (D-FAIL-CONV2=A). This is a marshalling fact about the
+/// JIT host ABI, not a second rendering rule: every arm resolves to the Prelude
+/// symbol AOT calls, so the failure text still lives once, in the Prelude (I9).
+///
+/// `IOError` is deliberately absent: its packed carrier already renders through
+/// the shared packed-enum projection (`Collections::show_packed_enum` calling
+/// `jet_foundation`'s `jet_show_io_error`), which both `print` and interpolation
+/// reach today.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CoreErrorCarrier {
+    /// The host already rendered the Prelude failure text and the resident value
+    /// IS that string handle (`Marshal::result_err_msg` and the hosts that inline
+    /// it). `UTF8Error` has no resident producer yet and joins on the same shape,
+    /// because its `jet_show` is its `message` too.
+    Message,
+    /// `EncodingError`'s resident record, read by `encoding_error_show`.
+    Encoding,
+    /// `DataError`'s resident record, read by `data.error_show`.
+    Data,
+    /// `detail_record << 8 | ordinal` (`marshal_net_error`).
+    PackedNet,
+    /// `payload << 8 | ordinal` (`marshal_http_error`).
+    PackedHttp,
+}
+
+/// The carrier for a family member named by its DECLARED Prelude leaf.
+fn core_error_carrier_declared(type_name: &str) -> Option<CoreErrorCarrier> {
+    Some(match type_name {
+        "EncodingError" => CoreErrorCarrier::Encoding,
+        "DataError" => CoreErrorCarrier::Data,
+        "NetError" => CoreErrorCarrier::PackedNet,
+        "HTTPError" => CoreErrorCarrier::PackedHttp,
+        // Every other member reaches the resident tier as the message its host
+        // already rendered from the Prelude: `json_decode`, `env_set`,
+        // `text_display_width_policy`, the DB hosts, `browser_profile`, the Ws
+        // hosts, and `duration_from_int`/`_from_float`.
+        "BrowserError" | "DBError" | "EnvError" | "JSONError" | "RangeError" | "TextError"
+        | "UTF8Error" | "WsError" => CoreErrorCarrier::Message,
+        _ => return None,
+    })
+}
+
+/// The carrier for a family member under either spelling: `encoding.EncodingError`
+/// through an import alias answers as the declared leaf, the same way every other
+/// Core view resolves a dotted name.
+pub(crate) fn core_error_carrier(type_name: &str) -> Option<CoreErrorCarrier> {
+    core_error_carrier_declared(core_prelude_key(type_name))
 }
 
 /// Declaration-ordered field names of a Prelude struct.
