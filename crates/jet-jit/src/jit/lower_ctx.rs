@@ -5899,9 +5899,16 @@ impl LowerCtx<'_, '_> {
                             reader_type,
                         )?;
                         return Ok(());
-                    } else if *columnar {
-                        return Err("jit for-in columnar unsupported".to_string());
                     }
+                    // D-SOA-TIER1=A: `columnar` is deliberately NOT consulted
+                    // for the list walk below. This tier holds a columnar list as
+                    // its logical rows, so iteration IS the plain list walk and
+                    // yields each logical `S` — the same polarity the interpreter
+                    // ambient has, which is what makes the layout invisible to the
+                    // loop (D-SOA2D). The one place the layout is real is a read,
+                    // and a read goes through the shared Prelude store
+                    // (`lower_columnar_gather`), never through a second walk here.
+                    //
                     // `by_value` is set for Stream / Iter / HTTPBodyChunks / moved
                     // lists of non-Clone handles. JIT walks materialized list
                     // handles (including by-value List/FixedList); true JetIter /
@@ -11955,6 +11962,41 @@ impl LowerCtx<'_, '_> {
             self.adopt_compute_resource(v, handle);
         }
         Ok(handle)
+    }
+
+    /// D-SOA1 / D-SOA-TIER1=A: `xs[i]` on a `#Layout(columnar)` list.
+    ///
+    /// The Cranelift tier holds a columnar list as its logical rows, so the
+    /// literal, `len`, `is_empty`, `push` and iteration are the plain list
+    /// operations — the same polarity the interpreter ambient has, and what keeps
+    /// the layout observationally invisible (D-SOA2D). The reads the layout
+    /// itself defines are the exception: they go through THE shared Prelude
+    /// column store in `jet_jit_columnar_gather`, so the store, the row
+    /// bookkeeping, the bounds selection and the wording are the Prelude's here
+    /// exactly as they are in emitted AOT code (I9).
+    ///
+    /// Both columnar reads come through this one lowering: the whole-record read
+    /// returns the gathered record, and the fused `xs[i].field` read indexes it
+    /// with the column number the store was built with. One gather, not one per
+    /// read shape (I8).
+    fn lower_columnar_gather(
+        &mut self,
+        base: &TExpr,
+        index: &TExpr,
+        line: usize,
+    ) -> Result<Value, String> {
+        let list = self.lower_expr(base)?;
+        let at = self.lower_expr(index)?;
+        if self.b.func.dfg.value_type(at) != types::I64 {
+            return Err(format!(
+                "jit columnar index ABI unsupported: {:?}",
+                index.ty
+            ));
+        }
+        let line = self.b.ins().iconst(types::I32, line as i64);
+        let record = self.call_host(self.host.coll.columnar_gather, &[list, at, line]);
+        self.emit_trap_check()?;
+        Ok(record)
     }
 
     /// Materialize one comptime-folded value.
@@ -19136,15 +19178,32 @@ impl LowerCtx<'_, '_> {
                 })
             }
             TExprKind::ListSpread { parts } => self.lower_list_spread(&expr.ty, parts),
-            TExprKind::ColumnarListLit { .. } => {
+            // D-SOA-TIER1=A: the columnar list literal builds the same logical
+            // rows a plain `[S]` literal builds, because that is how this tier
+            // holds a columnar list; the layout lives in the shared Prelude store
+            // the two reads below go through, not in a second list carrier here.
+            TExprKind::ColumnarListLit { elems, .. } => self.lower_list_lit(&expr.ty, elems),
+            TExprKind::ColumnarGather { base, index, line } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    Err("jit columnar list literal unsupported".to_string())
+                    self.lower_columnar_gather(base, index, *line)
                 })
             }
-            TExprKind::ColumnarGather { .. } => Err("jit columnar gather unsupported".to_string()),
-            TExprKind::ColumnarColumnRead { .. } => {
+            TExprKind::ColumnarColumnRead {
+                base,
+                index,
+                column,
+                line,
+                ..
+            } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    Err("jit columnar column read unsupported".to_string())
+                    // The fused `xs[i].field` read: the shared store's gather,
+                    // then the ONE record-slot accessor table the JIT already
+                    // uses for a struct field. `column` is the field's position
+                    // in declared stored-field order, which is exactly this
+                    // tier's record slot order, so no second numbering is
+                    // introduced and the field cannot silently shift (I8).
+                    let record = self.lower_columnar_gather(base, index, *line)?;
+                    self.record_slot(record, *column, &expr.ty)
                 })
             }
             TExprKind::IndexHook {
