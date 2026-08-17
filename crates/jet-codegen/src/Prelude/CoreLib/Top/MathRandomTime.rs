@@ -538,82 +538,13 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
     out
 }
 
-// D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing.
-// Parses `text`, then walks the result. Any JSON string that looks like a
-// number or boolean is coerced to that type; one log line is emitted per
-// coercion naming the field and the from→to types. The coerced value collapses
-// onto `Data` (D-ENC-DYN1=A+).
+// D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing. The
+// walk, the coercion message and the audit-line shape are ONE policy in
+// `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
+// used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
+// owns: the process's own stderr.
 fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
-    let parsed = jet_std::parse_json(text)?;
-    Ok(jet_std::datatree_from_json(&jet_std_json_coerce_walk(
-        &parsed, "",
-    )))
-}
-
-fn jet_std_json_coerce_walk(value: &jet_std::JSON, path: &str) -> jet_std::JSON {
-    match value {
-        jet_std::JSON::Text(s) => {
-            // try bool first (exact match only)
-            if s == "true" {
-                jet_std_json_emit_coerce(path, "string", "boolean");
-                return jet_std::JSON::Boolean(true);
-            }
-            if s == "false" {
-                jet_std_json_emit_coerce(path, "string", "boolean");
-                return jet_std::JSON::Boolean(false);
-            }
-            // try number (must parse as valid f64 and round-trip cleanly)
-            if let Ok(n) = s.parse::<f64>() {
-                if n.is_finite() {
-                    jet_std_json_emit_coerce(path, "string", "number");
-                    return jet_std::JSON::Number(n);
-                }
-            }
-            value.clone()
-        }
-        jet_std::JSON::Object(entries) => {
-            let mut out = std::collections::BTreeMap::new();
-            for (k, v) in entries {
-                let child_path = if path.is_empty() {
-                    format!("{}", k)
-                } else {
-                    format!("{}.{}", path, k)
-                };
-                out.insert(k.clone(), jet_std_json_coerce_walk(v, &child_path));
-            }
-            jet_std::JSON::Object(out)
-        }
-        jet_std::JSON::Array(items) => {
-            let coerced: Vec<jet_std::JSON> = items
-                .iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    let child_path = if path.is_empty() {
-                        format!("[{}]", i)
-                    } else {
-                        format!("{}[{}]", path, i)
-                    };
-                    jet_std_json_coerce_walk(v, &child_path)
-                })
-                .collect();
-            jet_std::JSON::Array(coerced)
-        }
-        // Null, Boolean, Number — already the right type, no coercion.
-        other => other.clone(),
-    }
-}
-
-fn jet_std_json_emit_coerce(path: &str, from: &str, to: &str) {
-    let field_label = if path.is_empty() { "<root>" } else { path };
-    let msg = format!(
-        "json coerce: field \"{}\" {} \u{2192} {}",
-        field_label, from, to
-    );
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    eprintln!("{{\"level\":\"info\",\"body\":\"{}\",\"ts\":{}}}", msg, ts);
+    jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 
 fn jet_string_bytes(s: &String) -> Vec<u8> {

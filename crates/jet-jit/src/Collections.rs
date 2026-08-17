@@ -1625,50 +1625,6 @@ fn jet_jit_range_equal(
     ) as i8
 }
 
-/// Element-kind preserving join (#1995 sibling).
-///
-/// The gate is float-capable: `TBuiltinOp::JoinSep` (`jit/safety.rs`) admits
-/// any `jit_list_native_type` receiver, and `lower_ctx.rs` lowers every one of
-/// them straight to this host. `clone_int_list` answers `None` on the first
-/// non-`Int` element, and the `ice!` behind it panicked inside this `extern
-/// "C"` frame — which aborts the process rather than reporting, because
-/// cranelift-jit registers no unwind information for the JIT frames below
-/// (#1997). Walk the arena per index instead, so a `[Float]` shows through the
-/// same shared renderer `print` uses.
-fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let Some(len) = rt.heap.list_len(list) else {
-            rt.set_host_fault("jit list join: bad list handle");
-            return 0;
-        };
-        let Some(sep) = rt.heap.clone_string(sep_id) else {
-            rt.set_host_fault("jit list join: bad separator handle");
-            return 0;
-        };
-        // Match AOT JoinSep: `iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(sep)`.
-        // String elements are heap handles; Int (and other non-string carriers) show as
-        // decimal — never trap. AOT already accepts `[Int].join(",")`. Float elements
-        // are `JetVal::Float`, shown by the same `jet_rt::display_f64` the JIT's
-        // `print` host uses, so the two agree by construction.
-        let parts: Vec<String> = (0..len)
-            .map(|index| {
-                if let Some(id) = rt.heap.list_get_int(list, index) {
-                    return rt
-                        .heap
-                        .clone_string(id)
-                        .unwrap_or_else(|| id.to_string());
-                }
-                if let Some(value) = rt.heap.list_get_float(list, index) {
-                    return jet_rt::display_f64(value);
-                }
-                String::new()
-            })
-            .collect();
-        let joined = parts.join(&sep);
-        rt.heap.alloc_string(joined)
-    })
-}
-
 fn jet_jit_map_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map())
 }
@@ -4947,7 +4903,6 @@ host_fns! {
     range_contains: "jet_jit_range_contains" => jet_jit_range_contains: sig_range_contains;
     range_show: "jet_jit_range_show" => jet_jit_range_show: sig_range_show;
     range_equal: "jet_jit_range_equal" => jet_jit_range_equal: sig_range_equal;
-    list_join_str: "jet_jit_list_join_str" => jet_jit_list_join_str: sig_join;
     loop_stride_check: "jet_jit_loop_stride_check" => jet_jit_loop_stride_check: sig_len;
     map_new: "jet_jit_map_new" => jet_jit_map_new: sig_new;
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
