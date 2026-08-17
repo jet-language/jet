@@ -1282,6 +1282,39 @@ fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
     })
 }
 
+/// D-SOA-TIER1=A / D-SOA1: THE read that pulls one record out of a
+/// `#Layout(columnar)` list on the Cranelift tier.
+///
+/// The tier holds a columnar list as its logical rows (D-SOA-TIER1=A), so this
+/// host marshals those rows into the shared Prelude column store and reads them
+/// with the Prelude's own `jet_columns_gather` — the same source AOT compiles
+/// and the same store the interpreter ambient builds. Nothing about the layout,
+/// the row bookkeeping, the bounds selection or the wording is decided here: a
+/// Cranelift host marshals, it does not re-encode policy (I9).
+///
+/// The gathered cells come back in column order, which is the declared
+/// stored-field order the arena already lays a record of that struct out in, so
+/// the row is rebuilt slot-for-slot and the fused field read can index it with
+/// the very column number the store was built with (I8: one numbering).
+fn jet_jit_columnar_gather(list: i64, idx: i64, line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(rows) = rt.heap.record_rows(list) else {
+            jet_foundation::ice!(None, "jit columnar gather: bad handle");
+        };
+        // Every row has one cell per stored field, so row 0 sizes the store; an
+        // empty list has no row and therefore no column, which is exactly the
+        // zero-row store the shared bounds stop reports against.
+        let width = rows.first().map_or(0, Vec::len);
+        match jet_codegen::columns::JetColumns::from_rows(width, rows).gather(idx) {
+            Ok(cells) => rt.heap.alloc_record_cells(cells),
+            Err(error) => {
+                rt.set_runtime_stop("E3010", line, &error.message());
+                0
+            }
+        }
+    })
+}
+
 fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int_proven(list, idx))
 }
@@ -4766,6 +4799,7 @@ host_fns! {
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
+    columnar_gather: "jet_jit_columnar_gather" => jet_jit_columnar_gather: sig_get;
     fixed_list_get: "jet_jit_fixed_list_get" => jet_jit_fixed_list_get: sig_get;
     fixed_list_get_f64: "jet_jit_fixed_list_get_f64" => jet_jit_fixed_list_get_f64: sig_get_f64;
     list_get_range_start: "jet_jit_list_get_range_start" => jet_jit_list_get_range_start: sig_get_range_scalar;

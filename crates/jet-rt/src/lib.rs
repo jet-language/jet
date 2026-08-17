@@ -662,6 +662,44 @@ impl JetArena {
         }
     }
 
+    /// D-SOA-TIER1=A: the logical rows of a list whose elements are records,
+    /// as cell vectors in stored-field order.
+    ///
+    /// The Cranelift tier holds a `#Layout(columnar)` list as its rows, exactly
+    /// as the interpreter ambient does, and marshals them into THE shared
+    /// Prelude column store for the two reads the layout defines. This is the
+    /// read side of that marshalling: it hands the rows over as cells so the
+    /// host never has to know the arena's private shape, and the store — not an
+    /// engine — owns the layout, the row bookkeeping and the bounds policy (I9).
+    pub fn record_rows(&self, list: i64) -> Option<Vec<Vec<JetVal>>> {
+        let Some(JetVal::List(values)) = self.values.get(list as usize) else {
+            return None;
+        };
+        values
+            .iter()
+            .map(|value| match value {
+                // A struct element is an arena record reached through its
+                // handle; `Record` in place is the same row already inline.
+                JetVal::Int(handle) => match self.values.get(*handle as usize) {
+                    Some(JetVal::Record(fields)) => Some(fields.clone()),
+                    _ => None,
+                },
+                JetVal::Record(fields) => Some(fields.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The write side of the same marshalling: one record straight from the
+    /// cells a gather returned. Cell order is column order, which is the slot
+    /// order the tier already lays a record of that struct out in, so the row is
+    /// rebuilt slot-for-slot with no second numbering.
+    pub fn alloc_record_cells(&mut self, cells: Vec<JetVal>) -> i64 {
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::Record(cells));
+        id
+    }
+
     pub fn record_get_int(&self, record: i64, index: i64) -> Option<i64> {
         match self.record_get(record, index) {
             Some(JetVal::Int(value)) => Some(*value),

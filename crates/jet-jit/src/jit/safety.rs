@@ -1867,6 +1867,38 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     }
                 })
         }
+        // D-SOA-TIER1=A: a `#Layout(columnar)` list is held on this tier as its
+        // logical rows, so the literal carries the same record-list gate a plain
+        // `[S]` literal does. The two reads the layout defines are resident
+        // because their ONE host marshals those rows into THE shared Prelude
+        // column store and reads them with the Prelude's own gather
+        // (`lower_ctx::lower_columnar_gather`), and the row it returns is an
+        // ordinary arena record — so the whole-record read is a record handle and
+        // the fused field read is the existing record-slot accessor. Each gate
+        // below admits exactly what that lowering compiles: widening one without
+        // its arm would be a Cranelift rejection of generated code (I2).
+        TExprKind::ColumnarListLit { elems, .. } => {
+            jit_list_record_type(&expr.ty) && elems.iter().all(|e| resident_safe_expr(e, callees))
+        }
+        TExprKind::ColumnarGather { base, index, .. } => {
+            jit_list_record_type(&base.ty)
+                && matches!(&index.ty, Type::Int)
+                && record_type_key(&expr.ty).is_some()
+                && resident_safe_expr(base, callees)
+                && resident_safe_expr(index, callees)
+        }
+        TExprKind::ColumnarColumnRead { base, index, .. } => {
+            // The cell lands in the field's own carrier through `record_slot`,
+            // which reads a `String` field by handle and every other field by its
+            // CLIF type. Gate on exactly that, so no cell shape reaches a lowering
+            // that has no accessor for it.
+            jit_list_record_type(&base.ty)
+                && matches!(&index.ty, Type::Int)
+                && (matches!(&expr.ty, Type::String)
+                    || super::types_meta::clif_ty(&expr.ty).is_some())
+                && resident_safe_expr(base, callees)
+                && resident_safe_expr(index, callees)
+        }
         TExprKind::Index {
             base,
             index,
@@ -4289,9 +4321,17 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             );
             // TIR leaves `.lines()` MethodCall as Unit and the loop var unbound;
             // lower hardcodes String elems. Don't demand collection/body types.
+            //
+            // D-SOA-TIER1=A: `columnar` is consulted at exactly ONE place in this
+            // predicate — the encoding-reader shape below — because that is the
+            // only place the lowering still consults it. Every other for-in shape
+            // walks the logical rows, which is what a columnar list IS on this
+            // tier, so refusing it here would refuse a loop the lowering compiles.
+            // Predicate and lowering admit the same set; a wider predicate would
+            // be a Cranelift rejection of generated code, i.e. an ICE (I2), and a
+            // narrower one would leave the host dead.
             if process_lines_ok || file_lines_ok || stdin_lines_ok {
-                return !columnar
-                    && resident_safe_expr(source, callees)
+                return resident_safe_expr(source, callees)
                     && step
                         .as_ref()
                         .is_none_or(|step| resident_safe_expr(step, callees))
@@ -4344,7 +4384,6 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 )
                 || matches!(&collection.ty, Type::Apply { name, .. } if name == "Stream");
             (chars_ok || iterable_ok || stream_ok || list_ok || list_pair_ok || map_ok)
-                && !columnar
                 && by_value_ok
                 && resident_safe_expr(source, callees)
                 && resident_safe_expr(collection, callees)
