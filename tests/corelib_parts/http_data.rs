@@ -1354,12 +1354,16 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source = include_str!("../../examples/features/io/terminal_parity.jet");
+    // Same answers the checked-in golden was recorded with, from their one
+    // home in `tests/common` (I8).
+    let answers = common::example_stdin("io/terminal_parity")
+        .expect("io/terminal_parity has stdin answers");
     let (code, stdout, stderr) = build_and_run(
         &dir,
         "terminal_parity",
         source,
         &[],
-        Some("\nnot-a-number\n3\n2\n"),
+        Some(answers.piped),
     );
     assert_eq!(code, 0, "prompt fixture failed: {stderr}");
     assert_eq!(

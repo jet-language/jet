@@ -589,11 +589,17 @@ fn run() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("run prompt named-deopt fixture");
+    // This fixture drives the same prompt sequence as
+    // `examples/features/io/terminal_parity.jet`, so it needs the same answers
+    // and reads them from their one home in `tests/common` (I8): the asserted
+    // `false|production|non-tty` below is exactly what those answers produce.
+    let answers = common::example_stdin("io/terminal_parity")
+        .expect("io/terminal_parity has stdin answers");
     child
         .stdin
         .take()
         .unwrap()
-        .write_all(b"\nnot-a-number\n3\n2\n")
+        .write_all(answers.piped.as_bytes())
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{output:?}");

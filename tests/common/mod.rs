@@ -157,6 +157,88 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), n))
 }
 
+// --- interactive example stdin ----------------------------------------------
+//
+// An interactive example's checked-in golden is only reproducible against the
+// answers it was recorded with, and four suites feed those answers
+// (`tests/golden.rs`, `tests/terminal.rs`, `tests/corelib_parts/http_data.rs`,
+// `tests/dev.rs`). They live here once. A second copy is how a golden and a
+// harness drift apart while neither one looks wrong on its own — and a harness
+// that feeds nothing at all silently compares a no-input run against a
+// fed-input golden.
+
+/// The answers one example needs on stdin.
+pub struct ExampleStdin {
+    /// Answers for a run whose stdin is a pipe or a file. This is what the
+    /// checked-in `examples/features/expected/<stem>.out` golden was recorded
+    /// against, so it is also what any harness comparing against that golden
+    /// owes the program.
+    pub piped: &'static str,
+    /// The extra answers a run on a real terminal reaches and a piped run does
+    /// not. Empty when a terminal run reads exactly what a piped run reads.
+    pub tty_only: &'static str,
+}
+
+impl ExampleStdin {
+    /// Answers for a run on a real terminal.
+    pub fn tty(&self) -> String {
+        format!("{}{}", self.piped, self.tty_only)
+    }
+}
+
+/// `io/terminal_parity` answers, in program order:
+///   `io.confirm`      — an empty line takes the `[y/N]` default, so `false`;
+///   `io.choose`       — `not-a-number` and `3` are both rejected (the golden's
+///                       two `Enter a number from 1 to 2.` lines), then `2`
+///                       selects `production`;
+///   `io.input_secret` — reached only on a terminal. Off a terminal it answers
+///                       `Err(InvalidInput)` without consuming a line, which is
+///                       the golden's `secret: non-tty`; on a terminal it reads
+///                       six characters, which is `secret length: 6`.
+const TERMINAL_PARITY_STDIN: ExampleStdin = ExampleStdin {
+    piped: "\nnot-a-number\n3\n2\n",
+    tty_only: "secret\n",
+};
+
+/// The stdin an example needs, or `None` for the examples that read nothing.
+///
+/// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
+/// stems asks for the answers instead of naming the interactive examples
+/// again. Only an example whose checked-in golden was recorded WITH these
+/// answers belongs here: a harness that walks every stem uses this table to
+/// decide what to feed, so an entry whose golden is a no-input transcript
+/// would make that harness feed the wrong thing.
+pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
+    match stem {
+        "io/terminal_parity" => Some(&TERMINAL_PARITY_STDIN),
+        _ => None,
+    }
+}
+
+/// Run the built `jet` binary with `answers` on stdin and collect its output.
+///
+/// A program that reads stdin needs a child process to read from. The
+/// in-process entry points (`dev_iteration`, `CraneliftBackend::run`) read the
+/// test binary's own fd 0, which every other test on every other thread
+/// shares, so there is nothing per-run to redirect there.
+pub fn jet_cli_output_with_stdin(args: &[&str], answers: &str) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(args)
+        .env("NO_COLOR", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("jet CLI must start");
+    child
+        .stdin
+        .take()
+        .expect("piped jet stdin")
+        .write_all(answers.as_bytes())
+        .expect("write jet stdin answers");
+    child.wait_with_output().expect("collect jet CLI output")
+}
+
 /// Whether `rustc` is on PATH. Honors `JET_REQUIRE_RUSTC=1` (D-CI3): CI sets
 /// this so a missing rustc is a loud failure — never a quiet self-skip that
 /// silently drops I2 (rustc-must-accept) coverage.
