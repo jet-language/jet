@@ -1697,7 +1697,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             if resident_safe_expr(e, callees) {
                                 true
                             } else {
-                                let _ = expr_kind_tag(e);
+                                let _ = expr_kind_name(&e.kind);
                                 false
                             }
                         }
@@ -1718,7 +1718,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             true
                         } else {
                             // Keep false; tag surfaces via Let init detail when needed.
-                            let _ = expr_kind_tag(e);
+                            let _ = expr_kind_name(&e.kind);
                             false
                         }
                     }
@@ -4511,86 +4511,160 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
     }
     for (i, s) in tir.body.iter().enumerate() {
         if !resident_safe_stmt(s, callees) {
-            if let Some(drill) = first_unsafe_stmt_detail(std::slice::from_ref(s), callees) {
-                return Some(format!("body stmt {i}: {drill}"));
-            }
-            let extra = match s {
-                TStmt::Let { init, .. } | TStmt::ExprStmt(init) | TStmt::Assign { value: init, .. } => {
-                    let mut tag = format!(" init={}", expr_kind_tag(init));
-                    if let TExprKind::CoreClosureCall {
-                        kind: TCoreClosureKind::ReactiveDerived { executable, .. }
-                            | TCoreClosureKind::ReactiveEffect { executable, .. }
-                            | TCoreClosureKind::UiReactiveRender { executable, .. }
-                            | TCoreClosureKind::UiButtonOnClick { executable, .. },
-                    } = &init.kind
-                    {
-                        match &executable.executable {
-                            TIR::TLambdaBody::Expr(e) => {
-                                tag.push_str(&format!(" body={}", expr_kind_tag(e)));
-                                if let TExprKind::Binary {
-                                    overflow,
-                                    lhs,
-                                    rhs,
-                                    ..
-                                } = &e.kind
-                                {
-                                    tag.push_str(&format!(
-                                        " bin=({} / {} overflow={overflow} lhs_ok={} rhs_ok={})",
-                                        expr_kind_tag(lhs),
-                                        expr_kind_tag(rhs),
-                                        intish_ty(&lhs.ty) || reactive_get_intish(lhs),
-                                        intish_ty(&rhs.ty) || reactive_get_intish(rhs),
-                                    ));
-                                }
-                                if let TExprKind::HandleMethod { recv, .. } = &e.kind {
-                                    tag.push_str(&format!(" hm_recv={}", expr_kind_tag(recv)));
-                                }
-                            }
-                            TIR::TLambdaBody::Block(stmts) => {
-                                tag.push_str(&format!(" block_len={}", stmts.len()));
-                            }
-                            TIR::TLambdaBody::SharedBlock(stmts) => {
-                                tag.push_str(&format!(" block_len={}", stmts.len()));
-                            }
-                        }
-                    }
-                    tag
-                }
-                _ => String::new(),
-            };
-            return Some(format!("body stmt {i}: {:?}{extra}", stmt_kind_tag(s)));
+            // One detail ladder (I8). `first_unsafe_stmt_detail` is total over
+            // `TStmt` — every arm returns `Some` for a statement the predicate
+            // already refused — so this caller only prefixes the body index. A
+            // second copy of the ladder here was unreachable and could drift.
+            let drill = first_unsafe_stmt_detail(std::slice::from_ref(s), callees)
+                .unwrap_or_else(|| stmt_kind_tag(s).to_string());
+            return Some(format!("body stmt {i}: {drill}"));
         }
     }
     None
 }
 
-fn expr_kind_tag(expr: &TExpr) -> &'static str {
-    match &expr.kind {
-        TExprKind::Print(_) => "Print",
+/// Name the construct behind a resident-safety refusal.
+///
+/// Every `TExprKind` variant is named explicitly and there is deliberately no
+/// `_` fallback: the old catch-all reported `init=OtherExpr`, which HID the
+/// identity of real refusals and made them unactionable. A variant added to
+/// `TExprKind` must fail to compile here rather than silently become
+/// unnameable — the same convention the `TBuiltinOp` dispatch uses. `TExprKind`
+/// has no derives, so enumeration is the mechanism (there is no `Debug`).
+///
+/// Arms follow the declaration order of `TExprKind` in
+/// `crates/jet-codegen/src/Codegen/TIR/mod.rs` so coverage is checkable by eye.
+fn expr_kind_name(kind: &TExprKind) -> &'static str {
+    match kind {
+        TExprKind::IntLit(_, _) => "IntLit",
+        TExprKind::FloatLit(_) => "FloatLit",
+        TExprKind::BoolLit(_) => "BoolLit",
+        TExprKind::CharLit(_) => "CharLit",
         TExprKind::StrLit(_) => "StrLit",
-        TExprKind::CoreCall { module, method, .. } => {
-            // Leak short tag for diagnostics only.
-            Box::leak(format!("CoreCall:{module}.{method}").into_boxed_str())
-        }
+        TExprKind::Local(_) => "Local",
+        TExprKind::Unit => "Unit",
+        TExprKind::InlineBlock(_) => "InlineBlock",
+        TExprKind::DefaultLit => "DefaultLit",
+        TExprKind::Uninit => "Uninit",
+        TExprKind::CtLit(_) => "CtLit",
+        TExprKind::HostCall(_) => "HostCall",
+        TExprKind::ConstRef(_) => "ConstRef",
+        TExprKind::DataEntriesToMap(_) => "DataEntriesToMap",
+        TExprKind::Call { .. } => "Call",
+        TExprKind::DistinctCtor { .. } => "DistinctCtor",
+        TExprKind::RangeCheckedCtor { .. } => "RangeCheckedCtor",
+        TExprKind::DistinctConvert { .. } => "DistinctConvert",
+        TExprKind::UnitConvert { .. } => "UnitConvert",
+        TExprKind::MathBuiltin { .. } => "MathBuiltin",
+        TExprKind::PreciseBuiltin { .. } => "PreciseBuiltin",
+        TExprKind::Print(_) => "Print",
+        TExprKind::Drop(_) => "Drop",
+        TExprKind::Close(_) => "Close",
+        TExprKind::ResourceNew(_) => "ResourceNew",
+        TExprKind::ResourceTake(_) => "ResourceTake",
+        TExprKind::AmbientInput { .. } => "AmbientInput",
+        TExprKind::RequireStop { .. } => "RequireStop",
+        TExprKind::Binary { .. } => "Binary",
+        TExprKind::CompareChain { .. } => "CompareChain",
+        TExprKind::LayoutCompare { .. } => "LayoutCompare",
+        TExprKind::LayoutLit { .. } => "LayoutLit",
+        TExprKind::Unary { .. } => "Unary",
+        TExprKind::IncDec { .. } => "IncDec",
+        TExprKind::StructLit { .. } => "StructLit",
+        TExprKind::Field { .. } => "Field",
+        TExprKind::SharedGuardValue { .. } => "SharedGuardValue",
+        TExprKind::SharedGuardMap { .. } => "SharedGuardMap",
+        TExprKind::SharedGuardSplit { .. } => "SharedGuardSplit",
+        TExprKind::SharedGuardWait { .. } => "SharedGuardWait",
+        TExprKind::ConditionNotify { .. } => "ConditionNotify",
+        TExprKind::PtrFromAddr { .. } => "PtrFromAddr",
+        TExprKind::Deref(_) => "Deref",
+        TExprKind::RawOf(_) => "RawOf",
+        TExprKind::AllocNew { .. } => "AllocNew",
+        TExprKind::EnumLit { .. } => "EnumLit",
+        TExprKind::JSONLit { .. } => "JSONLit",
+        TExprKind::DBValueLit { .. } => "DBValueLit",
+        TExprKind::ListLit(_) => "ListLit",
+        TExprKind::ListSpread { .. } => "ListSpread",
+        TExprKind::ColumnarListLit { .. } => "ColumnarListLit",
+        TExprKind::ColumnarGather { .. } => "ColumnarGather",
+        TExprKind::ColumnarColumnRead { .. } => "ColumnarColumnRead",
+        TExprKind::TupleLit { .. } => "TupleLit",
+        TExprKind::MapLit(_) => "MapLit",
+        TExprKind::Index { .. } => "Index",
+        TExprKind::PoolSlot { .. } => "PoolSlot",
+        TExprKind::IndexHook { .. } => "IndexHook",
+        TExprKind::MathLaneIndex { .. } => "MathLaneIndex",
+        TExprKind::MathSwizzleRead { .. } => "MathSwizzleRead",
+        TExprKind::Slice { .. } => "Slice",
+        TExprKind::Clone(_) => "Clone",
+        TExprKind::ExplicitCopy(_) => "ExplicitCopy",
+        TExprKind::Borrow { .. } => "Borrow",
+        TExprKind::MaterializeView(_) => "MaterializeView",
+        TExprKind::MethodCall { .. } => "MethodCall",
+        TExprKind::FnFieldCall { .. } => "FnFieldCall",
+        TExprKind::StaticCall { .. } => "StaticCall",
+        TExprKind::DecodeUnder { .. } => "DecodeUnder",
+        TExprKind::BuiltinMethod { .. } => "BuiltinMethod",
+        TExprKind::CoreCall { .. } => "CoreCall",
+        TExprKind::IfExpr { .. } => "IfExpr",
+        TExprKind::Todo { .. } => "Todo",
+        TExprKind::Unreachable { .. } => "Unreachable",
+        TExprKind::DistinctRaw(_) => "DistinctRaw",
+        TExprKind::Present(_) => "Present",
+        TExprKind::Absent => "Absent",
+        TExprKind::Ok(_) => "Ok",
+        TExprKind::Err(_) => "Err",
+        TExprKind::Try { .. } => "Try",
+        TExprKind::OrFallback { .. } => "OrFallback",
+        TExprKind::OptField { .. } => "OptField",
+        TExprKind::Lambda(_) => "Lambda",
+        TExprKind::PatternMatches { .. } => "PatternMatches",
+        TExprKind::OptionLift2 { .. } => "OptionLift2",
+        TExprKind::ClosureMethod { .. } => "ClosureMethod",
+        TExprKind::HostBorrowCallback { .. } => "HostBorrowCallback",
+        TExprKind::NumericMethod { .. } => "NumericMethod",
+        TExprKind::OverflowOpt { .. } => "OverflowOpt",
+        TExprKind::HandleMethod { .. } => "HandleMethod",
+        // The closure kinds are named for the same reason: the callback form is
+        // the fact a refusal turns on.
         TExprKind::CoreClosureCall { kind } => match kind {
+            TCoreClosureKind::Spawn { .. } => "CoreClosure:Spawn",
+            TCoreClosureKind::Serve { .. } => "CoreClosure:Serve",
+            TCoreClosureKind::OnInterrupt { .. } => "CoreClosure:OnInterrupt",
+            TCoreClosureKind::Guard { .. } => "CoreClosure:Guard",
+            TCoreClosureKind::OnCommit { .. } => "CoreClosure:OnCommit",
+            TCoreClosureKind::OnRollback { .. } => "CoreClosure:OnRollback",
             TCoreClosureKind::ReactiveDerived { .. } => "CoreClosure:Derived",
             TCoreClosureKind::ReactiveEffect { .. } => "CoreClosure:Effect",
             TCoreClosureKind::UiReactiveRender { .. } => "CoreClosure:UiRender",
             TCoreClosureKind::UiButtonOnClick { .. } => "CoreClosure:UiButtonOnClick",
-            TCoreClosureKind::Spawn { .. } => "CoreClosure:Spawn",
-            TCoreClosureKind::OnInterrupt { .. } => "CoreClosure:OnInterrupt",
-            _ => "CoreClosure:Other",
         },
-        TExprKind::HandleMethod { op, .. } => "HandleMethod",
-        TExprKind::MethodCall { .. } => "MethodCall",
-        TExprKind::BuiltinMethod { .. } => "BuiltinMethod",
-        TExprKind::ClosureMethod { .. } => "ClosureMethod",
-        TExprKind::Call { name, .. } => Box::leak(format!("Call:{name}").into_boxed_str()),
-        TExprKind::Binary { .. } => "Binary",
-        TExprKind::Local(_) => "Local",
-        TExprKind::Clone(_) => "Clone",
-        TExprKind::ExplicitCopy(_) => "ExplicitCopy",
-        _ => "OtherExpr",
+        TExprKind::TaskGroupAll { .. } => "TaskGroupAll",
+        TExprKind::TaskGroupRace { .. } => "TaskGroupRace",
+        TExprKind::TaskGroupAny { .. } => "TaskGroupAny",
+        TExprKind::SelectStart => "SelectStart",
+        TExprKind::SelectRecv { .. } => "SelectRecv",
+        TExprKind::SelectAfter { .. } => "SelectAfter",
+        TExprKind::SelectRead { .. } => "SelectRead",
+        TExprKind::SelectWait { .. } => "SelectWait",
+        TExprKind::FnValue { .. } => "FnValue",
+        TExprKind::ModuleCall { .. } => "ModuleCall",
+        TExprKind::ExternCall { .. } => "ExternCall",
+    }
+}
+
+/// The refusal tag: the variant name, plus the one fact the refusal actually
+/// turns on when the variant alone is not the answer — the resolved callee for
+/// the two call forms, and the op for the two method dispatches. `TBuiltinOp`
+/// and `TClosureOp` derive `Debug`, so naming them needs no second table.
+fn expr_kind_tag(expr: &TExpr) -> String {
+    match &expr.kind {
+        TExprKind::Call { name, .. } => format!("Call:{name}"),
+        TExprKind::CoreCall { module, method, .. } => format!("CoreCall:{module}.{method}"),
+        TExprKind::BuiltinMethod { op, .. } => format!("BuiltinMethod:{op:?}"),
+        TExprKind::ClosureMethod { op, .. } => format!("ClosureMethod:{op:?}"),
+        kind => expr_kind_name(kind).to_string(),
     }
 }
 
@@ -4641,7 +4715,15 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                 return Some(format!("{}[{i}]", stmt_kind_tag(s)));
             }
             TStmt::Let { init, .. } | TStmt::ExprStmt(init) | TStmt::Assign { value: init, .. } => {
-                let mut detail = format!("{}[{i}] init={}", stmt_kind_tag(s), expr_kind_tag(init));
+                let mut detail = format!("{}[{i}]", stmt_kind_tag(s));
+                if let TStmt::Let { name, .. } = s {
+                    // The Jet binding name pins the refusal to ONE source
+                    // statement. A variant name alone leaves every `Let` in the
+                    // body as a candidate, which is what made the last two
+                    // collection refusals cost a session each.
+                    detail.push_str(&format!(" `{name}`"));
+                }
+                detail.push_str(&format!(" init={} ty={:?}", expr_kind_tag(init), init.ty));
                 if let TExprKind::CoreClosureCall {
                     kind: TCoreClosureKind::ReactiveDerived { executable, .. }
                         | TCoreClosureKind::ReactiveEffect { executable, .. }
@@ -4691,15 +4773,11 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                 }
                 if let TExprKind::HandleMethod { op, .. } = &init.kind {
                     let op_tag = match op {
-                        THandleOp::UiBackendMethod { method } => {
-                            Box::leak(format!("UiBackend:{method}").into_boxed_str())
-                        }
-                        THandleOp::EventMethod { method } => {
-                            Box::leak(format!("Event:{method}").into_boxed_str())
-                        }
-                        THandleOp::ReactiveGet => "ReactiveGet",
-                        THandleOp::ReactiveSet => "ReactiveSet",
-                        _ => "HandleOp",
+                        THandleOp::UiBackendMethod { method } => format!("UiBackend:{method}"),
+                        THandleOp::EventMethod { method } => format!("Event:{method}"),
+                        THandleOp::ReactiveGet => "ReactiveGet".to_string(),
+                        THandleOp::ReactiveSet => "ReactiveSet".to_string(),
+                        _ => "HandleOp".to_string(),
                     };
                     detail.push_str(&format!(" op={op_tag}"));
                 }
