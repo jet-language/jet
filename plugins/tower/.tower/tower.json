@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2026,
-    "rev": 38004,
+    "rev": 38006,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85510,7 +85510,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.352Z",
-      "updated": "2026-08-14T10:49:06.032Z",
+      "updated": "2026-08-17T02:37:13.833Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 760
     },
@@ -100440,8 +100440,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:59.251Z",
-      "updated": "2026-08-12T18:11:57.969Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-17T02:36:42.002Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1000
     },
     {
@@ -174633,6 +174633,174 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-17T01:14:04.816Z"
+    },
+    {
+      "id": "D-AUTHORITY-WORD2",
+      "cardId": "c0575p3w",
+      "group": "syntax",
+      "title": "What replaces the word capability in the three places a user still types it",
+      "gist": "The new name for three user-typed spellings of the old word.",
+      "lesson": "The project retired the word `capability` from what a user reads. That pass covered diagnostics, help text, docs and examples. Three places are different: a user types them, so renaming one changes real programs and scripts. This choice picks the replacement for those three, or decides to keep them.",
+      "explainer": "",
+      "story": "Ari reads a permission error, and it now says `authority`. Ari searches the docs for `authority`, finds the guide, then writes the marker the guide describes. The compiler answers that the name does not exist, because the thing a program types is still spelled `Capability`. Ari now has two words for one idea and no way to tell which is current.",
+      "inWild": "// 1. The fact menu, typed as a marker prefix and pinned by E0119\n#Caps(Capability.FS)\nfn read_report() ? { … }\n\n// 2. A standard library reader\nbrowser := web.launch()\nprint(browser.capabilities().version)\n\n// 3. A command line flag\n// $ jet inspect --capabilities-json",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Rename all three to authority",
+          "detail": "The three become `Authority.FS`, `.authority()` and `--authority-json`, matching the word a reader now sees everywhere else. Gain: one word for one idea, so a reader who follows a diagnostic finds the thing they must type. Loss: existing programs and scripts that use the old spellings stop working and must be edited.",
+          "technical": "Rename the `Capability` fact menu to `Authority`, `BrowserCapabilities` to `BrowserAuthority` with `.capabilities()` becoming `.authority()`, and the CLI flag to `--authority-json`. Greenfield cutover per AGENTS.md: remove the old spellings rather than keeping aliases. E0119 pins the marker prefix, so its snapshot moves with it.",
+          "code": "#Caps(Authority.FS)\nfn read_report() ? { … }\n\nprint(browser.authority().version)\n\n// $ jet inspect --authority-json"
+        },
+        {
+          "key": "B",
+          "name": "Rename the marker menu only, and leave the two library and tool names",
+          "detail": "`Capability.FS` becomes `Authority.FS`, because that is the one a diagnostic sends the reader to. The browser reader and the flag keep their names. Gain: the confusing case is fixed with the smallest change to working programs. Loss: the old word survives in two places, so a search still returns both.",
+          "technical": "Rename only the fact menu and its E0119 snapshot. `BrowserCapabilities`, `.capabilities()` and `--capabilities-json` stay, documented as names taken from the browser protocol rather than from Jet's own vocabulary.",
+          "code": "#Caps(Authority.FS)\nfn read_report() ? { … }\n\n// unchanged, and documented as protocol vocabulary\nprint(browser.capabilities().version)\n// $ jet inspect --capabilities-json"
+        },
+        {
+          "key": "C",
+          "name": "Keep all three and say why in the docs",
+          "detail": "Nothing a user types changes. The docs state that `Authority` is the word for the idea and that these three names are historical. Gain: no program or script breaks. Loss: a reader who follows a diagnostic still cannot find the name to type, which is the problem the retirement set out to fix.",
+          "technical": "No code change. The retirement stops at read-only surfaces, and a note records that the typed names were deliberately left.",
+          "code": "// unchanged\n#Caps(Capability.FS)\nprint(browser.capabilities().version)\n// $ jet inspect --capabilities-json"
+        },
+        {
+          "key": "D",
+          "name": "Rename the marker menu to rights",
+          "detail": "The menu becomes `Rights.FS`, keeping `Authority` for the value a program passes around and using a different word for the menu of facts. Gain: two related but distinct ideas keep distinct names, so a reader is not left wondering why one word means both. Loss: a third word enters the vocabulary a reader must learn.",
+          "technical": "Rename the fact menu to `Rights`, matching the rights-tree wording already used in the authority substrate work. `Authority` stays the name of the handle a program holds. The two library and tool names follow option B and stay.",
+          "code": "#Caps(Rights.FS)\nfn read_report() ? { … }\n\n// the value a program holds keeps its own name\nfn serve(auth: Authority) ? { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno spells permissions one way in the flag, the prompt and the API, so a reader who sees the prompt can guess the flag.",
+          "code": "deno run --allow-read=/etc main.ts\nawait Deno.permissions.query({ name: \"read\" })"
+        },
+        {
+          "lang": "Android",
+          "note": "Android uses one word in the manifest, the request call and the dialog. The word is long, but a search finds all three.",
+          "code": "<uses-permission android:name=\"android.permission.CAMERA\" />"
+        },
+        {
+          "lang": "WebDriver",
+          "note": "WebDriver's own wire format calls them capabilities, which is why the browser reader carries that word. It comes from the protocol, not from Jet.",
+          "code": "{ \"capabilities\": { \"alwaysMatch\": { \"browserName\": \"chrome\" } } }"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "It fixes the one case a reader actually reaches from a diagnostic, and it leaves alone the two names that come from an external protocol rather than from Jet's vocabulary. A reader who searches for the browser reader is reading browser documentation, where the old word is correct.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It renames two names that are borrowed from the WebDriver wire format, where `capabilities` is the correct term. That trades a real break for consistency with a word the protocol does not use."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves the exact failure the story describes: a diagnostic sends the reader to a word that no program can type."
+          },
+          {
+            "key": "D",
+            "reason": "It adds a third word for one family of ideas. The rights-tree wording is internal to the substrate design and has not been a name a user types."
+          }
+        ],
+        "tradeoff": "Option B leaves the old word visible in two places, so a search for it still returns hits. That is acceptable because both are documented as protocol vocabulary, and the case that misleads a reader following an error is the one that gets fixed."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared renaming all three against renaming only the marker menu, and recommended the menu because it is the only one a diagnostic sends a reader to.",
+        "boilOcean": "The breadth review added keeping all three with a documentation note, and renaming the menu to `rights`. It also tested keeping an alias for one release, which was dropped because the project's greenfield rule forbids deprecated spellings.",
+        "hybrid": "The hybrid review tested renaming the menu and the flag while keeping the browser reader. The flag is read by scripts and gains nothing a reader needs, so it was folded into option B.",
+        "cooperative": "The cooperative review strengthened the rename-everything option by pairing it with a migration note in the release docs. It still renames two names borrowed from the WebDriver format.",
+        "adversarial": "The adversarial review asked what a reader does after seeing `authority` in an error under each option. Only the options that rename the marker menu answer that, and keeping all three fails it outright."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-17T02:36:42.002Z"
+    },
+    {
+      "id": "D-JOB-NAME2",
+      "cardId": "c04zqxw1",
+      "group": "tooling",
+      "title": "Whether jet env lists integration checks as jobs",
+      "gist": "Whether the env check list is renamed to jobs, and whether it stays merged.",
+      "lesson": "A project declares its own jobs. The environment model also declares checks, such as an Android SDK check or a vault check. `jet env` prints both in one list under the heading `tasks`. The word `task` is being retired from this surface in favour of `job`, so this list needs a decision: what heading it uses, and whether the two kinds stay merged.",
+      "explainer": "",
+      "story": "Rae runs `jet env` to see why a build will not start. The list shows a vault check beside two of Rae's own jobs, all under one heading. Rae fixes the vault check, reruns, and cannot tell which entries were the project's and which came from the environment model.",
+      "inWild": "$ jet env\ntasks:\n  android-sdk-check   ok\n  vault-check         failed\n  build-assets        ok\n  publish-docs        ok\n\n// build-assets and publish-docs are the project's own #Job entries.\n// android-sdk-check and vault-check come from the environment model.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Rename the heading to jobs and keep one list",
+          "detail": "The heading becomes `jobs` and both kinds stay together. Gain: one word across the whole surface, and one place to look. Loss: a reader still cannot tell a project job from an environment check.",
+          "technical": "Rename the machine key and the human heading from `tasks` to `jobs` in the env report. Merged ordering is unchanged.",
+          "code": "$ jet env\njobs:\n  android-sdk-check   ok\n  vault-check         failed\n  build-assets        ok"
+        },
+        {
+          "key": "B",
+          "name": "Rename the heading and split the two kinds",
+          "detail": "The heading becomes `jobs` for the project's own entries, and environment checks get their own heading. Gain: a reader sees which entries they wrote and which the environment supplies. Loss: two headings to read, and any script reading the machine key must handle both.",
+          "technical": "Rename the project key to `jobs` and emit environment checks under a separate `checks` key. Both keys appear in the machine output, so a consumer reads the one it means.",
+          "code": "$ jet env\nchecks:\n  android-sdk-check   ok\n  vault-check         failed\njobs:\n  build-assets        ok"
+        },
+        {
+          "key": "C",
+          "name": "Keep the heading tasks",
+          "detail": "Nothing changes here. The word `job` applies to what a program declares, and this list keeps its own name. Gain: no script that reads the machine key breaks. Loss: one surface keeps the retired word, so a reader meets both words.",
+          "technical": "No change. The env report is documented as using its own vocabulary, separate from the #Job surface.",
+          "code": "$ jet env\ntasks:\n  vault-check         failed\n  build-assets        ok"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "npm",
+          "note": "npm keeps one word for the things a project declares and reports tool checks separately, so a reader is never asked to tell them apart in one list.",
+          "code": "$ npm run\nScripts available:\n  build\n  test"
+        },
+        {
+          "lang": "Nix",
+          "note": "Nix flakes name each output kind separately, so a reader sees which part of the system produced an entry.",
+          "code": "$ nix flake show\n├───checks\n└───packages"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "It fixes both problems at once. The word matches the rest of the surface, and a reader can tell an entry they wrote from an entry the environment supplied, which is the confusion the story describes.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "It fixes the word but keeps two different kinds of thing under one heading, so the reader still cannot tell which entries are theirs."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves the retired word on a surface a user reads, which is the thing the retirement set out to remove."
+          }
+        ],
+        "tradeoff": "Splitting the list means a script that reads one key now reads two. That is acceptable because the machine output names both keys explicitly, so a consumer states which kind it wants instead of guessing from a merged list."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared renaming the heading against splitting the list, and recommended doing both because the merged list is the reason the report is hard to read.",
+        "boilOcean": "The breadth review added keeping the heading unchanged, and tested a single list with a per-entry source column. The column was folded into the split, which states the source once per group instead of once per row.",
+        "hybrid": "The hybrid review kept the split and asked whether the two groups should share one exit status. They already do, so no change was needed.",
+        "cooperative": "The cooperative review strengthened the merged option by sorting the project entries first. A reader still has to know the names to tell the groups apart.",
+        "adversarial": "The adversarial review asked what a script does when an environment check is added upstream. Under the split it reads the key it means and is unaffected, so the split remains the recommendation."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-17T02:37:13.833Z"
     }
   ],
   "questions": [
@@ -176324,6 +176492,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-17T02:37:13.833Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-JOB-NAME2",
+      "note": "Whether jet env lists integration checks as jobs"
+    },
+    {
+      "at": "2026-08-17T02:36:42.002Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-WORD2",
+      "note": "What replaces the word capability in the three places a user still types it"
+    },
     {
       "at": "2026-08-17T01:23:12.185Z",
       "by": "fable-e3-burndown",
@@ -179809,20 +179991,6 @@
       "action": "card.update",
       "ref": "c0n60ekq",
       "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:57:58.282Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0n60ekq",
-      "note": "JIT F2: lower_binary operand table missing three operand shapes reached only through derived c"
-    },
-    {
-      "at": "2026-08-15T18:57:21.848Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c014nejk",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
     }
   ],
   "nextNum": 368,
