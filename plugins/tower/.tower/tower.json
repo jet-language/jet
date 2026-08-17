@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2026,
-    "rev": 38006,
+    "rev": 38018,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -131183,7 +131183,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Make the measurement independent of suite load. Options in preference order, and the choice is worth stating rather than defaulting: (1) measure work rather than time -- count the compiler-owned steps or bytes the existing budget machinery already tracks, which is what `jet check` budgets do elsewhere in this repo, so a busy machine cannot move the verdict; (2) if wall-clock is genuinely the property under test, run it serialized or outside the parallel suite, and say so in the test name; (3) keep wall-clock but calibrate against a same-run baseline measured on the same machine under the same load, so the ratio is the assertion rather than an absolute.\n\nDo NOT simply widen the budget. That trades a flaky failure for a detector that no longer detects anything, and the number would need widening again on the next machine.\n\nRelated context: #677 covers typed project compile-latency budgets, so this may fold into that card's mechanism rather than needing its own. Check before duplicating. blockedBy: none",
       "blockedBy": [],
@@ -131193,29 +131193,29 @@
         {
           "n": 1,
           "text": "The latency verdict is independent of how many other tests are running",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T02:57:12.707Z"
+          "evidence": "Approach recorded with its reason: option 2, keep the basis and move the place. D-DEV3 is a wall-clock promise to the user (docs/spec/diagnostics.md, roadmap.md:67), so the basis stays wall clock and the budget stays 200ms; only the location changed. tests/dev_latency.rs is its own cargo test target holding exactly one test, and both cargo test and tools/ci/test-shards.sh run one target per process, so nothing else executes while the number is taken. Work counts were rejected because they need a machine-specific steps-to-ms constant and stay green through a blocking regression; a same-run baseline ratio was rejected because it cancels the fixed per-save cost that D-DEV3 exists to bound.",
+          "at": "2026-08-17T04:09:52.380Z"
         },
         {
           "n": 2,
           "text": "The test passes in the full parallel suite and in isolation, on the same commit",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T02:57:13.162Z"
+          "evidence": "Verified at 47225c565: cargo test --test dev_latency = ok, 1 passed / 0 failed in 0.43s, and the old in-suite copy is deleted from tests/dev_parts/routine.rs so the fact has one owner.",
+          "at": "2026-08-17T04:09:52.992Z"
         },
         {
           "n": 3,
           "text": "The budget is not merely widened; the measurement basis is stated in the test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T02:57:13.610Z"
+          "evidence": "It still catches the regression it guards. The timed round is the same jet::check_with_path the watch loop runs per save, so a slower parse, a per-check stdlib re-read or a quadratic sema walk still trips it. Two teeth were added rather than removed: the example must check CLEAN, so a load failure can no longer hold the budget green while measuring nothing, and the test asserts its own source holds exactly one test, so the load dependence cannot be reintroduced by adding a second test to this target.",
+          "at": "2026-08-17T04:09:53.465Z"
         }
       ],
       "refs": [],
@@ -131227,8 +131227,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T02:57:12.268Z",
-      "updated": "2026-08-16T02:57:13.611Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T04:09:54.525Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T04:09:54.525Z"
     },
     {
       "id": "c02esppi",
@@ -131709,7 +131710,13 @@
       "plan": "Re-derive the gate file from an observed run once, after #1998's total classification has landed, and pin its row count against the corpus stem count so a stem cannot fall out of a section unnoticed.\n\nDo not hand-add rows. The reconciliation that produced the current state of tests/jit_gaps.txt (12648cdcc) made the ledger self-consistent with an INCOMPLETE oracle and thereby understated real coverage; repeating that here would be the fourth hand-edit of a file class that has already been falsified three times.\n\nSequencing: depends on #1998 being integrated first, since a re-derivation against a blind oracle reproduces the bug.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-17",
+          "by": "fable-e3-burndown",
+          "text": "MECHANISM AND RE-DERIVATION BOTH LANDED at f7aab7bf8. The ledger is regenerated from an OBSERVED run, not hand-edited: JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture, 374 -> 496 rows, so every one of the 496 corpus stems now carries a section and the 122-stem hole is closed. tooling/data_plot specifically has a row. Hand-editing was refused on purpose: the sibling ledger tests/jit_gaps.txt has been falsified three times and a classification typed by hand is the same mistake. The ratchet closed in the same diff: CORPUS_GATE_ROW_FLOOR 374 -> 496 (may only grow), CORPUS_GATE_UNCLASSIFIED_CEILING 122 -> 0 (may only shrink), resting on an asserted classified + unclassified == corpus identity plus corpus >= EXAMPLE_CORPUS_FLOOR. Enforcement is cheap and host-independent: corpus_gate_manifest_accounts_for_every_example parses the ledger and walks examples/features/<topic>/ with no Cranelift host, no rustc and no run, and a negative-control test proves the audit actually names a missing row, a duplicate, a ghost and a reasonless exclusion. The strict gate's own duplicate ghost/unlisted check was deleted and now calls that one law (I8). Root cause of the staleness is recorded: the file last changed 2026-08-13, one day before d1aaf936e rewrote error handling across 39 net and serde examples, so those resident_jit rows were never re-observed. Two caveats worth carrying: dump mode returns BEFORE every ratchet so a regeneration cannot self-check, and stems file as expected_exit when rustc is absent, so regenerate only on a Cranelift-supported host with rustc."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -131762,7 +131769,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:36:50.517Z",
-      "updated": "2026-08-16T12:37:10.080Z",
+      "updated": "2026-08-17T04:10:04.226Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -132200,7 +132207,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Split the suite so every declared test actually runs and libtest reaches its own summary. Do not raise the budget.\n\nWhere the time goes, from the same run: the 43 slow tests are dominated by whole-corpus three-way differentials (the `*_match_interpreter_jit_and_aot` family, example_corpus_strict_jit_aot_differential_gate, cranelift_three_way_differential_battery, jit_coverage_audit, jit_try_compile_manifest_matches). Each compiles a large slice of the example corpus, and several compile overlapping slices, so the same stems are compiled repeatedly across tests.\n\nTwo directions, and the choice should be stated rather than assumed:\n1. Split by cost into separate targets, so a routine target stays fast and the expensive corpus batteries run as their own target with their own budget.\n2. Share the compile work. collect_jit_coverage already memoises one corpus observation per test binary via LazyLock; the differential batteries could read one shared observation instead of each walking the corpus. That attacks the cause rather than the symptom.\n\nPrefer 2 where the batteries genuinely want the same observation, and 1 for the rest. Note that a split must not quietly drop a test from the routine set: the reason five jit_run failures went unrecorded for a whole session is that jit_run was not in the routine set.\n\nWhatever the shape, the acceptance is that the summary prints and the declared count equals the run count.",
       "blockedBy": [],
@@ -132210,56 +132217,56 @@
         {
           "n": 1,
           "text": "cargo test --no-fail-fast --test dev reaches libtest's own summary and prints test result plus a failures section, with no budget-guard abort",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:36:59.423Z"
+          "evidence": "Verified at 47225c565: every target reaches libtest's own summary and prints test result plus a failures section, with no budget-guard abort and no SIGABRT anywhere. cargo test --no-fail-fast --test dev --test dev_latency --test dev_interp_parity --test dev_default_parity gives dev 131 passed / 15 failed in 109.72s, dev_latency 1 passed, dev_interp_parity 3 passed / 2 failed, dev_default_parity 3 passed / 1 failed. The second run of --test dev_tier_parity --test dev_corpus --test dev_corpus_gate likewise reaches every summary: dev_tier_parity 8 passed / 11 failed in 370.08s, dev_corpus 3 passed / 3 failed in 405.22s, dev_corpus_gate 3 passed / 1 failed in 382.60s. Before this change the single dev binary aborted at the 900s guard having started only 139 of 169 declared tests, so no summary and no failures section ever printed.",
+          "at": "2026-08-17T04:09:55.991Z"
         },
         {
           "n": 2,
           "text": "Every declared test runs: the started count equals the declared count, and no test is silently skipped",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:36:59.855Z"
+          "evidence": "Every declared test runs. All 166 #[test] functions were accounted for across the split (143 routine plus 2, 1, 16, 3, 1), verified programmatically rather than by eye: brace and paren balance zero per file, every non-blank original line surviving, and no duplicate or missing fn definition. A new test, every_dev_slice_is_wired_into_a_test_target, fails if any slice is included by nothing, so a slice cannot be orphaned. The measured totals above sum to the declared counts per target.",
+          "at": "2026-08-17T04:09:57.145Z"
         },
         {
           "n": 3,
           "text": "The 900s budget is met by splitting or speeding up, and the budget constant is NOT raised",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:37:00.271Z"
+          "evidence": "The 900s budget was met by attacking the cause, and the budget constant was NOT raised anywhere. Measured root cause: ten curated tier batteries each carried a PRIVATE copy of one child-spawn loop and ran children strictly in series, roughly 160 optimized rustc builds nose to tail, and the three-way battery walked about 350 stems the same way. Every battery also held dev_diff_lock, so the whole binary was one serial chain. One shared run_child_stem_battery replaces all ten copies (I8) with test_worker_count(8) children and a cross-process FfiBridgeLock for bridge stems, and run_three_way_battery_parallel reuses the worker-queue mechanism the corpus gate already used for the identical three legs. A latent hazard was fixed on the way: the jit_3way oracle scratch index was hard-coded 0, safe only while serial, and is now an atomic counter. dev now finishes in 110s.",
+          "at": "2026-08-17T04:09:58.713Z"
         },
         {
           "n": 4,
           "text": "Redundant corpus compilation across the differential batteries is either shared through one observation or explicitly justified per battery",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:37:00.721Z"
+          "evidence": "Redundant corpus compilation is shared rather than paid twice: jit_coverage_audit, jit_try_compile_manifest_matches and cranelift_three_way_differential_battery are deliberately kept in ONE target, dev_corpus, so they keep reading the single memoised collect_jit_coverage walk. Splitting them would have paid for that walk twice, which is why cost-splitting was applied to the rest and sharing to these three.",
+          "at": "2026-08-17T04:10:00.503Z"
         },
         {
           "n": 5,
           "text": "Any test moved to a separate target is added to a named routine set, so no target can sit unrun and unrecorded the way jit_run did",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:37:01.162Z"
+          "evidence": "No target sits outside a routine set, and membership needs no allowlist: scripts/agent/time-suites.sh times every tests/*.rs against the same 900s guard, and tools/ci/test-shards.sh enumerates targets from cargo metadata per D-CI1=A, so a new target is picked up by construction. Pointers were updated with the split: tools/ci/jit-aot-parity.sh now targets dev_corpus_gate and dev_corpus, plus four parity-guard pointers in crates, docs/spec/architecture.md, docs/reference/core-library.md, and the feature-claim manifest and report with a recomputed artifact hash.",
+          "at": "2026-08-17T04:10:01.603Z"
         },
         {
           "n": 6,
           "text": "The whole-suite pass/fail tally is a complete measurement and is recorded as such",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T14:37:01.598Z"
+          "evidence": "The whole-suite tally is now a complete measurement rather than a floor, and that immediately paid: the 2026-08-15 handoff recorded 121 passing / 18 failing, within noise of the truncated 123/16 this session first measured, confirming that figure had also been cut off by the same guard. With summaries printing, 15 dev failures, 11 tier-parity failures, 3 corpus failures and 1 gate failure became visible WITH bodies for the first time and were triaged this session into production bugs and stale expectations. A separate finding closed in the same commit: typechecked_example_stems silently dropped every sema-failing stem and fed the filtered list to the default battery, which is the third instance of the silent-drop hole cards 1998 and 2012 closed elsewhere; it now returns the rejected stems with the compiler's own diagnostic and asserts a shrink-only ceiling, whose first true measurement is 54.",
+          "at": "2026-08-17T04:10:02.702Z"
         }
       ],
       "refs": [],
@@ -132267,8 +132274,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T14:36:58.997Z",
-      "updated": "2026-08-16T14:37:01.599Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-17T04:10:03.559Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T04:10:03.559Z"
     },
     {
       "id": "c02cuoc0",
@@ -176493,6 +176501,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T04:10:04.227Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0y6raw5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-17T04:10:03.560Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0h9oynm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T04:10:02.703Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0h9oynm",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-17T04:10:01.603Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0h9oynm",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-17T04:10:00.503Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0h9oynm",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T04:09:58.713Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0h9oynm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T04:09:57.145Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0h9oynm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T04:09:55.991Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0h9oynm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T04:09:54.526Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c01j4gal",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T04:09:53.466Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01j4gal",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T04:09:52.993Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01j4gal",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T04:09:52.382Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c01j4gal",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-17T02:37:13.833Z",
       "by": "fable-e3-burndown",
       "action": "decision.add",
@@ -179906,90 +179998,6 @@
       "by": "fable-e3-burndown",
       "action": "card.update",
       "ref": "c0d9tenn",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:06.390Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0d9tenn",
-      "note": "JIT F4: Struct-literal layout table missing five core/host policy structs"
-    },
-    {
-      "at": "2026-08-15T18:58:05.948Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wm4nqu",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:05.521Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wm4nqu",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:04.522Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wm4nqu",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:03.606Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0wm4nqu",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:02.282Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wm4nqu",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:01.030Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0wm4nqu",
-      "note": "JIT F3: TIfCond::And only supports (IfLet, Plain) — a plain && conjunction is rejected"
-    },
-    {
-      "at": "2026-08-15T18:58:00.603Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0n60ekq",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:00.170Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0n60ekq",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:57:59.738Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0n60ekq",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:57:59.309Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0n60ekq",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:57:58.867Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0n60ekq",
       "note": "plan"
     }
   ],
