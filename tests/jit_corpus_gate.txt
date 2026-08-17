@@ -56,14 +56,12 @@ frontend_rejected:
   serde/encoding_xml_projection: E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E0107: nothing named `child` exists here; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E0107: nothing named `child` exists here; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
   serde/encoding_xml_stream: E2402: `?` can't convert `IOError` into `Err` — no declared conversion exists; E2402: `?` can't convert `EncodingError` into `Err` — no declared conversion exists; E0114: `write_catalog` promises to return Unit ? Err, but a path can reach the end without `return`; E2402: `?` can't convert `IOError` into `Err` — no declared conversion exists; E2402: `?` can't convert `IOError` into `Err` — no declared conversion exists; E2402: `?` can't convert `EncodingError` into `Err` — no declared conversion exists
   serde/json: E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists
-  serde/json_coerce: E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists; E0107: nothing named `entries` exists here; E0107: nothing named `entries` exists here; E0107: nothing named `entries` exists here; E0107: nothing named `n` exists here; E0107: nothing named `s` exists here; E0107: nothing named `b` exists here
   serde/json_typed: E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists; E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
   serde/toml: E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
   serde/yaml: E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
   text/duration_facts: E0107: nothing named `time` exists here
   tooling/compiler_api: E0956: `core.compiler.lex` is compile-time only; E0956: `core.compiler.parse` is compile-time only; E0956: `core.compiler.check` is compile-time only; E0956: `core.compiler.source_map` is compile-time only; E0102: nothing named `generated_compiler_api` exists here
   tooling/debug_native: E0405: `?? return` here needs a value; E0405: `?? return` here needs a value
-  types/no_any_alternatives: E0119: there's no type called `DataTree`; E0107: nothing named `entries` exists here; E0107: nothing named `name` exists here
   web/ui_showcase: E0405: `??` only works on a fallible value, not Int (a whole number)
 
 gate_excluded:
@@ -242,6 +240,7 @@ resident_jit:
   errors/errors
   errors/fallible_run
   errors/must_use
+  errors/or_err
   errors/partial_and_notes
   errors/qq_control
   errors/rollback_trait
@@ -279,6 +278,7 @@ resident_jit:
   io/os_stop_cleanup
   io/process_builder
   io/process_exit_cleanup
+  io/progress
   io/stdin_filter
   io/stream
   io/terminal
@@ -296,6 +296,7 @@ resident_jit:
   lowlevel/target_machine_board
   math/bit_not
   math/floor_div
+  math/fraction
   math/int_div
   math/math_audit
   math/modulo
@@ -374,6 +375,7 @@ resident_jit:
   text/runtime_duration
   text/stream_lines
   text/string_parse
+  text/strings
   text/time_calendar
   text/unicode_text_audit
   text/uuid
@@ -437,6 +439,7 @@ resident_jit:
   types/multi_head_functions
   types/nested_enum_groups
   types/option
+  types/option_combinators
   types/optional_result_variants
   types/patchable
   types/range_types
@@ -471,6 +474,7 @@ resident_jit:
   web/web_wasm_for_in
   web/web_wasm_list
   web/web_wasm_list_string
+  web/web_wasm_map
   web/web_wasm_range
   web/web_wasm_string
   web/web_wasm_string_param
@@ -481,7 +485,6 @@ deopt_interp:
   cli/typed_entry_args
   collections/dynamic-array-view
   collections/filter_map
-  collections/iter_adapters
   collections/iter_tools_audit
   collections/list_surface
   collections/map_surface
@@ -492,14 +495,12 @@ deopt_interp:
   crypto/random_api_split
   devloop/bench_override
   devloop/test_override
-  errors/or_err
   io/io_prelude
   io/path
   lowlevel/lowlevel
   lowlevel/mmio_board_write
   lowlevel/pointer_cast_deref
   lowlevel/unsafe_obligations
-  math/fraction
   memory/memoize
   memory/rawptr
   memory/shared_transact
@@ -509,20 +510,19 @@ deopt_interp:
   serde/csv
   serde/serde_derive
   serde/serde_generic
-  text/strings
   text/unicode_text
   tooling/compute_autodiff
   tooling/statement_attributes
-  types/option_combinators
   ui/events
-  web/web_wasm_map
 
 run_tier_broken:
   cli/positionals: parity
   cli/subcommands: parity
+  collections/iter_adapters: parity
   collections/lists: parity
   comptime/build_stamp: parity
-  io/progress: parity
   io/scope_guard: parity
   lowlevel/layout_columnar: E0956
+  serde/json_coerce: parity
+  types/no_any_alternatives: parity
 
