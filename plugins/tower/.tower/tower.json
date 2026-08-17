@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2027,
-    "rev": 38044,
+    "rev": 38058,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -115249,7 +115249,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Give the four parked service/sync stems real resident lowering that marshals into the same Prelude symbols AOT embeds (I9). Rows: tests/jit_gaps.txt:449-452 (service_runtime, service_tree, service_authority, sync text_new). Resident safety currently blanket-deopts core.services (crates/jet-jit/src/jit/safety.rs:1063). Add host marshalling at the module-call dispatcher crates/jet-jit/src/jit/lower_ctx.rs:9901 with host functions beside the JIT data adapters (crates/jet-jit/src/Data.rs), calling the canonical semantics in crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs and Sync.rs:183 — marshalling only, no re-encoded policy. The interpreter mapping at crates/jet-codegen/src/Codegen/TIR/eval/services_calls.rs shows the semantic homes. Narrow the safety gate; delete the four ledger rows.",
       "blockedBy": [],
@@ -115270,38 +115270,38 @@
         {
           "n": 1,
           "text": "service_runtime, service_tree, service_authority, and sync text_new examples run on JIT and interpreter matching AOT; ledger rows deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T09:47:11.284Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. There is no blanket core.services deopt. A real 14-arm allowlist sits at crates/jet-jit/src/jit/safety.rs:1606-1666 with full arity dispatch at lower_ctx.rs:12786-12853 and core.sync.text_new at :12833, and all four stems sit in compile_covered with jit_gaps.txt gaps: and run_gaps: both empty. What landed is an I8 dedup rather than new coverage: service_core_arity became pub(crate) and is now the single table consulted by BOTH the lowering and tier admission, replacing a hand-restated allowlist plus a superseded app/core.web sync branch. The two sides were machine-diffed before the deletion - 69 rows each, zero set difference, zero arity disagreement - so admission and lowering now agree structurally instead of coincidentally, with no construct newly admitted. The card's real blocker turned out to be on the AOT side and is recorded separately: tooling/service_authority, service_runtime and service_tree all FAIL AOT compilation, and the gate was absolving them by filing AOT failure under expected_exit. The concrete cause is now known - two Prelude fragments each emit use std::time::{Duration, ...}, so any program pulling in both gets generated Rust that rustc rejects with E0252, which per I2 is an internal compiler error. That defect and the gate-class split are tracked on #2016 and #2026.",
+          "at": "2026-08-17T09:18:17.698Z"
         },
         {
           "n": 2,
           "text": "service_runtime, service_tree, service_authority, and sync_crdt/text_new examples produce byte-identical output under AOT (jet run --release), default jet run, and the interpreter; tests/services_runtime.rs and tests/sync_crdt.rs targeted runs green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:48.681Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. There is no blanket core.services deopt. A real 14-arm allowlist sits at crates/jet-jit/src/jit/safety.rs:1606-1666 with full arity dispatch at lower_ctx.rs:12786-12853 and core.sync.text_new at :12833, and all four stems sit in compile_covered with jit_gaps.txt gaps: and run_gaps: both empty. What landed is an I8 dedup rather than new coverage: service_core_arity became pub(crate) and is now the single table consulted by BOTH the lowering and tier admission, replacing a hand-restated allowlist plus a superseded app/core.web sync branch. The two sides were machine-diffed before the deletion - 69 rows each, zero set difference, zero arity disagreement - so admission and lowering now agree structurally instead of coincidentally, with no construct newly admitted. The card's real blocker turned out to be on the AOT side and is recorded separately: tooling/service_authority, service_runtime and service_tree all FAIL AOT compilation, and the gate was absolving them by filing AOT failure under expected_exit. The concrete cause is now known - two Prelude fragments each emit use std::time::{Duration, ...}, so any program pulling in both gets generated Rust that rustc rejects with E0252, which per I2 is an internal compiler error. That defect and the gate-class split are tracked on #2016 and #2026.",
+          "at": "2026-08-17T09:18:18.131Z"
         },
         {
           "n": 3,
           "text": "The blanket core.services deopt at safety.rs:1063 is narrowed to only genuinely uncovered calls; no re-encoded service policy exists in jet-jit (marshalling adapters only, I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:49.101Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. There is no blanket core.services deopt. A real 14-arm allowlist sits at crates/jet-jit/src/jit/safety.rs:1606-1666 with full arity dispatch at lower_ctx.rs:12786-12853 and core.sync.text_new at :12833, and all four stems sit in compile_covered with jit_gaps.txt gaps: and run_gaps: both empty. What landed is an I8 dedup rather than new coverage: service_core_arity became pub(crate) and is now the single table consulted by BOTH the lowering and tier admission, replacing a hand-restated allowlist plus a superseded app/core.web sync branch. The two sides were machine-diffed before the deletion - 69 rows each, zero set difference, zero arity disagreement - so admission and lowering now agree structurally instead of coincidentally, with no construct newly admitted. The card's real blocker turned out to be on the AOT side and is recorded separately: tooling/service_authority, service_runtime and service_tree all FAIL AOT compilation, and the gate was absolving them by filing AOT failure under expected_exit. The concrete cause is now known - two Prelude fragments each emit use std::time::{Duration, ...}, so any program pulling in both gets generated Rust that rustc rejects with E0252, which per I2 is an internal compiler error. That defect and the gate-class split are tracked on #2016 and #2026.",
+          "at": "2026-08-17T09:18:18.557Z"
         },
         {
           "n": 4,
           "text": "The four jit_gaps.txt rows 449-452 are deleted and tests/dev.rs jit_coverage_audit passes with no new rows",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:49.528Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. There is no blanket core.services deopt. A real 14-arm allowlist sits at crates/jet-jit/src/jit/safety.rs:1606-1666 with full arity dispatch at lower_ctx.rs:12786-12853 and core.sync.text_new at :12833, and all four stems sit in compile_covered with jit_gaps.txt gaps: and run_gaps: both empty. What landed is an I8 dedup rather than new coverage: service_core_arity became pub(crate) and is now the single table consulted by BOTH the lowering and tier admission, replacing a hand-restated allowlist plus a superseded app/core.web sync branch. The two sides were machine-diffed before the deletion - 69 rows each, zero set difference, zero arity disagreement - so admission and lowering now agree structurally instead of coincidentally, with no construct newly admitted. The card's real blocker turned out to be on the AOT side and is recorded separately: tooling/service_authority, service_runtime and service_tree all FAIL AOT compilation, and the gate was absolving them by filing AOT failure under expected_exit. The concrete cause is now known - two Prelude fragments each emit use std::time::{Duration, ...}, so any program pulling in both gets generated Rust that rustc rejects with E0252, which per I2 is an internal compiler error. That defect and the gate-class split are tracked on #2016 and #2026.",
+          "at": "2026-08-17T09:18:18.985Z"
         }
       ],
       "refs": [],
@@ -115311,8 +115311,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T09:47:10.916Z",
-      "updated": "2026-08-12T18:12:07.835Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T09:18:19.574Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T09:18:19.574Z"
     },
     {
       "id": "c0gb4uu4",
@@ -115424,7 +115425,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "zip_family's crash is already fixed (see card log); remaining work is a genuine N-ary zip/pad host representation in the JIT since AOT's TBuiltinOp::Zip builds a bespoke Rust tuple-struct literal per call site at emit time (crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs lower_zip_family), which does not translate directly to a JIT host call — this needs a design pass, not a wire-up. map_surface needs the same missing List/Map host-fn coverage as card #1754. set.jet's all/filter/each/fold/map/flat_map blockers are closure-taking builtin methods hitting the same 'jit closure method unsupported' gap as #1754's iterator adapters — design the closure-crossing-the-host-boundary mechanism once, shared across both cards. Prove each stem with `scripts/agent/jet-env jet run` against its example under examples/features/, matching AOT output, then delete the tests/jit_gaps.txt rows for map_surface, set, and zip_family.",
       "blockedBy": [],
@@ -115486,28 +115487,28 @@
           "n": 1,
           "text": "zip_family panic/index-oob triaged: real bug fixed at root or reclassified with evidence",
           "status": "met",
-          "metBy": "bd12-jita",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "TRIAGED: real compiler bug, fixed at root, not just a tier gap. Root cause: crates/jet-jit/src/jit/lower_ctx.rs's TBuiltinOp::Zip arm unconditionally indexed args[0] to get the zip partner. The free zero-arg zip() call lowers (TIR::lower_empty_zip_family, jet-codegen) to input_count:0, args:[] -- so args[0] panicked with exactly the observed message (index out of bounds: the len is 0 but the index is 0). AOT's own emit path handles this shape correctly via a dedicated empty-zip constructor; only the JIT lowering was missing the guard. Fixed: added an explicit input_count/flatten/fill_mode guard before touching args, so a genuinely-2-input no-pad zip still takes the fast self.host.coll.list_zip path (unchanged, still correct), while an empty/N-ary/flatten/zip_pad shape now returns a graceful Err (declines to interp) instead of panicking. Verified: examples/features/collections/zip_family.jet no longer panics under JIT compile (confirmed via cargo test -p jet --test dev jit_coverage_audit -- --nocapture: reason text changed from 'jit compile panicked before returning an unsupported reason: index out of bounds...' to a normal 'jit builtin method unsupported: n-ary/padded/empty zip' Err), and its output still matches AOT via interpreter fallback (diff clean).",
-          "at": "2026-08-08T14:04:22.541Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. The card states coll.list_zip only ever implemented the two-input no-pad case. That is false in the tree: lower_zip_family at crates/jet-jit/src/jit/lower_ctx.rs:11363-11462 implements generic N-ary zip through JitZipPlan and the iter_zip_family host, with modes Short, Strict and Pad and fills DefaultNone, Common and Columns. Every shape in examples/features/collections/zip_family.jet is covered - zip(), 1-ary, .zip, .zip_short, 3-ary, 4-ary, zip_pad, fill: and fills: - and collections/zip_family records resident_jit in the re-derived ledger. One construct still refuses, flatten at lower_ctx.rs:11374-11376, and it is unused by the corpus; the refusal is consistent between the predicate and the lowering, so it is an honest refusal rather than a gap. A sibling divergence in collections/iter_adapters is tracked on #2024 and is not this family: that lane confirmed it owns no zip arm.",
+          "at": "2026-08-17T09:18:20.190Z"
         },
         {
           "n": 2,
           "text": "map_surface, set, zip_family examples run on JIT and interpreter matching AOT; ledger rows deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T09:47:27.376Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. The card states coll.list_zip only ever implemented the two-input no-pad case. That is false in the tree: lower_zip_family at crates/jet-jit/src/jit/lower_ctx.rs:11363-11462 implements generic N-ary zip through JitZipPlan and the iter_zip_family host, with modes Short, Strict and Pad and fills DefaultNone, Common and Columns. Every shape in examples/features/collections/zip_family.jet is covered - zip(), 1-ary, .zip, .zip_short, 3-ary, 4-ary, zip_pad, fill: and fills: - and collections/zip_family records resident_jit in the re-derived ledger. One construct still refuses, flatten at lower_ctx.rs:11374-11376, and it is unused by the corpus; the refusal is consistent between the predicate and the lowering, so it is an honest refusal rather than a gap. A sibling divergence in collections/iter_adapters is tracked on #2024 and is not this family: that lane confirmed it owns no zip arm.",
+          "at": "2026-08-17T09:18:20.623Z"
         },
         {
           "n": 3,
           "text": "zip_family example runs on default jet run (JIT) and interpreter matching AOT for 2/3/4-ary zip, pad, and the loop row; its jit_gaps row is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:40:13.411Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. The card states coll.list_zip only ever implemented the two-input no-pad case. That is false in the tree: lower_zip_family at crates/jet-jit/src/jit/lower_ctx.rs:11363-11462 implements generic N-ary zip through JitZipPlan and the iter_zip_family host, with modes Short, Strict and Pad and fills DefaultNone, Common and Columns. Every shape in examples/features/collections/zip_family.jet is covered - zip(), 1-ary, .zip, .zip_short, 3-ary, 4-ary, zip_pad, fill: and fills: - and collections/zip_family records resident_jit in the re-derived ledger. One construct still refuses, flatten at lower_ctx.rs:11374-11376, and it is unused by the corpus; the refusal is consistent between the predicate and the lowering, so it is an honest refusal rather than a gap. A sibling divergence in collections/iter_adapters is tracked on #2024 and is not this family: that lane confirmed it owns no zip arm.",
+          "at": "2026-08-17T09:18:21.058Z"
         }
       ],
       "refs": [],
@@ -115517,8 +115518,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T09:47:26.633Z",
-      "updated": "2026-08-12T18:12:08.969Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T09:18:21.635Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T09:18:21.635Z"
     },
     {
       "id": "c0uscf94",
@@ -115675,7 +115677,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Five standalone resident gaps, one pass. (1) errors/or_err: generalize outcome-carrier lowering beyond I64 payloads at lower_ctx.rs:13508 (currently deliberately deopt-only, tests/jit_corpus_gate.txt:375); extend tests/outcome_carrier.rs:122. (2) tooling/app_live: Prelude-backed live-query lowering, narrow its safety gate at safety.rs:1067; the interpreter adapter at Codegen/TIR/eval/webapp.rs:56 shows the canonical surface. (3) types/traits: named-option printing at lower_ctx.rs:20179. (4) ui/ui_component_kit: make UI component callees discoverable at lower_ctx.rs:9452. (5) adopted orphans errors/partial_and_notes and io/db_policy: read their exact ledger reasons, fix the specific missing host function or dispatch arm the same way. crypto/auth_sessions (already covered, tests/dev.rs:5032) and or_err's compile-covered row stay as regressions. Delete each proven row; host functions call the same Prelude symbols AOT embeds (I9).",
       "blockedBy": [],
@@ -115701,38 +115703,38 @@
         {
           "n": 1,
           "text": "each of the five examples runs on JIT and interpreter matching AOT; ledger rows deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T09:47:29.576Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. All five stems this card batches are already resident_jit in the re-derived ledger: errors/partial_and_notes:250, io/db_policy:271, tooling/app_live:388, types/traits:458, ui/ui_component_kit:469. That section is an observed parity proof rather than a label - classify_corpus_stem diverts a stem to TierDivergent unless jit_out == aot_out, separately asserts interpreter == AOT, and requires both that no deopt occurred and that Cranelift actually executed. None of the five appears in tier_divergent or in run_tier_broken, which is empty. The three root causes the card recorded (a ui_component_kit AOT internal compiler error, app_live's LiveQuery lowering, and types/traits printing an unsubstituted Option<T>) were each closed by earlier work this epoch. The card's own cited gap rows are also gone: jit_gaps.txt gaps: and run_gaps: are both empty. Recorded rather than silently closed: the stem list in circulation was itself stale - it named errors/or_err, while the card names errors/partial_and_notes.",
+          "at": "2026-08-17T09:18:22.216Z"
         },
         {
           "n": 2,
           "text": "errors/partial_and_notes and io/db_policy examples run on default jet run (JIT) and interpreter matching AOT; their jit_gaps rows are deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:40:16.251Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. All five stems this card batches are already resident_jit in the re-derived ledger: errors/partial_and_notes:250, io/db_policy:271, tooling/app_live:388, types/traits:458, ui/ui_component_kit:469. That section is an observed parity proof rather than a label - classify_corpus_stem diverts a stem to TierDivergent unless jit_out == aot_out, separately asserts interpreter == AOT, and requires both that no deopt occurred and that Cranelift actually executed. None of the five appears in tier_divergent or in run_tier_broken, which is empty. The three root causes the card recorded (a ui_component_kit AOT internal compiler error, app_live's LiveQuery lowering, and types/traits printing an unsubstituted Option<T>) were each closed by earlier work this epoch. The card's own cited gap rows are also gone: jit_gaps.txt gaps: and run_gaps: are both empty. Recorded rather than silently closed: the stem list in circulation was itself stale - it named errors/or_err, while the card names errors/partial_and_notes.",
+          "at": "2026-08-17T09:18:22.645Z"
         },
         {
           "n": 3,
           "text": "app_live, traits, ui_component_kit, or_err, partial_and_notes, and db_policy examples produce byte-identical output under AOT, default jet run, and interpreter; their jit_gaps rows are deleted; tests/dev.rs stem tests green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:53.758Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. All five stems this card batches are already resident_jit in the re-derived ledger: errors/partial_and_notes:250, io/db_policy:271, tooling/app_live:388, types/traits:458, ui/ui_component_kit:469. That section is an observed parity proof rather than a label - classify_corpus_stem diverts a stem to TierDivergent unless jit_out == aot_out, separately asserts interpreter == AOT, and requires both that no deopt occurred and that Cranelift actually executed. None of the five appears in tier_divergent or in run_tier_broken, which is empty. The three root causes the card recorded (a ui_component_kit AOT internal compiler error, app_live's LiveQuery lowering, and types/traits printing an unsubstituted Option<T>) were each closed by earlier work this epoch. The card's own cited gap rows are also gone: jit_gaps.txt gaps: and run_gaps: are both empty. Recorded rather than silently closed: the stem list in circulation was itself stale - it named errors/or_err, while the card names errors/partial_and_notes.",
+          "at": "2026-08-17T09:18:23.074Z"
         },
         {
           "n": 4,
           "text": "No re-encoded policy in jet-jit for any of the five surfaces (marshalling only); no new jit_gaps rows appear",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:54.472Z"
+          "evidence": "Premise refuted by measurement at c04e904a6, not implemented as written. All five stems this card batches are already resident_jit in the re-derived ledger: errors/partial_and_notes:250, io/db_policy:271, tooling/app_live:388, types/traits:458, ui/ui_component_kit:469. That section is an observed parity proof rather than a label - classify_corpus_stem diverts a stem to TierDivergent unless jit_out == aot_out, separately asserts interpreter == AOT, and requires both that no deopt occurred and that Cranelift actually executed. None of the five appears in tier_divergent or in run_tier_broken, which is empty. The three root causes the card recorded (a ui_component_kit AOT internal compiler error, app_live's LiveQuery lowering, and types/traits printing an unsubstituted Option<T>) were each closed by earlier work this epoch. The card's own cited gap rows are also gone: jit_gaps.txt gaps: and run_gaps: are both empty. Recorded rather than silently closed: the stem list in circulation was itself stale - it named errors/or_err, while the card names errors/partial_and_notes.",
+          "at": "2026-08-17T09:18:23.506Z"
         }
       ],
       "refs": [],
@@ -115742,8 +115744,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T09:47:29.201Z",
-      "updated": "2026-08-12T18:12:10.136Z",
-      "updatedBy": "fable-e3-audit"
+      "updated": "2026-08-17T09:18:24.098Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-17T09:18:24.098Z"
     },
     {
       "id": "c0v4n785",
@@ -176619,6 +176622,104 @@
   ],
   "events": [
     {
+      "at": "2026-08-17T09:18:24.098Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0irn826",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T09:18:23.507Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0irn826",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T09:18:23.075Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0irn826",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T09:18:22.646Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0irn826",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T09:18:22.217Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0irn826",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T09:18:21.635Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0casx3j",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T09:18:21.058Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0casx3j",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T09:18:20.624Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0casx3j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T09:18:20.191Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0casx3j",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-17T09:18:19.575Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04cx2ti",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-17T09:18:18.985Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04cx2ti",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-17T09:18:18.557Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04cx2ti",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-17T09:18:18.132Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04cx2ti",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-17T09:18:17.699Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04cx2ti",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-17T08:46:50.171Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -180019,104 +180120,6 @@
       "action": "card.criteria-add",
       "ref": "c0v2w0vu",
       "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:31.162Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0v2w0vu",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:29.877Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0v2w0vu",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:29.235Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0v2w0vu",
-      "note": "JIT F11: Static constructor on a Core handle type outside the TIR subset"
-    },
-    {
-      "at": "2026-08-15T18:58:28.721Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0khsi7k",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:28.288Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0khsi7k",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:27.851Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0khsi7k",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:27.433Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0khsi7k",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:26.991Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0khsi7k",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-15T18:58:26.418Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0khsi7k",
-      "note": "JIT F10: Unsafe sentry address provenance not tracked"
-    },
-    {
-      "at": "2026-08-15T18:58:25.997Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uig3ju",
-      "note": "#4 Each member stem produces byte-identical output on AOT and o"
-    },
-    {
-      "at": "2026-08-15T18:58:25.584Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uig3ju",
-      "note": "#3 No stem is parked in tests/jit_gaps.txt and no skip guard is"
-    },
-    {
-      "at": "2026-08-15T18:58:25.177Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uig3ju",
-      "note": "#2 The fix is the one named in the plan, applied at the single "
-    },
-    {
-      "at": "2026-08-15T18:58:24.240Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uig3ju",
-      "note": "#1 Every member stem compiles on the resident JIT: cargo test -"
-    },
-    {
-      "at": "2026-08-15T18:58:23.266Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0uig3ju",
-      "note": "plan"
     }
   ],
   "nextNum": 368,
