@@ -3652,6 +3652,50 @@ impl TExpr {
     }
 }
 
+/// D-MEM-COPYSEM1=A: the ONE mapping from a `MaterializeView` source type to
+/// the shared Prelude materialization symbol (`Prelude/Core/ViewCopy.rs` for
+/// native/wasm, `Prelude/Core/ViewCopy.js` for the web tier). Per I9 no engine
+/// re-derives it: AOT emit, the wasm and JS web emitters, and lambda-capture
+/// lowering all read this table, so a `String` window and a `[T]` window can
+/// never disagree about which kernel copies them. Mirrors sema's
+/// `owned_type_for_read_view`, which decides the *type* of the same store.
+///
+/// A string window is the fallback because sema only builds `MaterializeView`
+/// for a proven read window: a `View<str>`, a `Type::String` local flagged
+/// `string_view`, or a range place. The first two are strings, so anything
+/// that is not list-shaped here is the string case.
+pub fn view_copy_symbol(source: &Type) -> &'static str {
+    match source {
+        Type::Apply { name, args } if name == "View" => {
+            if matches!(args.as_slice(), [Type::Named(element)] if element == "str") {
+                "jet_string_view_copy"
+            } else {
+                "jet_view_copy"
+            }
+        }
+        Type::List(_) | Type::FixedList { .. } => "jet_view_copy",
+        _ => "jet_string_view_copy",
+    }
+}
+
+/// D-MEM-COPYSEM1=A: the owned destination type a `View<T>` window
+/// materializes into, paired with `view_copy_symbol` so a capture store cannot
+/// pick one without the other. `None` means the source is not a declared view
+/// window and the caller keeps its own type.
+pub fn view_copy_owned_type(source: &Type) -> Option<Type> {
+    let Type::Apply { name, args } = source else {
+        return None;
+    };
+    if name != "View" || args.len() != 1 {
+        return None;
+    }
+    if matches!(&args[0], Type::Named(element) if element == "str") {
+        Some(Type::String)
+    } else {
+        Some(Type::List(Box::new(args[0].clone())))
+    }
+}
+
 pub enum TExprKind {
     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
     /// width is the elaborated `(signed, bits)` sema attached to the AST node.

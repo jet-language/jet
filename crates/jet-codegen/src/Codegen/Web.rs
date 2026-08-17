@@ -5172,24 +5172,13 @@ fn wasm_emit_expr(
                 format!("&({place})")
             }
         }
+        // D-MEM-COPYSEM1=A: same shared Prelude symbol AOT calls, chosen by the
+        // one `view_copy_symbol` table (I9 — the wasm tier only marshals).
         TIR::TExprKind::MaterializeView(inner) => {
+            let symbol = TIR::view_copy_symbol(&inner.ty);
             let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
-            match &inner.ty {
-                Type::Apply { name, args }
-                    if name == "View"
-                        && matches!(args.as_slice(), [Type::Named(element)] if element == "str") =>
-                {
-                    format!("jet_string_view_copy({value})")
-                }
-                Type::Apply { name, .. } if name == "View" => {
-                    format!("jet_view_copy({value})")
-                }
-                Type::List(_) | Type::FixedList { .. } => {
-                    format!("jet_view_copy({value})")
-                }
-                _ => format!("jet_string_view_copy({value})"),
-            }
-        },
+            format!("{symbol}({value})")
+        }
         TIR::TExprKind::BuiltinMethod {
             recv,
             op: TIR::TBuiltinOp::LenList,
@@ -7316,23 +7305,12 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Clone(inner) | E::ExplicitCopy(inner) | E::DistinctRaw(inner) => {
             tir_js_expr(inner, funcs, file_prefix)?
         }
+        // D-MEM-COPYSEM1=A: `ViewCopy.js` mirrors `ViewCopy.rs` symbol for
+        // symbol, so the JS tier reads the same `view_copy_symbol` table (I9).
         E::MaterializeView(inner) => {
+            let symbol = TIR::view_copy_symbol(&inner.ty);
             let value = tir_js_expr(inner, funcs, file_prefix)?;
-            match &inner.ty {
-                Type::Apply { name, args }
-                    if name == "View"
-                        && matches!(args.as_slice(), [Type::Named(element)] if element == "str") =>
-                {
-                    format!("jet_string_view_copy({value})")
-                }
-                Type::Apply { name, .. } if name == "View" => {
-                    format!("jet_view_copy({value})")
-                }
-                Type::List(_) | Type::FixedList { .. } => {
-                    format!("jet_view_copy({value})")
-                }
-                _ => format!("jet_string_view_copy({value})"),
-            }
+            format!("{symbol}({value})")
         }
         E::Close(inner) => {
             let key = web_close_key(&inner.ty).ok_or(())?;

@@ -25,6 +25,8 @@ use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::view_copy_owned_type;
+use crate::Codegen::TIR::view_copy_symbol;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::with_lambda_body_expr_cache;
@@ -44,28 +46,19 @@ fn reactive_capture_name(name: &str) -> String {
 
 /// D-MEM-COPYSEM1=A: resolve the owning capture type and shared Prelude
 /// operation for a read-only view. Sema records the names; lowering only
-/// marshals that fact into the target tier.
+/// marshals that fact into the target tier, reading the same
+/// `view_copy_symbol` / `view_copy_owned_type` tables every emitter reads so a
+/// captured window and a stored window can never pick different kernels.
 pub(super) fn materialized_capture_kind(
     name: &str,
     env: &LowerEnv,
 ) -> Option<(&'static str, Type)> {
     if env.is_string_view_local(name) {
-        return Some(("jet_string_view_copy", Type::String));
+        return Some((view_copy_symbol(&Type::String), Type::String));
     }
-    let source = env
-        .split_view_handle(name)
-        .or_else(|| env.ty_of(name))?;
-    let Type::Apply { name, args } = source else {
-        return None;
-    };
-    if name != "View" || args.len() != 1 {
-        return None;
-    }
-    if matches!(&args[0], Type::Named(element) if element == "str") {
-        Some(("jet_string_view_copy", Type::String))
-    } else {
-        Some(("jet_view_copy", Type::List(Box::new(args[0].clone()))))
-    }
+    let source = env.split_view_handle(name).or_else(|| env.ty_of(name))?;
+    let owned = view_copy_owned_type(&source)?;
+    Some((view_copy_symbol(&source), owned))
 }
 
 /// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
