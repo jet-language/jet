@@ -4004,7 +4004,7 @@ fn emit_test_fns(
                 ));
                 emit_test_body(cx, &test.body, out);
                 out.push_str("        Ok(())\n");
-                out.push_str("    }})\n");
+                out.push_str("    })\n");
             }
             out.push_str("}\n\n");
             continue;

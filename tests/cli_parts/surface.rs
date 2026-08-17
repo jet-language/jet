@@ -505,6 +505,13 @@ fn test_and_bench_help_keep_shared_runner_flags_paired() {
     }
 }
 
+/// I8: this test owns exactly ONE fact — that every user-visible surface names
+/// the coverage levels the instrumentation actually emits (function and branch
+/// rows, per `jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json`).
+/// Whole-artifact drift belongs to its canonical owners,
+/// `completions_generate_for_every_shell` and `man_page_golden` in
+/// `cli_parts/commands.rs`; re-asserting those goldens here made an unrelated
+/// command or flag addition look like a coverage-help regression.
 #[test]
 fn coverage_help_matches_instrumentation() {
     const COVERAGE_HELP: &str = "function and branch coverage";
@@ -543,7 +550,6 @@ fn coverage_help_matches_instrumentation() {
             assert!(script.contains(COVERAGE_HELP), "{shell}: {script}");
         }
         assert!(!script.contains("function and line coverage"), "{shell}: {script}");
-        check_snapshot(&format!("completions_{shell}.txt"), &script);
     }
 
     let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
@@ -551,12 +557,6 @@ fn coverage_help_matches_instrumentation() {
     let man = String::from_utf8_lossy(&man.stdout);
     assert!(man.contains(COVERAGE_HELP), "{man}");
     assert!(!man.contains("function and line coverage"), "{man}");
-    let man = man.replacen(
-        &format!("\"jet {}\"", env!("CARGO_PKG_VERSION")),
-        "\"jet VERSION\"",
-        1,
-    );
-    check_snapshot("man.txt", &man);
 }
 
 #[test]
