@@ -2295,7 +2295,7 @@ ties, non-finite numerics, signed-zero collapse, population variance
 labels, and tightened `DataLimits` failures. Both ship golden output under
 `examples/features/expected/tooling/` and AOT coverage in
 `tests/data_hostile.rs`. Strict resident-JIT parity (no AOT fallback) is
-covered by `tests/dev.rs`
+covered by `tests/dev_tier_parity.rs`
 (`data_pipelines_and_parsing_match_interpreter_jit_and_aot`).
 
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.

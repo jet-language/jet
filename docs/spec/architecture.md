@@ -633,7 +633,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   and never a durable `tests/jit_gaps.txt` parking lot. The interpreter is the
   reference semantics for `jet run`/`jet dev` parity. A feature PR is incomplete
   unless its example/golden proves the AOT path and
-  `tests/dev.rs::dev_default_matches_compiled_binary` proves default `jet run` /
+  `tests/dev_default_parity.rs::dev_default_matches_compiled_binary` proves default `jet run` /
   `jet dev` has the same stdout, stderr, exit code, diagnostics, panics, and
   side effects. If deopt runs that surface, interpreter ambient must call the
   same Prelude symbol as AOT emit. Web-facing surfaces prove the web target the same way. Native
