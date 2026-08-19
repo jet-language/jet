@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2052,
-    "rev": 38433,
+    "nextNum": 2062,
+    "rev": 38466,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17,18 +17,7 @@
         "epoch:e5",
         "radar-cards",
         "radar-remaining",
-        "radar-frozen",
-        "radar:e12",
-        "radar:e10",
-        "radar:e9",
-        "radar:e4",
-        "radar:e5",
-        "radar:e6",
-        "radar:e7",
-        "radar:e11",
-        "radar:e8",
-        "radar-sq",
-        "radar:e3"
+        "radar-frozen"
       ]
     },
     "completionCursor": "2026-08-17T19:30:52.378Z"
@@ -18858,6 +18847,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-19",
+          "by": "fable",
+          "text": "video-mine probe side-evidence (2026-08-19): jet run --release on an unchanged single-file probe recompiled 35-41s on every rerun — no cache reuse observed for identical source (binary 901bfe9b5). Relevant to the BuildCache/reusable-objects slices (#1023-#1028)."
+        },
+        {
           "at": "2026-08-10",
           "by": "mine-video",
           "text": "Evidence for the latency target (mined 2026-08-10, youtu.be/iu_ALBDtoHo).\n\nDevelopers reject Rust purely to avoid waiting on its compiler and pick Go instead. The cause is structural: whole-crate inference and monomorphization prevent checking one file on its own.\n\nFor agent work the same number matters twice over, because the loop runs the checker on every edit rather than once per human thought. Measured today: jet check on a small file is 0.757s warm.\n\nThe property worth protecting is not a benchmark figure, it is per-file checkability. Jet's query system already has it. Treat losing it as a regression in this card's scope, not as a tuning question."
@@ -18981,8 +18975,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T01:38:26.355Z",
-      "updated": "2026-08-10T18:52:05.000Z",
-      "updatedBy": "mine-video",
+      "updated": "2026-08-19T11:45:59.490Z",
+      "updatedBy": "fable",
       "tags": [],
       "parentId": null
     },
@@ -101798,6 +101792,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-19",
+          "by": "fable",
+          "text": "video-mine design input (2026-08-19, SwiftUI 'Flow data through SwiftUI', Qxv4Tf4-AdU): (1) AVOID SwiftUI's mechanism fragmentation — six decorated mechanisms (@State/@Binding/@Observable/@Environment/@AppStorage/@Model) chosen per data-flow tier; the talk exists because users cannot pick. Jet's signal surface should cover view state, model, preferences, and persistence as ONE mechanism with scope/lifetime parameters (I8). (2) @State's real model — framework-owned storage keyed by view identity, view structs transient — is the subtle part; Jet signals are explicitly owned values (owner Drop detaches the graph), a simpler story worth keeping. (3) Jet already BEATS the @Observable model: JetDerived.get() auto-subscribes the active observer — fine-grained signal graph vs SwiftUI re-running whole view bodies; record as beat vector. (4) Worth designing: type-keyed environment/context injection for rarely-changing shared objects (prop-drilling relief) and an @AppStorage-class persistent-preference scope (#505 live queries and #765 #Persist cover the model/persistence tiers; preferences tier is uncovered). (5) SwiftData micro surface worth stealing: relationship delete-rule cascade + inverse declared on the model."
+        },
+        {
           "at": "2026-08-12",
           "by": "fable",
           "text": "video-mine design input (2026-08-12): HAM ships long-press inspect-element inside production apps — runtime introspection as a first-class UI-framework feature. Worth weighing in the canonical UI architecture evaluation."
@@ -101842,7 +101841,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T00:07:09.478Z",
-      "updated": "2026-08-12T16:09:55.722Z",
+      "updated": "2026-08-19T11:45:58.848Z",
       "updatedBy": "fable",
       "workOrder": 5350
     },
@@ -134526,6 +134525,467 @@
       "created": "2026-08-19T11:19:49.171Z",
       "updated": "2026-08-19T11:19:59.642Z",
       "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0b6kkbv",
+      "num": 2052,
+      "title": "Structure is a value: engineering-principles audit — proposal and ballot slate",
+      "body": "First-principles audit of Jet against the classic software-engineering principles (owner request 2026-08-19). Verdict: Jet already enforces more principles as law than any peer (visibility ladder, acyclic imports, contracts, effects, delegation). Five structure truths have no home: name liveness, API lifecycle, import-edge rules, cross-cutting policy home, and template reach into registries. Proposal frames all five as one fact plane under D-FACT-LAW1 and mints six direction-level ballots D-STRUCT-PLANE1/LIVE1/LIFE1/EDGE1/POLICY1/ONCE1. Probes also found drift bugs filed as separate cards (trait-value coercion E0112 vs spec.md:814; inline-module struct E0119; E0113 self-contradictory fix text).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Six ballots D-STRUCT-PLANE1/LIVE1/LIFE1/EDGE1/POLICY1/ONCE1 are ballot-ready on this card with full review passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:43:19.279Z"
+        },
+        {
+          "n": 2,
+          "text": "No ratified decision is contradicted; every amendment (E2001/E2002/L2001 Core-only scope) is named inside its ballot text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:43:19.758Z"
+        },
+        {
+          "n": 3,
+          "text": "Drift bugs found by probes are filed as their own cards with repro evidence",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:43:20.219Z"
+        },
+        {
+          "n": 4,
+          "text": "Ratified outcomes recorded in docs/spec and implementation cards minted per outcome",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:43:20.674Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/structure-program-is-a-value.md",
+        "docs/audits/field-audit-2026-08-03.md"
+      ],
+      "tags": [
+        "research",
+        "architecture"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:43:07.845Z",
+      "updated": "2026-08-19T11:43:20.675Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0tcvfkk",
+      "num": 2053,
+      "title": "Trait value never forms at argument position: E0112 rejects what spec.md:814 promises",
+      "body": "Spec (spec.md:814, S48): 'A trait name in type position ([Shape], fn f(s: Shape)) means dynamic dispatch with invisible boxing.' Probe: trait Shape + struct Circle impl Shape + fn show(s: Shape); calling show(c) with c :: Circle.{radius: 1.0} fails E0112 'show wants Shape (a trait value) for argument 1, but this is Circle'. Same for direct literal argument. Only the [Shape] list-literal path coerces (examples/features/types/traits.jet golden only exercises that path). Fix text 'use Shape (a trait value) here' gives no way to make one — repair-determinism defect too. Repro: target-probes/sr/trait3.jet, jet run exits 1. DIP through trait params is unusable at call sites until this lands.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:43:45.949Z",
+      "updated": "2026-08-19T11:43:45.949Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c027z91l",
+      "num": 2054,
+      "title": "Struct declared in an inline module is invisible to its own module (E0119); E0113 emits self-contradictory fix",
+      "body": "Probe: module bank { pub struct Account { balance: Int } pub fn open() { a :: Account.{balance: 100} } } fails E0119 'no type called Account' — the struct is unusable inside its own inline module, in type position and literal position, qualified or not. Generic modules (module cache<K>(...) { pub struct Buffer ... }) DO support member structs, so plain inline modules are inconsistent. Shipped evidence: examples/features/web/ui_showcase.jet:16-29 documents being unable to group functions into #Target(JS) module browser {} because of this bug plus an I2 codegen rejection, and ships 10 repeated per-function #Target(JS) tags as the workaround. Related message bug from same repro: E0113 says \"promises to return bank.Account, but this returns vis2.bank.Account ... Fix: use bank.Account here\" — the fix prescribes exactly what the user wrote (I4 violation). Repros: target-probes/sr/vis3.jet (E0119), target-probes/sr/vis2.jet (E0113).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:43:46.485Z",
+      "updated": "2026-08-19T11:43:46.485Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0beea95",
+      "num": 2055,
+      "title": "core.io watcher events are stringly typed: ev.domain/kind are Strings where enums exist",
+      "body": "examples/features/io/watcher.jet:31,68-76 matches on ev.domain == { \"process\" -> ... \"port\" -> ... } and threads string sentinels (first_kind := \"none\"). The watcher stdlib API hands back string domain/kind fields instead of enums, forcing stringly-typed consumer code while enum and distinct exist and stdlib-api-laws demand illegal-states-unrepresentable surfaces. Found by the engineering-principles corpus audit (card #2052).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:43:47.040Z",
+      "updated": "2026-08-19T11:43:47.040Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0615ffl",
+      "num": 2056,
+      "title": "core.regex runtime: naive Pike VM is quadratic in practice; grep-class engine needed",
+      "body": "Video-mine evidence (Why Its So Hard To Write A Fast grep, UJ_W0O3sFnY, 2026-08-19): a naive spec-shaped regex engine was 70x slower than grep; swapping to a SIMD-prefiltered engine (vectorscan) cut 170s to 7s on 4GB. Jet probe on today's binary (901bfe9b5): re.find_all(.{\"struct\"}, text) literal scan — 40KB=0.7s, 400KB=15.4s default jet run (superlinear), 4MB never finished in 300s; GNU grep does the full 4MB in 0.004s (31,476 hits). Causes in Prelude/CoreLib/JetStd/Open.rs: find_from re-runs the Pike VM at every byte position; run_at/add_thread allocate Vec + BTreeSet + caps.clone() per position; JetRegexMatch clones the ENTIRE haystack String per match (3,087 matches x 400KB = about 1.2GB copied). The ratified semantics are right (D-REGEXENGINE1 linear time, no backreferences — DFA-able by construction; the std::regex trap is spec-level and Jet avoided it). Only the runtime is slow. Direction: byte-level lazy DFA or NFA simulation without per-position restart, memchr/Teddy-class literal prefilter (jet_compute already proves vetted-unsafe AVX2/SSE2 runtime dispatch is invariant-clean, Compute.rs jet_compute_simd_backend), span-based matches with lazy group extraction, zero allocation on the scan hot path. Engine lives in the Prelude so all tiers share it (I9 structural).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:44:41.135Z",
+      "updated": "2026-08-19T11:44:41.135Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0p48658",
+      "num": 2057,
+      "title": "core.files parallel walk + grep-class file-scan flagship",
+      "body": "Video-mine evidence (UJ_W0O3sFnY): the winning architecture for scanning 200k files / 4GB was NOT io_uring (queue exhaustion, overflow buffers, free lists — complexity swallowed the gains and it was scrapped) but the simplest parallel shape: one shared queue of directories; every thread pops a directory, enumerates it, pushes discovered subdirectories, and processes that directory's files sequentially; plus write batching to cut lock contention and write syscalls. Final: 1.2s for 4GB, within 80ms of ripgrep. Jet today: fs.walk (FSIoEnvOsTesting.rs walk_dir) is single-threaded recursive with per-directory sort; no parallel traversal or high-throughput scan primitive exists. Deliverable: a parallel walk/scan path in core.files honoring the shared-queue architecture, and a grep-style flagship example proving Jet can be the fastest-grep substrate (depends on #2056 for the matcher). Expert notes for later, not this card: sink-aware zero-copy (splice) is what lets cat-class tools win; mmap loses to plain read for sequential scans once page faults are paid.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [
+        "c0615ffl"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:45:08.410Z",
+      "updated": "2026-08-19T11:46:29.135Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0y3llif",
+      "num": 2058,
+      "title": "Default jet run: hot numeric list loop runs ~1400x slower than AOT",
+      "body": "Probe on today's binary (901bfe9b5, 2026-08-19): fn sum_all(xs: [Int]) with loop x, xs { total += x } over a 2,000,000-element list — default jet run: 2815ms/2829ms per call; jet run --release: 2ms per call. Same source, same output (I9 semantics hold; this is a pure performance gap of about 1400x on the beginner-default tier). Compiler-opts video (BOrAVwwCXq8) context: this magnitude is not missing autovectorization (that costs about 8x) — it is the shape of a loop interpreting or crossing a boxed/deopt boundary per element. Also note (probe side-evidence, belongs to the compiler-speed family): rerunning jet run --release on an unchanged single-file probe recompiled for 35-41s each time — no cache reuse observed. Diagnose which tier actually executes this loop (Cranelift native vs TIR-eval deopt), record the cause, and close the gap to a defensible dev-lens multiple. The video's benchmark lesson applies directly: users WILL benchmark default jet run, and today it measures the interpreter, not Jet.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:45:08.953Z",
+      "updated": "2026-08-19T11:45:08.954Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0zkd2j5",
+      "num": 2059,
+      "title": "Self-hosted optimizer design: SSA backend fed by sema facts",
+      "body": "Owner directive (2026-08-19 video-mine run): the self-hosted compiler must eventually beat the underlying Rust compiler on generated-code quality, not only on build latency. Compiler-opts video (BOrAVwwCXq8) supplies the catalog and the leverage: SSA + explicit CFG make every classic pass a lookup instead of an analysis; aliasing is the most common vectorization blocker; purity is the universal optimization currency. Jet's categorical edge: sema already PROVES facts rustc must re-infer from scratch — D-MEM1 exclusivity (& is exclusive-for-the-call: noalias by construction), the one effect model (purity per function), value semantics + deep freeze (D-CONC-FREEZE1: immutability facts), typed bounds. Today those proofs are discarded at emit and LLVM re-derives approximations. The self-hosted optimizing backend must consume them directly. docs/plans/compiler-speed.md bets 1-6 cover build speed and monomorphization; no card owns optimizer design. This card is the design doc, not the implementation.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "video-mine",
+        "self-hosting"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:45:41.694Z",
+      "updated": "2026-08-19T11:45:41.694Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c08jqcnk",
+      "num": 2060,
+      "title": "jet bench: keep() sink and optimizer-trap guards",
+      "body": "Both perf videos (UJ_W0O3sFnY, BOrAVwwCXq8) end on the same trap: a benchmark that measures the optimizer, not the work — the famous nested-loop language benchmark actually measured integer division; the grep video's first mmap benchmark lied by 2000x because the file was never faulted in. jet bench today has no black-box/keep sink (grep over jet-cli and Prelude: no matches), so an optimizing tier may elide the measured loop entirely and a lazy resource may defer its cost outside the timed region. Small, bounded surface: a keep(x) sink the optimizer must treat as used, plus bench docs teaching the trap catalog.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:45:42.237Z",
+      "updated": "2026-08-19T11:45:42.237Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0hipgvn",
+      "num": 2061,
+      "title": "Measure global-allocator impact on Jet AOT workloads",
+      "body": "Video-mine evidence (UJ_W0O3sFnY): dropping in mimalloc for musl malloc removed 2 seconds from a ~5s run with zero code change; top comment (326 likes) mocks glibc malloc speed. Jet AOT binaries default to the system allocator through JetProgramAllocator (#1853 shipped the swap point; #1926 proved the expert story). Unknown: what a mimalloc-class allocator is worth on Jet's own workloads (glibc is better than musl; the video number does not transfer). Measure before proposing anything. A default change would add an external dependency to generated programs — owner gate under the Core dependency rules; this card ships no default change.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "performance",
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:45:42.779Z",
+      "updated": "2026-08-19T11:45:42.780Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -178357,24 +178817,6 @@
       "cardId": "c0nqa5px"
     },
     {
-      "id": "b2gow3ol",
-      "text": "How can we rethink development in general from first principles to improve on effectiveness, efficiency, speed, and incredible ergonomics. What are the biggest pain points in development at all echelons across all domains, how can we fundamentally address them. How can we minimize friction OVERALL in development, not just with the common friction points that impact WRITING and READING code?",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-10T13:41:31.011Z"
-    },
-    {
-      "id": "b0rbwnan",
-      "text": "Evaluate jet against principles of software engineering/etc -> one is principle of single responsibility. Audit against this in jet and jet programs to ensure we optimize jet from first principles of engineering",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-10T18:04:57.271Z"
-    },
-    {
       "id": "b1l7zqt1",
       "text": "Oh my pi as inspiration for all user facing TUI ux/dx/ui",
       "note": "",
@@ -178543,6 +178985,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-19T11:46:29.135Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0p48658",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-19T11:45:59.490Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0zmoznd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T11:45:58.848Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0y6f65g",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T11:45:42.780Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0hipgvn",
+      "note": "Measure global-allocator impact on Jet AOT workloads"
+    },
+    {
+      "at": "2026-08-19T11:45:42.237Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c08jqcnk",
+      "note": "jet bench: keep() sink and optimizer-trap guards"
+    },
+    {
+      "at": "2026-08-19T11:45:41.694Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0zkd2j5",
+      "note": "Self-hosted optimizer design: SSA backend fed by sema facts"
+    },
+    {
+      "at": "2026-08-19T11:45:08.954Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0y3llif",
+      "note": "Default jet run: hot numeric list loop runs ~1400x slower than AOT"
+    },
+    {
+      "at": "2026-08-19T11:45:08.411Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0p48658",
+      "note": "core.files parallel walk + grep-class file-scan flagship"
+    },
+    {
+      "at": "2026-08-19T11:44:41.135Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0615ffl",
+      "note": "core.regex runtime: naive Pike VM is quadratic in practice; grep-class engine needed"
+    },
+    {
+      "at": "2026-08-19T11:43:47.040Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0beea95",
+      "note": "core.io watcher events are stringly typed: ev.domain/kind are Strings where enums exist"
+    },
+    {
+      "at": "2026-08-19T11:43:46.485Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c027z91l",
+      "note": "Struct declared in an inline module is invisible to its own module (E0119); E0113 emits self-contradictory fix"
+    },
+    {
+      "at": "2026-08-19T11:43:45.949Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0tcvfkk",
+      "note": "Trait value never forms at argument position: E0112 rejects what spec.md:814 promises"
+    },
+    {
+      "at": "2026-08-19T11:43:20.675Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0b6kkbv",
+      "note": "#4 Ratified outcomes recorded in docs/spec and implementation c"
+    },
+    {
+      "at": "2026-08-19T11:43:20.220Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0b6kkbv",
+      "note": "#3 Drift bugs found by probes are filed as their own cards with"
+    },
+    {
+      "at": "2026-08-19T11:43:19.758Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0b6kkbv",
+      "note": "#2 No ratified decision is contradicted; every amendment (E2001"
+    },
+    {
+      "at": "2026-08-19T11:43:19.279Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0b6kkbv",
+      "note": "#1 Six ballots D-STRUCT-PLANE1/LIVE1/LIFE1/EDGE1/POLICY1/ONCE1 "
+    },
+    {
+      "at": "2026-08-19T11:43:07.845Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0b6kkbv",
+      "note": "Structure is a value: engineering-principles audit — proposal and ballot slate"
+    },
+    {
+      "at": "2026-08-19T11:27:44.289Z",
+      "by": "fable",
+      "action": "papercut.add",
+      "ref": "pc01955qe",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T11:24:23.159Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b2gow3ol",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T11:24:21.299Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b0rbwnan",
+      "note": ""
+    },
     {
       "at": "2026-08-19T11:19:59.642Z",
       "by": "fable-ideas",
@@ -181902,146 +182484,6 @@
       "action": "card.criteria-meet",
       "ref": "c014nejk",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-16T23:58:42.071Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c014nejk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T23:57:11.023Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m7k8pa",
-      "note": "#5 example_corpus_strict_jit_aot_differential_gate reports no c"
-    },
-    {
-      "at": "2026-08-16T23:57:10.597Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m7k8pa",
-      "note": "#4 No golden is edited to match a tier and the gate's interpret"
-    },
-    {
-      "at": "2026-08-16T23:57:10.154Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m7k8pa",
-      "note": "#3 Any rendering or policy re-derived in the interpreter is del"
-    },
-    {
-      "at": "2026-08-16T23:57:09.727Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m7k8pa",
-      "note": "#2 serde/encoding_stream_types, tooling/data_plot and types/uni"
-    },
-    {
-      "at": "2026-08-16T23:57:09.274Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0m7k8pa",
-      "note": "#1 The AOT-versus-interpreter diff is recorded per stem, so the"
-    },
-    {
-      "at": "2026-08-16T23:57:08.816Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0m7k8pa",
-      "note": "Three newly-compiling stems diverge on the pure-interpreter tier"
-    },
-    {
-      "at": "2026-08-16T23:48:25.794Z",
-      "by": "fable-e3-burndown",
-      "action": "decision.add",
-      "ref": "D-SOA-TIER1",
-      "note": "How the dev tiers run a columnar list"
-    },
-    {
-      "at": "2026-08-16T18:22:11.621Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-16T18:22:11.621Z"
-    },
-    {
-      "at": "2026-08-16T17:13:53.552Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0m4rfbe",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T17:13:52.947Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m4rfbe",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-16T17:13:52.518Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m4rfbe",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T17:13:52.104Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m4rfbe",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T17:13:51.672Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m4rfbe",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T17:13:51.226Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m4rfbe",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T17:13:50.785Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0f02mn4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T17:13:50.183Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f02mn4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-16T17:13:49.753Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f02mn4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T17:13:49.321Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f02mn4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T17:13:48.897Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f02mn4",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
@@ -182649,6 +183091,14 @@
       "text": "Corpus-gate and three-way batteries write per-stem AOT crate scratch into TMPDIR, which is /tmp and RAM-backed tmpfs here; 745 dirs reached 26G of 31G and drove swap to 22G of 24G. jet-env rejects a /tmp CARGO_TARGET_DIR but nothing redirects the nix-shell TMPDIR. Export TMPDIR to a disk path such as ~/.cache/jet-scratch before long gate runs; scripts/agent/tmp-guard.sh reclaims most of it after the fact.",
       "cardId": null,
       "created": "2026-08-17T10:57:59.774Z",
+      "status": "open"
+    },
+    {
+      "id": "pc01955qe",
+      "by": "fable",
+      "text": "codex-rescue harness agent type broken: every spawn fails instantly with 404 model: claude-sonnet-4-0 not found; fell back to scout agents for research fan-out",
+      "cardId": null,
+      "created": "2026-08-19T11:27:44.289Z",
       "status": "open"
     }
   ]
