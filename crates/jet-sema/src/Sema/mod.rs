@@ -108,6 +108,12 @@ pub(crate) enum TypeDef {
         /// must never be accepted at the C FFI boundary (card #436 / E3203) —
         /// only this flag makes `c_named_type_ok` (Sema/FFI.rs) say yes.
         is_c_layout: bool,
+        /// D-MIGRATE1: `#PublishedSchema` was present (either the standalone
+        /// prefix or the grouped `#[PublishedSchema, …]` spelling). Codegen
+        /// adds a hidden `__jet_unknown_fields` carrier field to the generated
+        /// Rust struct, so a comptime-folded value of this type has no
+        /// complete literal form (`ct_value_is_emittable`).
+        published: bool,
     },
     Enum {
         variants: HashMap<String, (Span, VariantPayload)>,
@@ -293,6 +299,19 @@ impl TypeRegistry {
     /// The enum counterpart of `is_user_struct`.
     pub(crate) fn is_user_enum(&self, name: &str) -> bool {
         matches!(self.types.get(name), Some(TypeDef::Enum { .. }))
+    }
+
+    /// D-MIGRATE1: true when `name` is a `#PublishedSchema` struct. Its
+    /// generated Rust struct carries a hidden `__jet_unknown_fields` field, so
+    /// no source-shaped literal of it is complete.
+    pub(crate) fn is_published_schema_struct(&self, name: &str) -> bool {
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Struct {
+                published: true,
+                ..
+            })
+        )
     }
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
@@ -1587,6 +1606,10 @@ pub(crate) struct Checker<'a> {
     lambda_params_are_lending_views: bool,
     /// M11: when true, lambda is being passed to canonical `task` — stricter capture rules (E1101).
     is_task_spawn: bool,
+    /// D-CONC-SPAWN1: set by `infer_try` when a `?` in the CURRENT lambda body
+    /// is typed against the enclosing fallible return. `infer_lambda` scopes it
+    /// per lambda and harvests it into `LambdaMeta::fallible_propagation`.
+    task_body_propagates: bool,
     /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.

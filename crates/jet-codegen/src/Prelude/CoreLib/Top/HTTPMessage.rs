@@ -241,6 +241,12 @@ impl JetShow for JetHTTPError {
     }
 }
 
+impl JetDebug for JetHTTPError {
+    fn jet_debug(&self) -> String {
+        <Self as JetShow>::jet_show(self)
+    }
+}
+
 // D-FAIL-CONV2=A: one display hook backs both the shipped impl HTTPError => Err
 // and user interpolation.
 impl JetDisplay for JetHTTPError {

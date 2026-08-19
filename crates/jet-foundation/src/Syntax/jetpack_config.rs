@@ -138,6 +138,10 @@ pub const NS_WORKSPACE: &str = "workspace";
 /// docs/spec/performance-budget-decisions.md.
 pub const NS_PERF: &str = "perf";
 pub const PERF_FIELD_BUDGETS: &str = "budgets";
+/// D-PERFBUDGET-COMPILE1=C (ratified 2026-07-16): typed compile workloads.
+/// `compile_workloads: { name: CompilerWorkload.Edit.{ target, patch } }`
+/// plus the `CompileTime` metric and `CompilerProbe(Clean|NoChange|Edit(name))`
+/// provider below are the sole compile-latency budget spellings.
 pub const PERF_FIELD_COMPILE_WORKLOADS: &str = "compile_workloads";
 pub const TYPE_BUDGET: &str = "Budget";
 pub const TYPE_BUDGET_APPLIES: &str = "BudgetApplies";

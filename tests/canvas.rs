@@ -525,6 +525,19 @@ fn source_span_near(haystack: &str, marker: &str) -> (usize, usize) {
     (start, end)
 }
 
+fn source_span_at_or_after(haystack: &str, marker: &str, minimum_start: usize) -> (usize, usize) {
+    let mut search_from = 0usize;
+    while let Some(found) = haystack[search_from..].find(marker) {
+        let pos = search_from + found;
+        let (start, end) = source_span_near(&haystack[pos..], marker);
+        if start >= minimum_start {
+            return (start, end);
+        }
+        search_from = pos + marker.len();
+    }
+    panic!("marker has no source span at or after {minimum_start}: {marker}");
+}
+
 fn graph_id_for_title(graph: &str, title: &str) -> String {
     field_before(graph, &format!("\"title\":\"{title}\""), "graph_id")
 }
@@ -1199,6 +1212,67 @@ fn run() {
     let removed = fs::read_to_string(&multi_path).unwrap();
     assert!(removed.contains("[1, 2, 3]"), "{removed}");
     assert!(!removed.contains("[1, 2, 3, 4]"), "{removed}");
+}
+
+#[test]
+fn canvas_statement_state_nodes_and_toggle_transaction() {
+    let path = write_fixture(
+        "statement_state",
+        r#"fn run() {
+    #Off print("off")
+    #DebugOnly print("debug")
+    print("on")
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("state graph");
+    for field in [
+        "\"node_descriptor_id\":\"switched\"",
+        "\"title\":\"#Off\"",
+        "\"badges\":[\"#Off\"]",
+        "\"title\":\"#DebugOnly\"",
+        "\"badges\":[\"#DebugOnly\"]",
+        "toggle_switch_state",
+    ] {
+        assert!(graph.contains(field), "statement-state graph missing {field}: {graph}");
+    }
+
+    let graph_id = graph_id_for_title(&graph, "run");
+    let (node_start, node_end) = source_span_near(&graph, "\"title\":\"#Off\"");
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let turn_on = format!(
+        "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
+        revision, graph_id, node_start, node_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &turn_on).expect("turn on state");
+    let on = fs::read_to_string(&path).unwrap();
+    assert!(!on.contains("#Off"), "{on}");
+    assert!(on.contains("#DebugOnly print(\"debug\")"), "{on}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after turn on");
+    let on_start = on.find("print(\"on\")").expect("plain on call");
+    let (node_start, node_end) = source_span_at_or_after(&graph, "\"title\":\"print", on_start);
+    let revision = jet::Canvas::source_revision(&on);
+    let turn_off = format!(
+        "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
+        revision, graph_id, node_start, node_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &turn_off).expect("turn off state");
+    let off = fs::read_to_string(&path).unwrap();
+    assert!(!off.contains("#Off print(\"off\")"), "{off}");
+    assert!(off.contains("#Off print(\"on\")"), "{off}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after turn off");
+    let off_on_start = off.find("#Off print(\"on\")").expect("off plain on call");
+    let (node_start, node_end) = source_span_at_or_after(&graph, "\"title\":\"#Off\"", off_on_start);
+    let revision = jet::Canvas::source_revision(&off);
+    let restore = format!(
+        "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
+        revision, graph_id, node_start, node_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &restore).expect("restore state");
+    assert_eq!(fs::read_to_string(&path).unwrap(), on);
 }
 
 #[test]

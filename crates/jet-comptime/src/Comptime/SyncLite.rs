@@ -13,6 +13,10 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
+
 #[allow(non_camel_case_types)]
 trait __jet_Encode {
     fn jet_encode(&self) -> jet_std::DataTree;

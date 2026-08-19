@@ -234,8 +234,16 @@
     return modulePath && modulePath !== "builtin" ? "Function from " + modulePath + "." : "Calls a function.";
   }
 
+  function nodeStateBadge(node) {
+    return ((node && node.badges) || []).find((badge) => badge === "#Off" || badge === "#DebugOnly") || "";
+  }
+
+  function nodeBadgeText(node) {
+    return nodeStateBadge(node) || (developerMode && node && node.kind ? String(node.kind).toUpperCase() : "");
+  }
+
   function shouldDrawNodeBadge(node) {
-    return developerMode && !!node && !!node.kind;
+    return !!nodeBadgeText(node);
   }
 
   function isGetterCapsule(node) {
@@ -300,7 +308,7 @@
     const leftW = Math.max(0, ...inputPins.map((p) => pinContentWidth(graph, node, p)));
     const rightW = Math.max(0, ...outputPins.map((p) => pinContentWidth(graph, node, p)));
     const pinW = leftW + rightW + NODE_PAD * 4;
-    const badgeW = shouldDrawNodeBadge(node) ? Math.min(118, measureTextPx(`9.2px ${MONO_FONT}`, String(node.kind || "").toUpperCase()) + 14) + NODE_PAD * 2 : 0;
+    const badgeW = shouldDrawNodeBadge(node) ? Math.min(118, measureTextPx(`9.2px ${MONO_FONT}`, nodeBadgeText(node)) + 14) + NODE_PAD * 2 : 0;
     const multiInput = (node.edit_affordances || []).includes("append_multi_input");
     const armInput = (node.edit_affordances || []).includes("add_pattern_arm");
     const footerText = multiInput ? `+ ${inputPins.filter((p) => !isExecPin(p)).length} inputs` : armInput ? "+ arm" : "";
@@ -623,17 +631,19 @@
     }
 
     if (shouldDrawNodeBadge(node)) {
-      const badgeText = String(node.kind || "").toUpperCase();
+      const badgeText = nodeBadgeText(node);
+      const stateBadge = nodeStateBadge(node);
+      const badgeColor = stateBadge === "#Off" ? "#f87171" : stateBadge ? "#fbbf24" : style.accent;
       ctx.font = `${Math.max(7.5, 9.2 * view.zoom)}px ${MONO_FONT}`;
       const badgeW = Math.min(118 * view.zoom, ctx.measureText(badgeText).width + 14 * view.zoom);
       const badgeY = y + headerH + 6 * view.zoom;
       roundRect(x + 14 * view.zoom, badgeY, badgeW, 20 * view.zoom, 4 * view.zoom);
-      ctx.fillStyle = hexToRgba(style.accent, .14);
+      ctx.fillStyle = hexToRgba(badgeColor, .14);
       ctx.fill();
-      ctx.strokeStyle = hexToRgba(style.accent, .42);
+      ctx.strokeStyle = hexToRgba(badgeColor, .42);
       ctx.lineWidth = Math.max(.8, view.zoom);
       ctx.stroke();
-      ctx.fillStyle = style.accent;
+      ctx.fillStyle = badgeColor;
       ctx.textAlign = "center";
       ctx.fillText(clipText(badgeText, 16), x + 14 * view.zoom + badgeW / 2, badgeY + 13.5 * view.zoom);
       ctx.textAlign = "left";

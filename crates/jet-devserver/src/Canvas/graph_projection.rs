@@ -981,7 +981,20 @@ fn project_stmt(
             add_region(g, ordinal, "shield", "#Shield", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70);
         }
-        Stmt::Switched { body, .. } => {
+        Stmt::Switched { marker, body, span } => {
+            let node_id = format!("{}:stmt:{ordinal}:switched", g.graph_id);
+            let badge = format!("#{}", marker.name);
+            add_node(
+                g,
+                &node_id,
+                "switched",
+                &badge,
+                (*span).into(),
+                x,
+                y,
+                vec![&badge],
+                vec!["toggle_switch_state", "source_jump"],
+            );
             project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70);
         }
         Stmt::Region {

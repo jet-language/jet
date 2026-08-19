@@ -1207,6 +1207,135 @@ pub(super) fn apply_remove_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
+pub(super) fn apply_toggle_switch_state(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    node_span: SourceSpan,
+) -> Result<String, String> {
+    let func = checked_func_for_graph(path, src, graph_id)?;
+    match find_switched_node(&func.body, node_span) {
+        Some(SwitchedNode::Marker(marker_span)) => {
+            let changed = FixEngine::apply_edits(src, &[edit(marker_span, "")])
+                .map_err(|_| edit_error("overlap", "Canvas statement-state toggle overlapped"))?;
+            write_checked_formatted(path, src, &changed)
+        }
+        Some(SwitchedNode::Nested) => Err(edit_error(
+            "bad_request",
+            "Canvas node is already inside a statement state",
+        )),
+        None if !statement_contains_span(&func.body, node_span)
+            || same_span(func.name_span.into(), node_span) => Err(edit_error(
+            "not_found",
+            "Canvas statement node no longer exists",
+        )),
+        None => {
+            let insert = line_start(src, node_span.start);
+            let changed = FixEngine::apply_edits(
+                src,
+                &[edit(
+                    SourceSpan {
+                        start: insert,
+                        end: insert,
+                    },
+                    "#Off ",
+                )],
+            )
+            .map_err(|_| edit_error("overlap", "Canvas statement-state toggle overlapped"))?;
+            write_checked_formatted(path, src, &changed)
+        }
+    }
+}
+
+enum SwitchedNode {
+    Marker(SourceSpan),
+    Nested,
+}
+
+fn find_switched_node(stmts: &[Stmt], node_span: SourceSpan) -> Option<SwitchedNode> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Switched { marker, body, span } => {
+                let switched_span: SourceSpan = (*span).into();
+                if same_span(switched_span, node_span) {
+                    return Some(SwitchedNode::Marker(marker.span.into()));
+                }
+                if span_within(node_span, switched_span) {
+                    return Some(SwitchedNode::Nested);
+                }
+                if let Some(found) = find_switched_node(body, node_span) {
+                    return Some(found);
+                }
+            }
+            _ => {
+                if let Some(found) = find_switched_node_in_children(stmt, node_span) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_switched_node_in_children(stmt: &Stmt, node_span: SourceSpan) -> Option<SwitchedNode> {
+    match stmt {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => find_switched_node(body, node_span),
+        Stmt::CountedLoop { step, body, .. } => step
+            .as_deref()
+            .and_then(|step| find_switched_node(std::slice::from_ref(step), node_span))
+            .or_else(|| find_switched_node(body, node_span)),
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => {
+            for arm in arms {
+                if let Some(found) = find_switched_node(&arm.body, node_span) {
+                    return Some(found);
+                }
+            }
+            else_body
+                .as_deref()
+                .and_then(|body| find_switched_node(body, node_span))
+        }
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => find_switched_node(then_body, node_span).or_else(|| {
+            else_body
+                .as_deref()
+                .and_then(|body| find_switched_node(body, node_span))
+        }),
+        _ => None,
+    }
+}
+
+fn statement_contains_span(stmts: &[Stmt], node_span: SourceSpan) -> bool {
+    stmts
+        .iter()
+        .any(|stmt| span_within(node_span, stmt.span().into()))
+}
+
 pub(super) fn apply_append_multi_input(
     path: &Path,
     src: &str,

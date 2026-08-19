@@ -10,7 +10,7 @@ fn handle_api(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("path") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{body}"))
 }
 
-fn run() ? IOError | NetError | HTTPError | TaskFailure {
+fn run() ? HTTPError | IOError | NetError | TaskFailure {
     files.write("/tmp/jet_http_static.txt", "0123456789")?
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?

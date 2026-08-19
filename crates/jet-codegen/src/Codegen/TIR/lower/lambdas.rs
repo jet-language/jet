@@ -608,6 +608,23 @@ pub(crate) fn lower_spawn_lambda_for_jit_with_shared_block(
     lower_spawn_lambda_for_jit_expecting_with_body(lam, cx, env, &[], Some(body))
 }
 
+/// D-CONC-SPAWN1: the Rust error type a fallible `task` body early-returns.
+/// Sema proved every `?` in the body against the enclosing function's fallible
+/// return (`LambdaMeta::fallible_propagation`), so the rendered closure returns
+/// `JetOutcome<_, E>` and its happy path must build the same carrier
+/// (`Ok::<_, E>(…)`) — otherwise the `?` sits inside a `()` closure and rustc
+/// rejects the generated code (I2). Mirrors `spawn_body_result_ty`.
+fn spawn_fallible_err_rust(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<String> {
+    if !lam.meta.fallible_propagation {
+        return None;
+    }
+    match env.ret_ty.as_ref() {
+        Some(Type::Result { err, .. }) => Some(cx.rust_type(err)),
+        Some(Type::Option(_)) => Some(format!("{}JetAbsent", cx.root_prefix)),
+        _ => None,
+    }
+}
+
 /// c109 Phase 13: render a canonical `task` lambda. It is `emit_lambda` minus the
 /// Fn-vs-FnMut and escape logic: ALWAYS `move`, NEVER `Box::new`. The clone-capture
 /// prelude is identical. Returns the full rendered closure string (wrapped in
@@ -685,9 +702,18 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     // reason: this env is not the env the executable pass uses.
     let saved_spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
     let saved_spawn_sites = cx.jit_spawn_sites.borrow().clone();
+    let fallible_err = spawn_fallible_err_rust(lam, cx, env);
     let body = with_lambda_body_expr_cache(|| match &lam.body {
-        LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
-        LambdaBody::Block(stmts) => render_spawn_block_body(stmts, cx, &mut lam_env),
+        LambdaBody::Expr(e) => {
+            let value = emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx);
+            match fallible_err.as_deref() {
+                Some(err) => format!("{{ Ok::<_, {err}>({value}) }}"),
+                None => value,
+            }
+        }
+        LambdaBody::Block(stmts) => {
+            render_spawn_block_body(stmts, cx, &mut lam_env, fallible_err.as_deref())
+        }
     });
     *cx.jit_spawn_lambdas.borrow_mut() = saved_spawn_lambdas;
     *cx.jit_spawn_sites.borrow_mut() = saved_spawn_sites;
@@ -763,11 +789,25 @@ pub(super) fn render_reactive_block_closure(
 
 /// Render a spawn-lambda block body: prefix statements keep `;`, the tail
 /// expression is the closure's return value (no trailing `;`).
-fn render_spawn_block_body(stmts: &[Stmt], cx: &Cx, lam_env: &mut LowerEnv) -> String {
+///
+/// D-CONC-SPAWN1: `fallible_err` is `Some(E)` when the body propagates with
+/// `?` (see `spawn_fallible_err_rust`). The closure then returns
+/// `JetOutcome<_, E>`, so the tail is wrapped `Ok::<_, E>(…)` — the turbofish
+/// pins `E`, which the tail alone cannot name — and a tail-less body ends with
+/// `Ok::<_, E>(())`.
+fn render_spawn_block_body(
+    stmts: &[Stmt],
+    cx: &Cx,
+    lam_env: &mut LowerEnv,
+    fallible_err: Option<&str>,
+) -> String {
     let Some((prefix, tail)) = lambda_block_tail(stmts) else {
         let mut inner = String::new();
         let lowered = lower_stmts(stmts, cx, lam_env);
         emit_tir_stmts(&lowered, cx, &mut inner, 1);
+        if let Some(err) = fallible_err {
+            inner.push_str(&format!("    Ok::<_, {err}>(())"));
+        }
         return format!("{{ {} }}", inner);
     };
     let mut inner = String::new();
@@ -778,20 +818,26 @@ fn render_spawn_block_body(stmts: &[Stmt], cx: &Cx, lam_env: &mut LowerEnv) -> S
     let pad = "    ";
     match tail {
         Stmt::Return(Some(e), _) => {
-            inner.push_str(&format!(
-                "{}return {};",
-                pad,
-                emit_tir_expr(&lower_expr(e, cx, lam_env), cx)
-            ));
+            let value = emit_tir_expr(&lower_expr(e, cx, lam_env), cx);
+            match fallible_err {
+                Some(err) => inner.push_str(&format!("{pad}return Ok::<_, {err}>({value});")),
+                None => inner.push_str(&format!("{pad}return {value};")),
+            }
         }
         Stmt::Expr(e) => {
-            inner.push_str(&format!(
-                "{}{}",
-                pad,
-                emit_tir_expr(&lower_expr(e, cx, lam_env), cx)
-            ));
+            let value = emit_tir_expr(&lower_expr(e, cx, lam_env), cx);
+            match fallible_err {
+                Some(err) => inner.push_str(&format!("{pad}Ok::<_, {err}>({value})")),
+                None => inner.push_str(&format!("{pad}{value}")),
+            }
         }
-        _ => {}
+        // `lambda_block_tail` only yields `Expr`/`Return(Some)` tails; keep the
+        // fallible carrier total anyway.
+        _ => {
+            if let Some(err) = fallible_err {
+                inner.push_str(&format!("{pad}Ok::<_, {err}>(())"));
+            }
+        }
     }
     format!("{{ {} }}", inner)
 }

@@ -162,6 +162,7 @@ impl<'a> Checker<'a> {
                     // only propagates the error; the unwrapped Ok value may have any
                     // type (it is bound by the caller, not returned unchanged).
                     Type::Result { err: ret_err, .. } if *ret_err == err => {
+                        self.task_body_propagates = true;
                         Some((*ok).clone())
                     }
                     // D-FAIL-ERROR1=A: older String-returning callees cross into
@@ -171,6 +172,7 @@ impl<'a> Checker<'a> {
                             && matches!(err.as_ref(), Type::String) =>
                     {
                         *convert = TryConvert::DefaultErr;
+                        self.task_body_propagates = true;
                         Some((*ok).clone())
                     }
                     // D-UNIONTYPE1=A: member error widens into the return's union.
@@ -184,6 +186,7 @@ impl<'a> Checker<'a> {
                             enum_name: crate::AST::union_enum_name(members),
                             tag: crate::AST::union_member_tag(&err),
                         };
+                        self.task_body_propagates = true;
                         Some((*ok).clone())
                     }
                     Type::Result { err: ret_err, .. } => {
@@ -194,6 +197,7 @@ impl<'a> Checker<'a> {
                         if self.trait_reg.has_error_conv(&err_type_name, &ret_err_name) {
                             let fn_name = error_conv_fn_name(&err_type_name, &ret_err_name);
                             *convert = TryConvert::Typed(fn_name);
+                            self.task_body_propagates = true;
                             return Some((*ok).clone());
                         }
 
@@ -207,6 +211,7 @@ impl<'a> Checker<'a> {
                                 let fn_name =
                                     error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
                                 *convert = TryConvert::Typed(fn_name);
+                                self.task_body_propagates = true;
                                 return Some((*ok).clone());
                             }
                             self.diags.push(Diagnostic::error(
@@ -275,6 +280,7 @@ impl<'a> Checker<'a> {
                 let ret = self.ret.clone().unwrap_or(Type::Int);
                 if let Type::Option(ret_inner) = &ret {
                     if **ret_inner == **inner {
+                        self.task_body_propagates = true;
                         return Some((**inner).clone());
                     }
                 }

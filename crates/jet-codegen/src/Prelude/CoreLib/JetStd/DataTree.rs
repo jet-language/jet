@@ -197,6 +197,19 @@
         pub fn int(&self) -> Result<i64, Vec<FieldError>> {
             match self {
                 DataTree::Int(n) => Ok(*n),
+                // D-SERDE2: a hand `decode` runs inside the typed walk, so the
+                // lexical `Number`/`TypedText` carriers reach these accessors.
+                // Project them here exactly as the `decode_*` helpers do for
+                // derived codecs — one protocol for hand and derived codecs.
+                DataTree::Number(text) => crate::jet_json_number::json_exact_integer_text(text)
+                    .ok()
+                    .and_then(|digits| jet_int_from_str(&digits).ok())
+                    .ok_or_else(|| {
+                        FieldError::one(format!(
+                            "expected int, got {}",
+                            render_datatree_json(self, false, 0)
+                        ))
+                    }),
                 _ => Err(FieldError::one(format!(
                     "expected int, got {}",
                     render_datatree_json(self, false, 0)
@@ -205,7 +218,7 @@
         }
         pub fn text(&self) -> Result<String, Vec<FieldError>> {
             match self {
-                DataTree::Text(s) => Ok(s.clone()),
+                DataTree::Text(s) | DataTree::TypedText(s) => Ok(s.clone()),
                 _ => Err(FieldError::one(format!(
                     "expected text, got {}",
                     render_datatree_json(self, false, 0)
@@ -225,6 +238,17 @@
             match self {
                 DataTree::Float(f) => Ok(*f),
                 DataTree::Int(n) => Ok(*n as f64),
+                DataTree::Number(text) => text
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| {
+                        FieldError::one(format!(
+                            "expected float, got {}",
+                            render_datatree_json(self, false, 0)
+                        ))
+                    }),
                 _ => Err(FieldError::one(format!(
                     "expected float, got {}",
                     render_datatree_json(self, false, 0)
@@ -405,5 +429,10 @@
             } else {
                 format!("at `{}`: {}", self.path, self.reason)
             }
+        }
+    }
+    impl super::JetDebug for FieldError {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
         }
     }

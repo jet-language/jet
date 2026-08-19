@@ -20,7 +20,7 @@ fn store_reading(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.json(201, Reading.{city: reading.city, degrees: reading.degrees + 1}))
 }
 
-fn run() ? IOError | NetError | HTTPError | TaskFailure {
+fn run() ? HTTPError | IOError | NetError | TaskFailure {
     files.create_dir_all("/tmp/jet_http_public")?
     files.write("/tmp/jet_http_public/index.html", "home")?
     files.write("/tmp/jet_http_public/.env", "TOKEN=private")?

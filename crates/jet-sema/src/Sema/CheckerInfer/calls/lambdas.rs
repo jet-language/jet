@@ -544,6 +544,11 @@ use std::collections::HashSet;
             let saved_in_lambda_body = self.in_lambda_body;
             let saved_inferred_mut_captures =
                 std::mem::take(&mut self.inferred_lambda_mut_captures);
+            // D-CONC-SPAWN1: the propagation fact is per lambda body — a `?`
+            // inside a nested closure early-returns that closure, never this
+            // one. Scope the working flag and harvest it below.
+            let saved_task_body_propagates =
+                std::mem::replace(&mut self.task_body_propagates, false);
             self.in_lambda_body = true;
             if matches!(
                 exp_ret.map(|ret| ret.as_ref()),
@@ -691,6 +696,10 @@ use std::collections::HashSet;
                 .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
                 .cloned()
                 .collect();
+            // D-CONC-SPAWN1: record this body's own propagation fact, then
+            // restore the enclosing body's.
+            lam.meta.fallible_propagation = self.task_body_propagates;
+            self.task_body_propagates = saved_task_body_propagates;
             self.in_lambda_body = saved_in_lambda_body;
             self.ret = saved_ret;
             self.expected_type = saved_expected;

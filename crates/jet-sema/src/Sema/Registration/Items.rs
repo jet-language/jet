@@ -1176,6 +1176,13 @@ pub(crate) fn register_struct(
             must_use: s.is_must_use,
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
             is_c_layout: s.layout == Some(crate::AST::StructLayout::C),
+            // `#PublishedSchema struct` sets the flag; the grouped
+            // `#[PublishedSchema, Codable]` spelling leaves the marker in
+            // `derives` — accept both (mirrors `Sema::desugar_migrations`).
+            published: s.is_published_schema
+                || s.derives
+                    .iter()
+                    .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA),
         },
     );
     if !computed_fields.is_empty() {

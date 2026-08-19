@@ -1,0 +1,103 @@
+// Card #1593: stream.peer_identity() exposes the negotiated cipher_suite and
+// tls_version. A local HTTPS server (D-TLSSERVE1 named tls: option) proves both
+// deterministically: pinning bounds to .Tls13 makes the negotiated protocol
+// Tls13 and the suite a TLS13_* name. The certificates are the checked-in
+// hermetic localhost fixtures (tests/fixtures/tls); they trust nothing real.
+use core.http.server as http_server
+use core.net as net
+use core.net.tls as tls
+use core.tasks as tasks
+
+fn run() ? HTTPError | IOError | NetError | RangeError | TaskFailure {
+    cert :: """
+    -----BEGIN CERTIFICATE-----
+    MIIDEDCCAfigAwIBAgIUc4ZxeyDVyHcTzpYDKQnrBdE5XvYwDQYJKoZIhvcNAQEL
+    BQAwFjEUMBIGA1UEAwwLSmV0LVRlc3QtQ0EwHhcNMjYwNzEzMjAzMTMxWhcNMzYw
+    NzEwMjAzMTMxWjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEB
+    AQUAA4IBDwAwggEKAoIBAQC0PnbevzM8M8dQNTYRzpcPgvvjmUBaVABI4fzvXUff
+    t+W7n3PlTdjKHTmWrRSYdglGqp8AVa1IKZPS5KHBpXHTBUcnvZ98n+2xkvYytw1H
+    F7DOP8s3v0SbSjkK0BKKkSY3PXpM8gsINfWXRcWtXeOSXML9Ljf6mh3620PwKA6j
+    5zWVLsdKGgU78Ykwnus/jkTkNBaiaADXm5+dSiM+mOYkmq9ZBI8SSnNIixFKci0y
+    4LFnNxIl8YsUseMKh/C3jjZUicmSCKS1eOfibq/e3Qa1cY3a56njVCr+nDjy5rvV
+    QRtfCoHA5RlDFpLptrwSjkJ+SYixR/FnlwVshKiTleBxAgMBAAGjWDBWMBQGA1Ud
+    EQQNMAuCCWxvY2FsaG9zdDAdBgNVHQ4EFgQUPf8IzVjn2ErJLxhiXDYnrStc3ksw
+    HwYDVR0jBBgwFoAUOP4yBZT8Sq2e6OKdlhXhHzuvtvUwDQYJKoZIhvcNAQELBQAD
+    ggEBAHbYxj67nN8ll2jlQpv2RWRwXf/fNmwtaetN1NjNVHKl+Ch1X0GJhdT7oIqW
+    pkCDx38TBlK+W3MQeDjvvt2uJBHq/YC/zFPgfOc416XdpBVFbnxnBKxk1avWguA+
+    y/F9HHMqnA8AU3prQaUvc4HEQtT8v39kGYs501fnJ9T1Si201IRq2ms52jSu7wEs
+    Lc0YYKU/VeR5xhg4FygJglZJ15TQn4IusXb/yj8T51qKFOZ3cN5nmaS3uzF8uW2d
+    oyg/DJnBtW2H93tXH27cLXeHdKvUbWwDetBIrk6abD4SN0VVfS3Y/xk81fMS6ruD
+    +tIGDpdh97Orhp+1iZF0QbvZBzI=
+    -----END CERTIFICATE-----
+    """
+    key :: """
+    -----BEGIN PRIVATE KEY-----
+    MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC0PnbevzM8M8dQ
+    NTYRzpcPgvvjmUBaVABI4fzvXUfft+W7n3PlTdjKHTmWrRSYdglGqp8AVa1IKZPS
+    5KHBpXHTBUcnvZ98n+2xkvYytw1HF7DOP8s3v0SbSjkK0BKKkSY3PXpM8gsINfWX
+    RcWtXeOSXML9Ljf6mh3620PwKA6j5zWVLsdKGgU78Ykwnus/jkTkNBaiaADXm5+d
+    SiM+mOYkmq9ZBI8SSnNIixFKci0y4LFnNxIl8YsUseMKh/C3jjZUicmSCKS1eOfi
+    bq/e3Qa1cY3a56njVCr+nDjy5rvVQRtfCoHA5RlDFpLptrwSjkJ+SYixR/FnlwVs
+    hKiTleBxAgMBAAECggEAAkGv8kz5grzxN19bLHDmMkMFDU3rYNYhZMgzhvmnfzUJ
+    ssYlyM6nMqyX/ntvQRNlPVXAhNwNvdQLbj3/inGcUbSEtgopN4G3E5yP6YWiLGwv
+    Af4JeMqzvK/6s9h0CvkTPejOoaz8F1+5kenFNkzxHvF7XXkZKVGJo4zgNl8CA+pJ
+    P9w7lt+Kd8uJ2RI6rTk7jsaqzo8hjjZ3wpjM9QBpDD/zYVIdIw5WvJUFuO/G8GHF
+    rafAPZUzesPNIBnNcx8Am2fh8ijvzaaXfPuk9fNxmsyi4Aqtsrz96XWpwDZBexf/
+    P026ruk1NdnqJ8Xd9YHXFEtwjT2iJ+OP8acuEH/WIQKBgQDZ3mHBhdylaNvtiGRZ
+    9ZMYwbsy+kEXQghW3KLUR+UTdudu68Sn6RNZOB/pYcCZOOPZ9yYLcKwre9A+Lgt8
+    BpDUSRGrvSZhO7Ry44MBwt+ArnfhEf/9xF+GZN1ssG9SXCy1oOMbAG3kFZDKZxLN
+    pCSgYRMxMy0sQtsUyhSX/c6aWQKBgQDTyk6FL/8tzIfB1/EDV2z3ZzL5bTPTKyyk
+    nih2Lpe6ItvFkXGuUrguNo7xAkc5IiufnIyc1ZTqS0K2NUYmtsbd8HvoJ0osNDka
+    fbWQmFqjv3N1WTDDPDmMl2HBOPK/8f0L8pP7sL5OlnklHgMFPzTgoQdG5mmVZlfW
+    q8JdwBYD2QKBgAZKKUBRAQG1eUPuQBdow4pfbWwXVXG6cksvq3O9b5uUPzIwlEjU
+    rb5RpHo0XD8QKWPNgsepxQ6sUGK7KZG3Ds9SHLR8jXMZKih28P1IBvPMFaHlxyIo
+    XSmgF9Rfc5dJGfFUZ7oL1SBUjw2I1D4jkvseUlOFSrSQaYq8GsQYi7JhAoGAbNwx
+    2/e9vDbDGPn74fHQCqK66sYcu1AX1E2PEqAEUSKVwElwG2BdVzOn6W14Wn+b2KDJ
+    DdwifQNOOQXNFx0fvvhbWArJ70qwh1NSPg5xmHVRzWGY1OFh20f8cSrqa4rgvIFl
+    WxuP1ik1/8QbXVkNvuBGM0U/xBEk2SzT7QhMyJECgYBALGwwEFX/HTodgmMkBoxZ
+    MEjwVP4d4AIto0fhkh1d8UQ0Trgi/qtYqxufrbUhC3PPFKviUIrJObRgeleKJjd9
+    2+IDJQzPDCTcgunrG/U2rsHwoop5OHZXw/sp+uVoPqPmUAopDfozqLmE4C+gfkh9
+    3VClaOaG5FiQfwAgOuf/rQ==
+    -----END PRIVATE KEY-----
+    """
+    ca :: """
+    -----BEGIN CERTIFICATE-----
+    MIIDHTCCAgWgAwIBAgIUY/T7ApVns5cL/M0CS8IEsmpQCC4wDQYJKoZIhvcNAQEL
+    BQAwFjEUMBIGA1UEAwwLSmV0LVRlc3QtQ0EwHhcNMjYwNzEzMjAzMTMxWhcNMzYw
+    NzEwMjAzMTMxWjAWMRQwEgYDVQQDDAtKZXQtVGVzdC1DQTCCASIwDQYJKoZIhvcN
+    AQEBBQADggEPADCCAQoCggEBALGTs6HdTTE9xhWZ2rgktiKTSs6wTMbE+JlXYDzU
+    riQmD8AvOQIcjTKCSsjfu6Aa+ljWBpct0YV62vEe8NUqTNVSkdbHT/Qxn7NNJSNm
+    5WAwktFR7in92xJgY2ig9hyjXdhW1UBmk69v3MjMeFp6aY2YO1zRXYQV0oXDMvcr
+    r0c8xTQo3f4gr720D0fRMNkUC+X6C7ZM/8+Gag4akt8WJ5+7fmpfOmRe6eCorB/o
+    5i4bnYLVcfBHJwm30mvlVlnw1xVUxQV5cxfjuyjXipKwWvPc7EOztc5xnAp0p39u
+    jLq3jU3KpxBhZKprM2UZzB8yVfGxH2x2lbIGyTcDz4YWbm0CAwEAAaNjMGEwHQYD
+    VR0OBBYEFDj+MgWU/EqtnujinZYV4R87r7b1MB8GA1UdIwQYMBaAFDj+MgWU/Eqt
+    nujinZYV4R87r7b1MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMA0G
+    CSqGSIb3DQEBCwUAA4IBAQCP17J4fyDIQP2jZFm9acLCvbOmpfRqrVGp4MCCZr4Q
+    W28FtR/MpeVIqfxH/vySWbNcIP/SsaD5NuWG/aEeB7ASP97qx3wqC3Zo1mCM0Ulg
+    5kJ5e7JLjT+F93ma5amvxWFmjtKigHUGG/9QZ2TyI2Ex84Ohv6R1H+88rJwns8kk
+    mT6Y21VkNX5qibYkvBiNr3ODsLgwhctUUCg2qZf+1Yzz+W4dhW2FXmlXhVLUUsTH
+    4/8NFSdHn4wN3KAAO9ocU/RDuvuRK1yH+ghKOT6igRuKroICO81Xu0dagl0HVsFZ
+    A/xFuStCK3vmKWkNX23M7aE5CaMHEhpu2JmISHsFe7lH
+    -----END CERTIFICATE-----
+    """
+    mux :: http_server.mux()
+    mux.get("/", (req: HTTPRequest) => Ok(http_server.response(200, "ok")))
+    server :: http_server.bind("127.0.0.1:0", mux, tls: http_server.tls(cert, key))?
+    addr :: server.local_addr()?
+    serving :: task { server.serve()? }
+    roots :: tls.RootCertificates.from_pem(ca.bytes())?
+    trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots))?
+    config :: trusted.with_version_bounds(min: .Tls13, max: .Tls13)?
+    tcp :: net.tcp_connect(addr)?
+    budget :: Duration.seconds(2)?
+    secure := tls.client(^tcp, server_name: "localhost", config: config, deadline: budget)?
+    peer :: secure.peer_identity()
+    print(peer.verified_server_name)
+    print(peer.cipher_suite.starts_with("TLS13_"))
+    print(peer.tls_version)
+    secure.close()?
+    grace :: Duration.milliseconds(200)?
+    _ :: server.shutdown(grace)?
+    serving.join()?
+}

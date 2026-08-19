@@ -290,6 +290,9 @@ pub(crate) struct Cx {
     pub(crate) rollback_types: HashSet<String>,
     /// D-DISPLAYDBG1: user types with an explicit `impl Type.Display`.
     pub(crate) display_types: HashSet<String>,
+    /// Types with an explicit `impl Type.Debug` (hand `JetDebug` bridged in
+    /// `emit_trait_impl`). Union debug arms consult this beside `auto_debug`.
+    pub(crate) debug_types: HashSet<String>,
     /// D-SHAPE-RESOURCE2=A: user types with an ordinary nominal `Close` impl.
     pub(crate) close_types: HashSet<String>,
     /// D-ITER-HOOK: `for x in coll` on types implementing `Iterable`.
@@ -897,6 +900,21 @@ impl Cx {
             || self
                 .imported_type_metadata_name(name)
                 .is_some_and(|canonical| self.auto_printable.contains(&canonical))
+    }
+
+    /// I2: whether codegen guarantees a `JetDebug` impl for nominal `name` —
+    /// auto-derived (`auto_debug`, which also carries the Prelude synthetic
+    /// set) or hand-implemented (`debug_types`). Distinct newtypes are handled
+    /// separately: they always get an impl.
+    pub(crate) fn has_auto_debug_type(&self, name: &str) -> bool {
+        self.auto_debug.contains(name)
+            || self.debug_types.contains(name)
+            || self
+                .imported_type_metadata_name(name)
+                .is_some_and(|canonical| {
+                    self.auto_debug.contains(&canonical)
+                        || self.debug_types.contains(&canonical)
+                })
     }
 
     pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
@@ -3888,6 +3906,7 @@ pub(crate) fn build_cx_items(
         imported_traits: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),
+        debug_types: HashSet::new(),
         close_types: HashSet::new(),
         iterable_hooks: HashMap::new(),
         index_hooks: HashMap::new(),
@@ -4841,6 +4860,9 @@ pub(crate) fn build_cx_items(
             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY) => {
                 cx.display_types.insert(i.type_name.clone());
             }
+            Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_DEBUG) => {
+                cx.debug_types.insert(i.type_name.clone());
+            }
             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_CLOSE) => {
                 cx.close_types.insert(i.type_name.clone());
             }
@@ -4851,6 +4873,9 @@ pub(crate) fn build_cx_items(
                     }
                     if block.trait_name == Syntax::TRAIT_DISPLAY {
                         cx.display_types.insert(s.name.clone());
+                    }
+                    if block.trait_name == Syntax::TRAIT_DEBUG {
+                        cx.debug_types.insert(s.name.clone());
                     }
                     if block.trait_name == Syntax::TRAIT_CLOSE {
                         cx.close_types.insert(s.name.clone());
@@ -4864,6 +4889,9 @@ pub(crate) fn build_cx_items(
                     }
                     if block.trait_name == Syntax::TRAIT_DISPLAY {
                         cx.display_types.insert(e.name.clone());
+                    }
+                    if block.trait_name == Syntax::TRAIT_DEBUG {
+                        cx.debug_types.insert(e.name.clone());
                     }
                     if block.trait_name == Syntax::TRAIT_CLOSE {
                         cx.close_types.insert(e.name.clone());

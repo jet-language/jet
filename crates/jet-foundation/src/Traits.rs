@@ -1667,6 +1667,7 @@ impl TraitRegistry {
             "DNSSrv",
             "Duration",
             "EncodingError",
+            "EmailError",
             "EnvError",
             "EventResult",
             "F32x4",

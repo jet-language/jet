@@ -261,6 +261,14 @@ impl<'a> Checker<'a> {
         match value {
             CtValue::Struct { type_name, fields } => {
                 self.registry.is_user_struct(type_name)
+                    // D-MIGRATE1: a `#PublishedSchema` struct's generated Rust
+                    // type carries a hidden `__jet_unknown_fields` carrier the
+                    // comptime value does not model. Serializing the fold would
+                    // emit a literal missing that field (rustc E0063 — an I2
+                    // internal compiler error), so decline and let the ordinary
+                    // runtime literal path build the value (it injects the
+                    // carrier).
+                    && !self.registry.is_published_schema_struct(type_name)
                     && fields
                         .iter()
                         .all(|(_, field)| self.ct_value_is_emittable(field))

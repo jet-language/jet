@@ -68,8 +68,8 @@ fn progress_return_ty(args: &[TExpr]) -> Type {
 }
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
-use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
+use crate::Codegen::TIR::spawn_body_result_ty;
 use crate::Codegen::TIR::lower_core_closure_call;
 use crate::Codegen::TIR::lower::core_module_path_from_receiver;
 use crate::Codegen::TIR::lower::in_own_frame;
@@ -1849,7 +1849,7 @@ fn lower_method_call_impl(
         if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 return in_own_frame(|| {
-                    let body_ty = lambda_body_ty(lam, cx, env);
+                    let body_ty = spawn_body_result_ty(lam, cx, env);
                     let site = jit_spawn_site(lam, cx, env);
                     let spawn_closure = render_spawn_lambda(lam, cx, env);
                     let executable = Box::new(lower_lambda(lam, cx, env));
@@ -1910,7 +1910,7 @@ fn lower_method_call_impl(
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             return in_own_frame(|| {
-                let body_ty = lambda_body_ty(lam, cx, env);
+                let body_ty = spawn_body_result_ty(lam, cx, env);
                 let site = jit_spawn_site(lam, cx, env);
                 let spawn_closure = render_spawn_lambda(lam, cx, env);
                 let executable = Box::new(lower_lambda(lam, cx, env));

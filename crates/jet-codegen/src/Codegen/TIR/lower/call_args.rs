@@ -93,6 +93,27 @@ pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
     lambda_body_ty_expecting(lam, cx, env, None)
 }
 
+/// D-CONC-SPAWN1: a spawned task's element type. Mirrors sema's
+/// `infer_task_spawn`: a body that propagates with `?` (sema fact
+/// `LambdaMeta::fallible_propagation`) early-returns the enclosing function's
+/// error out of the closure, so the element is the fallible carrier
+/// `Result<tail, E>` (`Option<tail>` for optional propagation) — the same
+/// type the rendered Rust closure returns.
+pub(crate) fn spawn_body_result_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
+    let t = lambda_body_ty(lam, cx, env);
+    if !lam.meta.fallible_propagation {
+        return t;
+    }
+    match env.ret_ty.as_ref() {
+        Some(Type::Result { err, .. }) => Type::Result {
+            ok: Box::new(t),
+            err: err.clone(),
+        },
+        Some(Type::Option(_)) => Type::Option(Box::new(t)),
+        _ => t,
+    }
+}
+
 /// `lambda_body_ty`, but seeding a bare (unannotated) param from `expected_params`
 /// at the same position — same fallback `lower_lambda_expecting` uses (D-MEM1 S6:
 /// `Shared<T>.read(s => …)`'s bare `s` needs its real type here too, or the

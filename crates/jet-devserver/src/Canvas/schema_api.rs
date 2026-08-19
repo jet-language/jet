@@ -18,7 +18,8 @@ use super::edit_actions::{
     apply_edit_function_signature, apply_edit_pattern_arm, apply_inline_edit, apply_insert_call,
     apply_insert_structural, apply_move_link, apply_noop, apply_promote_inline,
     apply_remove_multi_input_element, apply_remove_pattern_arm, apply_rename,
-    apply_reorder_statements, apply_update_comment_region, apply_visible_conversion,
+    apply_reorder_statements, apply_toggle_switch_state, apply_update_comment_region,
+    apply_visible_conversion,
     canvas_action_candidate, extract_inline_candidate, inline_helper_candidate,
     write_checked_formatted, write_checked_source,
 };
@@ -945,6 +946,16 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
                     .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
             };
             apply_remove_pattern_arm(path, &src, &graph_id, pattern_span)
+        }
+        "toggle_switch_state" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let node_span = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            apply_toggle_switch_state(path, &src, &graph_id, node_span)
         }
         "append_multi_input" => {
             let element = json_string_field(request, "element").unwrap_or_else(|| "1".to_string());

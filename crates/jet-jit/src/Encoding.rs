@@ -5,7 +5,7 @@
 //! `include!` the canonical `jet_std` parser. UUID mirrors `jet_std_uuid_*`.
 
 use super::Concurrency;
-use crate::JetShow;
+use crate::{JetDebug, JetShow};
 use jet_foundation::base_encoding_dispatch;
 use jet_foundation::PackageEdition;
 use jet_foundation::AST::{CtFloat, CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart};

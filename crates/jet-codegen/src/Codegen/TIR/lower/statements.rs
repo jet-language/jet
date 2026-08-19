@@ -30,6 +30,7 @@ use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::TLetTy;
 use crate::Codegen::TIR::TFnValueKind;
@@ -2440,13 +2441,36 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // Keep that internal carrier through TIR so every tier returns and
                     // binds the same reference, rather than materializing a copy.
                     let allocator_carrier = init.ty.is_allocator_view() || init.ty.is_allocator_result();
+                    // D-CONC-SPAWN1: a fallible task body's closure returns the
+                    // internal carrier `Task<T ? E>` (`spawn_body_result_ty`),
+                    // while sema's surface binding type stays `Task<T>`. Keep
+                    // the carrier through TIR — bind and annotate with the
+                    // lowered spawn type so the Rust `let` matches its init —
+                    // exactly the allocator-carrier precedent above.
+                    let spawn_carrier = matches!(
+                        &init.kind,
+                        TExprKind::CoreClosureCall {
+                            kind: TCoreClosureKind::Spawn { .. }
+                        }
+                    ) && matches!(
+                        &init.ty,
+                        Type::Apply { name, args }
+                            if name == "Task"
+                                && matches!(
+                                    args.first(),
+                                    Some(Type::Result { .. }) | Some(Type::Option(_))
+                                )
+                    ) && b
+                        .ty
+                        .as_ref()
+                        .is_some_and(|ty| ty.without_user_tags() != &init.ty);
                     // No declared `b.ty`? A typed list head (`[Shape].{ Circle.{…}, … }`)
                     // still carries its own resolved element type on `init.ty` — reuse it
                     // self-referentially so trait-object elements still get boxed
                     // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
                     // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
                     // binding got, and rustc rejected the un-boxed struct literals (I2).
-                    let want = if allocator_carrier {
+                    let want = if allocator_carrier || spawn_carrier {
                         init.ty.clone()
                     } else {
                         b.ty
@@ -2533,7 +2557,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // owner/range for the shared Prelude window setter. It must stay
                     // inferred; the source-facing ViewMut spelling is a sema type,
                     // not the generated Rust carrier.
-                    let ty = if allocator_carrier || init.ty.is_compute_view_mut() {
+                    let ty = if allocator_carrier || spawn_carrier || init.ty.is_compute_view_mut() {
                         init.ty.clone()
                     } else {
                         b.ty
@@ -2615,7 +2639,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // inferred binding.
                     let let_ty = if allocator_carrier {
                         crate::Codegen::TIR::TLetTy::plain(ty.clone())
-                    } else if ty.is_compute_view_mut() {
+                    } else if spawn_carrier || ty.is_compute_view_mut() {
+                        // D-CONC-SPAWN1: the fallible spawn carrier binds
+                        // UNANNOTATED. The closure fully pins the type
+                        // (`Ok::<_, E>(…)` tail + widened `?` sites), and
+                        // spelling the lowered type here would name tuple
+                        // typedefs (`__jet_JetTup_<hash>`) derived from
+                        // lowering-side spellings that the AST-walk tuple
+                        // collector (Tuples.rs) never registered — rustc
+                        // E0425 on a tuple-tail task body (I2).
                         TLetTy::Inferred
                     } else if send_fn {
                         TLetTy::SendFn(ty.clone())

@@ -8,6 +8,12 @@ use super::Diagnostics::unsupported;
 mod kernel {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    trait JetShow {
+        fn jet_show(&self) -> String;
+    }
+    trait JetDisplay {
+        fn jet_display(&self) -> String;
+    }
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Email.rs");
 }

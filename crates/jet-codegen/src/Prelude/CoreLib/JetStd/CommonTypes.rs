@@ -557,6 +557,11 @@
             format!("{self:?}")
         }
     }
+    impl super::JetDebug for DataErrorKind {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetDisplay for DataErrorKind {
         fn jet_display(&self) -> String {
             format!("{self:?}")
@@ -595,6 +600,11 @@
     }
     impl super::JetShow for DataError {
         fn jet_show(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDebug for DataError {
+        fn jet_debug(&self) -> String {
             self.display_text()
         }
     }
@@ -2403,9 +2413,19 @@
             }
         }
     }
+    impl super::JetDebug for EnvError {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for UTF8Error {
         fn jet_show(&self) -> String {
             self.message.clone()
+        }
+    }
+    impl super::JetDebug for UTF8Error {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
         }
     }
     impl super::JetShow for RangeError {
@@ -2413,9 +2433,19 @@
             self.reason.clone()
         }
     }
+    impl super::JetDebug for RangeError {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for TextError {
         fn jet_show(&self) -> String {
             self.message.clone()
+        }
+    }
+    impl super::JetDebug for TextError {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
         }
     }
     // D-FAIL-CONV2=A: family members render failure text through one display hook.

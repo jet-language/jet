@@ -1708,6 +1708,7 @@ fn check_func_body_bundle_scoped(
         inferred_lambda_mut_captures: HashSet::new(),
         lambda_params_are_lending_views: false,
         is_task_spawn: false,
+        task_body_propagates: false,
         interrupt_callback_depth: 0,
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,

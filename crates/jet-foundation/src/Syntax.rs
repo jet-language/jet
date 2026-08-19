@@ -239,6 +239,9 @@ pub const KW_CONC_TASK: &str = "task";
 /// D-CONC-FREEZE1=A (ratified 2026-08-12, card #1889): prefix verb that
 /// creates a deeply immutable owned snapshot for a task crossing.
 pub const KW_FREEZE: &str = "freeze";
+// D-CONC-FREEZE1=A adds no second token for consuming captures: `task ^name`
+// reuses SIGIL_MOVE (`^`, D-MEM1) as task-capture syntax on a group child.
+// The child owns the value; later use of the name is ordinary E0121.
 /// D-CONC-SPAWN1=D: qualified fan-out selector.
 pub const TASK_ALL: &str = "task.all";
 /// D-CONC-SPAWN1=D: qualified fan-out selector.

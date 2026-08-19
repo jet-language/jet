@@ -10,6 +10,10 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
+
 
 /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
 trait JetDisplay {

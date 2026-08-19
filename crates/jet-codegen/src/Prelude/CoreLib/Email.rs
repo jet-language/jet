@@ -85,6 +85,27 @@ pub mod jet_email {
         }
     }
 
+    // One error projection for user-facing text: every tier renders through
+    // these impls; adapters marshal fields only.
+    impl super::JetShow for Error {
+        fn jet_show(&self) -> String {
+            let (kind, _disc, operation, server, code, reason) = error_parts(self.clone());
+            let mut text = format!("email {operation} failed ({kind}): {reason}");
+            if let Some(server) = server {
+                text.push_str(&format!(" — server {server}"));
+            }
+            if let Some(code) = code {
+                text.push_str(&format!(" — code {code}"));
+            }
+            text
+        }
+    }
+    impl super::JetDisplay for Error {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+
     pub fn configuration_error(operation: &str, reason: impl Into<String>) -> Error {
         Error::Configuration {
             operation: operation.to_string(),

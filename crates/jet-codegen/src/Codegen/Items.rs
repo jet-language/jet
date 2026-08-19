@@ -1566,6 +1566,52 @@ fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
     }
 }
 
+/// The `jet_debug` twin of [`jet_showable_type`]: true only when codegen
+/// guarantees every nominal leaf a `JetDebug` impl. Union debug arms use this
+/// to choose `.jet_debug()` vs the always-required `.jet_show()` fallback, so
+/// the generated crate never calls a `jet_debug` nobody emitted (I2) — e.g.
+/// `[FieldError]` or `NetError` payloads whose Prelude types are show-only.
+fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
+    match ty {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => jet_debuggable_type(cx, inner),
+        Type::Result { ok, err } => {
+            jet_debuggable_type(cx, ok) && jet_debuggable_type(cx, err)
+        }
+        Type::Map { key, value, .. } => {
+            jet_debuggable_type(cx, key) && jet_debuggable_type(cx, value)
+        }
+        // Every anonymous union enum gets a JetDebug impl (its arms degrade
+        // per member), so a nested union payload always resolves.
+        Type::Union(_) => true,
+        Type::Named(name) => {
+            name == "str"
+                || cx.has_auto_debug_type(name)
+                || cx.is_distinct_type_name(name)
+        }
+        Type::Apply { name, args } => {
+            cx.has_auto_debug_type(name)
+                && args.iter().all(|arg| jet_debuggable_type(cx, arg))
+        }
+        Type::TraitObject(_)
+        | Type::Tuple(_)
+        | Type::Shared(_)
+        | Type::Fn { .. }
+        | Type::ComputeDim(_) => false,
+    }
+}
+
 fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
     let Type::Result { err, .. } = ty else {
         return None;
@@ -1736,8 +1782,19 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             ));
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
+                // I2: call `.jet_debug()` only when the payload type is
+                // guaranteed a `JetDebug` impl. Otherwise fall back to
+                // `.jet_show()`, which the JetShow arm above already requires
+                // of every member. Sema never debug-renders a union whose
+                // member lacks Debug, so a fallback arm is I2 ballast, not a
+                // semantic path.
+                let method = if jet_debuggable_type(cx, m) {
+                    "jet_debug"
+                } else {
+                    "jet_show"
+                };
                 out.push_str(&format!(
-                    "            Self::{tag}(v) => crate::jet_debug_union(v.jet_debug()),\n"
+                    "            Self::{tag}(v) => crate::jet_debug_union(v.{method}()),\n"
                 ));
             }
             out.push_str("        }\n    }\n}\n\n");

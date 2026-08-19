@@ -917,6 +917,12 @@ mod net_tls_close_tests {
     mod smtp_adapter {
         #[allow(unused_imports)]
         pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
+        trait JetShow {
+            fn jet_show(&self) -> String;
+        }
+        trait JetDisplay {
+            fn jet_display(&self) -> String;
+        }
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
         include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
     }
@@ -2817,76 +2823,111 @@ fn emit_wrapper_lib(
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\nfn ffi_panic() -> ! {\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }\n    std::panic::panic_any(format!(\"__jet_ffi_runtime__: {MESSAGE}\"));\n}\n\n",
     );
+    // Every runtime fragment below carries its own top-level `use` lines
+    // (e.g. `std::io::{Read, Write}` appears in HTTP.rs, HTTPServerTLS.rs
+    // and NetTls.rs alike), so concatenating any two of them at the crate
+    // root is a duplicate-import error (rustc E0252, I2). Each independently
+    // selected fragment is therefore emitted inside its own module with a
+    // glob re-export: imports stay module-private while every pub item —
+    // including the `*_impl` fns the helper binaries call through the crate
+    // root — remains visible exactly as in the historical flat layout.
+    // `#[no_mangle]` symbols export from inside modules unchanged.
+    fn push_runtime_mod(out: &mut String, name: &str, emit: impl FnOnce(&mut String)) {
+        out.push_str("mod ");
+        out.push_str(name);
+        out.push_str(" {\n");
+        emit(out);
+        out.push_str("}\npub use ");
+        out.push_str(name);
+        out.push_str("::*;\n");
+    }
     if needs_archive {
         // D-CORE-COMPRESS1=A: archive runtime touches only zip/tar containers.
-        out.push_str(ARCHIVE_SOURCE);
-        out.push('\n');
+        push_runtime_mod(&mut out, "__jet_archive", |out| {
+            out.push_str(ARCHIVE_SOURCE);
+            out.push('\n');
+        });
     }
     if needs_db {
         // D-DEP-DB1: the database runtime is the only place `rusqlite` is touched.
-        out.push_str(DB_RUNTIME);
-        out.push('\n');
+        push_runtime_mod(&mut out, "__jet_db", |out| {
+            out.push_str(DB_RUNTIME);
+            out.push('\n');
+        });
     }
     if needs_http_client {
         // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately-ratified TLS seam.
-        out.push_str("const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"");
-        out.push_str(HTTP_PUBLIC_SUFFIX_LIST);
-        out.push_str("\"################;\n");
-        out.push_str(HTTP_CLIENT_RUNTIME);
-        out.push('\n');
+        push_runtime_mod(&mut out, "__jet_http_client", |out| {
+            out.push_str("const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"");
+            out.push_str(HTTP_PUBLIC_SUFFIX_LIST);
+            out.push_str("\"################;\n");
+            out.push_str(HTTP_CLIENT_RUNTIME);
+            out.push('\n');
+        });
     }
     if needs_http_server_tls {
         // D-TLSSERVE1=A: the server TLS runtime is the only place serving
         // touches rustls.
-        out.push_str(HTTP_SERVER_TLS_RUNTIME);
-        out.push('\n');
+        push_runtime_mod(&mut out, "__jet_http_server_tls", |out| {
+            out.push_str(HTTP_SERVER_TLS_RUNTIME);
+            out.push('\n');
+        });
     }
     if needs_net_tls {
         // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
-        // When the native HTTP client is also present, nest the stream runtime so
-        // its std imports do not collide with HTTP.rs at the bridge crate root.
-        if needs_http_client {
-            out.push_str("mod __jet_net_tls {\n");
-            out.push_str(NET_TLS_RUNTIME);
-            out.push_str("}\npub use __jet_net_tls::*;\n");
-        } else {
+        push_runtime_mod(&mut out, "__jet_net_tls", |out| {
             out.push_str(NET_TLS_RUNTIME);
             out.push('\n');
-        }
+        });
     }
-    if needs_crypto {
-        // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
-        out.push_str(&standalone_outcome_runtime());
-        out.push('\n');
-        out.push_str(CRYPTO_ENTROPY_RUNTIME);
-        out.push('\n');
-        out.push_str("use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n");
-        out.push_str(CRYPTO_RUNTIME);
-        out.push('\n');
+    if needs_crypto || needs_secrets {
+        // One module for both: the secrets runtime resolves the entropy
+        // provider through a sibling `use jet_crypto_entropy::…`, which only
+        // works when `mod jet_crypto_entropy` is an item of the same module.
+        // `needs_secrets` implies `needs_crypto` (core.crypto.vault is in the
+        // needs_crypto list above; jetpack's Secrets path passes both).
+        push_runtime_mod(&mut out, "__jet_crypto", |out| {
+            if needs_crypto {
+                // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
+                out.push_str(&standalone_outcome_runtime());
+                out.push('\n');
+                out.push_str(CRYPTO_ENTROPY_RUNTIME);
+                out.push('\n');
+                out.push_str(
+                    "use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};\n",
+                );
+                out.push_str(CRYPTO_RUNTIME);
+                out.push('\n');
+            }
+            if needs_secrets {
+                // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place the
+                // `age` crate is touched.
+                out.push_str(UNICODE_TABLES_RUNTIME);
+                out.push('\n');
+                out.push_str(VAULT_NFC_RUNTIME);
+                out.push('\n');
+                out.push_str(SECRETS_RUNTIME);
+                out.push('\n');
+                out.push_str(VAULT_KEY_WRAP_RUNTIME);
+                out.push('\n');
+            }
+        });
     }
     if needs_compress {
         // D-CODECS1: the compress runtime is the only place the standalone
         // `core.archive.gzip` / `core.archive.zstd` codec paths are touched.
-        out.push_str(COMPRESS_RUNTIME);
-        out.push('\n');
+        push_runtime_mod(&mut out, "__jet_compress", |out| {
+            out.push_str(COMPRESS_RUNTIME);
+            out.push('\n');
+        });
     }
     if needs_plugin {
         // D-DEP-WASM1=A: application `core.plugin` host (wasmtime Component Model).
         // Compiler-extension host is a separate runtime (`COMPILER_EXTENSION_RUNTIME`).
-        out.push_str(PLUGIN_RUNTIME);
-        out.push('\n');
-    }
-    if needs_secrets {
-        // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place the
-        // `age` crate is touched.
-        out.push_str(UNICODE_TABLES_RUNTIME);
-        out.push('\n');
-        out.push_str(VAULT_NFC_RUNTIME);
-        out.push('\n');
-        out.push_str(SECRETS_RUNTIME);
-        out.push('\n');
-        out.push_str(VAULT_KEY_WRAP_RUNTIME);
-        out.push('\n');
+        push_runtime_mod(&mut out, "__jet_plugin", |out| {
+            out.push_str(PLUGIN_RUNTIME);
+            out.push('\n');
+        });
     }
     let mut names: HashSet<String> = HashSet::new();
     for e in entries {

@@ -1327,6 +1327,40 @@ fn run() {
     await ctx.driver.evaluate(`window.prompt = () => "3"`);
   },
 
+  "node-state-off-toggle": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn run() {
+    #Off print("off")
+    print("on")
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+
+    const offNode = await ctx.node("#Off");
+    await ctx.driver.rightClick(offNode.x, offNode.y);
+    await ctx.expectMenu("Turn on");
+    await ctx.pickEntry("Turn on");
+    await ctx.waitFor(async () => !(await ctx.source()).includes("#Off"), "state turn on");
+    await assertSourceSync(ctx, ["state turn on"]);
+    const on = await ctx.source();
+
+    const printNode = await ctx.node("print");
+    await ctx.driver.rightClick(printNode.x, printNode.y);
+    await ctx.expectMenu("Turn off");
+    await ctx.pickEntry("Turn off");
+    await ctx.waitFor(async () => (await ctx.source()).includes("#Off print"), "state turn off");
+    await assertSourceSync(ctx, ["state turn off"]);
+
+    const doc = await ctx.graph();
+    const badged = (doc.graphs || []).flatMap((g) => g.nodes || []).filter((n) => (n.badges || []).includes("#Off"));
+    if (!badged.length) throw new Error("no #Off badge node after turn off");
+
+    const restored = await ctx.undo();
+    if (restored !== on) throw new Error(`undo did not restore pre-#Off source\nexpected:\n${on}\nactual:\n${restored}`);
+    if (restored === before) throw new Error("toggle cycle did not change source before undo checkpoint");
+  },
+
   "inline-edit-values": async (ctx) => {
     await ctx.openCanvas();
     await ctx.switchGraph("scratch");

@@ -3,6 +3,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_closure_call_return_ty;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lambda_body_ty;
+use crate::Codegen::TIR::spawn_body_result_ty;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda;
@@ -173,7 +174,7 @@ pub(crate) fn lower_core_closure_call(
     };
     if module == "core.tasks" && method == "spawn" {
         let lam = lam_at(0)?;
-        let body_ty = lambda_body_ty(lam, cx, env);
+        let body_ty = spawn_body_result_ty(lam, cx, env);
         let site = jit_spawn_site(lam, cx, env);
         let spawn_closure = render_spawn_lambda(lam, cx, env);
         let executable = Box::new(lower_lambda(lam, cx, env));

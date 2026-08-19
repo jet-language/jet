@@ -11,7 +11,7 @@ fn handle_trailers(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return response.trailers(^trailers)
 }
 
-fn run() ? NetError | HTTPError | TaskFailure {
+fn run() ? HTTPError | NetError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: http_server.mux()

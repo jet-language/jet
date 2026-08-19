@@ -39,6 +39,12 @@ impl JetShow for JetWsError {
     }
 }
 
+impl JetDebug for JetWsError {
+    fn jet_debug(&self) -> String {
+        <Self as JetShow>::jet_show(self)
+    }
+}
+
 // D-FAIL-CONV2=A: one display hook backs both the shipped impl WsError => Err
 // and user interpolation.
 impl JetDisplay for JetWsError {

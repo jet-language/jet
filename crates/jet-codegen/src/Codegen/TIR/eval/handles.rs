@@ -396,6 +396,21 @@ fn datatree_int_result(recv: &CtValue) -> CtValue {
             ..
         } => match (variant.as_str(), args.as_slice()) {
             ("Int", [(_, CtValue::Int(value))]) => Ok(CtValue::Int(*value)),
+            // Typed-JSON lexical `Number` carrier: same projection as the
+            // Prelude accessor (DataTree.rs `int()`), so a hand `decode`
+            // reads one protocol on every tier.
+            ("Number", [(_, CtValue::Str(text))]) => {
+                crate::jet_json_number::json_exact_integer_text(text)
+                    .ok()
+                    .and_then(|digits| digits.parse::<i64>().ok())
+                    .map(CtValue::Int)
+                    .ok_or_else(|| {
+                        format!(
+                            "expected int, got {}",
+                            crate::Comptime::render_datatree_for_tir(recv)
+                        )
+                    })
+            }
             _ => Err(format!(
                 "expected int, got {}",
                 crate::Comptime::render_datatree_for_tir(recv)
@@ -514,10 +529,25 @@ fn datatree_at_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
 fn datatree_scalar_result(recv: &CtValue, variant: &str, name: &str) -> CtValue {
     let value = match (variant, datatree_payload(recv, variant)) {
         ("Float", Some(value)) => Some(value.clone()),
-        ("Float", None) => datatree_payload(recv, "Int").and_then(|value| match value {
-            CtValue::Int(value) => Some(CtValue::Float(crate::AST::CtFloat::f64(*value as f64))),
-            _ => None,
-        }),
+        ("Float", None) => datatree_payload(recv, "Int")
+            .and_then(|value| match value {
+                CtValue::Int(value) => {
+                    Some(CtValue::Float(crate::AST::CtFloat::f64(*value as f64)))
+                }
+                _ => None,
+            })
+            .or_else(|| match datatree_payload(recv, "Number") {
+                // Typed-JSON lexical carrier, projected as in DataTree.rs `float()`.
+                Some(CtValue::Str(text)) => text
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .map(|value| CtValue::Float(crate::AST::CtFloat::f64(value))),
+                _ => None,
+            }),
+        // Typed-JSON text carrier reads as ordinary text (DataTree.rs `text()`).
+        ("Text", None) => datatree_payload(recv, "TypedText").cloned(),
         (_, Some(value)) => Some(value.clone()),
         _ => None,
     };

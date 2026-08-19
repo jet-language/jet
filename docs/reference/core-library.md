@@ -3519,7 +3519,8 @@ already, visible as `stream.peer_identity().verified_server_name`; Jet gives
 no way to turn it off. The negotiated values deferred by the ruling now ship
 as `stream.peer_identity().cipher_suite` and
 `stream.peer_identity().tls_version`; `.with_version_bounds` remains the
-request policy, not the negotiated result.
+request policy, not the negotiated result. Example:
+`examples/features/net/tls_peer_identity.jet`.
 
 ---
 

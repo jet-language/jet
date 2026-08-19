@@ -1,6 +1,12 @@
 mod email_native {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    trait JetShow {
+        fn jet_show(&self) -> String;
+    }
+    trait JetDisplay {
+        fn jet_display(&self) -> String;
+    }
     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Email.rs");
 }

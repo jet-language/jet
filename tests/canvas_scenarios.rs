@@ -360,6 +360,11 @@ fn pattern_arm_invalid_refused() {
 }
 
 #[test]
+fn node_state_off_toggle() {
+    run_canvas_scenario("node-state-off-toggle");
+}
+
+#[test]
 fn multi_input_append_remove() {
     run_canvas_scenario("multi-input-append-remove");
 }

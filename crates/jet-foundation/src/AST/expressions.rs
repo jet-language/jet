@@ -299,6 +299,12 @@ pub struct LambdaMeta {
     /// projector. Later tiers consume this fact instead of reinterpreting the
     /// lambda body.
     pub cell_projection_path: Option<Vec<String>>,
+    /// D-CONC-SPAWN1: the body contains a `?` that sema typed against the
+    /// enclosing function's fallible return. A spawned closure with this flag
+    /// early-returns that error, so every engine must give the closure a
+    /// `Result` carrier (`Task<T ? E>`), or the rendered Rust `?` sits inside
+    /// a `()` closure and rustc rejects the generated code (I2).
+    pub fallible_propagation: bool,
 }
 
 /// S46/S47 (M8): `(params) => body`; captures are inferred.

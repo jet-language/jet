@@ -360,6 +360,18 @@
     });
   }
 
+  function toggleSwitchState(node) {
+    if (!latestDoc || !node || !node.source_span) return;
+    postTransaction({
+      schema_version: 1,
+      op: "toggle_switch_state",
+      revision: latestDoc.revision,
+      graph_id: selectedGraphId,
+      node_start: spanStart(node.source_span),
+      node_end: spanEnd(node.source_span)
+    });
+  }
+
   function appendMultiInput(node) {
     if (!latestDoc || !node) return;
     const graph = currentGraphOrNull();
@@ -437,6 +449,15 @@
     ];
     if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add pattern arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
     if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
+    const stateBadge = ((node.badges || []).find((badge) => badge === "#Off" || badge === "#DebugOnly")) || "";
+    if (!node.staged && node.source_span && node.kind !== "entry") {
+      actions.unshift({
+        title: stateBadge ? "Turn on" : "Turn off",
+        detail: stateBadge ? stateBadge + " source transaction" : "#Off source transaction",
+        group: "State",
+        run: () => toggleSwitchState(node)
+      });
+    }
     if (node.staged) actions.unshift({ title: "Delete staged node", detail: "local view", group: "edit", run: () => { removeStagedNode(node.node_id); drawGraph(latestDoc); } });
     if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function", detail: "function", group: "graph", run: () => openFunctionGraph(node.title) });
     return actions;
