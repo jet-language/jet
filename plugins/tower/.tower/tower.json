@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2080,
-    "rev": 39223,
+    "rev": 39230,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -101822,11 +101822,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Extend the native TLS bridge so TLSPeerIdentity exposes the negotiated cipher suite and protocol version. D-CORESURF-SMALL1 (ratified) names both as real gaps deferred to this card. No new syntax, no new dependency, no ballot needed.\n\nSurface: stream.peer_identity().cipher_suite -> String (for example TLS13_AES_128_GCM_SHA256); stream.peer_identity().tls_version -> TLSVersion (the existing enum: .Tls12 / .Tls13).\n\nSteps:\n1. crates/jet-pkg-model/src/Prelude/NetTls.rs: widen JetTLSPeerSnapshot from 8 to 10 elements, appending the cipher suite name (String) and the negotiated version (i64, the same coding with_version_bounds already uses). In jet_net_tls_peer_identity_impl read conn.negotiated_cipher_suite() and conn.protocol_version(); both are present after a finished handshake; map an absent value to an Err exactly like the existing missing-chain case.\n2. crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs: update the mirrored JetTLSPeerSnapshot alias and jet_net_tls_peer_identity_from_snapshot so JetTLSPeerIdentity carries the two new fields. The tuple widening makes the compiler flag every remaining construction and destructuring site; fix each one. All tiers share this one Prelude path (I9); no engine re-encodes anything.\n3. crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs: in core_struct_field add cipher_suite -> String and tls_version -> Named TLSVersion to the TLSPeerIdentity arm.\n4. Docs: extend the stream.peer_identity() row in docs/reference/core-library.md and rewrite the ledger-declined note in the core.tls section so ciphersuites and tlsversion are shipped, not gaps. In docs/reference/core-surface-ledger.json give gap.network.ciphersuites and gap.network.tlsversion the shipped jetSpelling and a winning verdict, copying the shape of an already-resolved gap row.\n5. Proof: extend core_tls_expert_config_peer_identity_and_directional_close_are_real in tests/corelib.rs. Pin .Tls13 version bounds in the fixture, print both new fields, assert tls_version is Tls13 and cipher_suite starts with TLS13_ (the exact suite can vary with rustls defaults, so assert the prefix). Add the same two prints to the localhost TLS harness in tests/dev.rs to prove the default jet run tier returns the same values through the same Prelude symbol.",
       "blockedBy": [],
-      "assignee": "grok-e3",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-17",
@@ -101853,56 +101853,56 @@
         {
           "n": 1,
           "text": "JetTLSPeerSnapshot in crates/jet-pkg-model/src/Prelude/NetTls.rs and the mirrored alias in crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs both carry two new trailing elements (cipher-suite String, negotiated-version i64); jet_net_tls_peer_identity_impl fills them from the rustls connection and errors like the missing-chain case when absent",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:32:26.162Z"
+          "evidence": "NetTls.rs:19-30 10-element snapshot; :381-397 impl reads negotiated_cipher_suite()/protocol_version(), absent errors like missing-chain; NetHTTP.rs:278-289 mirrored alias",
+          "at": "2026-08-19T20:36:33.076Z"
         },
         {
           "n": 2,
           "text": "jet_net_tls_peer_identity_from_snapshot maps the two new elements onto JetTLSPeerIdentity fields cipher_suite (String) and tls_version (TLSVersion enum); the conversion lives only in the shared Prelude path, no engine-side re-encoding (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:32:26.535Z"
+          "evidence": "NetHTTP.rs:1455-1505 from_snapshot maps elements 9/10 to cipher_suite/tls_version, 12/13 enum coding; JIT hosts marshal only (net_http_hosts.rs:1093-1101, 2931-2938); dev-tier server_name marshal fix 67a7baf7d",
+          "at": "2026-08-19T20:36:33.580Z"
         },
         {
           "n": 3,
           "text": "core_struct_field in crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs types cipher_suite as String and tls_version as TLSVersion on TLSPeerIdentity",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:32:27.242Z"
+          "evidence": "core_types.rs:520-521 TLSPeerIdentity arm types cipher_suite String, tls_version TLSVersion",
+          "at": "2026-08-19T20:36:34.077Z"
         },
         {
           "n": 4,
           "text": "tests/corelib.rs TLS expert test pins .Tls13 bounds, prints both new fields, and asserts tls_version is Tls13 and cipher_suite starts with TLS13_; targeted run passes via scripts/agent/jet-env",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:32:27.854Z"
+          "evidence": "PROOF cargo test --test corelib_net core_tls_expert_config_peer_identity_and_directional_close_are_real ok 6.65s (asserts TLS13_ prefix + Tls13); test lives in tests/corelib_parts/net.rs:1520-1676 via corelib_net.rs aggregator",
+          "at": "2026-08-19T20:36:34.583Z"
         },
         {
           "n": 5,
           "text": "tests/dev.rs localhost TLS harness prints the same two fields under default jet run and matches the AOT values; targeted run passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:32:28.427Z"
+          "evidence": "PROOF cargo test --test dev dev_default_tls_peer_identity_matches_aot_and_interpreter ok 7.58s after 67a7baf7d (dev+interpreter stdout == AOT: TLS13_AES_256_GCM_SHA384/Tls13); golden net/tls_peer_identity ok via features/net/ filter after FFI fragment module-wrap d88c229cc",
+          "at": "2026-08-19T20:36:35.084Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md core.tls section documents both fields and no longer calls them gaps; ledger rows gap.network.ciphersuites and gap.network.tlsversion carry the shipped jetSpelling and a winning verdict",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:32:29.173Z"
+          "evidence": "core-library.md:3504+3515-3523 documents both fields shipping; ledger regenerated ids collection.core.net.tls.{cipher_suite,tls_version} verdict equal (generator renamed gap.network.* rows 2026-08-17)",
+          "at": "2026-08-19T20:36:35.579Z"
         }
       ],
       "refs": [
@@ -101920,9 +101920,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T01:26:06.592Z",
-      "updated": "2026-08-17T19:05:07.015Z",
-      "updatedBy": "grok-e3",
-      "claimedAt": "2026-08-17T19:05:07.015Z"
+      "updated": "2026-08-19T20:36:36.252Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T20:36:36.252Z"
     },
     {
       "id": "c0o5w74b",
@@ -182208,6 +182208,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T20:36:36.252Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05dt49c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T20:36:35.580Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05dt49c",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-19T20:36:35.085Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05dt49c",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T20:36:34.584Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05dt49c",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T20:36:34.077Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05dt49c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T20:36:33.580Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05dt49c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T20:36:33.080Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05dt49c",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-19T19:50:38.188Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -185657,55 +185706,6 @@
       "action": "card.update",
       "ref": "c0ptp3kp",
       "note": "track,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:27.571Z",
-      "by": "fable",
-      "action": "papercut.add",
-      "ref": "pc0oh8h63",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T13:30:27.147Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0hipgvn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:26.530Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0hipgvn",
-      "note": "#4 A committed measurement table compares the system allocator "
-    },
-    {
-      "at": "2026-08-19T13:30:26.082Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08jqcnk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:25.473Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c08jqcnk",
-      "note": "#4 keep(x) exists as a Prelude sink the optimizer must treat as"
-    },
-    {
-      "at": "2026-08-19T13:30:25.055Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zkd2j5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:24.439Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0zkd2j5",
-      "note": "#5 A committed design doc records the SSA backend design fed by"
     }
   ],
   "nextNum": 368,
