@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2084,
-    "rev": 39309,
+    "nextNum": 2086,
+    "rev": 39318,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -136299,6 +136299,83 @@
       "created": "2026-08-19T22:21:12.640Z",
       "updated": "2026-08-19T22:21:45.065Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0txf14f",
+      "num": 2084,
+      "title": "Runtime rlib cache grows without bound: no prune, 45-60MB per variant",
+      "body": "Found while reviving the runtime rlib cache (#2074, 2026-08-19). A Core-heavy runtime rlib is 45MB optimized and 60-63MB debug, and nothing prunes the store: every Prelude edit mints a new generation of content-addressed keys that is never collected, in ~/.cache/jet/runtime and in CARGO_TARGET_TMPDIR/jet-runtime-rlibs for golden. Manual reset today is rm -rf ~/.cache/jet/runtime plus cargo clean. Eviction was deliberately NOT added blind by the #2074 lane, because a cap below the real variant count would thrash and make the suite slower, which is the opposite of the mandate. So this card must FIRST census the real variant count from a full golden run, then choose a bounded policy (generation-aware or age plus total-size cap) that cannot evict a variant the current toolchain still needs. Relevant precedent: target/ once reached 619G unnoticed, which is why AGENTS.md makes footprint a standing concern.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T22:22:30.413Z",
+      "updated": "2026-08-19T22:22:30.413Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c06tdv16",
+      "num": 2085,
+      "title": "Build wall time is one fingerprint: cache_key costs 33.4s of a 35s build",
+      "body": "MEASURED 2026-08-19 with JET_TIMING=1 on a real edit-rebuild of a hello-world file, after #2083 made the key pass visible to PhaseTiming. jet-timing.json phases, microseconds: load 8768, sema 30818, cache_key 33440532, build_plan 740, ffi 10452, codegen 18550. So 33.4s of a 35.1s wall is the cache_key phase alone and everything else sums to about 70ms. The runtime rlib cache (#2074) was a hit on this very run, so rustc is not the cost either. cache_key is native_cache_key_with_toolchain (Source/CmdCompile.rs:3538): load_entry_with_overlay + seed_build_facts + Sema::check_bundle(Check) + cached_runtime_fingerprint + corelib_emission_fingerprint + manifest_fingerprint + ast_cache_key. Since load and sema are milliseconds, the cost is one of the fingerprints — most likely cached_runtime_fingerprint or corelib_emission_fingerprint hashing or re-emitting the whole Prelude/Core closure on every invocation, or a toolchain probe inside the loop. This is the single biggest inner-loop cost in Jet today and it dominates every jet build, jet run --release, and every suite that compiles examples. Owner directive 2026-08-19: permanently speed up development and the test suites.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Build wall time no longer dominated by the cache key: measured jet-timing.json cache_key phase drops from 33.4s to under 0.2s on the same edit-rebuild, recorded with before and after numbers",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "MEASURED before and after on the same machine and the same edit-rebuild loop (hello-world file, three iterations each, JET_TIMING=1). BEFORE: wall 35.1s, cache_key 33,440,532us. AFTER (commit hashing removed): wall 2s on all three runs, cache_key 57,487us. That is 582x on the phase and 17.5x on the wall, and the build now sits on the ~2s floor that a pure cache HIT already cost. Other phases unchanged: load 8494us, sema 30194us, build_plan 602us, ffi 10448us, codegen 17915us.",
+          "at": "2026-08-19T23:02:16.811Z"
+        },
+        {
+          "n": 2,
+          "text": "The key still moves whenever anything that can change the emitted program changes: compiler sources including the whole Prelude and Core closure, manifest, settings, profile, target, toolchain, with the staleness argument recorded on the card",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "The 835MB self-hash was replaced by env!(JET_COMPILER_BUILD_ID), which build.rs already emitted: a streaming SHA-256 over every non-test file under Source/ and all 24 crates/jet-* (including crates/jet-codegen/src/Prelude, so the whole Prelude and Core closure is covered), Cargo.toml, Cargo.lock, build.rs, docs/reference/core-library.md, docs/spec/diagnostics.md and the nix-compat oracle, plus build facts: full rustc -vV, TARGET, HOST, PROFILE, OPT_LEVEL, DEBUG, target features, encoded rustflags, every CARGO_FEATURE_*, the 34 CARGO_PROFILE_* overrides, RUSTC_WRAPPER and any custom target spec body. build.rs emits rerun-if-changed for every root and rerun-if-env-changed for every fact, so cargo cannot serve a stale id. Manifest, settings, profile, target and program AST remain separate key inputs alongside it (manifest_fingerprint, ast_cache_key, profile and mode tags), so nothing that changes the emitted program is now uncovered.",
+          "at": "2026-08-19T23:02:17.323Z"
+        },
+        {
+          "n": 3,
+          "text": "No new cache layer, no on-disk memo, and no placeholder fallback: a missing key input fails the compiler build rather than collapsing to a constant",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "Shape (a) compile-time constant: no new cache, no build script added (build.rs:31-37 already emitted the id), no on-disk memo. Used env! rather than option_env!().unwrap_or(placeholder) as CmdPerf.rs:2587 and CmdProve.rs:2257 do, so a missing id fails the compiler build instead of silently collapsing a key input; same precedent as Source/BudgetProviders.rs:465. OnceLock became LazyLock, mirroring the sibling memoization at crates/jet-pkg-model/src/FFI.rs:2858-2872.",
+          "at": "2026-08-19T23:02:17.817Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T22:52:20.508Z",
+      "updated": "2026-08-19T23:02:18.517Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T23:02:18.517Z"
     }
   ],
   "decisions": [
@@ -182607,6 +182684,69 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T23:02:18.517Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c06tdv16",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T23:02:17.817Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06tdv16",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T23:02:17.324Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06tdv16",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T23:02:16.811Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c06tdv16",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T23:02:16.302Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06tdv16",
+      "note": "#3 No new cache layer, no on-disk memo, and no placeholder fall"
+    },
+    {
+      "at": "2026-08-19T23:02:15.790Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06tdv16",
+      "note": "#2 The key still moves whenever anything that can change the em"
+    },
+    {
+      "at": "2026-08-19T23:02:15.286Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c06tdv16",
+      "note": "#1 Build wall time no longer dominated by the cache key: measur"
+    },
+    {
+      "at": "2026-08-19T22:52:20.508Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c06tdv16",
+      "note": "Build wall time is one fingerprint: cache_key costs 33.4s of a 35s build"
+    },
+    {
+      "at": "2026-08-19T22:22:30.413Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0txf14f",
+      "note": "Runtime rlib cache grows without bound: no prune, 45-60MB per variant"
+    },
+    {
       "at": "2026-08-19T22:21:46.493Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186042,69 +186182,6 @@
       "action": "card.update",
       "ref": "c0vjriuo",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:18.247Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0vjriuo",
-      "note": "#6 The corpus contains frozen tasks covering MCP, interactive t"
-    },
-    {
-      "at": "2026-08-19T13:35:17.832Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0mh8cme",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:17.226Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0mh8cme",
-      "note": "#6 The corpus contains frozen tasks covering browser automation"
-    },
-    {
-      "at": "2026-08-19T13:35:16.797Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0e68ggl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:16.173Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0e68ggl",
-      "note": "#6 The corpus contains frozen tasks covering structured data tr"
-    },
-    {
-      "at": "2026-08-19T13:35:15.737Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05twn4k",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:15.112Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c05twn4k",
-      "note": "#6 The corpus contains frozen tasks covering builds, test runs,"
-    },
-    {
-      "at": "2026-08-19T13:35:14.672Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xha49b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:14.054Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0xha49b",
-      "note": "#6 The corpus contains frozen tasks covering repository discove"
     }
   ],
   "nextNum": 368,
