@@ -20,7 +20,7 @@ fn store_reading(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.json(201, Reading.{city: reading.city, degrees: reading.degrees + 1}))
 }
 
-fn run() ? {
+fn run() ? IOError | NetError | HTTPError | TaskFailure {
     files.create_dir_all("/tmp/jet_http_public")?
     files.write("/tmp/jet_http_public/index.html", "home")?
     files.write("/tmp/jet_http_public/.env", "TOKEN=private")?
@@ -36,10 +36,10 @@ fn run() ? {
     // directory request serves its index.html.
     http_server.static_files(mux, "/assets", "/tmp/jet_http_public")
     t :: task {
-        http_server.serve_once_listener(listener, mux) ?? return
-        http_server.serve_once_listener(listener, mux) ?? return
-        http_server.serve_once_listener(listener, mux) ?? return
-        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)?
     }
     post :: http_client.request("POST", "http://{addr}/readings")
     sent :: post.header("origin", "https://app.example").body("{{\"city\":\"Reno\",\"degrees\":31}}")

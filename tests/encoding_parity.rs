@@ -410,7 +410,9 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
             "serde/codable_default",
             concat!(
                 "{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n",
-                "web\n[80, 443]\nprod\n[8080]\n",
+                "web\n[80, 443]\nprod\n",
+                "{\"name\":\"web\",\"ports\":[80,443],\"env\":\"prod\"}\n",
+                "[8080]\n",
             ),
         ),
     ] {
@@ -432,7 +434,8 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
         assert_eq!(
             backend,
             DevBackend::ResidentJit,
-            "{stem} default run must stay resident JIT"
+            "{stem} default run must stay resident JIT; detail: {}",
+            resident_jit_safe_bundle_detail(&checked_bundle(jet_path.to_str().unwrap()))
         );
         assert_eq!(default_run, aot, "{stem} default run diverged from AOT");
 

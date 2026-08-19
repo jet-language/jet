@@ -2950,7 +2950,25 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 TStmt::Return(Some(value))
             }));
         }
-        Stmt::Return(None, _) => TStmt::Return(None),
+        Stmt::Return(None, _) => {
+            if matches!(
+                &env.ret_ty,
+                Some(Type::Result { ok, .. })
+                    if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
+            ) {
+                return in_own_frame(|| LowerStmtPlan::ready({
+                    let unit = TExpr {
+                        ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                        kind: TExprKind::Unit,
+                    };
+                    TStmt::Return(Some(TExpr {
+                        ty: env.ret_ty.clone().expect("fallible void return"),
+                        kind: TExprKind::Ok(Box::new(unit)),
+                    }))
+                }));
+            }
+            TStmt::Return(None)
+        }
         // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the shared Stream Prelude owns
         // the producer task and makes this send a cancellation wait point.
         Stmt::Yield(e, _) => {

@@ -139,6 +139,11 @@
             self.display_text()
         }
     }
+    impl super::JetDebug for EncodingError {
+        fn jet_debug(&self) -> String {
+            self.display_text()
+        }
+    }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DataEvent {
         Null, Bool(bool), Int(i64), Float(f64), Number(String), Text(String), Bytes(Vec<u8>),
@@ -166,6 +171,39 @@
         pub path: String,
         pub reason: String,
     }
+    impl CBORError {
+        fn display_text(&self) -> String {
+            super::jet_encoding_error_kernel_show(
+                "CBOR",
+                &format!("{:?}", self.kind),
+                self.byte_offset,
+                None,
+                None,
+                &self.path,
+                &self.reason,
+            )
+        }
+    }
+    impl std::fmt::Display for CBORError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.display_text())
+        }
+    }
+    impl super::JetShow for CBORError {
+        fn jet_show(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDisplay for CBORError {
+        fn jet_display(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDebug for CBORError {
+        fn jet_debug(&self) -> String {
+            self.display_text()
+        }
+    }
     // D-ENC-XML-SURFACE1=A: whole-value XML policy, limits, and stable errors.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum XMLReason {
@@ -181,6 +219,39 @@
         pub column: JetOutcome<i64, JetAbsent>,
         pub path: String,
         pub reason: String,
+    }
+    impl XMLError {
+        fn display_text(&self) -> String {
+            super::jet_encoding_error_kernel_show(
+                "XML",
+                &format!("{:?}", self.kind),
+                self.byte_offset.as_ref().ok().copied().unwrap_or(0),
+                self.line.as_ref().ok().copied(),
+                self.column.as_ref().ok().copied(),
+                &self.path,
+                &self.reason,
+            )
+        }
+    }
+    impl std::fmt::Display for XMLError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.display_text())
+        }
+    }
+    impl super::JetShow for XMLError {
+        fn jet_show(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDisplay for XMLError {
+        fn jet_display(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDebug for XMLError {
+        fn jet_debug(&self) -> String {
+            self.display_text()
+        }
     }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct XMLLimits {
@@ -2347,6 +2418,27 @@
             self.message.clone()
         }
     }
+    // D-FAIL-CONV2=A: family members render failure text through one display hook.
+    impl super::JetDisplay for EnvError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for UTF8Error {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for RangeError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for TextError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for ProcessResult {
         fn jet_show(&self) -> String {
             format!("{:?}", self)
@@ -2468,6 +2560,16 @@
     impl super::JetShow for JSONError {
         fn jet_show(&self) -> String {
             format!("line {}: {}", self.line, self.message)
+        }
+    }
+    impl super::JetDisplay for JSONError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDebug for JSONError {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
         }
     }
     impl super::JetShow for JSON {

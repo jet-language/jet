@@ -494,12 +494,17 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
     let main = match funcs.get("run") {
         Some(f) => *f,
         None => {
-            let line = "this program has no `run` to debug — `jet debug` runs a program";
-            if io.is_scripted() {
-                io.push_line(line);
-            } else {
-                eprintln!("{}", line);
-            }
+            // I4 (#2029): a registered diagnostic, not a bare line.
+            let diag = crate::Sema::Diagnostics::render_registered(
+                "E0101",
+                "this program has no `run` function".to_string(),
+                "running a program starts at `fn run`, and the entry file doesn't define one"
+                    .to_string(),
+                "add `fn run() { … }`, or use `jet check <file>`".to_string(),
+                None,
+            );
+            let src = bundle.modules[bundle.entry].source.clone();
+            emit_diags(&mut io, file, &src, &[diag]);
             return (ExitCodes::USER_ERROR, io.into_output());
         }
     };

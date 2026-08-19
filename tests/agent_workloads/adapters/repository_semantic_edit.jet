@@ -6,7 +6,7 @@ use core.time as time
 
 fn run() {
     args :: process.argv()
-    if args.len() != 2 { panic("usage: repository_semantic_edit INPUT_ROOT") }
+    if args.len() != 2 -> panic("usage: repository_semantic_edit INPUT_ROOT")
     input :: args.get(1) ?? panic("missing input root")
     jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
     project := "project"
@@ -17,9 +17,7 @@ fn run() {
         .stderr(.Capture)
         .timeout(Duration.seconds(30) ?? panic("bad timeout"))
         .run() ?? panic("cannot run semantic codemod")
-    if result.timed_out || result.code != 0 {
-        panic("codemod failed: {result.errors}")
-    }
+    if result.timed_out || result.code != 0 -> panic("codemod failed: {result.errors}")
     source :: fs.read("{project}/project/examples/main.jet") ?? panic("cannot read edited source")
     print(source.trim())
     fs.remove_all(project) ?? panic("cannot clean edited project")

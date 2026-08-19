@@ -1240,6 +1240,18 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "jet_compute_cpu_simd");
     s = strip_vetted_module(&s, "ffi_reporter");
+    s = strip_vetted_module(&s, "jet_program_allocator");
+    s = strip_vetted_module(&s, "jet_mod_native");
+    loop {
+        let next = strip_vetted_module(&s, "jet_mod_native");
+        if next == s {
+            break;
+        }
+        s = next;
+    }
+    s = strip_vetted_module(&s, "jet_os_interrupt_ffi");
+    s = strip_mod(&s, "jet_os_interrupt");
+    s = strip_raylib_bridge(&s);
     while s.contains("mod __jet___c_") {
         let before = s.clone();
         s = strip_mod_prefix(&s, "__jet___c_");
@@ -1256,11 +1268,31 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
 pub fn strip_scheduler_native(src: &str) -> String {
     let begin = "// jet:scheduler-native-begin";
     let end = "// jet:scheduler-native-end";
+    let mut src = src.to_string();
+    loop {
+        match (src.find(begin), src.find(end)) {
+            (Some(b), Some(e)) if e >= b => {
+                let mut s = src[..b].to_string();
+                s.push_str(&src[e + end.len()..]);
+                src = s;
+            }
+            _ => return src,
+        }
+    }
+}
+
+
+/// D-RAYLIB1: drop the always-emitted kernel raylib FFI region. Bridge unsafe
+/// lives between `jet:raylib-begin` / `jet:raylib-end`; user functions stay
+/// in the scan.
+pub fn strip_raylib_bridge(src: &str) -> String {
+    let begin = "// jet:raylib-begin";
+    let end = "// jet:raylib-end";
     match (src.find(begin), src.find(end)) {
         (Some(b), Some(e)) if e >= b => {
-            let mut s = src[..b].to_string();
-            s.push_str(&src[e + end.len()..]);
-            s
+            let mut out = src[..b].to_string();
+            out.push_str(&src[e + end.len()..]);
+            out
         }
         _ => src.to_string(),
     }
@@ -1292,21 +1324,24 @@ pub fn strip_shared_guard_internals(src: &str) -> String {
 pub fn strip_vetted_module(src: &str, name: &str) -> String {
     let begin = format!("// JET_VETTED_UNSAFE_BEGIN: {name}");
     let end = format!("// JET_VETTED_UNSAFE_END: {name}");
-    // Markers may be indented inside cfg blocks.
-    let Some(start) = src.find(&begin).or_else(|| {
-        src.lines().enumerate().find_map(|(i, line)| {
-            line.trim_start()
-                .starts_with(&begin)
-                .then(|| src.lines().take(i).map(|l| l.len() + 1).sum::<usize>())
-        })
-    }) else {
-        return src.to_string();
-    };
-    let Some(relative_end) = src[start..].find(&end) else {
-        return src.to_string();
-    };
-    let end_offset = start + relative_end + end.len();
-    format!("{}{}", &src[..start], &src[end_offset..])
+    let mut src = src.to_string();
+    loop {
+        // Markers may be indented inside cfg blocks.
+        let Some(start) = src.find(&begin).or_else(|| {
+            src.lines().enumerate().find_map(|(i, line)| {
+                line.trim_start()
+                    .starts_with(&begin)
+                    .then(|| src.lines().take(i).map(|l| l.len() + 1).sum::<usize>())
+            })
+        }) else {
+            return src;
+        };
+        let Some(relative_end) = src[start..].find(&end) else {
+            return src;
+        };
+        let end_offset = start + relative_end + end.len();
+        src = format!("{}{}", &src[..start], &src[end_offset..]);
+    }
 }
 
 #[test]
@@ -1338,6 +1373,14 @@ unsafe { user_pointer() }
     assert!(!stripped.contains("unix_ffi()"));
     assert!(!stripped.contains("windows_ffi()"));
     assert!(!stripped.contains("other_ffi()"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn raylib_bridge_stripping_cannot_swallow_following_user_unsafe() {
+    let generated = "// jet:raylib-begin\nunsafe extern \"C\" fn InitWindow() {}\n// jet:raylib-end\nunsafe { user_pointer() }";
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("InitWindow"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
 }
 

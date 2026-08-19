@@ -11,25 +11,15 @@
 // runtime consumer invokes it *automatically*. `jet dev`'s due-job tick is
 // exercised by tests/dev.rs, not by this golden AOT run (I5's ordinary-run
 // convention for dev-loop-only behavior — see devloop/persist.jet).
-#[Job(.Dev), Every(5min)] fn prune_sessions() {
-    print("pruning sessions")
-}
+#[Job(.Dev), Every(5min)] fn prune_sessions() { print("pruning sessions") }
 
-#[Job(.Dev), Every(2h)] fn refresh_indexes() {
-    print("refreshing indexes")
-}
+#[Job(.Dev), Every(2h)] fn refresh_indexes() { print("refreshing indexes") }
 
-#[Job(.Dev), Every(1d)] fn compact_archive() {
-    print("compacting archive")
-}
+#[Job(.Dev), Every(1d)] fn compact_archive() { print("compacting archive") }
 
-#[Job(.Dev), Every("03:00")] fn nightly_backup() {
-    print("running nightly backup")
-}
+#[Job(.Dev), Every("03:00")] fn nightly_backup() { print("running nightly backup") }
 
-#[Job(.Ship)] fn manual_only() {
-    print("ran manually")
-}
+#Job(.Ship) fn manual_only() { print("ran manually") }
 
 fn run() {
     prune_sessions()

@@ -3907,12 +3907,11 @@ impl<'a> Checker<'a> {
     // `return s.after(sep)` written directly (no intermediate binding) always
     // lowers as an ordinary owned `String` — safe, nothing to catch.
 
-    /// D-LIN1 / D-CONC-JOIN1: true when `ty` is a `#SingleUse` value or carries
-    /// a task duty, checking the local registry first and then any imported
-    /// module that exposes the type publicly. Such a value must be consumed
-    /// exactly once and may not be aliased.
+    /// D-LIN1 / D-CONC-JOIN1: true when `ty` is a `#SingleUse` value or a Task
+    /// handle. Join duty lives on the handle. A list of handles is drained by
+    /// moving those handles out, not by treating the list as `#SingleUse`.
     pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
-        if type_requires_owned_iteration(ty) {
+        if is_task_type(ty) {
             return true;
         }
         let Some(name) = ty.base_name() else {

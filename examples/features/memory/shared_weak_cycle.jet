@@ -17,13 +17,17 @@ fn peer_label(n: Node) => String {
 }
 
 fn run() {
-    a := Shared.new(Node.{ label: "a", peer: None })
-    b := Shared.new(Node.{ label: "b", peer: None })
+    a := Shared.new(Node.{label: "a", peer: None})
+    b := Shared.new(Node.{label: "b", peer: None})
     // Downgrade before edit so the closures do not move the strong handles.
     wa := a.downgrade()
     wb := b.downgrade()
-    a.edit(n => { n.peer = Val(~wb) })
-    b.edit(n => { n.peer = Val(~wa) })
+    a.edit(n => {
+        n.peer = Val(~wb)
+    })
+    b.edit(n => {
+        n.peer = Val(~wa)
+    })
     alive :: a.read(n => peer_label(~n))
     print("while-alive:{alive}")
     count :: a.strong_count()

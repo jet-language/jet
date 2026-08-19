@@ -238,6 +238,18 @@ fn unsupported_feature_stops_at_e2203_boundary() {
     );
 }
 
+/// Card #2029 / I4: a library with no `run` is registered E0101, not a bare line.
+#[test]
+fn missing_run_is_registered_e0101() {
+    let file = fixture("no_run", "fn helper() { print(1) }\n");
+    let out = jet::Debug::run_session(&file, &["c"]);
+    assert!(
+        out.contains("E0101") && out.contains("no `run` function"),
+        "no-run must be registered E0101; got:\n{out}"
+    );
+}
+
+
 /// `next`/`n` steps over the loop body without descending statement-by-statement
 /// at a deeper position — the line advances within `main`, not into a callee.
 #[test]

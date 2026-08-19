@@ -4,7 +4,7 @@ use core.encoding.json as json
 use core.files as files
 use core.testing as testing
 
-fn write_catalog(path: Path) ? {
+fn write_catalog(path: Path) => Bool ? IOError | EncodingError {
     out :: files.create(path)?
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
     writer :: json.writer(^out, canonical: true)?
@@ -16,9 +16,10 @@ fn write_catalog(path: Path) ? {
     writer.write(encoding.DataEvent.ObjectEnd)?
     writer.flush()?
     writer.finish()?
+    return Ok(true)
 }
 
-fn run() ? {
+fn run() ? IOError | EncodingError {
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
     write_catalog(path)?
@@ -27,11 +28,11 @@ fn run() ? {
     read_count := 0
     loop event, reader {
         if event == {
-            .ObjectStart -> print("event:ObjectStart")
-            .Key(key) && key == "b" -> print("event:Key:b")
-            .Int(value) && value == 2 -> print("event:Int:2")
-            .Key(key) && key == "a" -> print("event:Key:a")
-            .Int(value) && value == 1 -> print("event:Int:1")
+            .ObjectStart -> { print("event:ObjectStart") }
+            .Key(key) && key == "b" -> { print("event:Key:b") }
+            .Int(value) && value == 2 -> { print("event:Int:2") }
+            .Key(key) && key == "a" -> { print("event:Key:a") }
+            .Int(value) && value == 1 -> { print("event:Int:1") }
             .ObjectEnd -> print("event:ObjectEnd")
             // The writer above emits only the five events handled here. Keep
             // the reader total if the event contract gains another variant.

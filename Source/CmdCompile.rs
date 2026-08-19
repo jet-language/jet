@@ -1147,8 +1147,9 @@ fn schedule_text(marker: &jet::AST::EveryMarker) -> Option<String> {
     }
 }
 
-/// D-TASKS-LIST1=A: one lex+parse source for E1294 and `jet jobs`.
+/// D-TASKS-LIST1=A / D-JOB-NAME1=A: one lex+parse source for E1294 and `jet jobs`.
 /// Source order, `#Doc`, and `#Every` metadata all come from this program.
+/// Listing is reached via `jet jobs`; the former tasks subcommand is retired.
 fn list_job_names(src: &str) -> Result<Vec<JobListing>, Vec<jet::Diagnostics::Diagnostic>> {
     let (toks, lex_diags) = jet::Lexer::lex(src);
     if !lex_diags.is_empty() {
@@ -2322,6 +2323,51 @@ const IGNORED_DIRS: &[&str] = &[
     "vendor", "target", "build", ".git", "node_modules", ".jet",
 ];
 
+/// Diagnostic snapshot trees and the syntax catalog are not valid Jet by
+/// construction. Directory walks skip them so `jet fmt --check tests` can
+/// cover the parseable corpus. Explicit file paths still format (D-FMTPROJECT1=D).
+fn skip_fmt_walk_path(path: &Path) -> bool {
+    let raw = path.to_string_lossy();
+    let s = raw.replace('\\', "/");
+    let rel = if let Some((_, rest)) = s.rsplit_once("/tests/") {
+        format!("tests/{rest}")
+    } else if let Some((_, rest)) = s.rsplit_once("/docs/") {
+        format!("docs/{rest}")
+    } else {
+        s.clone()
+    };
+    if rel == "docs/reference/syntax-surface.jet"
+        || rel.ends_with("/docs/reference/syntax-surface.jet")
+        || rel == "syntax-surface.jet"
+    {
+        return true;
+    }
+    if rel.starts_with("tests/ui_lint/") || rel == "tests/ui_lint" {
+        return true;
+    }
+    if rel.starts_with("tests/fuzz/sema/invalid/") || rel == "tests/fuzz/sema/invalid" {
+        return true;
+    }
+    if rel.starts_with("tests/ui/") || rel == "tests/ui" {
+        // Walk nested directories so `*.fixed.jet` is still formatted.
+        if !rel.ends_with(".jet") {
+            return false;
+        }
+        return !rel.ends_with(".fixed.jet");
+    }
+    if rel.starts_with("tests/fixtures/jetpack-config/")
+        || rel.starts_with("tests/fixtures/jetpack-config-real/")
+        || rel == "tests/fixtures/jetpack-project/functional-env.jet"
+        || rel.starts_with("tests/fixtures/policy_package_unsafe_allow/")
+        || rel == "tests/agent_workloads/inputs/build-test-recovery/invalid.jet"
+        || rel.ends_with("/ex_concurrency_detached_task.jet")
+    {
+        return true;
+    }
+    false
+}
+
+
 /// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS
 /// and the retired package manifest. The canonical Package and Config files use
 /// the typed package formatter in the preflight path below.
@@ -2334,11 +2380,12 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !IGNORED_DIRS.contains(&name) {
+            if !IGNORED_DIRS.contains(&name) && !skip_fmt_walk_path(&path) {
                 walk_jet_files(&path, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
             && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PAYLOAD_FILE)
+            && !skip_fmt_walk_path(&path)
         {
             out.push(path);
         }
@@ -4202,6 +4249,16 @@ fn build_library(
     }
 }
 
+fn write_backend_timing(timer: &jet::PhaseTiming::PhaseTimer) {
+    let json = timer.to_json();
+    let _ = fs::write(Path::new("build").join("jet-timing-backend.json"), &json);
+    if let Some(dir) = jet::PhaseTiming::output_dir() {
+        let build = dir.join("build");
+        let _ = fs::create_dir_all(&build);
+        let _ = fs::write(build.join("jet-timing-backend.json"), json);
+    }
+}
+
 pub(crate) fn build(
     file: &str,
     rust_code: &str,
@@ -4349,7 +4406,7 @@ pub(crate) fn build(
             }
             if let Some(timer) = compile_timer.as_mut() {
                 timer.lap("backend_link");
-                let _ = fs::write(Path::new("build").join("jet-timing-backend.json"), timer.to_json());
+                write_backend_timing(timer);
             }
             return;
         }
@@ -4493,7 +4550,7 @@ pub(crate) fn build(
     };
     if let Some(timer) = compile_timer.as_mut() {
         timer.lap("backend_link");
-        let _ = fs::write(Path::new("build").join("jet-timing-backend.json"), timer.to_json());
+        write_backend_timing(timer);
     }
 
     if !out.status.success() {

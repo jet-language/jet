@@ -101,7 +101,7 @@ pub fn resolve_effect_name(
             )
         })
         .min_by(|left, right| left.cmp(right))
-        .filter(|(distance, _)| *distance <= 3)
+        .filter(|(distance, _)| *distance > 0 && *distance <= 3)
         .map(|(_, candidate)| candidate);
     Err(suggestion)
 }

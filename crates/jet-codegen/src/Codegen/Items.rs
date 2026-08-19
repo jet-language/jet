@@ -1744,6 +1744,9 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             out.push_str(&format!(
                 "impl JetDisplay for {rust_name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
             ));
+            out.push_str(&format!(
+                "impl std::fmt::Display for {rust_name} {{\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        f.write_str(&self.jet_show())\n    }}\n}}\n\n"
+            ));
         }
     }
 }

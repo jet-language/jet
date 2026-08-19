@@ -686,7 +686,7 @@ fn interpreter_example_stems() -> Vec<String> {
 /// different set) and was never a measurement of this battery. Correcting an
 /// estimate to its measurement is not raising a guard: the number may only fall
 /// from here, and card #2018 owns driving it down.
-const SEMA_REJECTED_CEILING: usize = 54;
+const SEMA_REJECTED_CEILING: usize = 11;
 
 /// The stems the run-path front end accepts, and the ones it rejects together
 /// with the reason the compiler gave (#2020). Nothing is discarded.
@@ -760,7 +760,7 @@ enum JitCompileVerdict {
 /// #2012: every reader of `collect_jit_coverage` asserts this, not just the
 /// coverage audit, so no battery scoped to a slice of this universe can report
 /// success while the universe itself shrank.
-const EXAMPLE_CORPUS_FLOOR: usize = 496;
+const EXAMPLE_CORPUS_FLOOR: usize = 498;
 
 /// How many stems the compile oracle is still allowed to be blind to (#1998).
 ///
@@ -770,7 +770,7 @@ const EXAMPLE_CORPUS_FLOOR: usize = 496;
 /// skip to accept. The rows are derived from the compiler's own diagnostics at
 /// audit time, so this is a counted ceiling and not an allowlist: no stem can be
 /// written out of the universe by hand.
-const OUT_OF_UNIVERSE_CEILING: usize = 81;
+const OUT_OF_UNIVERSE_CEILING: usize = 11;
 
 /// How many compile-covered stems the resident JIT must still be willing to run
 /// — the universe `cranelift_three_way_differential_battery` is scoped to
@@ -1207,6 +1207,45 @@ fn is_named_dev_boundary(stem: &str, diags: &[jet::Diagnostics::Diagnostic]) -> 
         || (stem == "io/db_checked_sql" && diags.iter().all(|d| d.code == "E1004"))
 }
 
+/// #2017: corpus batteries compared no-input runs when a stem had answers.
+/// `dev_iteration_with_timeout` cannot take a per-run fd 0, so those stems
+/// leave the in-process path and compare a child CLI against AOT, both fed
+/// `common::example_stdin`.
+fn check_interactive_stem_cli_vs_aot(
+    i: usize,
+    stem: &str,
+    dir: &std::path::Path,
+    file: &str,
+    answers: &str,
+    interpret: bool,
+    tag: &str,
+    manifested_divergences: &[String],
+) -> DevBatteryStats {
+    let left = normalize_for_parity(stem, cli_tier_program_output(file, stem, answers, interpret));
+    let compiled = normalize_for_parity(
+        stem,
+        compiled_binary_output_with_stdin(dir, tag, i, stem, file, Some(answers)),
+    );
+    if left != compiled {
+        if is_manifested_parity_divergence(stem, manifested_divergences) {
+            eprintln!("manifested parity divergence: {stem}");
+            return DevBatteryStats {
+                ran: 1,
+                manifested: 1,
+                ..DevBatteryStats::default()
+            };
+        }
+        assert_eq!(
+            left, compiled,
+            "DIVERGENCE for `{stem}` with the answers its golden was recorded with: CLI and compiled binary disagree"
+        );
+    }
+    DevBatteryStats {
+        ran: 1,
+        ..DevBatteryStats::default()
+    }
+}
+
 fn check_dev_default_stem(
     i: usize,
     stem: &str,
@@ -1216,6 +1255,18 @@ fn check_dev_default_stem(
     let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let file = example_path(stem);
     eprintln!("dev-default checking {stem}");
+    if let Some(answers) = common::example_stdin(stem) {
+        return check_interactive_stem_cli_vs_aot(
+            i,
+            stem,
+            dir,
+            &file,
+            answers.piped,
+            false,
+            "dev_default_diff",
+            manifested_divergences,
+        );
+    }
     jet_jit::reset_jit_trace_for_test();
     let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
         RunOutcome::Ran {
@@ -1355,6 +1406,18 @@ fn check_interpreter_stem(
     }
     let file = example_path(stem);
     eprintln!("interpreter checking {stem}");
+    if let Some(answers) = common::example_stdin(stem) {
+        return check_interactive_stem_cli_vs_aot(
+            i,
+            stem,
+            dir,
+            &file,
+            answers.piped,
+            true,
+            "dev_diff",
+            manifested_divergences,
+        );
+    }
     let interpreted = match dev_iteration_with_timeout(stem, &file, true) {
         RunOutcome::Ran {
             stdout,
@@ -3058,7 +3121,7 @@ fn jit_coverage_audit_inner() {
     // row (aec11ad74 dropped `types/unit_literals` while it was a live gap).
     // Pin the row count outside the file: a deletion now has to lower a
     // reviewed constant, exactly like RUN_GAPS_CEILING.
-    const COMPILE_COVERED_FLOOR: usize = 451;
+    const COMPILE_COVERED_FLOOR: usize = 480;
     let recorded_count = expected_covered.len();
     assert_eq!(
         recorded_count, COMPILE_COVERED_FLOOR,

@@ -48,7 +48,7 @@ fn collect(first: ^Int, second: ^Int = first, rest: ...Int) => Int {
 
 // D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
 // are part of callable identity. `apply` only accepts a labelled call.
-fn apply(action: fn(*, force: Bool) => Int) => Int { return action(force: true) }
+fn apply(action: fn(*, force: Bool) => Int) => Int :: action(force: true)
 
 fn saver(force: Bool) => Int {
     print("saver {force}")
@@ -86,10 +86,5 @@ fn run() {
     // empty spread explicitly, and the second packs two written tail values.
     empty :: [Int].{}
     print(collect(tap("first", 1), 1, ...empty))
-    print(collect(
-        tap("first", 1),
-        tap("second", 2),
-        tap("third", 3),
-        tap("fourth", 4)
-    ))
+    print(collect(tap("first", 1), tap("second", 2), tap("third", 3), tap("fourth", 4)))
 }

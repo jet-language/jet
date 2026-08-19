@@ -233,7 +233,7 @@ impl Diagnostic {
     ) -> Self {
         let code = code.into();
         let row = crate::Registry::diagnostic(&code)
-            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{code}` has no typed row"));
         let rendered = row.render(holes);
         let edit = row_edit(row, span);
         Diagnostic {
@@ -257,7 +257,7 @@ impl Diagnostic {
     /// the row still owns whether this report has a generated fix channel.
     pub fn set_structured_edit(&mut self, edit: TextEdit) {
         let row = crate::Registry::diagnostic(&self.code)
-            .unwrap_or_else(|| panic!("diagnostic `{}` has no typed row", self.code));
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
         assert!(
             matches!(
                 row.structured_fix,
@@ -287,7 +287,7 @@ impl Diagnostic {
     ) -> Self {
         let code = code.into();
         let row = crate::Registry::diagnostic(&code)
-            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{code}` has no typed row"));
         let edit = row_edit(row, span);
         Diagnostic {
             moment: row.moment,
@@ -309,7 +309,7 @@ impl Diagnostic {
     /// raise site. Human fix prose is presentation only.
     pub fn with_edit(mut self, edit: TextEdit) -> Self {
         let row = crate::Registry::diagnostic(&self.code)
-            .unwrap_or_else(|| panic!("diagnostic `{}` has no typed row", self.code));
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
         assert!(
             matches!(
                 row.structured_fix,
@@ -345,7 +345,7 @@ impl Diagnostic {
             return Err("custom diagnostic code must not contain control characters");
         }
         let row = crate::Registry::diagnostic(&code)
-            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{code}` has no typed row"));
         let edit = row_edit(row, span);
         Ok(Self {
             moment: row.moment,
@@ -458,7 +458,7 @@ impl Diagnostic {
     ) -> Self {
         let code = code.into();
         let row = crate::Registry::diagnostic(&code)
-            .unwrap_or_else(|| panic!("diagnostic `{code}` has no typed row"));
+            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{code}` has no typed row"));
         let edit = row_edit(row, span);
         Diagnostic {
             moment: row.moment,
@@ -1211,7 +1211,7 @@ pub fn install_ice_panic_hook() {
 
     #[cfg(debug_assertions)]
     if std::env::var_os("JET_ICE_SELF_TEST").is_some() {
-        panic!("ICE self-test triggered by JET_ICE_SELF_TEST");
+        crate::ice!(None, "ICE self-test triggered by JET_ICE_SELF_TEST");
     }
 }
 

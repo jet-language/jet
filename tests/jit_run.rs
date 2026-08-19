@@ -1073,3 +1073,34 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+
+/// Card #2029: a total lowering failure must not read as Covered.
+#[test]
+fn lowering_failure_is_not_resident_covered() {
+    let dir = common::unique_tmp("jit_safety_no_program");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("lib_only.jet");
+    fs::write(&file, "fn helper() { print(1) }\n").unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
+    let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    assert!(
+        !jet_jit::tir_lowers_bundle(&bundle),
+        "a file with no run must not lower a JIT program"
+    );
+    match jet_jit::resident_jit_func_safety_detail(&bundle, "run") {
+        jet_jit::ResidentJitSafety::Covered => {
+            panic!("lowering-produced-nothing must not answer Covered")
+        }
+        jet_jit::ResidentJitSafety::Unavailable(reason) => {
+            assert!(
+                !reason.is_empty(),
+                "Unavailable must name the lowering failure"
+            );
+        }
+        jet_jit::ResidentJitSafety::Gap(detail) => {
+            panic!("expected Unavailable, got Gap({detail})")
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

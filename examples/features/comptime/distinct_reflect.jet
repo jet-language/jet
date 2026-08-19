@@ -8,7 +8,9 @@ fn build(b: BuildContext) => BuildPlan ? {
             info.name == "CustomerId" -> {
                 if {
                     info.has_marker("Comparable") -> next
-                    else -> b.error(info.span, "REFLECT", "missing marker", "#Comparable was lost", "keep the marker in reflection")
+                    else -> {
+                        b.error(info.span, "REFLECT", "missing marker", "#Comparable was lost", "keep the marker in reflection")
+                    }
                 }
             }
             else -> next
@@ -18,9 +20,6 @@ fn build(b: BuildContext) => BuildPlan ? {
     return b.plan(app)
 }
 
-fn run() {
-    print("distinct marker reflected")
-}
-
+fn run() { print("distinct marker reflected") }
 // --- expected output --------------------------------------------------
 // distinct marker reflected

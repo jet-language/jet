@@ -44,6 +44,7 @@ const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
 const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
 const NUMERIC_PATH = "crates/jet-foundation/src/Numeric.rs";
 const NET_TEXT_TIME_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs";
+const CORE_TYPES_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
 const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
 const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
@@ -159,6 +160,7 @@ const PYTHON_ABSENT = {
 // records. Aliasing keeps one comparison per workflow instead of splitting the
 // same competitor surface across two names.
 const CONTAINER_ALIASES = {
+  "core.task": "core.tasks",
   "core.http.client": "core.http",
   "core.http.server": "core.http",
   "core.time.expiring": "core.time",
@@ -391,6 +393,9 @@ const SYNONYM_GROUPS = [
   ["recv_from", "recvfrom", "receive_from"],
   ["shutdown", "close_write", "half_close"],
   ["send", "transmit", "write_bytes_to"],
+  // Negotiated TLS values live on TLSPeerIdentity; Elixir/Go spell the suite
+  // list in the plural.
+  ["cipher_suite", "ciphersuites", "cipher_suites"],
   // "log" only means logarithm in a maths container; elsewhere it writes a log
   // line, and merging them produced a natural-logarithm gap in core.log.
   ["ln", "logarithm", "natural_log"],
@@ -531,6 +536,7 @@ const TYPE_CONTAINER = {
   Set: "Set",
   Rank: "Rank",
   Map: "Map",
+  TLSPeerIdentity: "core.net.tls",
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {
@@ -629,10 +635,8 @@ const CLUSTER_OWNER = {
   "core.testing": 1590,
   "core.reflect": 1590,
   "core.http": 1590,
-  // D-CORESURF-SMALL1's own text defers core.net.tls's last 2 rows (ciphersuites,
-  // tlsversion — the negotiated values) to a follow-up card, not this ballot:
-  // a native TLS-bridge change, tracked separately from the decline sweep.
-  "core.net.tls": 1593,
+  // core.net.tls scored losses (ciphersuites, tlsversion) ship on
+  // TLSPeerIdentity; CLUSTER_OWNER drops the container when it has no losses.
   "core.crypto.uuid": 1590,
   "core.encoding": 1590,
   "core.encoding.csv": 1590,
@@ -1114,7 +1118,8 @@ function moduleInventory() {
 function fixedSignaturePairs(modules) {
   const source = read(FIXED_SIGS_PATH);
   const knownModules = new Set(modules.map(function (entry) { return entry.module; }));
-  const arms = matchArms(functionBody(source, "core_fixed_sig"), "match (module, name)");
+  const sigFn = source.includes("fn core_fixed_sig_impl(") ? "core_fixed_sig_impl" : "core_fixed_sig";
+  const arms = matchArms(functionBody(source, sigFn), "match (module, name)");
   const pairs = new Set();
   for (const arm of arms) {
     const strings = quoted(arm.lhs);
@@ -1127,7 +1132,7 @@ function fixedSignaturePairs(modules) {
       return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) && !moduleToken(value);
     });
     for (const raw of moduleIndexes.map(function (index) { return strings[index]; })) {
-      const module = canonicalModule(raw);
+      const module = containerFor(canonicalModule(raw));
       if (!knownModules.has(module)) {
         throw new Error("fixed_sigs names an unknown Core module: " + raw);
       }
@@ -1423,6 +1428,32 @@ function collectionInventory() {
         })
       )).sort(),
       sourceLine: pathLine,
+    });
+  }
+
+  // #1593: negotiated cipher suite and protocol version are TLSPeerIdentity
+  // fields, typed in core_struct_field rather than a method table.
+  {
+    const coreTypes = read(CORE_TYPES_PATH);
+    const fieldBody = functionBody(coreTypes, "core_struct_field");
+    const marker = "type_name == \"TLSPeerIdentity\"";
+    const start = fieldBody.indexOf(marker);
+    if (start < 0) {
+      throw new Error("TLSPeerIdentity fields missing from core_struct_field");
+    }
+    const next = fieldBody.indexOf("if type_name == \"TLSCertificate\"", start);
+    const arm = fieldBody.slice(start, next < 0 ? fieldBody.length : next);
+    const methods = quoted(arm).filter(function (name) {
+      return /^[a-z][a-z0-9_]*$/.test(name);
+    });
+    if (!methods.includes("cipher_suite") || !methods.includes("tls_version")) {
+      throw new Error("TLSPeerIdentity field harvest missed cipher_suite/tls_version");
+    }
+    tables.push({
+      function: "core_struct_field:TLSPeerIdentity",
+      type: TYPE_CONTAINER.TLSPeerIdentity,
+      methods: Array.from(new Set(methods)).sort(),
+      sourceLine: lineAt(coreTypes, coreTypes.indexOf(marker)),
     });
   }
 
@@ -2082,6 +2113,7 @@ function sourceFiles() {
     "crates/jet-foundation/src/Syntax.rs",
     SYNTAX_PATH,
     NUMERIC_PATH,
+    CORE_TYPES_PATH,
     "docs/reference/python-surface.json",
   ].concat(Object.values(SURFACE_FILES)).map(function (path) {
     const source = read(path);

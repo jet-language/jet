@@ -21,6 +21,12 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
+
+/// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
 // The shared DB wire fragment receives the host's row carrier through this
 // name. The interpreter uses its native map until converting to CtValue.
 type JetMap<K, V> = BTreeMap<K, V>;

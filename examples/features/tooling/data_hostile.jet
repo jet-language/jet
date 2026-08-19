@@ -26,17 +26,17 @@ fn run() {
     // Empty analytics → typed Empty errors.
     empty_mean :: data.mean([Float].{})
     if empty_mean == {
-        .Ok(_) -> print("empty_mean: ok")
+        .Ok(_) -> { print("empty_mean: ok") }
         .Err(error) -> print("empty_mean: {error}")
     }
     empty_q :: data.quantile([Float].{}, 0.5)
     if empty_q == {
-        .Ok(_) -> print("empty_quantile: ok")
+        .Ok(_) -> { print("empty_quantile: ok") }
         .Err(error) -> print("empty_quantile: {error}")
     }
     empty_var :: data.variance([Float].{})
     if empty_var == {
-        .Ok(_) -> print("empty_variance: ok")
+        .Ok(_) -> { print("empty_variance: ok") }
         .Err(error) -> print("empty_variance: {error}")
     }
 
@@ -67,12 +67,12 @@ fn run() {
     // Extreme / non-finite numerics fail closed.
     nan_mean :: data.mean([1.0, Float.NAN, 3.0])
     if nan_mean == {
-        .Ok(_) -> print("nan_mean: ok")
+        .Ok(_) -> { print("nan_mean: ok") }
         .Err(error) -> print("nan_mean: {error}")
     }
     inf_sum :: data.sum([1.0, Float.INFINITY])
     if inf_sum == {
-        .Ok(_) -> print("inf_sum: ok")
+        .Ok(_) -> { print("inf_sum: ok") }
         .Err(error) -> print("inf_sum: {error}")
     }
 
@@ -84,8 +84,8 @@ fn run() {
 
     // #1657: catastrophic cancellation. One compensated kernel answers on every
     // tier; a naive left-to-right sum would answer 0.0 for both of these.
-    cancel_sum :: data.sum([1e16, 1.0, -1e16]) ?? panic("cancel_sum")
-    cancel_mean :: data.mean([1e16, 1.0, -1e16]) ?? panic("cancel_mean")
+    cancel_sum :: data.sum([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic("cancel_sum")
+    cancel_mean :: data.mean([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic("cancel_mean")
     print("cancellation_sum: {cancel_sum}")
     print("cancellation_mean: {cancel_mean}")
 
@@ -98,12 +98,12 @@ fn run() {
     // Invalid quantile domain and rolling width.
     bad_q :: data.quantile([1.0, 2.0, 3.0], 1.5)
     if bad_q == {
-        .Ok(_) -> print("bad_quantile: ok")
+        .Ok(_) -> { print("bad_quantile: ok") }
         .Err(error) -> print("bad_quantile: {error}")
     }
     bad_w :: data.rolling_mean([1.0, 2.0, 3.0], 0)
     if bad_w == {
-        .Ok(_) -> print("bad_window: ok")
+        .Ok(_) -> { print("bad_window: ok") }
         .Err(error) -> print("bad_window: {error}")
     }
 
@@ -126,7 +126,7 @@ fn run() {
     reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
     groups :: data.group_mean(reader, e => e.service, e => e.latency_ms)
     if groups == {
-        .Ok(_) -> print("large_limit: ok")
+        .Ok(_) -> { print("large_limit: ok") }
         .Err(error) -> print("large_limit: {error}")
     }
 }

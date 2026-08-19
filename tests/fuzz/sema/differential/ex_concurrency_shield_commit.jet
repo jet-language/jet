@@ -12,12 +12,10 @@ fn shielded_commit() => Int {
 }
 
 fn fast_seven() => Int :: 7
+
 fn run() {
     task.group g {
-        winner :: task.race {
-            shielded_commit(),
-            fast_seven()
-        } ?? panic("race failed")
+        winner :: task.race {shielded_commit(), fast_seven()} ?? panic("race failed")
         print(winner)
     }
 }

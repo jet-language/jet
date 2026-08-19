@@ -95,6 +95,29 @@ pub(super) fn regex_pattern(
     })
 }
 
+pub(super) fn regex_escape(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let text = as_string(
+        args.first()
+            .ok_or_else(|| unsupported("regex.escape: missing text argument", span))?,
+        span,
+    )?;
+    Ok(CtValue::Str(escape_regex_text(text)))
+}
+
+fn escape_regex_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        let meta = ch == '\\' || ch == '.' || ch == '+' || ch == '*' || ch == '?'
+            || ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}'
+            || ch == '^' || ch == '\u{24}' || ch == '\u{7c}';
+        if meta {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 pub(super) fn regex_is_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
     let text = as_string(

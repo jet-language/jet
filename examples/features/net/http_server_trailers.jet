@@ -11,7 +11,7 @@ fn handle_trailers(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return response.trailers(^trailers)
 }
 
-fn run() ? {
+fn run() ? NetError | HTTPError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: http_server.mux()
@@ -27,7 +27,7 @@ fn run() ? {
     raw_response := ""
     chunk := ""
     server_task :: task {
-        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux)?
     }
     wire_stream.write_all(raw_request)?
     loop _, 0..32 {

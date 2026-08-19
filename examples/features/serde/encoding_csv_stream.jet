@@ -3,15 +3,16 @@ use core.encoding as encoding
 use core.encoding.csv as csv
 use core.files as files
 
-fn write_catalog(path: Path) ? {
+fn write_catalog(path: Path) => Bool ? IOError | EncodingError {
     output :: files.create(path)?
     writer :: csv.writer(^output, encoding.EncodingLimits.safe())?
     writer.write(["ok", "true"])?
     writer.flush()?
     writer.finish()?
+    return Ok(true)
 }
 
-fn run() ? {
+fn run() ? IOError | EncodingError {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
     scratch :: files.temp_dir("jet-encoding-csv")?

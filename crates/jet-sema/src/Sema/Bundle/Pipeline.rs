@@ -2761,6 +2761,9 @@ fn check_bundle_opts_for_output_inner(
         dedupe_unknown_names(&mut module_diags);
         dedupe_soft_public_lints(&mut module_diags);
         diags.extend(module_diags);
+        // D-FAIL-CONV2=A: hook for demand-driven family conversions recorded on
+        // TryConvert::Typed during checking.
+        diags.extend(super::super::Prelude::inject_exercised_error_conversions(module));
         for pending in &mut local_pending_diagnostics {
             pending.function_key = name_ledger
                 .semantic_identity(idx, &pending.function_key)

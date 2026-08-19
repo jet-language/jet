@@ -142,3 +142,33 @@ mod compare_tests {
         assert!(Parser::parse(&tokens).is_err());
     }
 }
+
+#[cfg(test)]
+mod raw_head_fmt_tests {
+    use super::Formatter;
+
+    #[test]
+    fn typed_head_bodies_keep_raw_backslashes() {
+        let src = r#"fn run() {
+    digits :: Regex.{"\d+"}
+    text :: "a\nb"
+    loc :: URL.{"https://x/{name}"}
+}
+"#;
+        let once = Formatter::format_source(src).expect("typed head should format");
+        assert!(
+            once.contains(r#"Regex.{"\d+"}"#),
+            "formatter decoded a typed-head slash:\n{once}"
+        );
+        assert!(
+            once.contains(r#""a\nb""#),
+            "formatter lost the plain-string newline escape:\n{once}"
+        );
+        assert!(
+            once.contains("{name}"),
+            "formatter dropped a typed-head hole:\n{once}"
+        );
+        let twice = Formatter::format_source(&once).expect("typed head should reformat");
+        assert_eq!(once, twice, "typed-head formatting must be idempotent");
+    }
+}

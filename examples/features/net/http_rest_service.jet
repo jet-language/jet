@@ -10,7 +10,7 @@ fn handle_api(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("path") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{body}"))
 }
 
-fn run() ? {
+fn run() ? IOError | NetError | HTTPError | TaskFailure {
     files.write("/tmp/jet_http_static.txt", "0123456789")?
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
@@ -19,9 +19,9 @@ fn run() ? {
     mux.get("/events", (req: HTTPRequest) => Ok(http_server.sse("ready")))
     mux.get("/file", (req: HTTPRequest) => Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
     t :: task {
-        http_server.serve_once_listener(listener, mux) ?? return
-        http_server.serve_once_listener(listener, mux) ?? return
-        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)?
     }
     req0 :: http_client.request("POST", "http://{addr}/api/ada/profile")
     req1 :: req0.form("tool", "jet")

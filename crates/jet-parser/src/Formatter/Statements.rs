@@ -133,6 +133,41 @@ impl<'a> Fmt<'a> {
             return;
         }
 
+        // D-FENCE-RANGE1=A: integer-range fences expand to N entries that all
+        // point at the same `start..end` source span. Re-emit that range once.
+        if let Some((_, first_span)) = fence.names.first() {
+            if fence.names.len() > 1
+                && fence
+                    .names
+                    .iter()
+                    .all(|(_, span)| span.start == first_span.start && span.end == first_span.end)
+            {
+                if let Some(text) = self.src.get(first_span.start..first_span.end) {
+                    self.write(&format!(
+                        "{} {} {}",
+                        Syntax::SIGIL_FENCE_OPEN,
+                        text,
+                        Syntax::SIGIL_FENCE_CLOSE
+                    ));
+                    return;
+                }
+            }
+        }
+
+        // D-FMT-SIMPLIFY1=A / R4: a listed ascending integer run becomes a range.
+        if self.simplify {
+            if let Some((start, end)) = self.consecutive_expr_int_range(fence) {
+                self.write(&format!(
+                    "{} {}..{} {}",
+                    Syntax::SIGIL_FENCE_OPEN,
+                    start,
+                    end,
+                    Syntax::SIGIL_FENCE_CLOSE
+                ));
+                return;
+            }
+        }
+
         // Expression entries (D-FENCE-GLYPH1=A) store an empty display name;
         // emit their authored source slice instead.
         let names = fence
@@ -921,6 +956,36 @@ impl<'a> Fmt<'a> {
         crate::AST::uses_classic_if_spelling(self.src, span, first.cond.span())
     }
 
+    fn consecutive_expr_int_range(
+        &self,
+        fence: &crate::AST::FencedNames,
+    ) -> Option<(String, String)> {
+        if fence.names.len() < 2 {
+            return None;
+        }
+        if self.span_has_comment(fence.span.start, fence.span.end) {
+            return None;
+        }
+        let mut values = Vec::new();
+        let mut texts = Vec::new();
+        for (name, span) in &fence.names {
+            if !name.is_empty() {
+                return None;
+            }
+            let text = self.src.get(span.start..span.end)?;
+            if text.contains('.') {
+                return None;
+            }
+            let value = text.replace('_', "").parse::<i64>().ok()?;
+            values.push(value);
+            texts.push(text.to_string());
+        }
+        if values.windows(2).any(|pair| pair[1] != pair[0] + 1) {
+            return None;
+        }
+        Some((texts.first()?.clone(), texts.last()?.clone()))
+    }
+
     fn fmt_classic_switch(&mut self, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
         let Some(arm) = arms.first() else {
             return;
@@ -947,8 +1012,12 @@ impl<'a> Fmt<'a> {
                 self.fmt_classic_switch(arms, else_body.as_deref());
             }
             Some(body) => {
+                let then_used_braces = self.out.trim_end().ends_with('}');
                 self.write(" else");
-                self.fmt_control_body_after_header(body, self.authored_braced_loop_exit(body));
+                self.fmt_control_body_after_header(
+                    body,
+                    then_used_braces || self.authored_braced_loop_exit(body),
+                );
             }
             None => {}
         }

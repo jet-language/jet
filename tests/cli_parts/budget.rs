@@ -31,6 +31,21 @@ fn compiler_probe_rejects_unsupported_target_without_a_report() {
 }
 
 #[test]
+fn compiler_facts_rejects_compile_time_instead_of_measuring() {
+    let dir = budget_project("compile_time_not_compiler_facts", 10);
+    let source = fs::read_to_string(dir.join("src/run.jet")).unwrap()
+        .replace("metric: .PublicApiItems", "metric: .CompileTime(.P95)")
+        .replace("comparison: .Absolute", "provider: .CompilerFacts,\n        comparison: .RelativeTo(\"ci/linux-x64\")")
+        .replace("limit: .AtMost(10)", "limit: .RegressionAtMost(5pct)");
+    fs::write(dir.join("src/run.jet"), source).unwrap();
+    let output = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(text.contains("E2903") || text.contains("CompilerProbe") || text.contains("CompileTime"), "{text}");
+    assert!(!dir.join(".jet/perf/reports").exists(), "closed grammar rejection must not produce a report");
+}
+
+#[test]
 fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = allocation_budget_project("allocation_probe_runtime");

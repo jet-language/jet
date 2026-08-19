@@ -1577,9 +1577,59 @@ fn dev_default_tls_peer_identity_matches_aot_and_interpreter() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let cert = root.join("tests/fixtures/tls/localhost.cert.pem");
-    let key = root.join("tests/fixtures/tls/localhost.key.pem");
-    let root_bytes = fs::read(&cert).unwrap();
+    let ca_cert = root.join("tests/fixtures/tls/localhost.cert.pem");
+    let ca_key = root.join("tests/fixtures/tls/localhost.key.pem");
+    let serial = dir.join("ca.srl");
+    let server_cert = dir.join("server.cert.pem");
+    let server_key = dir.join("server.key.pem");
+    let csr = dir.join("server.csr.pem");
+    let ext = dir.join("server.ext");
+    fs::write(
+        &ext,
+        "basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n",
+    )
+    .unwrap();
+    let req = Command::new("openssl")
+        .args([
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=localhost",
+            "-keyout",
+        ])
+        .arg(&server_key)
+        .arg("-out")
+        .arg(&csr)
+        .output()
+        .unwrap();
+    assert!(req.status.success(), "{}", String::from_utf8_lossy(&req.stderr));
+    let sign = Command::new("openssl")
+        .args([
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-CAcreateserial",
+            "-CAserial",
+        ])
+        .arg(&serial)
+        .arg("-CA")
+        .arg(&ca_cert)
+        .arg("-CAkey")
+        .arg(&ca_key)
+        .arg("-extfile")
+        .arg(&ext)
+        .arg("-in")
+        .arg(&csr)
+        .arg("-out")
+        .arg(&server_cert)
+        .output()
+        .unwrap();
+    assert!(sign.status.success(), "{}", String::from_utf8_lossy(&sign.stderr));
+    let root_bytes = fs::read(&ca_cert).unwrap();
     let jet_bytes = |bytes: &[u8]| {
         bytes
             .iter()
@@ -1610,6 +1660,15 @@ fn run() {{
             roots = jet_bytes(&root_bytes),
         )
     };
+    let wait_ready = |port: u16| {
+        for _ in 0..50 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("openssl TLS 1.3 server did not accept on 127.0.0.1:{port}");
+    };
     let start_server = |port: u16| {
         let mut server = Command::new("openssl")
             .args([
@@ -1621,14 +1680,16 @@ fn run() {{
                 &port.to_string(),
                 "-cert",
             ])
-            .arg(&cert)
+            .arg(&server_cert)
             .arg("-key")
-            .arg(&key)
+            .arg(&server_key)
+            .arg("-cert_chain")
+            .arg(&ca_cert)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .expect("openssl TLS 1.3 server");
-        std::thread::sleep(Duration::from_millis(250));
+        wait_ready(port);
         server
     };
     let fresh_port = || {
@@ -2486,7 +2547,7 @@ fn run() {
         .unwrap_or_else(|error| panic!("unboxed Range resident compilation failed: {error}"));
     assert_eq!(
         jet_jit::resident_jit_func_safety_detail(&unboxed_bundle, "run"),
-        None,
+        jet_jit::ResidentJitSafety::Covered,
         "unboxed Range values must stay in resident JIT"
     );
     jet_jit::reset_struct_new_count_for_test();
@@ -2545,7 +2606,7 @@ fn run() {
         .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     assert_eq!(
         jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
-        None,
+        jet_jit::ResidentJitSafety::Covered,
         "Range values and windows must stay in resident JIT"
     );
     let native = run_cranelift_without_fallback(src, "range_values");
@@ -5181,8 +5242,11 @@ fn resident_jit_safety_detail_smoke() {
             eprintln!("  mixed: {c}");
         }
         for fn_name in ["show", "next", "label", "describe"] {
-            if let Some(d) = jet_jit::resident_jit_func_safety_detail(&bundle, fn_name) {
-                eprintln!("  {fn_name}: {d}");
+            match jet_jit::resident_jit_func_safety_detail(&bundle, fn_name) {
+                jet_jit::ResidentJitSafety::Covered => {}
+                jet_jit::ResidentJitSafety::Gap(d) | jet_jit::ResidentJitSafety::Unavailable(d) => {
+                    eprintln!("  {fn_name}: {d}");
+                }
             }
         }
         if let Err(e) = jet_jit::try_compile_bundle(&bundle) {
@@ -5499,12 +5563,12 @@ fn serde_jit_parity_manifest_pins() {
             "{stem} must not return to the run-tier gap ledger"
         );
     }
-    // A claim about the observed set, so it is made only for the stem the audit
-    // can see. `serde/encoding_breadth` is outside that universe (#1998).
-    assert!(
-        compile_covered.iter().any(|row| row == "serde/serde_generic"),
-        "serde/serde_generic must remain compile-covered"
-    );
+    for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
+        assert!(
+            compile_covered.iter().any(|row| row == stem),
+            "{stem} must remain compile-covered"
+        );
+    }
 }
 
 /// #1509 c4: negative control — the cross-check actually fires.

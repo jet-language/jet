@@ -5,26 +5,26 @@ use core.http.client as http_client
 use core.net as net
 use core.tasks as tasks
 
-fn run() ? {
+fn run() ? NetError | HTTPError | TaskFailure | Closed {
     // Spin up a minimal loopback server to respond to our client.
     (sender, ch) :: tasks.channel<String>()
     t :: task {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? return
-        sender.send(listener.local_addr() ?? return)
-        stream_one :: listener.accept() ?? return
-        _req_one :: stream_one.read_text(8192) ?? return
-        net.tcp_reply(^stream_one, "200 OK", "hello from core.http") ?? return
-        stream_two :: listener.accept() ?? return
-        _req_two :: stream_two.read_text(8192) ?? return
-        net.tcp_reply(^stream_two, "200 OK", "hello from core.http") ?? return
+        listener :: net.tcp_listen("127.0.0.1:0")?
+        sender.send(listener.local_addr()?)
+        stream_one :: listener.accept()?
+        _req_one :: stream_one.read_text(8192)?
+        net.tcp_reply(^stream_one, "200 OK", "hello from core.http")?
+        stream_two :: listener.accept()?
+        _req_two :: stream_two.read_text(8192)?
+        net.tcp_reply(^stream_two, "200 OK", "hello from core.http")?
     }
-    addr :: ch.receive() ?? return Err("no addr")
-    simple :: http.get("http://{addr}/") ?? return Err("simple get failed")
+    addr :: ch.receive()?
+    simple :: http.get("http://{addr}/")?
     configured :: http_client.request("GET", "http://{addr}/")
         .connect_timeout(1000)
-        .send() ?? return Err("configured get failed")
-    simple_body :: simple.body().text(8 * 1024 * 1024) ?? return Err("simple body failed")
-    configured_body :: configured.body().text(8 * 1024 * 1024) ?? return Err("configured body failed")
+        .send()?
+    simple_body :: simple.body().text(8 * 1024 * 1024)?
+    configured_body :: configured.body().text(8 * 1024 * 1024)?
     print("http rungs agree: {simple.status() == configured.status() && simple_body == configured_body}")
-    t.join() ?? return Err("server failed")
+    t.join()?
 }

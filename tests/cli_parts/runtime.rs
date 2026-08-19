@@ -364,12 +364,38 @@ fn top_level_help_lists_job_vocabulary_only() {
         .unwrap();
     assert!(out.status.success(), "help failed: {:?}", out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("jobs"), "help must list `jet jobs`: {stdout}");
+    assert!(stdout.contains("jet jobs"), "help must list `jet jobs`: {stdout}");
     assert!(stdout.contains("#Job"), "help must list `#Job`: {stdout}");
     assert!(stdout.contains("<file.jet> --"), "help must show job subcommands: {stdout}");
+    assert!(
+        stdout.contains("<file.jet> -- <job>"),
+        "help must show named-job argv, not a dedicated flag: {stdout}"
+    );
     assert!(!stdout.contains("tasks"), "retired task CLI vocabulary leaked: {stdout}");
     let retired_flag = format!("--{}", "task");
     assert!(!stdout.contains(&retired_flag), "retired job flag leaked: {stdout}");
+    for golden in [
+        "tests/cli/completions_fish.txt",
+        "tests/cli/completions_zsh.txt",
+        "tests/cli/man.txt",
+    ] {
+        let snapshot = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(golden),
+        )
+        .unwrap_or_else(|error| panic!("read {golden}: {error}"));
+        assert!(
+            snapshot.contains("jobs") && snapshot.contains("#Job"),
+            "{golden} must list job discovery"
+        );
+        assert!(
+            snapshot.contains("<file.jet> -- <job>"),
+            "{golden} must document named-job argv"
+        );
+        assert!(
+            !snapshot.contains("tasks") && !snapshot.contains(&retired_flag),
+            "{golden} leaked retired task CLI vocabulary"
+        );
+    }
 }
 
 #[test]

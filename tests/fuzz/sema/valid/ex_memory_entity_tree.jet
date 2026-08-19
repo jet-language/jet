@@ -10,9 +10,9 @@ struct Node {
 
 fn run() {
     tree := Pool<Node>.new()
-    root :: tree.add(Node.{ name: "root", parent: None, children: [] })
-    child :: tree.add(Node.{ name: "child", parent: Val(root), children: [] })
-    grandchild :: tree.add(Node.{ name: "grandchild", parent: Val(child), children: [] })
+    root :: tree.add(Node.{name: "root", parent: None, children: []})
+    child :: tree.add(Node.{name: "child", parent: Val(root), children: []})
+    grandchild :: tree.add(Node.{name: "grandchild", parent: Val(child), children: []})
 
     tree[root].children.push(child)
     tree[child].children.push(grandchild)
@@ -21,12 +21,10 @@ fn run() {
     depth := 0
     loop {
         node :: tree[id].parent
-        if node == Val(p) {
+        if node == .Val(p) {
             depth += 1
             id = p
-        } else {
-            break
-        }
+        } else { break }
     }
     print("grandchild depth={depth}")
     print("root has {tree[root].children.len()} child")

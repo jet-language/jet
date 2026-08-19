@@ -614,6 +614,18 @@ fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
     let dir = compile_latency_budget_project("budget_compile_latency");
     let bootstrap = Command::new(jet()).args(["budget", "update", "--baseline", "ci/linux-x64", "--bootstrap", "--reason", "initial compile latency", "--yes", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(bootstrap.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&bootstrap.stdout), String::from_utf8_lossy(&bootstrap.stderr));
+    let CanonicalJson::Object(bootstrap_command) = CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else { panic!("bootstrap command") };
+    assert_eq!(bootstrap_command["applied"], CanonicalJson::Bool(true));
+    let CanonicalJson::Object(bootstrap_report) = &bootstrap_command["report"] else { panic!("bootstrap report") };
+    let CanonicalJson::Object(bootstrap_content) = &bootstrap_report["content"] else { panic!("bootstrap content") };
+    let CanonicalJson::Array(bootstrap_measurements) = &bootstrap_content["measurements"] else { panic!("bootstrap measurements") };
+    assert_eq!(bootstrap_measurements.len(), 3);
+    for measurement in bootstrap_measurements {
+        let CanonicalJson::Object(measurement) = measurement else { panic!("bootstrap measurement") };
+        assert_eq!(measurement["unit"], CanonicalJson::String("Duration".into()));
+        let CanonicalJson::Object(statistics) = &measurement["statistics"] else { panic!("bootstrap statistics") };
+        assert_eq!(statistics["count"], CanonicalJson::Integer("20".into()));
+    }
     let check = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(check.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&check.stdout), String::from_utf8_lossy(&check.stderr));
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&check.stdout).unwrap() else { panic!("command") };

@@ -6,10 +6,7 @@ fn run() {
     policy :: db.policy("tasks", "owner == user") ?? panic("policy")
     scoped := conn.with_policy(policy, "alice")
     _created :: db.migrate(scoped, "tasks-v1", ["CREATE TABLE tasks (owner TEXT, title TEXT)"]) ?? panic("create")
-    _one :: scoped.execute(
-        "INSERT INTO tasks (owner, title) VALUES (?, ?)",
-        [DBValue.Text("bob"), DBValue.Text("one")]
-    ) ?? panic("insert")
+    _one :: scoped.execute("INSERT INTO tasks (owner, title) VALUES (?, ?)", [DBValue.Text("bob"), DBValue.Text("one")]) ?? panic("insert")
     rows :: scoped.query("SELECT title FROM tasks", []) ?? panic("query")
     print("rows:{rows.len()}")
     bypass :: scoped.query("SELECT title FROM other", [])

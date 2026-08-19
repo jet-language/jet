@@ -3,9 +3,7 @@
 // Invoke: `jet run <this-file> -- greet` / `jet run <this-file> -- seed_data`.
 // Cross-job dependency = a plain call (`seed_data` calls `greet` below).
 // I5 golden runs both job paths (see tests/golden.rs).
-#[Job(.Ship), Doc("Say hello from a shipped project job")] fn greet() {
-    print("hello from job")
-}
+#[Job(.Ship), Doc("Say hello from a shipped project job")] fn greet() { print("hello from job") }
 
 #[Job(.Dev), Doc("Seed local data"), Every(5min)] fn seed_data() {
     greet()

@@ -2002,7 +2002,7 @@ impl<'a> Fmt<'a> {
             match part {
                 crate::AST::StrMatchPart::Lit(s) => {
                     if raw_head {
-                        self.write(&escape_typed_head_lit(s));
+                        self.write(&escape_typed_head_single_line(s));
                     } else {
                         self.write(&escape_str_lit(s));
                     }
@@ -2316,7 +2316,7 @@ impl<'a> Fmt<'a> {
                 }
             }
             match &parts[i] {
-                StrPart::Lit(text) => self.write(&escape_typed_head_lit(text)),
+                StrPart::Lit(text) => self.write(&escape_typed_head_single_line(text)),
                 StrPart::Interp(expr, fmt) => {
                     self.write("{");
                     self.fmt_expr(expr, Prec::OrFallback);
@@ -2472,6 +2472,26 @@ fn escape_typed_head_lit(s: &str) -> String {
     let mut out = String::new();
     for ch in s.chars() {
         match ch {
+            '{' | '}' => {
+                out.push(ch);
+                out.push(ch);
+            }
+            ch => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Single-line Type.{"…"} bodies keep written slashes. A quote still needs
+/// a preceding slash so it is not the closer (D-BOUND-RAW1).
+fn escape_typed_head_single_line(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '"' if !out.ends_with('\\') => {
+                out.push('\\');
+                out.push('"');
+            }
             '{' | '}' => {
                 out.push(ch);
                 out.push(ch);

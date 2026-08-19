@@ -16,7 +16,7 @@ fn handle_user(req: HTTPRequest) => HTTPResponse ? HTTPError {
 
 fn handle_create(req: HTTPRequest) => HTTPResponse ? HTTPError :: Ok(server.response(201, "created"))
 
-fn run() ? {
+fn run() ? NetError | HTTPError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: server.mux()
@@ -24,7 +24,10 @@ fn run() ? {
     mux.get("/users/:id", (req: HTTPRequest) => handle_user(req))
     mux.post("/users", (req: HTTPRequest) => handle_create(req))
     t :: task {
-        loop i, [0, 1, 2, 3] -> server.serve_once_listener(listener, mux) ?? return
+        server.serve_once_listener(listener, mux)?
+        server.serve_once_listener(listener, mux)?
+        server.serve_once_listener(listener, mux)?
+        server.serve_once_listener(listener, mux)?
     }
     r1 :: http.get("http://{addr}/")?
     print(r1.body().text(8388608)?)

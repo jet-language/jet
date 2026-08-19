@@ -53,10 +53,10 @@ const HOST_GATED: &str = "host_gated";
 /// went back to being unwatched, which is the defect this file pins; a target
 /// with no row raises `unassigned` and fails against the ceiling below.
 ///
-/// Measured on 2026-08-17: 289 `tests/*.rs` targets in this package, 7 in
+/// Measured on 2026-08-17: 289 `tests/*.rs` targets in this package, 8 in
 /// workspace crates, plus this file. Lower it only in the same reviewed diff as
 /// a deleted test file.
-const TEST_TARGET_FLOOR: usize = 297;
+const TEST_TARGET_FLOOR: usize = 298;
 
 /// How many declared targets may belong to NO set (#2025).
 ///

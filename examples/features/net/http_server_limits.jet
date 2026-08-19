@@ -3,14 +3,14 @@ use core.http.server as http_server
 use core.net as net
 use core.tasks as tasks
 
-fn run() ? {
+fn run() ? NetError | HTTPError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: http_server.mux()
     mux.post("/", (req: HTTPRequest) => Ok(http_server.response(200, "handler ran")))
     server :: task {
-        http_server.serve_once_listener(listener, mux) ?? return
-        http_server.serve_once_listener(listener, mux) ?? return
+        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)?
     }
     smuggling :: net.tcp_connect(addr)?
     smuggling_request := "".bytes()

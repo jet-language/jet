@@ -499,11 +499,11 @@ fn fact_value_with_detail(
 
 fn fact_kind_for(plane: &str, fact: &KnowledgeFact) -> &'static str {
     let registered = jet_foundation::Registry::row(plane)
-        .unwrap_or_else(|| panic!("reflection found unregistered plane `{plane}`"));
+        .unwrap_or_else(|| jet_foundation::ice!(None, "reflection found unregistered plane `{plane}`"));
     assert_eq!(registered.kind(), jet_foundation::Registry::RowKind::Plane);
     let kind = jet_foundation::Registry::registered_fact_read(plane)
         .and_then(jet_foundation::Registry::FactRead::reflection_kind)
-        .unwrap_or_else(|| panic!("reflection found unreadable plane `{plane}`"));
+        .unwrap_or_else(|| jet_foundation::ice!(None, "reflection found unreadable plane `{plane}`"));
     let produced = match fact {
         KnowledgeFact::Interval { .. } => "Range",
         KnowledgeFact::Layout { .. } => "Layout",

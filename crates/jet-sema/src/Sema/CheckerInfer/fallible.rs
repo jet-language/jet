@@ -5,6 +5,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::Sema::Diagnostics::{is_core_error_family_type, is_default_error};
 use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
 
 impl<'a> Checker<'a> {
@@ -198,6 +199,16 @@ impl<'a> Checker<'a> {
 
                         if is_default_error(ret_err) {
                             let err_name = err.name();
+                            // D-FAIL-CONV2=A: demand-driven family conversion onto Err.
+                            if !self.no_prelude
+                                && !self.no_alloc
+                                && is_core_error_family_type(&err_name)
+                            {
+                                let fn_name =
+                                    error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
+                                *convert = TryConvert::Typed(fn_name);
+                                return Some((*ok).clone());
+                            }
                             self.diags.push(Diagnostic::error(
                                 "E2402",
                                 format!(

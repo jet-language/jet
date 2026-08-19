@@ -1059,6 +1059,39 @@ module.exports = grammar({
         '"',
       ),
 
+    // D-BOUND-RAW1=A: Type.{"…"} bodies hand every slash to the head grammar.
+    // A slashed quote still belongs to the body; doubled braces stay literal.
+    typed_head_string: ($) =>
+      seq(
+        '"',
+        repeat(
+          choice(
+            $.typed_head_brace,
+            $.typed_head_slash,
+            $.string_interpolation,
+            $._string_content,
+          ),
+        ),
+        '"',
+      ),
+
+    typed_head_multiline: ($) =>
+      seq(
+        '"""',
+        repeat(
+          choice(
+            $.typed_head_brace,
+            $.typed_head_slash,
+            $.string_interpolation,
+            $._ml_string_content,
+          ),
+        ),
+        '"""',
+      ),
+
+    typed_head_slash: (_) => token.immediate(/\\./),
+    typed_head_brace: (_) => token.immediate(/\{\{|\}\}/),
+
     // Triple-quoted multiline string `"""…"""` (D-SG5); interpolation stays live.
     multiline_string: ($) =>
       seq(
@@ -1216,8 +1249,8 @@ module.exports = grammar({
             "body",
             optional(
               choice(
-                $.string_literal,
-                $.multiline_string,
+                $.typed_head_string,
+                $.typed_head_multiline,
                 commaSep1(
                   choice(
                     seq(field("field", $.identifier), ":", field("value", $._expr)),

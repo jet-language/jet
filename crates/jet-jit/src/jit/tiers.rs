@@ -8,16 +8,8 @@ use jet_codegen::Codegen::TIR::{JitProgram, TFunc, TFuncKind};
 use jet_foundation::AST::{ProgramBundle, Type};
 
 use super::api_debug::{cranelift_host_supported, classify_jit_gap};
-use super::safety::{resident_safe_func_detail, resident_safe_spawn_lambda};
+use super::safety::{entry_return_supported, resident_safe_func_detail, resident_safe_spawn_lambda};
 use super::gap::JitGap;
-
-fn entry_return_supported(ret: Option<&Type>) -> bool {
-    ret.is_none()
-        || matches!(ret, Some(Type::Named(name)) if name == "App")
-        || matches!(ret, Some(Type::Result { ok, err })
-            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "App")
-                && matches!(err.as_ref(), Type::String | Type::Named(_)))
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {

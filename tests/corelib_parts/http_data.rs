@@ -1377,26 +1377,34 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
 
     #[cfg(unix)]
     {
-        let shell = r#"
-{
-  sleep 0.2
-  printf '\r'
-  sleep 0.1
-  printf 'bad\r3\r2\r'
-  sleep 0.2
-  printf 'swordfish\r'
-} | timeout 8s script -qec '"$JET_PROMPT_BIN"' /dev/null
-"#;
-        let output = Command::new("sh")
-            .args(["-c", shell])
-            .env("JET_PROMPT_BIN", dir.join("terminal_parity"))
+        use std::io::Write;
+        use std::process::Stdio;
+        let bin = dir.join("terminal_parity");
+        let quoted = format!("'{}'", bin.display().to_string().replace('\'', "'\\''"));
+        let shell_line = format!("exec {quoted}");
+        let mut child = Command::new("script")
+            .args(["-qfec", &shell_line, "/dev/null"])
             .env("NO_COLOR", "1")
-            .output()
-            .expect("run prompt fixture under PTY");
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("util-linux script must allocate a real PTY");
+        child
+            .stdin
+            .take()
+            .expect("PTY stdin")
+            .write_all(answers.tty().as_bytes())
+            .expect("write terminal answers");
+        let output = child.wait_with_output().expect("collect PTY transcript");
         let shown = String::from_utf8_lossy(&output.stdout);
         assert!(output.status.success(), "PTY prompt failed:\n{shown}");
-        assert!(shown.contains("secret length: 9"), "{shown}");
-        assert!(!shown.contains("swordfish"), "secret was echoed:\n{shown}");
+        assert!(shown.contains("secret length: 6"), "{shown}");
+        let without_report = shown.replace("secret length: 6", "");
+        assert!(
+            !without_report.contains("secret"),
+            "secret was echoed:\n{shown}"
+        );
     }
 
     let _ = fs::remove_dir_all(&dir);

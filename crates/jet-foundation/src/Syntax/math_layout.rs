@@ -695,8 +695,9 @@ pub const SCOPE_TEST_MEASURE: &str = "measure";
 /// the member head and defaults to `AMBIENT_CASE`.
 pub const SCOPE_TEST_CASES: &str = "cases";
 
-/// D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can invoke as an
-/// argv subcommand, living beside `fn run()`. Bare marker defaults to `.Dev`.
+/// D-JOB-NAME1=A / D-JOB-SUBCMD1=C: `#Job fn` — a top-level function Jet can
+/// invoke as an argv subcommand, living beside `fn run()`. The word is `job`
+/// everywhere (marker, `jet jobs`, diagnostics). Bare marker defaults to `.Dev`.
 pub const KW_JOB: &str = "Job";
 
 /// D-JOB-SUBCMD1=C: the closed scope menu accepted by `#Job(<scope>)`.

@@ -1118,7 +1118,7 @@ CLI.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1101 | `{value}` cannot cross the `{boundary}` boundary: the value writes shared state | the `{boundary}` boundary can run concurrently with its owner; {reason} | give it with `^`, freeze it with `freeze`, or share it with `Shared` |
+| E1101 | `{value}` cannot cross the `{boundary}` boundary: the value writes shared state | the `{boundary}` boundary can run concurrently with its owner; {reason} | give it with `^`, freeze it with `freeze`, or share it with `shared` |
 | E1102 | A value crossing a task, channel, parallel-worker, or safe-kernel boundary is not sendable. | Concurrent boundaries move owned data between workers. A view, trait value, mutable capture, borrowed closure, or thread-confined cell cannot cross. | Send plain owned data, make an ordinary owned copy when permitted, or use `Shared<T>` for deliberate shared state. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
 | E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`. |

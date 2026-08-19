@@ -891,6 +891,7 @@ impl<'a> Checker<'a> {
                                         if !base_is_view_mut
                                             && !base_has_write_view
                                             && !info.mutable
+                                            && self.frozen_for(&root).is_none()
                                         {
                                             let (code, why, fix) = if matches!(
                                                 info.param_conv,
@@ -1255,6 +1256,7 @@ impl<'a> Checker<'a> {
                                     if !info.mutable
                                         && !self.is_write_view(&root)
                                         && !self.is_edit_shared_guard(&root)
+                                        && self.frozen_for(&root).is_none()
                                     {
                                         let is_self = root == Syntax::KW_SELF;
                                         let what = if is_self {
@@ -1711,17 +1713,27 @@ impl<'a> Checker<'a> {
                             ));
                         }
                         (None, Some(rt)) => {
-                            self.diags.push(Diagnostic::error(
-                                "E0113",
-                                format!(
-                                    "`{}` promises to return {}, but this `return` is empty",
-                                    self.fn_name,
-                                    rt.show()
-                                ),
-                                "the value handed back must match the type after `=>`".to_string(),
-                                "add the value: `return ...;`".to_string(),
-                                Some(*span),
-                            ));
+                            // D-FAIL-EXIT1: implicit `fn run` is `Unit ? Err`.
+                            // A bare `return` is successful exit, same as falling off
+                            // the end of the body.
+                            let fallible_void = matches!(
+                                rt,
+                                Type::Result { ref ok, .. }
+                                    if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
+                            );
+                            if !fallible_void {
+                                self.diags.push(Diagnostic::error(
+                                    "E0113",
+                                    format!(
+                                        "`{}` promises to return {}, but this `return` is empty",
+                                        self.fn_name,
+                                        rt.show()
+                                    ),
+                                    "the value handed back must match the type after `=>`".to_string(),
+                                    "add the value: `return ...;`".to_string(),
+                                    Some(*span),
+                                ));
+                            }
                         }
                         (None, None) => {}
                     }

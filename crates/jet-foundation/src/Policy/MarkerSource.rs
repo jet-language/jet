@@ -36,10 +36,10 @@ fn declaration(line: &str) -> AppliedRule {
     let rest = line["marker ".len()..].trim();
     let open = rest
         .find('(')
-        .unwrap_or_else(|| panic!("marker declaration without a parameter list: {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "marker declaration without a parameter list: {line}"));
     let close = rest
         .rfind(')')
-        .unwrap_or_else(|| panic!("marker declaration without a closing `)`: {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "marker declaration without a closing `)`: {line}"));
     let name = leak(rest[..open].trim());
 
     let mut params: Vec<RuleParam> = Vec::new();
@@ -56,7 +56,7 @@ fn declaration(line: &str) -> AppliedRule {
     for entry in split_top_level(&rest[open + 1..close]) {
         let (label, value) = entry
             .split_once(':')
-            .unwrap_or_else(|| panic!("marker parameter without `:` in {line}: {entry}"));
+            .unwrap_or_else(|| crate::ice!(None, "marker parameter without `:` in {line}: {entry}"));
         let (label, value) = (label.trim(), value.trim());
         if let Some(fact) = label.strip_prefix(crate::Syntax::COMPTIME_MARK) {
             match fact {
@@ -79,7 +79,7 @@ fn declaration(line: &str) -> AppliedRule {
                         replacement: leak(&unquote(value, line)),
                     }
                 }
-                other => panic!("unknown marker fact `${other}` in {line}"),
+                other => crate::ice!(None, "unknown marker fact `${other}` in {line}"),
             }
             continue;
         }
@@ -217,7 +217,7 @@ fn list(value: &str) -> Vec<&str> {
     let inner = value
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or_else(|| panic!("expected a `[…]` list, found `{value}`"));
+        .unwrap_or_else(|| crate::ice!(None, "expected a `[…]` list, found `{value}`"));
     split_top_level(inner)
 }
 
@@ -225,7 +225,7 @@ fn flag(value: &str, line: &str) -> bool {
     match value {
         "true" => true,
         "false" => false,
-        other => panic!("a marker fact reads `true` or `false`, found `{other}` in {line}"),
+        other => crate::ice!(None, "a marker fact reads `true` or `false`, found `{other}` in {line}"),
     }
 }
 
@@ -233,7 +233,7 @@ fn unquote(value: &str, line: &str) -> String {
     let inner = value
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or_else(|| panic!("expected a quoted value, found `{value}` in {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "expected a quoted value, found `{value}` in {line}"));
     let mut out = String::with_capacity(inner.len());
     let mut escaped = false;
     for character in inner.chars() {
@@ -254,7 +254,7 @@ fn site(written: &str, line: &str) -> RuleSite {
     RuleSite::ALL
         .into_iter()
         .find(|site| site.name() == name)
-        .unwrap_or_else(|| panic!("`{written}` is not a marker site, in {line}"))
+        .unwrap_or_else(|| crate::ice!(None, "`{written}` is not a marker site, in {line}"))
 }
 
 fn scope(written: &str, line: &str) -> PolicyScope {
@@ -264,7 +264,7 @@ fn scope(written: &str, line: &str) -> PolicyScope {
         "Module" => PolicyScope::Module,
         "Function" => PolicyScope::Function,
         "Block" => PolicyScope::Block,
-        other => panic!("`{other}` is not a policy scope, in {line}"),
+        other => crate::ice!(None, "`{other}` is not a policy scope, in {line}"),
     }
 }
 
@@ -274,7 +274,7 @@ fn rule_resolution(written: &str, line: &str) -> RuleResolution {
         "Override" => RuleResolution::Override,
         "Merge" => RuleResolution::Merge,
         "Tighten" => RuleResolution::Tighten,
-        other => panic!("`{other}` is not a resolution, in {line}"),
+        other => crate::ice!(None, "`{other}` is not a resolution, in {line}"),
     }
 }
 

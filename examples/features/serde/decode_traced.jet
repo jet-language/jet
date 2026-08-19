@@ -35,7 +35,7 @@ migration UserRecord {
     add verified: Bool = false
 }
 
-fn run() ? {
+fn run() ? [FieldError] {
     p_raw :: "{{\"x\": 3, \"y\": 4}}"
     p :: json.decode_traced<Point>(p_raw)?
     print("point: ({p.value.x}, {p.value.y})")
@@ -44,7 +44,9 @@ fn run() ? {
     fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
     fresh :: json.decode_traced<UserRecord>(fresh_raw)?
     if {
-        fresh.migration.migrated -> print("record {fresh.value.id} arrived as schema {fresh.migration.from}")
+        fresh.migration.migrated -> {
+            print("record {fresh.value.id} arrived as schema {fresh.migration.from}")
+        }
         else -> print("record {fresh.value.id} arrived fresh, no migration applied")
     }
     // An old v1 record — decoded through the migration chain.

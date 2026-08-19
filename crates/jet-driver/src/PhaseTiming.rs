@@ -12,6 +12,11 @@ pub fn enabled() -> bool {
     std::env::var_os("JET_TIMING").is_some()
 }
 
+/// Directory that must receive `jet-timing.json` for a compile-latency probe.
+pub fn output_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("JET_TIMING_DIR").map(std::path::PathBuf::from)
+}
+
 /// A running stopwatch that records the elapsed time of each phase as it is
 /// lapped. Durations are measured from the previous lap (or construction).
 pub struct PhaseTimer {
@@ -65,10 +70,24 @@ impl PhaseTimer {
         s
     }
 
-    /// Write the report to `<dir>/jet-timing.json`. Best-effort: a write
-    /// failure is silently ignored, since timing must never break a build.
+    /// Write the report to `<dir>/jet-timing.json`.
+    ///
+    /// Ordinary `JET_TIMING=1` builds stay best-effort so timing never breaks
+    /// a build. A compile-latency probe sets `JET_TIMING_DIR` to the scratch
+    /// tree it will read; that write is required and also lands in CWD so a
+    /// `project_root` that is not the process directory cannot hide the file.
     pub fn write_to(&self, dir: &std::path::Path) {
-        let _ = std::fs::write(dir.join("jet-timing.json"), self.to_json());
+        let json = self.to_json();
+        let _ = std::fs::write(dir.join("jet-timing.json"), &json);
+        if let Ok(cwd) = std::env::current_dir() {
+            if cwd != dir {
+                let _ = std::fs::write(cwd.join("jet-timing.json"), &json);
+            }
+        }
+        if let Some(out) = output_dir() {
+            let _ = std::fs::create_dir_all(&out);
+            let _ = std::fs::write(out.join("jet-timing.json"), json);
+        }
     }
 }
 

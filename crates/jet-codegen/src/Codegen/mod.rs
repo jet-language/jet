@@ -1457,7 +1457,9 @@ fn push_program_allocator_prelude(out: &mut String, bundle: &ProgramBundle) {
         return;
     };
     let cap_bytes = cap.map_or(0, |size| size.bytes);
+    out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n");
     out.push_str(PROGRAM_ALLOCATOR_PRELUDE);
+    out.push_str("\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n");
     out.push_str("\n#[global_allocator]\n");
     out.push_str(&format!(
         "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting({cap_bytes});\n\n"
@@ -2802,6 +2804,10 @@ mod tests {
         let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
         let fixed_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/FixedList.rs")).unwrap();
+        let columns =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Columns.rs")).unwrap();
+        let column_list =
+            std::fs::read_to_string(root.join("src/Prelude/Core/ColumnList.rs")).unwrap();
         let float_provenance = std::fs::read_to_string(
             root.join("src/Prelude/Core/FloatProvenance.rs"),
         )
@@ -2872,6 +2878,8 @@ mod tests {
             ("src/Prelude/Job.rs", job.as_str()),
             ("src/Prelude/Core/Option.rs", option.as_str()),
             ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
+            ("src/Prelude/Core/Columns.rs", columns.as_str()),
+            ("src/Prelude/Core/ColumnList.rs", column_list.as_str()),
             (
                 "src/Prelude/Core/FloatProvenance.rs",
                 float_provenance.as_str(),
@@ -2955,6 +2963,12 @@ mod tests {
             .unwrap();
         let fixed_list_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/FixedList.rs\")")
+            .unwrap();
+        let columns_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Columns.rs\")")
+            .unwrap();
+        let column_list_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/ColumnList.rs\")")
             .unwrap();
         let float_provenance_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/FloatProvenance.rs\")")
@@ -3051,7 +3065,9 @@ mod tests {
                 && job_pos < option_pos
                 && outcome_pos < option_pos
                 && option_pos < fixed_list_pos
-                && fixed_list_pos < float_provenance_pos
+                && fixed_list_pos < columns_pos
+                && columns_pos < column_list_pos
+                && column_list_pos < float_provenance_pos
                 && float_provenance_pos < unicode_pos
                 && unicode_pos < loadable_pos
                 && unicode_pos < string_concat_pos
@@ -3085,8 +3101,27 @@ mod tests {
                 && structural_debug_pos < stream_cursor_pos,
             "prelude ownership order is generated-byte order"
         );
-        assert!(production_codegen.contains("for part in PRELUDE_PARTS"));
-        assert!(!production_codegen.contains("include!("));
+        assert!(production_codegen.contains("for (index, part) in PRELUDE_PARTS.iter().enumerate()"));
+        // D-REPORT-TEST1=A: the host `test_report` module includes the same
+        // three report fragments the generated harness uses. Prelude parts
+        // themselves stay owned source (asserted per-file above); this pin
+        // forbids a fourth splice in production codegen.
+        let include_macros: Vec<&str> = production_codegen
+            .lines()
+            .filter(|line| line.trim_start().starts_with("include!("))
+            .collect();
+        assert_eq!(
+            include_macros.len(),
+            3,
+            "only Report.rs, TestingShared.rs, and TestReport.rs may include! here; found {include_macros:?}"
+        );
+        assert!(production_codegen.contains(
+            "include!(\"../../../jet-foundation/src/Report.rs\")"
+        ));
+        assert!(production_codegen.contains(
+            "include!(\"../Prelude/CoreLib/Top/TestingShared.rs\")"
+        ));
+        assert!(production_codegen.contains("include!(\"../Prelude/TestReport.rs\")"));
         assert_eq!(
             PRELUDE_PARTS,
             [
@@ -3095,6 +3130,8 @@ mod tests {
                 job.as_str(),
                 option.as_str(),
                 fixed_list.as_str(),
+                columns.as_str(),
+                column_list.as_str(),
                 float_provenance.as_str(),
                 unicode.as_str(),
                 string_concat.as_str(),
@@ -3145,6 +3182,8 @@ mod tests {
                     job.as_str(),
                     option.as_str(),
                     fixed_list.as_str(),
+                    columns.as_str(),
+                    column_list.as_str(),
                     float_provenance.as_str(),
                     unicode.as_str(),
                     string_concat.as_str(),

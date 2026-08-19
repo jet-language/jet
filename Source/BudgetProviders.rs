@@ -808,6 +808,7 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
         .arg(entry)
         .current_dir(root)
         .env("JET_TIMING", "1")
+        .env("JET_TIMING_DIR", root)
         // The build cache is project-scoped so `Clean` really recompiles the
         // workload, and `reset_compile_cache` wipes it between trials.
         .env("JET_CACHE_DIR", root.join(".jet-compile-cache"))
@@ -834,7 +835,13 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
     let deadline = Instant::now() + NATIVE_BUILD_DEADLINE;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) if status.success() => {
+                let missing = ["jet-timing.json", "build/jet-timing-backend.json"].iter().filter(|rel| !root.join(rel).is_file()).copied().collect::<Vec<_>>();
+                if !missing.is_empty() {
+                    return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("compile timing artifact {} is unavailable after a successful child compile", missing.join(" and "))));
+                }
+                return Ok(());
+            }
             Ok(Some(status)) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("compile workload build exited with {status}"))),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(2)),
             Ok(None) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Timeout, "compile workload build exceeded its deadline")); }
@@ -998,6 +1005,34 @@ mod tests {
         let cancellation=ProviderCancellation{cancelled:Arc::new(AtomicBool::new(false))};let failure=compiler_latency_provider(&request,&cancellation).unwrap_err();assert_eq!(failure.class,FailureClass::Incompatible);
         let _=std::fs::remove_dir_all(root);
     }
+    #[test]
+    fn compiler_probe_rejects_partial_timing_artifacts(){
+        let root=temporary("partial-timing");
+        std::fs::create_dir_all(root.join("build")).unwrap();
+        let missing=read_compile_phases(&root).unwrap_err();
+        assert_eq!(missing.class,FailureClass::Unavailable);
+        assert!(missing.reason.contains("unavailable"),"{}",missing.reason);
+        std::fs::write(root.join("jet-timing.json"),"{\"phases\":[{\"name\":\"sema\",\"us\":1}]}\n").unwrap();
+        let partial=read_compile_phases(&root).unwrap_err();
+        assert_eq!(partial.class,FailureClass::Unavailable);
+        assert!(partial.reason.contains("jet-timing-backend.json"),"{}",partial.reason);
+        std::fs::write(root.join("build/jet-timing-backend.json"),"{\"phases\":[{\"name\":\"backend_link\",\"us\":2}]}\n").unwrap();
+        let phases=read_compile_phases(&root).unwrap();
+        assert_eq!(phases,vec![("backend_link".into(),2_000u128),("sema".into(),1_000u128)]);
+        let _=std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compiler_probe_applies_a_deterministic_one_file_edit(){
+        let root=temporary("edit-patch");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/run.jet"),"fn run() {}\n").unwrap();
+        std::fs::write(root.join("change.patch"),"--- a/src/run.jet\n+++ b/src/run.jet\n@@ -1,1 +1,1 @@\n-fn run() {}\n+fn run() { print(\"fixture\") }\n").unwrap();
+        apply_unified_patch(&root,"change.patch").unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("src/run.jet")).unwrap(),"fn run() { print(\"fixture\") }\n");
+        let _=std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn compiler_probe_rejects_unsupported_profile_before_execution(){
         let root=temporary("compile-profile");std::fs::create_dir_all(root.join("src")).unwrap();

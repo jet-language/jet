@@ -49,6 +49,11 @@
 // add no token: `fn run()` is the default-fallible entry, and the build target
 // selects the final report boundary. CLI, web, wasm, and service adapters
 // carry one report with target-native delivery.
+// D-FAIL-CONV2=A (ratified 2026-08-17, card #2018) adds no token: the standard
+// library ships one `impl <CoreError> => Err` per family member on the
+// D-FAIL-CONV1 rail. Sema injects only the conversions a module's `?`
+// operators exercise. A program's own error type still needs its own
+// declaration.
 //
 // D-APILABEL1=A adds the two parameter-zone separators
 // PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in
@@ -138,6 +143,11 @@
 // D-CMD-OVERRIDE1=C (card #1451) adds no token: `fn test(suite: TestSuite)` and
 // `fn bench(suite: BenchSuite)` extend the existing command-entry convention.
 // `--show-default` selects the stock harness; no keyword or sigil enters the grammar.
+// D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker
+// and every command use `job`. Canonical CLI is `jet run <entry> -- <name>`
+// and `jet jobs`. Retired spellings have no alias or fallback. Help,
+// completions, diagnostics, docs, examples, and tests use the same word.
+// KW_JOB / JOB_SCOPE_VARIANTS live in math_layout and are re-exported here.
 // EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
 // (`->`) selects dispatch/guard values, yields finite-loop items, and marks a
 // one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified

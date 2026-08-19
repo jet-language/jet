@@ -1,11 +1,10 @@
 // D-DOTSCOPE1: a `.timeout` region over its budget fails the test (post-hoc).
 fn work(n: Int) => Int {
     total := 0
-    loop i, 0..n {
-        total += i
-    }
+    loop i, 0..n -> total += i
     return total
 }
+
 #Test("timeout exceeded") {
     .timeout(1ns) {
         require((work(100000) >= 0))

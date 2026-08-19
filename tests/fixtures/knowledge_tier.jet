@@ -14,20 +14,21 @@ struct Reservation {
 impl Reservation {
     #Transition(_, Pending) fn book(guest: String) => Reservation :: .{guest: ~guest}
 
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
-        return self
-    }
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation :: self
 }
 
-#Scrub(Input) fn clean(raw: #Input String) => String {
-    return ~raw
-}
+#Scrub(Input) fn clean(raw: #Input String) => String :: ~raw
 
 @answer :: 40 + 2
+
 @comptime_range :: wrapping(4 + 5)
+
 @comptime_exactness :: exactness_value()
+
 @comptime_unit :: unit_value()
+
 @comptime_state :: state_value()
+
 @comptime_classification :: classification_value()
 
 fn exactness_value() => Bool {

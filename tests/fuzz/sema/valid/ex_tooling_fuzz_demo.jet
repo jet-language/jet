@@ -9,15 +9,11 @@
 // Try: `jet fuzz examples/features/tooling/fuzz_demo.jet --iterations=2000`
 fn reverse(xs: [Int]) => [Int] {
     out := [Int].{}
-    loop x, xs {
-        out.insert(0, x)
-    }
+    loop x, xs -> out.insert(0, x)
     return out
 }
 
-fn run() {
-    print("{reverse([1, 2, 3])}")
-}
+fn run() { print("{reverse([1, 2, 3])}") }
 
 // A true invariant: reversing twice returns the original list, for every
 // generated list. `jet fuzz` finds no counterexample (there is none) — the

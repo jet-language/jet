@@ -29,7 +29,7 @@ fn inner(next: HTTPHandler) => HTTPHandler {
     }
 }
 
-fn run() ? {
+fn run() ? HTTPError | TaskFailure | RangeError {
     mux :: http_server.mux()
     http_server.request_id(mux)
     mux.middleware(outer)
@@ -38,7 +38,7 @@ fn run() ? {
     mux.get("/blocked", (req: HTTPRequest) => Ok(http_server.response(200, "must not run")))
     server :: http_server.bind("127.0.0.1:0", mux)?
     addr :: server.local_addr()?
-    serving :: task { server.serve() ?? return }
+    serving :: task { server.serve()? }
     time.sleep(20ms)
     success :: http_client.get("http://{addr}/ok")?
     print(success.status())

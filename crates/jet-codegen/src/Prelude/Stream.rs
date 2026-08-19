@@ -49,9 +49,16 @@ where
                 producer(&sender);
             }));
             if let Err(payload) = result {
-                if !jet_scheduler_is_cancel_unwind(payload.as_ref()) {
-                    sender.fail();
+                if jet_scheduler_is_cancel_unwind(payload.as_ref()) {
+                    // Producer defers already ran inside the caught unwind.
+                    // Resume would Drop `sender` during cleanup and abort the
+                    // process (`panic in a destructor during cleanup`), which
+                    // killed the jet-codegen lib suite (#2019). The spawn
+                    // catch frame then sees a normal return; the consumer
+                    // already cancelled the task.
+                    return;
                 }
+                sender.fail();
                 std::panic::resume_unwind(payload);
             }
         },

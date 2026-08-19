@@ -2046,6 +2046,7 @@ pub fn apply_core_call_with_type(
                 fields: vec![("pattern".to_string(), CtValue::Str(pattern.to_string()))],
             })
         }
+        ("core.regex", "escape") => regex_escape(args, span),
         ("core.regex", "is_match") => regex_is_match(args, span),
         ("core.regex", "find") => regex_find(args, span),
         ("core.regex", "find_all") => regex_find_all(args, span),

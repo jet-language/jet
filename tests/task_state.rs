@@ -33,6 +33,23 @@ fn run() {
 }
 
 #[test]
+fn a_task_handle_list_is_consumed_by_pop_and_join() {
+    let source = r#"
+fn run() {
+    workers := [Task<()>].{}
+    workers.push(task { })
+    loop workers.len() > 0 {
+        worker :: workers.pop() ?? panic("missing worker")
+        worker.join() ?? panic("worker failed")
+    }
+}
+"#;
+    jet::compile(source).expect(
+        "a [Task<T>] list is not #SingleUse; popping and joining each handle must compile",
+    );
+}
+
+#[test]
 fn task_lifecycle_joins_through_the_shared_flow_fact_walker() {
     let source = r#"
 fn run() {

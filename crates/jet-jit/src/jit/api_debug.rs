@@ -11,20 +11,12 @@ use super::runtime_host::catch_jit_panic;
 use super::tiers::{plan_tiers, record_trace};
 use super::trace::note_jit_execution;
 use super::safety::{
-    collect_select_arms_jit, count_spawn_sites, jit_list_task_type, jit_value_type,
+    collect_select_arms_jit, count_spawn_sites, entry_return_supported, jit_list_task_type, jit_value_type,
     resident_safe_capture_policy, resident_safe_expr, resident_safe_func,
     resident_safe_func_detail, resident_safe_program, resident_safe_spawn_lambda,
     resident_safe_stmt,
 };
 use super::RESIDENT_RUNTIME;
-
-fn entry_return_supported(ret: Option<&Type>) -> bool {
-    ret.is_none()
-        || matches!(ret, Some(Type::Named(name)) if name == "App")
-        || matches!(ret, Some(Type::Result { ok, err })
-            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "App")
-                && matches!(err.as_ref(), Type::String | Type::Named(_)))
-}
 
 pub fn cranelift_host_supported() -> bool {
     // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
@@ -303,14 +295,35 @@ pub fn jit_program_func_names(bundle: &ProgramBundle) -> Vec<String> {
     })
 }
 
-/// Test hook: per-function resident safety detail (`None` = covered).
+/// Test hook: per-function resident safety. `Covered` is the only green answer.
+/// Lowering that produced no program is `Unavailable`, never `Covered` (#2029).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResidentJitSafety {
+    Covered,
+    Gap(String),
+    Unavailable(String),
+}
+
+/// Test hook: per-function resident safety detail.
 #[doc(hidden)]
-pub fn resident_jit_func_safety_detail(bundle: &ProgramBundle, name: &str) -> Option<String> {
+pub fn resident_jit_func_safety_detail(bundle: &ProgramBundle, name: &str) -> ResidentJitSafety {
     crate::on_compiler_stack(|| {
-        let program = TIR::lower_jit_program(bundle)?;
+        let Some(program) = TIR::lower_jit_program(bundle) else {
+            return ResidentJitSafety::Unavailable(format!(
+                "lower_jit_program returned None ({})",
+                TIR::lower_jit_program_fail_reason(bundle)
+            ));
+        };
         let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-        let f = program.funcs.iter().find(|f| f.name == name)?;
-        resident_safe_func_detail(f, &names)
+        let Some(f) = program.funcs.iter().find(|f| f.name == name) else {
+            return ResidentJitSafety::Unavailable(format!(
+                "function `{name}` missing from lowered TIR"
+            ));
+        };
+        match resident_safe_func_detail(f, &names) {
+            None => ResidentJitSafety::Covered,
+            Some(detail) => ResidentJitSafety::Gap(detail),
+        }
     })
 }
 

@@ -41,6 +41,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "the ice! macro's own panic! implementation",
     ),
     (
+        "crates/jet-foundation/src/Outcome.rs",
+        1,
+        "spliced into generated user programs (flat prelude); ice! is not in that crate",
+    ),
+    (
         "crates/jet-foundation/src/XmlPull.rs",
         32,
         "#[cfg(test)] XML parser/event/tree assertion fixtures; exact audited count",
@@ -107,13 +112,23 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-codegen/src/SchedulerHost.rs",
-        5,
-        "#[cfg(test)] scheduler fixtures: stream producer failure, cancel result, shield result, yield deadline, and body-panic cleanup",
+        6,
+        "one runtime-stop panic! matching AOT Prelude/Core.rs RUNTIME_PANIC, plus five #[cfg(test)] scheduler fixtures",
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
         8,
         "test file — every panic! here is inside a #[test] fn",
+    ),
+    (
+        "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs",
+        4,
+        "#[cfg(test)] argument-reorder lowering assertion fixtures",
+    ),
+    (
+        "crates/jet-codegen/src/Codegen/mod.rs",
+        2,
+        "#[test] prelude-fragment inventory read helpers",
     ),
     (
         "crates/jet-comptime/src/Comptime/EncodingLite.rs",
@@ -122,17 +137,32 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-comptime/src/Comptime/Reflect.rs",
-        5,
-        "#[test]-only assertion fixtures",
+        12,
+        "#[cfg(test)] reflection shape assertion fixtures",
+    ),
+    (
+        "crates/jet-comptime/src/Comptime/CollectionEval.rs",
+        1,
+        "include-style collection_semantics jet_panic adapter — user-program RUNTIME_PANIC path, not compiler ICE",
+    ),
+    (
+        "crates/jet-comptime/src/Comptime/Build/execution_helpers.rs",
+        1,
+        "#[test] target-cycle error-shape assertion fixture",
+    ),
+    (
+        "crates/jet-lexer/src/lib.rs",
+        2,
+        "#[cfg(test)] string-token assertion fixtures",
     ),
     (
         "crates/jet-parser/src/Parser/mod.rs",
-        4,
+        7,
         "#[cfg(test)] mod s61_tests assertion fixtures; exact audited count",
     ),
     (
         "crates/jet-parser/src/lib.rs",
-        5,
+        6,
         "#[cfg(test)] generic-module parser assertion fixtures",
     ),
     (
@@ -172,8 +202,28 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "Source/BudgetProviders.rs",
+        2,
+        "#[cfg(test)] deliberately panicking hostile provider fixture plus workload-object assertion",
+    ),
+    (
+        "crates/jet-jit/build.rs",
+        3,
+        "build.rs inventory of Prelude enums — no ice! (build script is not the compiler front end)",
+    ),
+    (
+        "crates/jet-jit/src/jit/runtime_host.rs",
         1,
-        "#[cfg(test)] deliberately panicking hostile provider fixture for catch_unwind",
+        "#[test] Core-row presence assertion for host_fns audit",
+    ),
+    (
+        "crates/jet-jit/src/jit/resident.rs",
+        1,
+        "#[test] host-helper fault outcome assertion fixture",
+    ),
+    (
+        "crates/jet-jit/src/Compute.rs",
+        1,
+        "include-style compute semantics jet_panic adapter — user-program RUNTIME_PANIC path, not compiler ICE",
     ),
     (
         "crates/jet-cli/src/CLI.rs",

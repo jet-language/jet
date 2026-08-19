@@ -3,6 +3,7 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn manifest_deps(manifest: &str) -> BTreeSet<String> {
     let mut deps = BTreeSet::new();
@@ -317,5 +318,24 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
     assert_eq!(
         actual, allowed,
         "new direct Jetpack coupling added; route it through a product boundary first"
+    );
+}
+
+/// Card #2019: `cargo test` without `-p` only builds default-members, so
+/// `jet-codegen`'s lib tests can fail to compile for months. `verify-full`
+/// already compiles every workspace lib via `tools/ci/test-shards.sh`; this
+/// pin keeps the compile gate in the default root suite so two `#[cfg(test)]`
+/// errors cannot hide again.
+#[test]
+fn jet_codegen_lib_tests_compile() {
+    let output = Command::new("cargo")
+        .args(["test", "-p", "jet-codegen", "--lib", "--no-run", "--quiet"])
+        .output()
+        .expect("cargo test -p jet-codegen --lib --no-run");
+    assert!(
+        output.status.success(),
+        "jet-codegen lib tests must compile\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }

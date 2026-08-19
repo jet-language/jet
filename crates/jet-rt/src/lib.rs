@@ -376,11 +376,11 @@ impl JetArena {
                     .expect("proven fixed-list read of uninitialized slot");
                 &values[index]
             }
-            _ => panic!("proven fixed-list read of a non-list carrier"),
+            _ => jet_foundation::ice!(None, "proven fixed-list read of a non-list carrier"),
         };
         match value {
             JetVal::Int(value) => *value,
-            _ => panic!("proven fixed-list integer read of a non-integer slot"),
+            _ => jet_foundation::ice!(None, "proven fixed-list integer read of a non-integer slot"),
         }
     }
 
@@ -439,11 +439,11 @@ impl JetArena {
                     .expect("proven fixed-list read of uninitialized slot");
                 &values[index]
             }
-            _ => panic!("proven fixed-list read of a non-list carrier"),
+            _ => jet_foundation::ice!(None, "proven fixed-list read of a non-list carrier"),
         };
         match value {
             JetVal::Float(value) => *value,
-            _ => panic!("proven fixed-list float read of a non-float slot"),
+            _ => jet_foundation::ice!(None, "proven fixed-list float read of a non-float slot"),
         }
     }
 

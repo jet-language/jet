@@ -77,6 +77,31 @@ fn package_formatter_fails_closed_on_comments() {
 }
 
 #[test]
+fn typed_head_bodies_keep_raw_backslashes() {
+    let src = r#"fn run() {
+    digits :: Regex.{"\d+"}
+    text :: "a\nb"
+    page :: HTML.{"<p>{name}</p>"}
+}
+"#;
+    let once = jet::format_source(src).expect("typed head should format");
+    assert!(
+        once.contains(r#"Regex.{"\d+"}"#),
+        "formatter decoded a typed-head slash:\n{once}"
+    );
+    assert!(
+        once.contains(r#""a\nb""#),
+        "formatter lost the plain-string newline escape:\n{once}"
+    );
+    assert!(
+        once.contains("{name}"),
+        "formatter dropped a typed-head hole:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("typed head should reformat");
+    assert_eq!(once, twice, "typed-head formatting must be idempotent");
+}
+
+#[test]
 fn fixed_interpolation_selector_is_stable() {
     let src = "fn run(){price::1234.5\nprint(\"{price:Fixed(2)}\")}\n";
     let once = jet::format_source(src).expect("fixed interpolation should format");
@@ -1069,6 +1094,38 @@ fn fmt_simplify_keeps_a_struct_literal_return_braced() {
 }
 
 #[test]
+fn fmt_simplify_rewrites_listed_fence_integers_to_a_range() {
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let source = "fn run() {\n    print(@[0, 1, 2, 3]@)\n}\n";
+    let once = jet::format_source_with_options(source, options)
+        .expect("simplify fmt should format");
+    assert!(
+        once.contains("@[ 0..3 ]@") || once.contains("@[0..3]@"),
+        "R4 did not emit a fence range:\n{once}"
+    );
+    assert!(
+        !once.contains("0, 1, 2, 3"),
+        "R4 left the listed integer run:\n{once}"
+    );
+
+    let (before_tokens, before_lex_diags) = jet::Lexer::lex(source);
+    assert!(before_lex_diags.is_empty(), "{before_lex_diags:?}");
+    let before = jet::Parser::parse_for_fmt(&before_tokens).expect("source should parse");
+    let (after_tokens, after_lex_diags) = jet::Lexer::lex(&once);
+    assert!(after_lex_diags.is_empty(), "{after_lex_diags:?}");
+    let after = jet::Parser::parse_for_fmt(&after_tokens).expect("simplified source should parse");
+    assert_eq!(
+        jet::Formatter::canonical_program(&before),
+        jet::Formatter::canonical_program(&after),
+        "simplify must preserve the parsed AST"
+    );
+    assert_eq!(
+        once,
+        jet::format_source_with_options(&once, options).expect("second simplify pass should work")
+    );
+}
+
+#[test]
 fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
     let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");
@@ -1436,6 +1493,33 @@ fn fmt_classic_if_ignores_braces_inside_leading_trivia() {
     assert_eq!(
         out,
         jet::format_source(&out).expect("commented classic if should reformat")
+    );
+}
+
+#[test]
+fn fmt_classic_if_does_not_mix_braced_then_with_arrow_else() {
+    let source = concat!(
+        "fn run() {\n",
+        "    if flag {\n",
+        "        print(\"then-a\")\n",
+        "        print(\"then-b\")\n",
+        "    } else {\n",
+        "        print(\"else-only\")\n",
+        "    }\n",
+        "}\n",
+    );
+    let once = jet::format_source_with_options(
+        source,
+        jet::Formatter::FormatOptions { simplify: true },
+    )
+    .expect("mixed if/else should format");
+    assert!(
+        !once.contains("} else ->"),
+        "braced then-branch must not pair with an arrow else:\n{once}"
+    );
+    assert!(
+        once.contains("} else {") || once.contains("else {"),
+        "else should stay a braced body:\n{once}"
     );
 }
 

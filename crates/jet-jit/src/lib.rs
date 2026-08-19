@@ -456,7 +456,7 @@ pub use runtime_host::{reset_struct_new_count_for_test, struct_new_count_for_tes
 pub use api_debug::{
     cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,
     jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,
-    jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail,
+    jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail, ResidentJitSafety,
     resident_jit_safe_bundle, resident_jit_safe_bundle_detail, run_resident_strict_for_test,
     tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle,
 };

@@ -2496,7 +2496,7 @@ mod tests {
             return_view_provenance,
         } = wrapped
         else {
-            panic!("function value")
+            crate::ice!(None, "function value")
         };
         assert_eq!(params, vec![Type::List(Box::new(Type::String))]);
         assert_eq!(ret.unwrap().as_ref(), &Type::Result {

@@ -7,12 +7,21 @@ use jet_codegen::Codegen::TIR::{
 use jet_foundation::AST::{BinOp, Pattern, Type, UnOp};
 use std::collections::HashSet;
 
-fn entry_return_supported(ret: Option<&Type>) -> bool {
+pub(crate) fn entry_return_supported(ret: Option<&Type>) -> bool {
     ret.is_none()
         || matches!(ret, Some(Type::Named(name)) if name == "App")
         || matches!(ret, Some(Type::Result { ok, err })
             if matches!(ok.as_ref(), Type::Named(name) if name == "Unit" || name == "App")
-                && matches!(err.as_ref(), Type::String | Type::Named(_)))
+                && entry_error_supported(err))
+}
+
+fn entry_error_supported(err: &Type) -> bool {
+    match err {
+        Type::String | Type::Named(_) => true,
+        Type::Union(members) => !members.is_empty() && members.iter().all(entry_error_supported),
+        Type::List(inner) => matches!(inner.as_ref(), Type::Named(name) if name == "FieldError"),
+        _ => false,
+    }
 }
 
 pub(crate) fn flatten_string(parts: &[TStrPart]) -> Option<String> {

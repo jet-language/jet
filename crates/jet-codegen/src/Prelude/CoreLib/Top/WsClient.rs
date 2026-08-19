@@ -39,6 +39,14 @@ impl JetShow for JetWsError {
     }
 }
 
+// D-FAIL-CONV2=A: one display hook backs both the shipped impl WsError => Err
+// and user interpolation.
+impl JetDisplay for JetWsError {
+    fn jet_display(&self) -> String {
+        <Self as JetShow>::jet_show(self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetWsMessage {
     Text(String),

@@ -397,8 +397,12 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             "raylib user functions must stay safe; bridge unsafe stays in vetted prelude"
         );
     } else {
+        let leftover_unsafe = user_code.lines().any(|line| {
+            let trimmed = line.trim_start();
+            !trimmed.starts_with("//") && line.contains("unsafe")
+        });
         assert!(
-            !user_code.contains("unsafe"),
+            !leftover_unsafe,
             "generated Rust for {} contains `unsafe` outside vetted memory helpers",
             stem
         );

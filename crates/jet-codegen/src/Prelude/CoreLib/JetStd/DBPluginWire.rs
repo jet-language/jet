@@ -115,6 +115,14 @@
         }
     }
 
+    // D-FAIL-CONV2=A: one display hook backs both the shipped impl DBError => Err
+    // and user interpolation.
+    impl super::JetDisplay for DBError {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+
     /// Validate the small, closed policy language before a scope is created.
     /// Keeping this check next to the SQL transformer lets the JIT and AOT
     /// adapters call the same policy semantics.

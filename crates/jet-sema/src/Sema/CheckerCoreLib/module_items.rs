@@ -873,6 +873,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         "core.net.tls" => &[
             "ClientConfig", "RootCertificates", "ClientIdentity", "TLSVersion",
+            "TLSPeerIdentity", "TLSCertificate",
             "client", "read", "read_text", "write", "write_all", "write_text", "close",
         ],
         // D-ONCE-LAYER1=B: the one-shot rung is core.http; the configurable rung is core.http.client.
@@ -950,6 +951,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "migrate",
         ],
         // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
+        "core.units" => &["from"],
         "core.plugin" => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".

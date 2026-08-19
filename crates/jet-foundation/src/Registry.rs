@@ -960,7 +960,7 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     let severity = match fields[3] {
         "error" => Severity::Error,
         "lint" => Severity::Lint,
-        other => panic!("unknown diagnostic severity `{other}` in {line}"),
+        other => crate::ice!(None, "unknown diagnostic severity `{other}` in {line}"),
     };
     assert!(
         is_diagnostic_code(code),
@@ -982,13 +982,13 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         "run" => ReportMoment::Run,
         "test" => ReportMoment::Test,
         "tool" => ReportMoment::Tool,
-        other => panic!("unknown diagnostic moment `{other}` in {line}"),
+        other => crate::ice!(None, "unknown diagnostic moment `{other}` in {line}"),
     };
     let status = match fields[5] {
         "active" => DiagnosticStatus::Active,
         "retired" => DiagnosticStatus::Retired,
         "reserved" => DiagnosticStatus::Reserved,
-        other => panic!("unknown diagnostic status `{other}` in {line}"),
+        other => crate::ice!(None, "unknown diagnostic status `{other}` in {line}"),
     };
     let meaning = leak(&unescape_source(fields[6]));
     let what = leak(&unescape_source(fields[7]));
@@ -997,7 +997,7 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     let detail = match fields[10] {
         "true" => true,
         "false" => false,
-        other => panic!("diagnostic detail flag `{other}` is not bool in {line}"),
+        other => crate::ice!(None, "diagnostic detail flag `{other}` is not bool in {line}"),
     };
     let structured_fix = match fields[11] {
         "-" => None,
@@ -1040,7 +1040,7 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
     if let Some(replacement) = value.strip_prefix("replace:") {
         let (from, to) = replacement
             .split_once("=>")
-            .unwrap_or_else(|| panic!("structured replace fix needs `=>` in {line}"));
+            .unwrap_or_else(|| crate::ice!(None, "structured replace fix needs `=>` in {line}"));
         assert!(
             !from.is_empty() && !to.is_empty(),
             "structured replace fix needs non-empty sides in {line}"
@@ -1056,10 +1056,10 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
             "missing_arms" => StructuredFix::GeneratedMissingArms,
             "script_run" => StructuredFix::GeneratedScriptRun,
             "call_value" => StructuredFix::GeneratedCallValue,
-            _ => panic!("unknown generated structured fix `{kind}` in {line}"),
+            _ => crate::ice!(None, "unknown generated structured fix `{kind}` in {line}"),
         };
     }
-    panic!("unknown structured diagnostic fix `{value}` in {line}");
+    crate::ice!(None, "unknown structured diagnostic fix `{value}` in {line}");
 }
 
 /// A row field whose text itself contains backticks is written as a markdown
@@ -1139,10 +1139,10 @@ fn fact_declaration(line: &str) -> FactDeclaration {
     let rest = line["fact ".len()..].trim();
     let open = rest
         .find('(')
-        .unwrap_or_else(|| panic!("fact declaration without a parameter list: {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "fact declaration without a parameter list: {line}"));
     let close = rest
         .rfind(')')
-        .unwrap_or_else(|| panic!("fact declaration without a closing `)`: {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "fact declaration without a closing `)`: {line}"));
     let source_name = leak(rest[..open].trim());
     let mut name = source_name;
     let mut target = None;
@@ -1155,7 +1155,7 @@ fn fact_declaration(line: &str) -> FactDeclaration {
     for entry in split_top_level(&rest[open + 1..close]) {
         let (label, value) = entry
             .split_once(':')
-            .unwrap_or_else(|| panic!("fact parameter without `:` in {line}: {entry}"));
+            .unwrap_or_else(|| crate::ice!(None, "fact parameter without `:` in {line}: {entry}"));
         let (label, value) = (label.trim(), value.trim());
         match label {
             "@holds" => target = Some(fact_target(value, line)),
@@ -1165,19 +1165,19 @@ fn fact_declaration(line: &str) -> FactDeclaration {
             "@name" => name = leak(&unquote(value, line)),
             "@identity" => identity_bearing = fact_bool(value, line),
             "@decision" => decision = Some(leak(&unquote(value, line))),
-            other => panic!("unknown fact column `{other}` in {line}"),
+            other => crate::ice!(None, "unknown fact column `{other}` in {line}"),
         }
     }
 
     FactDeclaration {
         source_name,
         name,
-        target: target.unwrap_or_else(|| panic!("fact declaration without `@holds`: {line}")),
+        target: target.unwrap_or_else(|| crate::ice!(None, "fact declaration without `@holds`: {line}")),
         safe_direction: safe_direction
-            .unwrap_or_else(|| panic!("fact declaration without `@safe`: {line}")),
-        gates: gates.unwrap_or_else(|| panic!("fact declaration without `@gates`: {line}")),
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@safe`: {line}")),
+        gates: gates.unwrap_or_else(|| crate::ice!(None, "fact declaration without `@gates`: {line}")),
         published_by,
-        decision: decision.unwrap_or_else(|| panic!("fact declaration without `@decision`: {line}")),
+        decision: decision.unwrap_or_else(|| crate::ice!(None, "fact declaration without `@decision`: {line}")),
         identity_bearing,
     }
 }
@@ -1187,7 +1187,7 @@ fn fact_target(value: &str, line: &str) -> RowTarget {
         "Value" => RowTarget::Value,
         "Scope" => RowTarget::Scope,
         "Build" => RowTarget::Build,
-        other => panic!("`{other}` is not a fact target in {line}"),
+        other => crate::ice!(None, "`{other}` is not a fact target in {line}"),
     }
 }
 
@@ -1197,7 +1197,7 @@ fn fact_direction(value: &str, line: &str) -> SafeDirection {
         "Shrink" => SafeDirection::Shrink,
         "Discharge" => SafeDirection::Discharge,
         "None" => SafeDirection::None,
-        other => panic!("`{other}` is not a safe direction in {line}"),
+        other => crate::ice!(None, "`{other}` is not a safe direction in {line}"),
     }
 }
 
@@ -1205,7 +1205,7 @@ fn fact_bool(value: &str, line: &str) -> bool {
     match value {
         "true" => true,
         "false" => false,
-        other => panic!("`{other}` is not a fact boolean in {line}"),
+        other => crate::ice!(None, "`{other}` is not a fact boolean in {line}"),
     }
 }
 
@@ -1213,7 +1213,7 @@ fn fact_gates(value: &str, line: &str) -> &'static [&'static str] {
     let inner = value
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or_else(|| panic!("fact gates must be a list in {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "fact gates must be a list in {line}"));
     leak_slice(
         split_top_level(inner)
             .into_iter()
@@ -1263,7 +1263,7 @@ fn unquote(value: &str, line: &str) -> String {
     let inner = value
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'))
-        .unwrap_or_else(|| panic!("fact decision must be quoted in {line}"));
+        .unwrap_or_else(|| crate::ice!(None, "fact decision must be quoted in {line}"));
     let mut out = String::with_capacity(inner.len());
     let mut escaped = false;
     for character in inner.chars() {
@@ -1523,7 +1523,7 @@ pub fn type_plane(source_name: &str) -> &'static str {
         })
         .filter(|declaration| declaration.name.starts_with("Type."))
         .map(|declaration| declaration.name)
-        .unwrap_or_else(|| panic!("unregistered type plane `{source_name}`"))
+        .unwrap_or_else(|| crate::ice!(None, "unregistered type plane `{source_name}`"))
 }
 
 /// Every Prelude fact row, including type planes and compiler-owned facts.
@@ -1800,7 +1800,7 @@ mod tests {
     fn every_registered_plane_has_one_typed_read_projection() {
         for plane in fact_rows().filter(|row| row.kind() == RowKind::Plane) {
             let read = super::registered_fact_read(plane.name)
-                .unwrap_or_else(|| panic!("plane `{}` has no typed reader", plane.name));
+                .unwrap_or_else(|| crate::ice!(None, "plane `{}` has no typed reader", plane.name));
             assert_eq!(read.reflection_kind(), super::reflection_kind(plane.name));
             assert!(
                 read.registered_planes()

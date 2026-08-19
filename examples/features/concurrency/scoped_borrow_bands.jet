@@ -17,10 +17,13 @@ fn run() {
     task.group g {
         left :: &particles[0]
         right :: &particles[2]
-        print(task.all {
-            { left.position += left.velocity; left.position },
-            { right.position += right.velocity; right.position }
-        } ?? panic("task.all failed"))
+        print(task.all {{
+            left.position += left.velocity
+            left.position
+        }, {
+            right.position += right.velocity
+            right.position
+        }} ?? panic("task.all failed"))
     }
     print(particles[0].position)
     print(particles[1].position)

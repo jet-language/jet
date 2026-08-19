@@ -179,6 +179,13 @@ fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
 }
 
 #[test]
+fn declared_text_head_runs_through_aot_jit_and_interpreter() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = common::Scratch::new("declared_text_head_parity");
+    assert_tier_parity_case(&root, &scratch, "tooling/declared_text_head");
+}
+
+#[test]
 fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source = root.join("examples/features/tooling/build_entry_discovery");

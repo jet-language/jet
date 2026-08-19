@@ -1,0 +1,7 @@
+Error [E0149]: a runtime `String` can't be used as `Pattern`
+  --> tests/ui/declared_text_head_string_sink.jet:11:12
+    |
+ 11 |     accept(raw)
+    |            ^^^
+ Why: interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: write `Pattern.{"..."}` with `{value}` holes, or use `Pattern.raw("…")` if you have audited the text

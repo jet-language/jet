@@ -135,8 +135,16 @@
             build_facts: Default::default(),
             edition: "2027".to_string(),
         };
+        // Full-front-end helpers reach comptime eval of `Val`/`None` and struct
+        // literals. That path lives in TIR eval and is installed at the four
+        // production funnels; a unit test that calls `check_bundle` directly is
+        // below all four, so install here the same way `covers` hops the stack.
+        install_comptime_bridge();
         // No C imports in unit tests; CFfi::default() is the correct empty state.
-        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        // Coverage and lowering helpers check named functions, not a runnable
+        // program. `CompileMode::Run` demands `fn run` (E0101) and is the
+        // wrong door for a fragment whose entry is `opt`/`build`/`ch`.
+        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
         assert!(
             !diags
                 .iter()
@@ -386,8 +394,12 @@ fn run() {
 }
 ";
         let lowered = lower_after_sema(src, "run");
-        let actual: Vec<Type> = lowered
+        let lets: Vec<&TStmt> = lowered
             .body
+            .iter()
+            .filter(|stmt| matches!(stmt, TStmt::Let { .. }))
+            .collect();
+        let actual: Vec<Type> = lets
             .iter()
             .filter_map(|stmt| match stmt {
                 TStmt::Let { init, .. } => Some(init.ty.clone()),
@@ -425,8 +437,10 @@ fn run() {
                 Type::Option(Box::new(Type::Int)),
             ]
         );
+        // Extra non-Let statements from a lowering must not shift these pins:
+        // the GetMap facts live on the last two Lets.
         assert!(matches!(
-            &lowered.body[9],
+            lets[9],
             TStmt::Let {
                 init: TExpr {
                     kind: TExprKind::BuiltinMethod {
@@ -439,7 +453,7 @@ fn run() {
             }
         ));
         assert!(matches!(
-            &lowered.body[10],
+            lets[10],
             TStmt::Let {
                 init: TExpr {
                     kind: TExprKind::BuiltinMethod {

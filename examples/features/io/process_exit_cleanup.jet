@@ -3,12 +3,12 @@ use core.sys as os
 use core.process as process
 use core.mem.scope as scope
 
-struct Resource { name: String }
+struct Resource {
+    name: String
+}
 
 impl Resource.Close {
-    fn close(^self) {
-        print("close {self.name}")
-    }
+    fn close(^self) { print("close {self.name}") }
 }
 
 fn run() {
@@ -17,7 +17,7 @@ fn run() {
     }
     outer :: scope.guard(() => print("guard outer"))
     inner :: scope.guard(() => print("guard inner"))
-    resource := Resource.{ name: "resource" }
+    resource := Resource.{name: "resource"}
     defer close(^resource)
     print("body")
     process.exit(0)

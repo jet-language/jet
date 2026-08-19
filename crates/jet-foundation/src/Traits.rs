@@ -1754,6 +1754,8 @@ impl TraitRegistry {
             "WalkEntry",
             "WatchEvent",
             "WsError",
+            "XMLError",
+            "CBORError",
             "Zone",
             "ZonedDateTime",
         ] {

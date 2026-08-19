@@ -9,15 +9,13 @@ fn run() {
     print(has_digits)
     // find: the first matched substring (an optional — `None` if no match).
     first :: re.find(.{"\d+"}, text)
-    if first == Val(n) {
-        print(n)
-    }
+    if first == .Val(n) -> print(n)
     // find_all: every match, left to right.
     nums :: re.find_all(.{"\d+"}, text)
     print(nums.len())
     // match + capture groups: group(0) is the whole match, group(n) the n-th group.
     m :: re.match(.{"(\d+) shipped"}, text)
-    if m == Val(mat) {
+    if m == .Val(mat) {
         whole :: mat.group(0) ?? "none"
         first_group :: mat.group(1) ?? "none"
         print(whole)
@@ -36,7 +34,7 @@ fn run() {
     matches :: rx.matches("Ada\nlovelace")
     print(matches.len())
     first_named :: rx.match("Ada\nlovelace")
-    if first_named == Val(mat) {
+    if first_named == .Val(mat) {
         print(mat.name("word") ?? "none")
         print(mat.start())
         print(mat.end())

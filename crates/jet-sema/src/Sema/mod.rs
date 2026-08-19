@@ -1503,6 +1503,10 @@ pub(crate) struct Checker<'a> {
     /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
     /// Disables readable Core prelude resolution for this body.
     no_prelude: bool,
+    /// D-NOALLOC-SEM1=A / D-FAIL-CONV2=A: a `policy no_alloc` file cannot use
+    /// the default `Err` (it carries an owned message), so the shipped family
+    /// conversion is not opened onto it.
+    no_alloc: bool,
     /// D-PREPOST1: true while type-checking a `#Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.

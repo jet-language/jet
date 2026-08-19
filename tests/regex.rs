@@ -8,6 +8,9 @@ use std::process::Command;
 mod common;
 use common::have_rustc;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 /// Compile, FFI-link, and run a regex program; return stdout.
 fn run_regex(src: &str) -> String {
     // Unique dir per call so concurrent regex tests never clobber one another's
@@ -226,4 +229,26 @@ fn run() {
     assert_eq!(lines[6], "2", "split limit len");
     assert_eq!(lines[7], "b, c", "split limit remainder");
     assert_eq!(lines[8], "hit hit", "callback replacement");
+}
+
+#[test]
+fn typed_head_raw_escapes_agree_across_tiers() {
+    let src = r#"fn run() {
+    digits :: Regex.{"\d+"}
+    print(digits.is_match("7"))
+    slash_n :: Regex.{"a\nb"}
+    print(slash_n.is_match("7"))
+    braces :: Regex.{"x{{2}}"}
+    print(braces.is_match("xx"))
+}
+"#;
+    let expected = "true\nfalse\ntrue\n";
+    let (jit_code, jit_out, jit_err) = tir_support::jit_run("typed_head_raw_escapes", src);
+    assert_eq!(jit_code, 0, "jet run failed:\n{jit_err}");
+    assert_eq!(jit_out, expected, "jet run disagreed:\n{jit_err}");
+    let (interpreter_code, interpreter_out, interpreter_err) =
+        tir_support::interpreter_run("typed_head_raw_escapes", src);
+    assert_eq!(interpreter_code, jit_code, "interpreter exit disagreed:\n{interpreter_err}");
+    assert_eq!(interpreter_out, jit_out, "interpreter stdout disagreed:\n{interpreter_err}");
+    assert_eq!(interpreter_err, jit_err, "interpreter stderr disagreed");
 }
