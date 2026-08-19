@@ -1,4 +1,4 @@
-# Development: one act, one receipt
+# Development from first principles: one act, one receipt — and the inner loop re-founded
 
 First-principles audit of development in general — the whole lifecycle at every echelon, friction overall, not only writing and reading code. Date: 2026-08-19. Evidence: five research lanes (live probe of 80 CLI commands, lifecycle code map, decision sweep, silhouette sweep, 96-row industry pain corpus), lane files under `target-fpa/L1..L5`. Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 
@@ -12,7 +12,7 @@ First-principles audit of development in general — the whole lifecycle at ever
 
 **What it buys, concretely.** Warm `jet test` drops from 33 s to reading a store — and the second run of the full golden suite (45–90 min today, ~476 identical Prelude compiles) becomes mostly cache hits, which is the top-ranked fix in the test-performance plan landing as law instead of a one-off optimization. "Done" stops being a claim: a test result, a golden, a proof, a budget baseline, an API snapshot become one receipt shape, so the coverage ledger, the feature manifest, and a Tower card's evidence render from the store and cannot drift. Review, CI, and team caching stop being missing products: a review is a meaning-diff plus a receipt-diff; CI is a witness that replays cold and countersigns; a teammate's green is your instant green, under trust policy you set. False green dies structurally: an agent cannot claim what the store does not hold.
 
-**What the ballots ask.** Seven direction-level choices: adopt the law (D-DEVR-LAW1); never pay twice on every verb (D-DEVR-TWICE1); claims leave receipts and ledgers render (D-DEVR-CLAIM1); one project truth surface (D-DEVR-STATUS1); review as a product (D-DEVR-REVIEW1); the witness model for team, CI, and registry (D-DEVR-WITNESS1); production runs leave receipts locally (D-DEVR-PROD1). Each stands alone.
+**What the ballots ask.** Thirteen direction-level choices in two waves. Wave 1, the evidence machine: adopt the law (D-DEVR-LAW1); never pay twice on every verb (D-DEVR-TWICE1); claims leave receipts and ledgers render (D-DEVR-CLAIM1); one project truth surface (D-DEVR-STATUS1); review as a product (D-DEVR-REVIEW1); the witness model for team, CI, and registry (D-DEVR-WITNESS1); production runs leave receipts locally (D-DEVR-PROD1). Wave 2, the inner loop (Part II): the cone law for verdict latency (D-DEVR-CONE1); debugging as queries over a recorded run (D-DEVR-CAUSE1); `#Todo` as a typed goal with `jet fill` (D-DEVR-HOLE1); discovery by contract (D-DEVR-FIND1); refactors that carry their meaning (D-DEVR-SEMID1); speculative acts with rollback (D-DEVR-TRY1). Each stands alone.
 
 **What does not change.** The inner loop law (D-RUN-LAW1: verbs pick the observer; claims pick inputs and evidence grade) is untouched — receipts are what observers write down. The evidence words stay the ratified four: proved, passed, observed, met. I9 tier parity, the one report frame, the fact law, the corpus law, D-TELEMETRY1 (nothing ever phones home), and every frozen wall stay. Zero new mechanisms: this proposal generalizes three ratified ones (action cache, receipts, evidence ledger) and deletes their hand-maintained imitations.
 
@@ -205,9 +205,132 @@ $ jet debug --replay 8a3f              # proposed: receipt-id addressing extends
 
 Scope, honestly: this is the on-ramp, not an observability platform. Local-only stays law (D-TELEMETRY1=A — receipts never leave the machine unless the operator ships the bundle). A fleet that forbids any on-host artifact refuses recording itself with the same project switch (`receipts: .Off`). Metrics exporters, distributed tracing, and OTel remain explicitly future territory; what this element fixes is that the crash you are asked to debug arrives with its closure and its replay instead of a prose ticket.
 
+## Part II — the inner loop, re-founded
+
+Wave 1 re-founded the process plane: what happens around the code. The owner's challenge — is that all? — is answered by mapping every plane of development to the law that owns it. Six planes of the inner loop had no owner. Part II founds them. Nothing here is a new mechanism: each element is a missing consequence of machinery Jet already ratified, and each one names its rails.
+
+| Plane of development | Owning law | State |
+|---|---|---|
+| Meaning, types, knowledge | D-TYPE2-* (carriers and knowledge) | ratified |
+| Failure | D-FAIL-* (one report, three routes) | ratified |
+| Memory | memory v5 slate (D-MEM-*) | ratified |
+| Concurrency | D-CONC-* (work is a value) | ratified |
+| Authority and safety | D-AUTHORITY-*, D-FACT-* (one fact law) | ratified |
+| Build and config facts | D-CONF-* (one plane) | ratified |
+| Names and modules | D-NAME-* (one tree) | ratified |
+| Trust and format boundaries | D-BOUND-* (one crossing) | ratified |
+| Everything Jet says | D-REPORT-* (one report, four surfaces) | ratified |
+| Compile-time programming | D-META-* (one compile-time program) | ratified |
+| The run and the claim | D-RUN-LAW1, D-CLAIM-* | ratified |
+| Corpus truth | D-ONCE-* (say it once) | ratified |
+| Process evidence: speed, honesty, sharing | Part I (D-DEVR-LAW1 … PROD1) | this slate |
+| Verdict latency under edits | D-DEVR-CONE1 | this slate, Part II |
+| Debugging causality | D-DEVR-CAUSE1 | this slate, Part II |
+| Writing toward a goal | D-DEVR-HOLE1 | this slate, Part II |
+| Finding what exists | D-DEVR-FIND1 | this slate, Part II |
+| Refactoring identity | D-DEVR-SEMID1 | this slate, Part II |
+| Safe speculation | D-DEVR-TRY1 | this slate, Part II |
+| Observability exporters, live-DB migrations, hosted registry operations, time-travel engine | named future territory | deliberate (E6 schedule for time travel kept) |
+
+### Element 7 — the cone law: verdict latency scales with the edit, not the program
+
+Part I's receipts erase the cost when nothing changed. The cone law bounds the cost when something did: **the work to re-verdict after an edit is proportional to the edit's blast radius, never to program size.** The blast-radius engine already exists (`jet inspect impact`); the query crate already computes incrementally for the editor; the rlib card (c09otnjg) is the law's first artifact on the AOT side. What is missing is the law itself — so today every CLI verb re-derives the world, and only the LSP is incremental.
+
+```text
+# today: one-line edit, whole-program price
+$ vim src/parser.jet && jet check      # re-runs the whole front end
+$ jet run --release                    # regenerates and recompiles one monolithic program
+
+# proposed: the price is the cone
+$ vim src/parser.jet && jet check      # re-checks parse_line's cone: 3 fns, 2 files
+ok: 3 definitions re-checked · rest current · 0.02 s
+```
+
+Honesty about evidence: today's warm numbers are measured at toy scale (0.05 s hello-world `jet check`), where whole-program cost is invisible. The law is what keeps that number flat at 100 kLOC instead of letting it grow linearly — the failure every large codebase in every language lives with today, and the reason IDEs and compilers give different answers. The law is budget-enforced (typed latency budgets per verb and rung, riding D-PERFBUDGET-COMPILE1 and card #677), so a violation is a red budget, not a slow afternoon. Expert exits: `jet explain` names why a re-verdict exceeded the cone (a comptime dependency, a changed signature); budgets are project-tunable; there is nothing to refuse — a guarantee, not a behavior.
+
+### Element 8 — every "why" is a query over a recorded run
+
+Debugging is reconstructing causality backward from a symptom, but every mainstream tool samples forward: breakpoints, prints, re-runs. Jet already ratified the recording rail (D-JREPLAY1, shipped under `jet prove`; Part I's PROD1 feeds it from crashes). The missing law: **any recorded run answers questions.**
+
+```text
+$ jet debug --replay 8a3f              # the crash receipt from element 6
+> why total == 0                        # proposed: backward slice
+total = 0   because sum(items) ran over []        service.jet:41
+items = []  because parse(csv) dropped 14 rows    service.jet:22   (decode refused: E0910)
+> when order.state                      # proposed: write timeline for one place
+order.state = .Open      service.jet:12
+order.state = .Stale     service.jet:87   ← last write before the crash
+```
+
+The beginner story: `jet debug` is unchanged, and the crash that used to be a prose ticket arrives replayable. The expert story: `why` and `when` over any recorded run — local, test, or production. The schedule story, honestly: `when` is a per-place write timeline, which is inside the territory D-TIMETRAVEL1=C deferred to Epoch 6 and D-RUN-RECORD1=A re-affirmed as deferred — so option A is a **named amendment** that pulls the query surface over existing recordings forward, while reverse-step execution and the standalone always-on history engine stay on the Epoch 6 schedule. Exits: recording is opt-in (a flag, a crash, or a claim run); queries are read-only over a capture; a project that never records never carries one. Peers: rr and Pernosco prove record-and-query works and stay niche because they fight the platform from outside; a language that owns every tier can make determinism a property, not a heroic capture.
+
+### Element 9 — the goal is a value: `#Todo` holes and `jet fill`
+
+Jet already has the hole: `#Todo` compiles and stops at runtime. But the checker — which knows the expected type, the required effects, and every fact in scope at that position — says nothing about it. The upgrade: **`#Todo` in expression position is a typed goal, and the toolchain talks about it.**
+
+```text
+fn parse_row(line: String) -> Row ? ParseError {
+    #Todo                               # shipped today: compiles, stops if reached (E3011)
+}
+
+$ jet check                             # proposed: the goal card
+goal: parse_row's body                  needs Row ? ParseError
+  in scope: line: String · ParseError.{...} · Row.{...}
+  effects allowed: none (pure)
+$ jet fill run.jet:2                    # proposed verb (or a `jet fix` mode — the ballot decides): ranked candidates
+  1. Row.{ cells: line.split(",") }                    (uses: split — passes check)
+  2. line.take_pattern("{a}, {b}") … build Row          (uses: D-PARSESTR1 pattern)
+```
+
+Beginners keep writing programs that run before they are finished — the stop-on-reach behavior is unchanged, so no rung gains ceremony. Experts and agents get the highest-value property in the five quantities: repair determinism — one goal, one typed target, ranked candidates that already pass sema. The walls hold by construction: `fill` proposes ordinary term-level code that then enters ordinary checking (never AST injection, never a macro — D-METAMUTATE1 untouched; comptime still never creates a type). Exits: goal cards are advisory rows that never change `jet check`'s exit code, they summarize past a handful ("…and 17 more goals"), and a project switch silences them entirely. Precedent: GHC's typed holes and Idris's holes are the most-loved feature of their ecosystems and never left them, because no mainstream toolchain owns both the checker and the fill surface. Naming note: the word is genuinely contested — ratified surfaces already use "hole" both for interpolation slots (D-PARSESTR1, D-META-CODE1) and for `#Todo` itself (E3011/E2902 row text, D-TOOL2) — so the ballot carries the word choice: keep "hole" as shipped, or adopt "goal" and rename the E3011/E2902/D-TOOL2 text and examples with it.
+
+### Element 10 — discovery by contract: `jet find`
+
+The costliest beginner hour is "what is this called"; the costliest agent tokens are directory listings. Names are the wrong key — the developer knows the shape of what they need, not its name.
+
+```text
+$ jet find "String -> Path"                       # proposed: search by signature (unification, not text)
+core.files.Path.from(s: String) -> Path ? PathError
+$ jet find --effect FS.Read "read a csv"          # proposed: search by effect + words
+core.data.csv.read(path) =[FS.Read]=> Table ? CsvError
+$ jet find --example '"a,b" -> ["a","b"]'         # proposed: run pure candidates at comptime
+String.split(sep) -> [String]                      (1 match on the example)
+```
+
+One naming settlement, owned by the ballot: `find` joins `search` in the discovery word-space — `search`/`info` are ratified discovery verbs for **packages** — so D-DEVR-FIND1 fixes the split the way WITNESS1 fixed `verify`: `find` asks code by shape and contract, `search` asks the package catalog by name. (Pre-existing drift found while checking this: the live binary teaches `jet inspect search` while D-CLI-SURFACE1=B lists `search` flat — carded separately.)
+
+Signature search is Hoogle — loved for two decades, still confined to Haskell because nobody else's toolchain holds full typed signatures. Effect search and example search are Jet-only: effects are typed facts here, and comptime can safely run pure candidates against the example. Rails: semindex (definitions and signatures), the digest (the same rows the LLM surface renders), the comptime evaluator. Exits: it is a read-only query; there is nothing to refuse; `--json` for agents.
+
+### Element 11 — refactors carry their meaning
+
+A rename touches 47 lines, so the diff shows 47 edits, the merge conflicts with any concurrent change, blame loses the definition's history, and the reviewer burns attention on churn (pain rows 48, 52, 54). The tools that executed the rename — `jet fix`, codemod plans, LSP rename — knew exactly what it meant, and threw that knowledge away. The law: **a toolchain-executed refactor records its semantic op beside the text change, and diff, merge, review, and blame consume ops plus stable definition IDs.** Structural merge already keys on stable IDs; codemod plans are already replayable; this element joins them.
+
+```text
+$ jet review origin/main                # proposed rendering, riding element 4
+meaning    renamed parse_row → parse_line (47 sites)   ← one line, not 47
+           1 fn body changed (blast: 2 callers)
+claims     all 14 hold at both ends
+```
+
+A concurrent edit to the renamed function's body merges clean, because the rename is an op on a definition ID and the edit is a change to its body — different subjects, no textual collision. Exits: hand edits stay plain text forever; ops are additive metadata; every surface keeps a `--text` view.
+
+### Element 12 — try before you touch: speculative acts
+
+Agents (and careful humans) need the answer to "would this break?" without dirtying the tree. Today that costs apply → run → revert, with the tree exposed in between and nothing remembered afterward.
+
+```text
+$ jet try fix-plan.json                 # proposed: apply in an isolated overlay,
+2 claims re-checked · 1 breaks:         #   re-run only the affected claims,
+  parse rejects empty: FAIL (E3001 at parser.jet:12)
+rolled back · wrote receipt 6b09        #   answer, roll back, remember
+$ jet try fix-plan.json --keep          # the verdict was clean → land it
+```
+
+Rails: overlay-aware semindex open (shipped), codemod apply/undo (shipped), affected-claim selection (element 1), receipts (Part I). This is the transaction primitive the agent fix-loop card (`c0kbzrub`, "Prove the agent fix loop converges") needs under it, and the runtime rollback-regions draft deliberately does not cover — that draft is about program state at run time; this is about tree state at development time. Exits: `try` never touches the tree by default; `--keep` is the only write; a `try` receipt is marked speculative so no ledger counts it as project truth.
+
 ## The final vision
 
-One day, three echelons, one store. Every command line below that mentions receipts, status, review, verify, countersigning, or crash receipts is proposed; the rest is shipped behavior.
+One day, three echelons, one store. Every command line below that mentions receipts, status, review, verify, countersigning, crash receipts, goals, find, why, or try is proposed; the rest is shipped behavior.
 
 **Solo beginner** — types nothing new, ever:
 
@@ -216,6 +339,8 @@ $ jet new game && cd game
 $ jet run          # 0.02 s
 $ jet test         # runs, writes receipts
 $ jet test         # 0.08 s — "14 hold (nothing changed)"
+$ jet find "String -> Path"    # what is it called? — answered by shape, not name
+$ jet check        # a #Todo left in the code prints its goal card, and the program still runs
 $ jet build        # 34 s cold, honest
 $ jet build        # 0.1 s — current
 ```
@@ -226,7 +351,8 @@ $ jet build        # 0.1 s — current
 $ git pull && jet status
 closure d4e5f6 · claims: 11 hold (3 countersigned ci@team) · proofs current
 $ jet review origin/main          # before merging a teammate's branch
-meaning 1 fn · authority no change · claims all hold at both ends
+meaning   renamed parse_row → parse_line (47 sites) · 1 fn body changed
+authority no change · claims all hold at both ends
 $ jet verify --cold               # what the CI machine runs; nothing else exists
 ```
 
@@ -234,7 +360,9 @@ $ jet verify --cold               # what the CI machine runs; nothing else exist
 
 ```text
 $ jet status --json               # 1 line per claim: current/stale/not-recorded
+$ jet try fix-plan.json           # would this break? — verdict + receipt, tree untouched
 $ (edit) && jet test              # only the 2 stale claims re-run
+$ jet debug --replay 8a3f         # a failing claim's run, then: why total == 0
 $ tower card close #N --evidence receipt:4c22   # closure cites the store; false green impossible
 ```
 
@@ -294,6 +422,12 @@ Every element marked its proposed spellings in place; the final-vision transcrip
 | D-DEVR-REVIEW1 | Review product | new verb `jet review <ref>` / `jet diff --review` / decline | amends D-CLI-SURFACE1=B if a verb is added |
 | D-DEVR-WITNESS1 | Witness + countersign model; CI = cold witness (`jet verify --cold`); team share via cache bindings | full witness model / local witnesses only / decline | amends D-CLI-SURFACE1=B (new `verify` verb; settles the word against `jet hangar verify`); rides D-JPK-CACHEAUTH1=D signing and D-JPK-REMOTE1=D trust domains |
 | D-DEVR-PROD1 | Crash/observed-run receipts + evidence-carrying `jet report` | adopt / crash receipts only / decline | feeds D-JREPLAY1=A; keeps D-TELEMETRY1=A verbatim |
+| D-DEVR-CONE1 | The cone law: re-verdict cost scales with the edit's blast radius, budget-enforced | adopt for every verb with typed latency budgets / budgets on check+dev only / decline | rides D-PERFBUDGET-COMPILE1=C (#677); per-verb latency rows are new entries in its closed budget grammar (named extension) |
+| D-DEVR-CAUSE1 | Debugging is queries (`why`, `when`) over a recorded run | adopt the substrate law now (named amendment) / crash-replay queries only / decline | amends D-TIMETRAVEL1=C and D-RUN-RECORD1=A's per-variable-history deferral for query-over-recording only; reverse-step and the always-on history engine stay Epoch 6; rides D-JREPLAY1=A |
+| D-DEVR-HOLE1 | `#Todo` is a typed goal; `jet fill` proposes checked candidates | goal card + fill / goal card only / decline | `#Todo` runtime meaning unchanged; `fill` spelling amends D-CLI-SURFACE1=B or rides `jet fix` (options); word choice (keep "hole" vs adopt "goal" + rename E3011/E2902/D-TOOL2 text) carried in the ballot; walls untouched |
+| D-DEVR-FIND1 | Discovery by contract: signature, effect, and example search | full find verb / signature-only / under `jet inspect` / decline | amends D-CLI-SURFACE1=B if a flat verb is added; settles `find` (code by shape) vs `search` (packages by name); read-only |
+| D-DEVR-SEMID1 | Toolchain refactors record semantic ops; diff/merge/review/blame consume ops + stable IDs | record and consume / record only / decline | rides D-SEMINDEX1, D-CODEMOD1, structural-merge stable IDs; hand edits stay plain text |
+| D-DEVR-TRY1 | Speculative acts: apply in overlay, verdict affected claims, roll back, remember | full try verb / flag on `jet inspect codemod` (agent-only JSON) / decline | amends D-CLI-SURFACE1=B if a verb is added; try receipts marked speculative |
 
 Each ballot stands alone; any subset composes. Adopting none still leaves the defect cards below worth fixing.
 
@@ -303,11 +437,11 @@ Each ballot stands alone; any subset composes. Adopting none still leaves the de
 
 **Phase B — land ratified-but-unbuilt work on the substrate, so it is built once.** D-BUILDCACHE1's automatic action cache (kills the 33 s warm tax); the receipts cards (#655, #1019–#1020) connect their chain to it; the test-performance plan's rlib/action caching becomes receipt reuse; `jet test` gains a versioned status `--json` that emits the receipt (status data, beside — not inside — the `jet.report/v1` report stream); the parity ledger renders from tier-tagged receipts (#1663); the dev-loop slate remainder (D-CLAIM-BENCH1's `--measure`, D-RUN-RECORD1's `--record`) writes receipts from day one instead of growing private files.
 
-**Phase C — the balloted surfaces.** `jet status`, `jet review`, witness countersigning and `jet verify --cold`, crash receipts, evidence-carrying `jet report`. Each is a coherent greenfield migration that deletes its replaced form (hand ledgers, bespoke snapshot formats, the thin report bundle) in the same change.
+**Phase C — the balloted surfaces.** Wave 1: `jet status`, `jet review`, witness countersigning and `jet verify --cold`, crash receipts, evidence-carrying `jet report`. Wave 2: the goal card and `jet fill`, `jet find`, `why`/`when` queries under `jet debug --replay`, semantic-op recording in `jet fix`/codemod and its consumption in diff/merge/review, `jet try`. Each is a coherent greenfield migration that deletes its replaced form (hand ledgers, bespoke snapshot formats, the thin report bundle) in the same change. The cone law (CONE1) has no surface of its own: it lands as typed latency budgets plus the incremental re-verdict work they force, starting from the suite-speed cards.
 
 ## Adjacent defects (cards, not ballots)
 
-The live probe surfaced beginner-lethal defects independent of any ballot: `jet add --path` ICEs at exit 101 *and corrupts package.jet*; `jet remove` claims success for a dep that never existed; `jet update jet` rejects the pin `jet new` itself wrote; `jet help <cmd>` prints the global screen; project-mode `jet test` discovers only the entry file (the Zig trap the spec forbids); E0601's fix text teaches syntax E0930 rejects and a vocabulary D-CLAIM-WORD1 retired; `jet eval` swallows print output; `jet project parts` prints nothing; `shared-store status` attempts an install and demands sudo; nine surfaces leak the word "jetpack" into `jet`'s own voice. These are minted as defect cards on the audit card, with L1 transcripts as evidence.
+The live probe surfaced beginner-lethal defects independent of any ballot: `jet add --path` ICEs at exit 101 *and corrupts package.jet*; `jet remove` claims success for a dep that never existed; `jet update jet` rejects the pin `jet new` itself wrote; `jet help <cmd>` prints the global screen; project-mode `jet test` discovers only the entry file (the Zig trap the spec forbids); E0601's fix text teaches syntax E0930 rejects and a vocabulary D-CLAIM-WORD1 retired; `jet eval` swallows print output; `jet project parts` prints nothing; `shared-store status` attempts an install and demands sudo; nine surfaces leak the word "jetpack" into `jet`'s own voice. These are minted as defect cards on the audit card, with L1 transcripts as evidence. Separately, the 45–90 minute golden wall has three implementation cards that need no ballot and can start now (content-addressed Prelude/Core rlibs; a run-scoped oracle cache for the dev batteries; profile reclassification, shared FFI dep artifacts, and weighted CI shards — the ranked plan of the 2026-08-08 test-performance audit).
 
 ---
 
