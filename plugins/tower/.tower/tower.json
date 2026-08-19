@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2082,
-    "rev": 39256,
+    "rev": 39279,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81418,6 +81418,11 @@
       "assignee": "gpt-5.6-luna",
       "log": [
         {
+          "at": "2026-08-19",
+          "by": "fable-e3-burndown",
+          "text": "Protocol half of criterion 5 is green: cargo test --test notebook 12/12 ok (builder 1abf0234f) after three integrated fixes — Panic grant per D-NOPANIC1=D, item-plane cell routing (E0118), input() through the authorized REPL seam, and cells now executing the checked AST so sema's prelude normalization reaches every tier. Remaining on criterion 5: owner first-hour acceptance (needsAcceptance=true). Nothing machine-verifiable is outstanding."
+        },
+        {
           "at": "2026-08-17",
           "by": "grok-e3",
           "text": "Criterion 8 green (serial notebook protocol tests). Criterion 5 still needs owner first-hour acceptance (needsAcceptance=true); headless protocol coverage is the test half of that row."
@@ -81511,10 +81516,10 @@
           "n": 8,
           "text": "`scripts/agent/jet-env cargo test --test notebook -- shared_session_identical_stale_rules_across_clients jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss rich_output_trust_quarantines_imports_and_binds_grants headless_protocol_interrupt_stdin_debug_perf_and_clients` passes.",
           "status": "met",
-          "metBy": "grok-e3",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "scripts/agent/jet-env cargo test --test notebook -- shared_session_identical_stale_rules_across_clients jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss rich_output_trust_quarantines_imports_and_binds_grants headless_protocol_interrupt_stdin_debug_perf_and_clients --test-threads=1 → 4 passed. First parallel run had a flake on shared_session; serial rerun is green.",
-          "at": "2026-08-17T18:32:26.713Z"
+          "evidence": "PROOF cargo test --test notebook 12/12 ok (2026-08-19, builder 1abf0234f) after the checked-AST fix; covers the four named production-path tests plus serial protocol cases",
+          "at": "2026-08-19T21:28:05.430Z"
         }
       ],
       "refs": [
@@ -81535,8 +81540,8 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-04T16:50:40.578Z",
-      "updated": "2026-08-17T18:32:27.331Z",
-      "updatedBy": "grok-e3",
+      "updated": "2026-08-19T21:28:32.111Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1050,
       "claimedAt": "2026-08-14T13:27:13.655Z"
     },
@@ -97509,7 +97514,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-TYPE2-TIME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/type-system-v2-carriers-and-knowledge.md.",
       "blockedBy": [],
@@ -97530,65 +97535,65 @@
         {
           "n": 1,
           "text": "Duration is the delta quantity of the Time family with a fixed 64-bit nanosecond carrier; Instant is the matching point quantity",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:02.032Z"
+          "evidence": "Bundle.rs:843-869 Duration=Delta/Instant=Point on core.units::Time; Prelude/Units.jet:71-82 Time family ns base; i64-ns carriers Prelude/Core/Duration.rs + CommonTypes.rs:2581 + Core/Time.rs:290-300 JetInstant{start_ns}",
+          "at": "2026-08-19T21:27:23.283Z"
         },
         {
           "n": 2,
           "text": "Both hidden duration suffix tables are deleted, with no private suffix parsing left in the compiler",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:02.378Z"
+          "evidence": "Both hidden tables gone: .timeout table removed (CheckerTaskGroup.rs:163-195 typed Duration; ScopeMembers.rs:806-810), #Every table removed (CheckerSchedule.rs:29 registry.unit_literal), private unit_multiplier deleted (BudgetSpecs.rs:828/:860) now reading registered Syntax row jetpack_config.rs:183-199; grep unit_multiplier|duration_suffix|suffix_table = 0 compiler hits",
+          "at": "2026-08-19T21:27:23.788Z"
         },
         {
           "n": 3,
           "text": "One spelling works everywhere: wait :: 500ms then task.timeout(wait), and sleep(500ms) compiles",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:02.729Z"
+          "evidence": "tests/unit_family.rs:1256-1270 canonical_time_timeout_and_sleep_spellings_compile (wait :: 500ms, task.timeout(wait), sleep(500ms)); PROOF cargo test --test unit_family 61/61 ok",
+          "at": "2026-08-19T21:27:24.313Z"
         },
         {
           "n": 4,
           "text": "Point plus delta gives a point: now() + 5min is an Instant",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:03.086Z"
+          "evidence": "CheckerInfer/binary.rs:1107-1111 (Add,Point,Delta)->Instant with E0127 for point+point; tests/unit_family.rs:1245 now()+5min across tiers; engines marshal jet_time_instant_add_duration_ns only",
+          "at": "2026-08-19T21:27:24.805Z"
         },
         {
           "n": 5,
           "text": "Time takes part in unit algebra: 12meter / 2s type-checks as a speed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:03.432Z"
+          "evidence": "examples/features/types/dimensional_quantities.jet:6-8 with golden line 4 meter/ns; binary.rs D-SHAPE-QUANTITY1 exponent derivation; tests/unit_family.rs:1247/:1253 tier-agreed",
+          "at": "2026-08-19T21:27:25.319Z"
         },
         {
           "n": 6,
           "text": "Greenfield: the replaced form is deleted in the same change, and every in-repo consumer, example, test, doc and snapshot moves with it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:03.774Z"
+          "evidence": "Retired forms exist only as negative fixtures (tests/ui/duration_runtime_retired.*, retired_time_clock.*); live examples use plane literals; superseded private table deleted same change with both callers migrated",
+          "at": "2026-08-19T21:27:25.818Z"
         },
         {
           "n": 7,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T17:22:56.413Z"
+          "evidence": "PROOF cargo test --test unit_family 61/61 ok (2026-08-19, builder 1bad76e0c) covering parser, formatter, sema ui fixtures, measure rules for fixed lengths and matrix shapes, and canonical_time_plane_reaches_all_native_execution_tiers via assert_tiers_agree (JIT, forced interpreter, AOT); compute_parity 10/10 ok",
+          "at": "2026-08-19T21:27:26.325Z"
         }
       ],
       "refs": [
@@ -97600,9 +97605,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:01.689Z",
-      "updated": "2026-08-16T01:03:31.971Z",
+      "updated": "2026-08-19T21:27:27.004Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 610
+      "workOrder": 610,
+      "completedAt": "2026-08-19T21:27:27.004Z"
     },
     {
       "id": "c0yzzaom",
@@ -122422,11 +122428,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implement ratified D-CLI-GLOBAL1=E: one #CLI struct is the whole program — scalar fields are shared flags (same #Doc and = defaults), a callable member is a command (bind an existing fn with =, or a method whose self reads shared flags), the member name is the command word, member #Doc is the help summary, and #CLI(Standard) grants working --verbose/--quiet/--color/--version wired automatically. Replaces today's per-subcommand struct duplication (spec.md:3442 'no flag namespace shared' clause retires). Surfaces: entry discovery + schema (CLISchema.rs:134/:211/:265/:717; struct-entry path at :744 is the substrate for shared flags, enum branch supplies dispatch), Args parsing/completions (Args.rs:455/:473/:496), migrate examples/features/cli/subcommands.jet, normative clauses spec.md:3430/:3460, Syntax.rs registration, tree-sitter regen. Record D-CLI-GLOBAL1=E in syntax-decisions.md (currently unrecorded). Greenfield cutover: the old per-subcommand-struct pattern is deleted from every in-repo consumer.",
       "blockedBy": [],
-      "assignee": "grok-e3",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-17",
@@ -122453,110 +122459,110 @@
         {
           "n": 1,
           "text": "Ballot D-CLI-GLOBAL1 ratified; implementation follows the ratified outcome exactly",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:32:59.677Z"
+          "evidence": "Ballot ratified 2026-08-10 outcome E; implementation follows E: CLISchema.rs:989-1112 command_schema_with_items (fields to flags, callable members to commands), :196-251 command_target; E1344-E1347 registered Diagnostics.jet:558-561, emitted in sema CheckerCli.rs:201-237 (I3/I4) with ui fixtures tests/ui/cli_program_*.stderr",
+          "at": "2026-08-19T21:27:58.692Z"
         },
         {
           "n": 2,
           "text": "A shared flag works on every subcommand from one declaration, with precedence (command input > env > default) unchanged",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:33:00.054Z"
+          "evidence": "One declaration reaches every subcommand: Args.rs:480-517 jet_args_subcommand inherited_entries dedupe, parse-anywhere jet_args_all_entries:191-194; precedence argv>env>default Args.rs:570-578; golden expected/cli/subcommands.out:7 renders [precedence: flag > env > default]",
+          "at": "2026-08-19T21:27:59.189Z"
         },
         {
           "n": 3,
           "text": "spec.md subcommand clause ('no flag namespace is shared across variants') amended to the ratified law; syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:33:00.433Z"
+          "evidence": "Retired clause gone: grep 'no flag namespace is shared' over docs = 0 hits; spec.md:3617-3708 carries the new law; syntax-decisions.md:221-224 D-CLI-GLOBAL1=E",
+          "at": "2026-08-19T21:27:59.686Z"
         },
         {
           "n": 4,
           "text": "Help, dossier, embedded schema, and shell completions all show shared flags once at root scope",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:33:00.793Z"
+          "evidence": "tests/cli_parts/surface.rs:150-224 external_completion_preserves_checked_program_commands: root --config shown once, four shells show commands plus Standard flags (snapshots tests/cli/shape_cli_program_{bash,zsh,fish,powershell}.txt), dossier completion_words + commands, embedded schema JETCMD v5 (CLISchema.rs:11-21)",
+          "at": "2026-08-19T21:28:00.193Z"
         },
         {
           "n": 5,
           "text": "examples/features/cli/ example + golden proves shared-flag parse on AOT and jet run (I9); unknown-flag suggestions still work",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T11:33:01.162Z"
+          "evidence": "examples/features/cli/subcommands.jet + goldens subcommands.{out,serve.out,plan.out}; unknown-flag suggestion --confg to --config (comptime_cli_parity.rs:631-645, Args.rs:885-896). PROOF cargo test --test comptime_cli_parity 17/17 ok (282s, 2026-08-19, builder c7bc09b2c) incl. documented_cli_program_matches_aot_default_interpreter_and_goldens and tier_parity_examples_run_through_aot_jit_and_interpreter",
+          "at": "2026-08-19T21:28:00.680Z"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T12:43:58.295Z"
+          "evidence": "I7 rows for the program-struct form in crates/jet-foundation/src/Syntax.rs with the D-CLI-GLOBAL1 id",
+          "at": "2026-08-19T21:28:01.191Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T12:43:58.295Z"
+          "evidence": "syntax-decisions.md:221-224 records D-CLI-GLOBAL1=E",
+          "at": "2026-08-19T21:28:01.699Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T12:43:58.295Z"
+          "evidence": "Grammars regenerated for the ratified form (editors tree-sitter/tmGrammar/zed carry it)",
+          "at": "2026-08-19T21:28:02.215Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T12:43:58.295Z"
+          "evidence": "Snapshots re-blessed: tests/cli/shape_cli_program_*.txt, man.txt and the cli goldens match the shipped help/completions",
+          "at": "2026-08-19T21:28:02.727Z"
         },
         {
           "n": 10,
           "text": "The D-CLI-GLOBAL1=E program-struct form compiles and runs: shared flags visible to every command, callable members dispatch, #CLI(Standard) provides working --verbose/--quiet/--color/--version; a golden example proves it byte-identically on AOT, default jet run, and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:33.139Z"
+          "evidence": "Interpreter typed CLI no longer E2201: eval/cli.rs:445-635 prepare() covers Run/Direct/Invoke/Help/Version/Error incl. method receiver and bound-fn shared struct (fixes 8d04db518, e5218e209); program name and banner single-sourced Prelude/Job.rs:28-48 read by all three tiers. PROOF cargo test --test comptime_cli_parity 17/17 ok (282s, 2026-08-19, builder c7bc09b2c) incl. documented_cli_program_matches_aot_default_interpreter_and_goldens and tier_parity_examples_run_through_aot_jit_and_interpreter",
+          "at": "2026-08-19T21:28:03.233Z"
         },
         {
           "n": 11,
           "text": "Old per-subcommand payload duplication is gone from examples/tests/docs in the same change; completion and help snapshots (bash/zsh/fish/powershell + two help snapshots) re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:33.552Z"
+          "evidence": "Per-subcommand duplication gone; command_override E0402 resolved by 7db74255c (deleted the fallible-discard fn dev from test/bench override examples; swap_command_entry_point clears pre/post/inline_foreign); build-fact and stamp drift fixed by 5211ce8b4, b830d47f6, 2c13d9850, 9b58430dd, 5c61aabc4",
+          "at": "2026-08-19T21:28:03.744Z"
         },
         {
           "n": 12,
           "text": "Syntax.rs entry, grammar regen, formatter round-trip, and the syntax-decisions.md recording of D-CLI-GLOBAL1=E land together; comptime/AOT parity via tests/comptime_cli_parity.rs",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:01:33.991Z"
+          "evidence": "Formatter round-trip plus the syntax-decisions recording land together; PROOF cargo test --test fmt 190/190 ok and comptime_cli_parity 17/17 ok",
+          "at": "2026-08-19T21:28:04.243Z"
         }
       ],
       "refs": [],
@@ -122568,9 +122574,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T11:32:41.653Z",
-      "updated": "2026-08-17T18:55:49.441Z",
-      "updatedBy": "grok-e3",
-      "claimedAt": "2026-08-17T18:55:49.440Z"
+      "updated": "2026-08-19T21:28:04.919Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T21:28:04.918Z"
     },
     {
       "id": "c06xbujy",
@@ -182416,6 +182422,167 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T21:28:32.112Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pkjxs2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T21:28:05.430Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pkjxs2",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-19T21:28:04.919Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0n8zb5c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T21:28:04.243Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-19T21:28:03.744Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-19T21:28:03.233Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-19T21:28:02.728Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-19T21:28:02.215Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-19T21:28:01.699Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-19T21:28:01.192Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-19T21:28:00.681Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T21:28:00.194Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T21:27:59.687Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T21:27:59.190Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T21:27:58.692Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n8zb5c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T21:27:27.005Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0p834bt",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T21:27:26.325Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-19T21:27:25.819Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-19T21:27:25.319Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T21:27:24.805Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T21:27:24.313Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T21:27:23.789Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T21:27:23.283Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p834bt",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-19T21:22:39.892Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -185753,167 +185920,6 @@
       "action": "card.delete",
       "ref": "c0gmlscb",
       "note": "Windows IOCP: emitted Prelude body and AOT/dev conformance"
-    },
-    {
-      "at": "2026-08-19T13:32:59.696Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#9 Affected docs (docs/spec/spec.md, capability-claim-manifest."
-    },
-    {
-      "at": "2026-08-19T13:32:59.236Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#8 Targeted success and failure checks fail when the Prelude IO"
-    },
-    {
-      "at": "2026-08-19T13:32:58.809Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#7 Emitted AOT programs and default jet run produce identical s"
-    },
-    {
-      "at": "2026-08-19T13:32:58.390Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fylvpy",
-      "note": "#6 Windows IOCP behavior implemented once in the Prelude schedu"
-    },
-    {
-      "at": "2026-08-19T13:32:57.962Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0fylvpy",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:57.348Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0jnondn",
-      "note": "Windows x86 native C ABI runtime matrix"
-    },
-    {
-      "at": "2026-08-19T13:32:56.923Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#11 Independent reviewer confirms #436 parser/sema/codegen exhau"
-    },
-    {
-      "at": "2026-08-19T13:32:56.503Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#10 Default C/system and every supported Windows calling convent"
-    },
-    {
-      "at": "2026-08-19T13:32:56.079Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#9 Raw status/out-pointer poison-byte safety and borrowed non-n"
-    },
-    {
-      "at": "2026-08-19T13:32:55.627Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#8 Capture-free pure callbacks proven under reentrant and concu"
-    },
-    {
-      "at": "2026-08-19T13:32:55.177Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#7 Struct and fieldless+payload enum layout (size, alignment, f"
-    },
-    {
-      "at": "2026-08-19T13:32:54.738Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0eaqe17",
-      "note": "#6 Native Windows CI (x64 and x86) links production-generated J"
-    },
-    {
-      "at": "2026-08-19T13:32:54.294Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0eaqe17",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:06.302Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0dr8aqt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:05.677Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0y3l5yy",
-      "note": "#7 Runtime dispatch is proven across AVX2 and SSE2 paths via je"
-    },
-    {
-      "at": "2026-08-19T13:32:05.228Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0y3l5yy",
-      "note": "#6 The ufunc/kernel set that must lower to SIMD is named on the"
-    },
-    {
-      "at": "2026-08-19T13:32:04.786Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gqalzc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:04.184Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c082569u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:03.579Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zpske1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:02.908Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rcv8n1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:02.318Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:01.729Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ptp3kp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:01.128Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0te2a80",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
