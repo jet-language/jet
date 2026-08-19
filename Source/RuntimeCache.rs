@@ -102,14 +102,20 @@ pub fn prepare(
 }
 
 /// The directory holding cached runtime rlibs. Public so a provider that
-/// spawns a child compiler can hand the child the same toolchain cache
-/// instead of letting it fall back onto a project-scoped build cache.
+/// spawns a child compiler can hand the child the same toolchain cache.
+///
+/// Toolchain-scoped on purpose, and deliberately NOT derived from
+/// `JET_CACHE_DIR`: the key contains no project data at all (runtime source,
+/// exported source, rustc identity, flags, env), so a project-scoped root just
+/// guarantees a cold runtime compile per project. That is now strictly worse
+/// than not caching — building the runtime crate and then the thin program
+/// costs more than the one monolith it replaces, and it is only ever repaid by
+/// the next program that shares the key. Anything that genuinely needs its own
+/// runtime artifacts (the golden suite, a child compiler probe) sets
+/// `JET_RUNTIME_CACHE_DIR` explicitly.
 pub fn cache_root() -> PathBuf {
     if let Ok(path) = std::env::var("JET_RUNTIME_CACHE_DIR") {
         return PathBuf::from(path);
-    }
-    if let Ok(path) = std::env::var("JET_CACHE_DIR") {
-        return PathBuf::from(path).join("runtime");
     }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
