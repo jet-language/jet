@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -3536,31 +3536,44 @@ fn rustc_identity() -> (String, String) {
 }
 
 /// Identity of every executable/backend that can change emitted native code.
-/// Compiler build bytes make local/dev compilers distinct even when package
-/// SemVer is unchanged; rustc `-vV` includes its LLVM backend revision.
+///
+/// `build=` is this compiler's compile-time semantic identity — `build.rs`'s
+/// `semantic_id("jet.compiler.v2", COMPILER_SOURCES, build_facts())`, a SHA-256
+/// over every non-test source file under `Source/` and `crates/jet-*` (the
+/// Prelude and the Core closure included), `Cargo.toml`/`Cargo.lock`, and the
+/// `rustc -vV` / TARGET / HOST / PROFILE / OPT_LEVEL / DEBUG / feature /
+/// `RUSTFLAGS` / custom-target-spec facts of the build that produced this
+/// binary. It moves for exactly the edits that can change emitted code, it
+/// distinguishes local/dev compilers whose package SemVer is unchanged, and
+/// reading it costs nothing: it is a `&'static str` baked into this binary.
+/// `env!` (not `option_env!`) on purpose — a key input must never silently
+/// degrade to a constant placeholder.
+///
+/// #2085: this used to be `sha256(fs::read("/proc/self/exe"))`. On a dev
+/// compiler that is an 835 MB read, a second 835 MB copy inside `sha256`, and
+/// 13 M scalar compression blocks in an unoptimized build: 33.4 s of the 35.1 s
+/// a `jet build` took, paid on every invocation to re-derive a value that is
+/// fixed for the life of the binary. `rustc -vV` still rides along because the
+/// rustc that compiles the *emitted* Rust need not be the one that built this
+/// compiler; it carries its own LLVM backend revision.
+static NATIVE_TOOLCHAIN_IDENTITY: LazyLock<String> = LazyLock::new(|| {
+    let compiler_build = env!("JET_COMPILER_BUILD_ID");
+    let (rustc, backend) = rustc_identity();
+    let linker_name = Command::new("rustc").args(["--print", "linker"])
+        .output().ok().filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "cc".into());
+    let linker = command_identity(&linker_name, &["--version"]);
+    format!(
+        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-name={linker_name}\u{1}linker={linker}",
+        jet::Manifest::COMPILER_VERSION,
+        jet_semindex::SCHEMA_VERSION,
+    )
+});
+
 fn native_toolchain_identity() -> &'static str {
-    static IDENTITY: OnceLock<String> = OnceLock::new();
-    IDENTITY.get_or_init(|| {
-        #[cfg(target_os = "linux")]
-        let compiler_bytes = fs::read("/proc/self/exe");
-        #[cfg(not(target_os = "linux"))]
-        let compiler_bytes = std::env::current_exe().and_then(fs::read);
-        let compiler_build = compiler_bytes.ok()
-            .map(|bytes| jet::SHA256::sha256_hex(&bytes))
-            .unwrap_or_else(|| "unavailable".into());
-        let (rustc, backend) = rustc_identity();
-        let linker_name = Command::new("rustc").args(["--print", "linker"])
-            .output().ok().filter(|output| output.status.success())
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "cc".into());
-        let linker = command_identity(&linker_name, &["--version"]);
-        format!(
-            "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-name={linker_name}\u{1}linker={linker}",
-            jet::Manifest::COMPILER_VERSION,
-            jet_semindex::SCHEMA_VERSION,
-        )
-    })
+    NATIVE_TOOLCHAIN_IDENTITY.as_str()
 }
 
 fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
