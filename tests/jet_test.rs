@@ -1,7 +1,7 @@
 //! M6 phase 2: `jet test` output shape and fail-then-fix flow.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use jet_foundation::JSON::{parse_json, JSONValue};
@@ -1198,6 +1198,126 @@ fn jet_test_dir_recurses_into_subdirectories() {
     for needle in ["top level: pass", "one level down: pass", "two levels down: pass"] {
         assert!(stdout.contains(needle), "missing `{}`:\n{}", needle, stdout);
     }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #2066: a real `jet new` project in a temp directory — the out-of-the-box
+/// shape (`package.jet`, `run.jet` with no tests) each bare-`jet test` case
+/// below adds its own member files to.
+fn bare_package_project(label: &str, jet: &Path) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("jet_test_{}_{}", label, std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let name = dir.file_name().unwrap().to_string_lossy().to_string();
+    let created = Command::new(jet)
+        .arg("new")
+        .arg(&name)
+        .current_dir(std::env::temp_dir())
+        .output()
+        .unwrap();
+    assert!(
+        created.status.success(),
+        "jet new failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&created.stdout),
+        String::from_utf8_lossy(&created.stderr)
+    );
+    dir
+}
+
+#[test]
+fn bare_jet_test_discovers_tests_in_every_package_module() {
+    // #2066: `jet test` with no target used to build only the resolved entry
+    // file's harness, so a fresh project with its tests in `math.jet` reported
+    // E0601 "no #Test blocks found" and exited 1.
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = bare_package_project("bare_package", &jet);
+    fs::write(
+        dir.join("math.jet"),
+        "fn double(n: Int) => Int :: (n * 2)\n\n#Test(\"double returns twice the input\") {\n    require_eq(double(3), 6)\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(&jet).arg("test").current_dir(&dir).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "bare jet test failed in a fresh project:\nstdout: {}\nstderr: {}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("double returns twice the input: pass"),
+        "the sibling module's test never ran:\n{}",
+        stdout
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn bare_jet_test_reports_no_tests_once_for_a_testless_package() {
+    // #2066 criterion 2: E0601 fires only when the whole package has zero
+    // `#Test` blocks — once for the package, not once per member file.
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = bare_package_project("bare_testless", &jet);
+    fs::write(dir.join("math.jet"), "fn double(n: Int) => Int :: (n * 2)\n").unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "a package with no tests must fail:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        stderr
+    );
+    // The rendered heading carries `[E0601]` once per report; the trailing
+    // `jet explain E0601` pointer names the code again, so count headings.
+    assert_eq!(
+        stderr.matches("[E0601]").count(),
+        1,
+        "expected exactly one E0601 report for the package:\n{}",
+        stderr
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn bare_jet_test_surfaces_a_broken_package_member() {
+    // #2066: a member that fails to parse must report its real compile error
+    // instead of being silently skipped by package discovery.
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = bare_package_project("bare_broken", &jet);
+    fs::write(
+        dir.join("good.jet"),
+        "#Test(\"good member passes\") {\n    require(true)\n}\n",
+    )
+    .unwrap();
+    fs::write(dir.join("broken.jet"), "fn oops( {\n").unwrap();
+    let out = Command::new(&jet).arg("test").current_dir(&dir).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "a broken package member must fail the run:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    assert!(
+        stderr.contains("broken.jet"),
+        "the broken member's error never surfaced:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

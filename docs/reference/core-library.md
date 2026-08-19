@@ -2692,9 +2692,12 @@ instead of a module function call (D-TESTKIT1).
 #### `jet test` and `jet bench` — shared targets and filters
 
 `jet test <dir>` walks every subdirectory (skipping `build/` and dotdirs),
-running every `.jet` file found, in sorted path order. A directory that has a
-`package.jet` manifest is still treated as a project root (its single entry file
-runs), same as before.
+running every `.jet` file found, in sorted path order. Bare `jet test` inside a
+project is a package target (S43, D-BENCH-PARITY1): it discovers every `#Test`
+in the package, so a module file's tests run without naming the file. Package
+members with no `#Test` blocks and no doctests are skipped; `E0601` is reported
+only when the whole package has nothing to run. An entry-file `fn test`
+override still owns the whole run (D-CMD-OVERRIDE1).
 
 Tests run in parallel by default — one thread per test, with its own
 `testing.temp_dir` (the thread id is folded into the path) and its own
@@ -2703,6 +2706,7 @@ test's own output always reads the same as it did running alone. `--serial`
 opts out and runs one test at a time.
 
 ```
+jet test                         # the whole package: every #Test in it
 jet test <file|dir>              # parallel by default; walks subdirectories
 jet test <file|dir> --serial     # one test at a time
 jet test <file> --filter=foo     # only run tests whose name contains "foo"

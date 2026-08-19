@@ -143,6 +143,52 @@ pub fn scan_with_overlays(root: &Path, overlays: &[(PathBuf, String)]) -> Projec
     scan_with_diagnostics(root, overlays).0
 }
 
+/// Every source file this package compiles, sorted, without `scan`'s parse
+/// pass: the same authority-checked enumeration the part index is built from,
+/// minus package manifests and nested packages. Tooling that must act on every
+/// file in the package — bare `jet test` collecting `#Test` blocks package-wide
+/// (spec S43) — enumerates here instead of walking the filesystem again, so the
+/// file set stays the project scan's, not a second opinion about it. An
+/// authority failure yields an empty set: the caller's ordinary compile path
+/// reports the real error rather than a second, worse copy of it.
+pub fn source_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(resolver) = AuthorityResolver::open(root) else {
+        return Vec::new();
+    };
+    let Ok(files) = resolver.discover_source_files() else {
+        return Vec::new();
+    };
+    // A nested package is its own package: its files are that package's
+    // modules, not this one's. Stop at every nested manifest — the boundary
+    // package build-entry discovery already draws.
+    let nested = files
+        .iter()
+        .filter(|file| {
+            file.relative.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE)
+        })
+        .filter_map(|file| file.relative.parent())
+        .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("."))
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    files
+        .iter()
+        .filter(|file| {
+            !is_manifest_file(&file.relative)
+                && !nested.iter().any(|package| file.relative.starts_with(package))
+        })
+        .map(|file| file.path.clone())
+        .collect()
+}
+
+/// The package manifest (and its migration-era spelling) carries package
+/// facts, not project code: never a part, never a source file.
+fn is_manifest_file(relative: &Path) -> bool {
+    relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == Syntax::PACKAGE_FILE || name == Syntax::PAYLOAD_FILE)
+}
+
 pub fn scan_with_diagnostics(
     root: &Path,
     overlays: &[(PathBuf, String)],
@@ -157,11 +203,7 @@ pub fn scan_with_diagnostics(
     };
     let mut files = checked_files
         .iter()
-        .filter(|file| {
-            !file.relative.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
-                name == Syntax::PACKAGE_FILE || name == Syntax::PAYLOAD_FILE
-            })
-        })
+        .filter(|file| !is_manifest_file(&file.relative))
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     files.extend(
@@ -366,6 +408,38 @@ mod tests {
         assert_eq!(report.conflicts.len(), 1);
         assert_eq!(report.conflicts[0].name, "_bench");
         assert_eq!(report.conflicts[0].paths.len(), 2);
+    }
+
+    #[test]
+    fn source_files_are_the_package_own_modules() {
+        // Bare `jet test` enumerates here (spec S43): every module the package
+        // compiles, no manifests, and nothing belonging to a nested package.
+        let root = tempdir("source-files");
+        std::fs::write(root.join(Syntax::PACKAGE_FILE), "name: \"outer\"\n").unwrap();
+        std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/math.jet"), "fn double() => Int :: 2\n").unwrap();
+        std::fs::create_dir_all(root.join("vendor/inner")).unwrap();
+        std::fs::write(
+            root.join("vendor/inner").join(Syntax::PACKAGE_FILE),
+            "name: \"inner\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("vendor/inner/lib.jet"), "fn theirs() {}\n").unwrap();
+
+        let base = std::fs::canonicalize(&root).unwrap();
+        let files = source_files(&root);
+        let names = files
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&base)
+                    .unwrap_or(path.as_path())
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["run.jet".to_string(), "src/math.jet".to_string()]);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

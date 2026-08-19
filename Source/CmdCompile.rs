@@ -1778,6 +1778,61 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     });
 }
 
+/// Bare `jet test` inside a package (spec S43): every source file the package
+/// compiles is a test target, not only the resolved entry file. The member set
+/// comes from the driver's project scan — the same authority-checked
+/// enumeration `jet project parts` reports — so discovery covers exactly what
+/// the package compiles instead of walking the filesystem a second time.
+/// Members with neither `#Test` blocks nor doctests are skipped instead of
+/// failing; a member that fails to parse still reports its real compile error.
+/// When nothing in the package was testable, the resolved entry runs on the
+/// ordinary file path so its own report (E0601, or E2105 for a missing entry)
+/// is the one the user sees, exactly once.
+pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode) {
+    let entry = crate::find_project_entry(root);
+    let mut ran = 0usize;
+    let mut any_fail = false;
+    // D-CMD-OVERRIDE1=C: an entry-file `fn test` is the package's test command
+    // and owns the whole run, so the entry goes first and an override there
+    // ends the run before any member harness is discovered behind it.
+    if entry.is_file() {
+        match run_test_target(&entry, &opts, mode, true) {
+            TestTargetOutcome::Override(ok) => exit(if ok {
+                ExitCodes::OK
+            } else {
+                ExitCodes::USER_ERROR
+            }),
+            TestTargetOutcome::Ran(ok) => {
+                ran += 1;
+                any_fail = !ok;
+            }
+            TestTargetOutcome::NoTests => {}
+        }
+    }
+    for target in jet::ProjectParts::source_files(root) {
+        if target == entry || is_reserved_target_file(&target) {
+            continue;
+        }
+        match run_test_target(&target, &opts, mode, true) {
+            // A member's own `fn test` override is that file's harness choice;
+            // only the entry's override speaks for the whole package.
+            TestTargetOutcome::Ran(ok) | TestTargetOutcome::Override(ok) => {
+                ran += 1;
+                any_fail |= !ok;
+            }
+            TestTargetOutcome::NoTests => {}
+        }
+    }
+    if ran == 0 {
+        run_test_opts(&entry.to_string_lossy(), opts, mode);
+    }
+    exit(if any_fail {
+        ExitCodes::USER_ERROR
+    } else {
+        ExitCodes::OK
+    });
+}
+
 /// D-TESTKIT1=A gap #2 / D-BENCH-PARITY1=B: walk every subdirectory under
 /// `dir`, collecting `.ext` files. `build/` and dotdirs (`.git`, `.jet`'s own
 /// cache, etc.) are skipped, as are reserved package/env/workspace/config
@@ -1795,20 +1850,50 @@ pub(crate) fn collect_source_files_recursive(dir: &Path, ext: &str, out: &mut Ve
             }
             collect_source_files_recursive(&path, ext, out);
         } else if path.extension().and_then(|e| e.to_str()) == Some(ext)
-            && !matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("package.jet")
-                    | Some("env.jet")
-                    | Some("workspace.jet")
-                    | Some("config.jet")
-            )
+            && !is_reserved_target_file(&path)
         {
             out.push(path);
         }
     }
 }
 
+/// Reserved package surfaces are never test or bench targets: they declare
+/// package, env, workspace, and config facts instead of runnable code. One
+/// list for the recursive target walk and for the package member set.
+fn is_reserved_target_file(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+        name == jet::Syntax::PACKAGE_FILE
+            || name == jet::Syntax::ENV_FILE
+            || name == jet::Syntax::WORKSPACE_FILE
+            || name == jet::Syntax::CONFIG_FILE
+    })
+}
+
+/// What one test target contributed. Package mode needs "no tests here" as a
+/// result distinct from failure; a named file or directory target keeps falling
+/// through to the harness so it reports E0601.
+enum TestTargetOutcome {
+    Ran(bool),
+    NoTests,
+    /// The file defines `fn test` (D-CMD-OVERRIDE1=C) and ran as that override.
+    Override(bool),
+}
+
 fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
+    matches!(
+        run_test_target(path, opts, mode, false),
+        TestTargetOutcome::Ran(true) | TestTargetOutcome::Override(true)
+    )
+}
+
+/// Run one test target. `package` marks bare-`jet test` package members, whose
+/// empty files are skipped rather than reported.
+fn run_test_target(
+    path: &Path,
+    opts: &TestRunOpts,
+    mode: OutputMode,
+    package: bool,
+) -> TestTargetOutcome {
     let update_snapshots = opts.update_snapshots;
     let coverage = opts.coverage;
     let profile = if opts.release {
@@ -1822,7 +1907,7 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         Ok(s) => s,
         Err(e) => {
             crate::cli_error!("E2105", "couldn't read `{}`: {}", shown, e);
-            return false;
+            return TestTargetOutcome::Ran(false);
         }
     };
     // D-TEST4: discover and run any `///` doctest examples first. They are
@@ -1835,11 +1920,27 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         run_doctests(path, &shown, &src, update_snapshots, &profile, mode)
     };
 
-    // A file with doctests but no `#Test` blocks is testable on its doctests
-    // alone — skip the test harness (which would otherwise error E0601 "no #Test
-    // blocks"). A file with NEITHER falls through so the harness reports E0601.
-    if !override_entry && has_doctests && !jet::has_test_blocks(&shown) {
-        return doctests_ok;
+    if !override_entry {
+        if package {
+            // Package mode walks every member: one with no `#Test` blocks
+            // contributes nothing to the run, which is not the error an empty
+            // named target is. A member that fails to load answers `true`
+            // here, so its real compile error still surfaces below instead of
+            // being silently skipped.
+            if !jet::has_test_blocks(&shown) {
+                return if has_doctests {
+                    TestTargetOutcome::Ran(doctests_ok)
+                } else {
+                    TestTargetOutcome::NoTests
+                };
+            }
+        } else if has_doctests && !jet::has_test_blocks(&shown) {
+            // A file with doctests but no `#Test` blocks is testable on its
+            // doctests alone — skip the test harness (which would otherwise
+            // error E0601 "no #Test blocks"). A file with NEITHER falls through
+            // so the harness reports E0601.
+            return TestTargetOutcome::Ran(doctests_ok);
+        }
     }
 
     let (rust_code, ffi_link) = match if override_entry {
@@ -1853,7 +1954,11 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         Ok(r) => r,
         Err(diags) => {
             report_problems(mode, &shown, &src, &diags);
-            return false;
+            return if override_entry {
+                TestTargetOutcome::Override(false)
+            } else {
+                TestTargetOutcome::Ran(false)
+            };
         }
     };
     // Test harnesses are one-shot process-private executables. Concurrent
@@ -1944,7 +2049,12 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         let _ = fs::remove_file(co);
     }
     let _ = fs::remove_file(&bin);
-    out.status.success() && doctests_ok
+    let ok = out.status.success() && doctests_ok;
+    if override_entry {
+        TestTargetOutcome::Override(ok)
+    } else {
+        TestTargetOutcome::Ran(ok)
+    }
 }
 
 /// D-TEST4: compile and run each ```` ```jet ```` doctest block found in the file's

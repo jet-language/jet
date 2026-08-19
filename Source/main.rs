@@ -55,7 +55,7 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     resolve_named_profile, run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web,
-    run_fix, run_fmt, run_fuzz, run_new, run_jobs, run_test_opts,
+    run_fix, run_fmt, run_fuzz, run_new, run_jobs, run_test_opts, run_test_package,
     run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
@@ -2318,8 +2318,19 @@ fn main() {
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
-                                run_test_opts(
-                                    &entry_str,
+                                // Spec S43: bare `jet test` collects every
+                                // `#Test` in the package, so the target is the
+                                // package the resolved entry belongs to — the
+                                // same project shape bare `jet bench` uses
+                                // below, with member selection unchanged.
+                                let entry_dir = entry
+                                    .parent()
+                                    .filter(|path| !path.as_os_str().is_empty())
+                                    .unwrap_or_else(|| Path::new("."));
+                                let root = jet::Loader::find_manifest_root(entry_dir)
+                                    .unwrap_or_else(|| entry_dir.to_path_buf());
+                                run_test_package(
+                                    &root,
                                     TestRunOpts {
                                         show_default: jet_argv.iter().any(|a| a == "--show-default"),
                                         release: release_flag,
