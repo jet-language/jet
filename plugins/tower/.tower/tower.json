@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2083,
-    "rev": 39300,
+    "nextNum": 2084,
+    "rev": 39309,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-19T21:37:57.085Z"
+    "completionCursor": "2026-08-19T22:18:35.815Z"
   },
   "epochs": [
     {
@@ -135572,6 +135572,11 @@
         {
           "at": "2026-08-19",
           "by": "fable-e3-burndown",
+          "text": "PREMISE CORRECTED (measured 2026-08-19): a warm zero-change jet build is FRONT-END bound, not runtime-recompile bound. Trace: prepare_at is never reached on that path — CmdCompile.rs:4508-4520 try_copy_cached returns the cached binary before the rustc call at :4562, which is why the stats counter printed nothing and why no time moved. This cache pays on every BuildCache MISS instead, which is exactly the golden and corelib suites (tests/golden.rs:117-132 points JET_CACHE_DIR at a fresh temp dir per run, so all ~476 entries miss and do run rustc) plus every real edit-rebuild. Arithmetic for the suite: ~5.2s saved per Core-bearing AOT compile against one ~12.7s cold rlib per distinct block variant, and variants are far fewer than 476. Criterion 1 met. Criteria 2/3/4 stay open for the epoch-end measurement; the single-variable probe is: export JET_RUNTIME_CACHE_DIR=/tmp/rc-warm, then rebuild the same program with a REAL source edit each iteration (whitespace does not miss — the key is a canonical AST hash), run 1 stores and later runs hit, and the delta is the rustc leg. The dominant warm cost is now carded separately as #2083 (two front-end passes per build); watch binary size on release splits: 525,512 B vs 517,320 B monolith (+1.6%, LTO import boundary) against any size baseline."
+        },
+        {
+          "at": "2026-08-19",
+          "by": "fable-e3-burndown",
           "text": "Integrated 2026-08-19 (landed inside 2679f1037; described in the follow-up commit body). DECISIVE FINDING: the cache had never produced a single artifact — 91 key directories in ~/.cache/jet/runtime, 0 rlibs — because __jet_Ordering/__jet_Comparable were used inside the CACHED_RUNTIME block but emitted outside it, export_runtime_source promoted visibility onto multi-line generic continuation rows so the runtime crate did not parse, and __JET_PACKAGE_EDITION sat in the program head while Core reads it. All three fixed; Core moved inside the markers (push_core_runtime); schema v4; new test cached_runtime_owns_every_runtime_owned_trait pins the invariant that broke it; CmdCompile fail-open rebuilds the inline monolith once if a thin crate is rejected, so a split can cost a compile but never a build. PLAN CORRECTION: the planned second rlib (jet_runtime_core linked with --extern jet_runtime) is impossible — Core's impls on Prelude types (Sub for JetInstant, Comparable for JetInstant) are orphan impls across a crate boundary (E0117). One merged crate is the only shape. MEASURED 2026-08-19 on hello.jet single file: run 1 printed 'jet-runtime-cache store key=93c1d385... generated_bytes=627684' and ~/.cache/jet/runtime/93c1d385.../libjet_runtime.rlib now EXISTS (0 rlibs before), so the substrate works; but runs 2-4 printed NO cache line and stayed at 33.0-34.7s, so the warm-build win is NOT yet demonstrated. Open question handed back to the lane: whether a warm no-change build even reaches prepare_at, or whether the hit path bypasses the stats counter — i.e. whether the ~34s is rustc re-feeding the runtime at all. Criteria 2/3/4 are measurement rows and batch to the epoch-end run (golden wall time before/after, byte-identical expectations, cold jet build time)."
         },
         {
@@ -135599,11 +135604,11 @@
         {
           "n": 1,
           "text": "Canonical Prelude/Core runtime compiles once into content-addressed rlib artifacts keyed by (compiler version, toolchain, target, profile), stored in the existing cache/store (no new store); thin generated programs link against them instead of recompiling PRELUDE_PARTS.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:44.996Z"
+          "evidence": "Runtime rlib artifacts are now produced and linked. Before: 91 key dirs in ~/.cache/jet/runtime, 0 rlibs (cache 100% dead since #1785). After: ~/.cache/jet/runtime/<key>/libjet_runtime.rlib exists; JET_RUNTIME_CACHE_STATS shows 'store' on first compile of a runtime-block variant then 'hit' on every later compile sharing it (measured 2026-08-19: run1 store 41s, run2 hit 35s, run3 hit 36s on a per-edit rebuild loop). Key inputs: CACHE_SCHEMA jet-runtime-rlib-v4 + compiler/toolchain identity + target + profile flags, one crate (jet_runtime); no new store. Lane-measured rustc leg with the real default flags (-O -C strip=symbols -C lto=thin, rustc 1.94.1), monolith vs cached rlib + thin crate: no-Core hello 2345ms -> 785ms (3.0x), Core-heavy encoding_base_expert 4.07MB generated 6270ms -> 1021ms (6.1x); release opt-level=3 2343->768ms and 6163->1058ms; cold rlib build 2771ms / 12680ms once per variant. Both split binaries run byte-identical to the monolith (stdout, stderr, exit). The two-crate plan step is recorded as impossible (E0117 orphan impls); one merged crate shipped instead.",
+          "at": "2026-08-19T22:21:45.693Z"
         },
         {
           "n": 2,
@@ -135642,7 +135647,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:00.157Z",
-      "updated": "2026-08-19T22:07:41.025Z",
+      "updated": "2026-08-19T22:21:46.493Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -136232,6 +136237,67 @@
       "needsAcceptance": false,
       "created": "2026-08-19T22:02:08.777Z",
       "updated": "2026-08-19T22:02:40.302Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c03pfb56",
+      "num": 2083,
+      "title": "Two front-end passes per build: reuse one bundle for the cache key and the compile",
+      "body": "Found while measuring #2074 (2026-08-19). A warm jet build runs the front end TWICE and throws the first result away. Pass 1 is native_cache_key (Source/CmdCompile.rs:524-537 -> :3538 native_cache_key_with_toolchain), which does load_entry_with_overlay + seed_build_facts + Sema::check_bundle(Check) + cached_runtime_fingerprint + corelib_emission_fingerprint + manifest_fingerprint + ast_cache_key, and it is NOT lapped by PhaseTiming so it is invisible in jet-timing.json. Pass 2 is the real compile at :636-649 (compile_programmable_build_opts_...), which recomputes load + sema + build plan + codegen from scratch. The front-end short-circuit at :551 is gated on cmd == run, so build never takes it (comment at :546 says build stays on the full path to print effect and capability summaries). Reusing one bundle for both the key and the compile is the actual fix for warm build latency; #2074's rlib cache only pays on a BuildCache miss, so it cannot touch this. Owner directive 2026-08-19: permanently speed up development and the test suites.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "## Outcome\nOne front end per build. The bundle that produces the native cache key IS the bundle the compile uses, so a build never loads and checks the program twice.\n\n## Route\n1. Make native_cache_key_with_toolchain (Source/CmdCompile.rs:3538) return its checked bundle and build facts alongside the key, instead of dropping them.\n2. Thread that bundle into the compile path at CmdCompile.rs:636-649 so compile_programmable_build_opts_* accepts an already-checked bundle and skips its own load and sema.\n3. Keep the effect and capability summaries a build prints (the reason :551's short-circuit is run-only) by rendering them from the reused bundle.\n4. Lap the reused pass with PhaseTiming so jet-timing.json accounts for the whole build, not just pass 2 (this is why the cost was invisible).\n5. Verify the key still describes exactly what gets compiled: the key must be computed from the same bundle that is then emitted, which is strictly safer than today's recompute.\n\n## Not building\nNo new cache, no change to the AST cache key inputs, no change to what a cache hit returns. Do not delete the summaries a build prints.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A build loads and type-checks the program exactly once: the bundle behind the native cache key is the bundle the compile emits, proven by a counter or trace showing one load and one sema per jet build invocation",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:21:43.269Z"
+        },
+        {
+          "n": 2,
+          "text": "Warm and cold jet build wall time drop is measured before and after on the same machine and recorded in the card log, with the phase breakdown from jet-timing.json now accounting for the whole build",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:21:43.874Z"
+        },
+        {
+          "n": 3,
+          "text": "The effect and capability summaries a build prints are unchanged, and the cache key still describes exactly the program that gets compiled (same bundle in, same key out)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:21:44.474Z"
+        },
+        {
+          "n": 4,
+          "text": "No behavioral change to cache hits or to generated program bytes: a golden-sampled set of examples emits byte-identical Rust before and after",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:21:45.064Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T22:21:12.640Z",
+      "updated": "2026-08-19T22:21:45.065Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -182541,6 +182607,69 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T22:21:46.493Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c09otnjg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T22:21:45.694Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09otnjg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T22:21:45.065Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03pfb56",
+      "note": "#4 No behavioral change to cache hits or to generated program b"
+    },
+    {
+      "at": "2026-08-19T22:21:44.474Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03pfb56",
+      "note": "#3 The effect and capability summaries a build prints are uncha"
+    },
+    {
+      "at": "2026-08-19T22:21:43.874Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03pfb56",
+      "note": "#2 Warm and cold jet build wall time drop is measured before an"
+    },
+    {
+      "at": "2026-08-19T22:21:43.270Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03pfb56",
+      "note": "#1 A build loads and type-checks the program exactly once: the "
+    },
+    {
+      "at": "2026-08-19T22:21:42.686Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c03pfb56",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-19T22:21:12.641Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c03pfb56",
+      "note": "Two front-end passes per build: reuse one bundle for the cache key and the compile"
+    },
+    {
+      "at": "2026-08-19T22:18:35.815Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-19T22:18:35.815Z"
+    },
+    {
       "at": "2026-08-19T22:07:41.025Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -185976,69 +186105,6 @@
       "action": "card.criteria-add",
       "ref": "c0xha49b",
       "note": "#6 The corpus contains frozen tasks covering repository discove"
-    },
-    {
-      "at": "2026-08-19T13:35:13.593Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0uy7emy",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:34:45.800Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0uy7emy",
-      "note": "#6 The corpus runs on the frozen native OS matrix (the OS list "
-    },
-    {
-      "at": "2026-08-19T13:34:45.349Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0uy7emy",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:34:44.742Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c03g2e1j",
-      "note": "Context economy: measure tokens per unit of progress"
-    },
-    {
-      "at": "2026-08-19T13:34:44.310Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c00zl0f2",
-      "note": "#7 Token counts per completed task and per repair round are rec"
-    },
-    {
-      "at": "2026-08-19T13:34:43.879Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00zl0f2",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:34:43.271Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c07j54y0",
-      "note": "Agent executor: dry-run plan"
-    },
-    {
-      "at": "2026-08-19T13:34:42.817Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0vrs94y",
-      "note": "#9 Targeted tests prove plan-vs-receipt digest equality and tha"
-    },
-    {
-      "at": "2026-08-19T13:34:42.221Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0vrs94y",
-      "note": "#8 When a grant cannot be enforced on the host, plan() reports "
     }
   ],
   "nextNum": 368,
