@@ -1271,11 +1271,10 @@ fn jet_jit_tls_client_config_with_version_bounds(
 
 fn tls_client_stream_result(
     stream: i64,
-    server_name: i64,
+    server_name: String,
     config: Option<i64>,
     deadline: Option<i64>,
 ) -> Result<JetTLSStream, JetNetError> {
-    let server_name = clone_string(server_name);
     let config = match config {
         Some(handle) => match tls_client_config(handle) {
             Some(config) => Some(config),
@@ -1300,7 +1299,12 @@ fn tls_client_stream_result(
 }
 
 fn tls_client_result(stream: i64, server_name: i64, config: Option<i64>, deadline: Option<i64>) -> i64 {
-    let result = tls_client_stream_result(stream, server_name, config, deadline);
+    // I9: only the resident tier hands the name over as a JIT heap handle, so
+    // the handle→String read happens at this raw-host boundary. The CtValue
+    // adapter (`runtime_tls_client`) passes the owned String straight through —
+    // the interpreter legs run with no active resident runtime, where a heap
+    // round-trip silently reads back "".
+    let result = tls_client_stream_result(stream, clone_string(server_name), config, deadline);
     map_net_ok(result, |stream| {
         push_handle(NetHttpHandle::TLSStream(Arc::new(Mutex::new(stream))))
     })
@@ -3042,7 +3046,7 @@ pub(crate) fn runtime_tls_client(
     config: Option<i64>,
     deadline: Option<i64>,
 ) -> CtValue {
-    match tls_client_stream_result(stream, alloc_string(server_name), config, deadline) {
+    match tls_client_stream_result(stream, server_name, config, deadline) {
         Ok(stream) => tls_stream_result(stream),
         Err(error) => CtValue::failed(Box::new(net_error_value(error))),
     }
