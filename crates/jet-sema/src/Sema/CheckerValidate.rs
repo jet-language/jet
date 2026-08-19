@@ -331,6 +331,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         inline_foreign: None,
         undo: None,
         markers: Vec::new(),
+        compiler_generated: false,
         body,
     };
 

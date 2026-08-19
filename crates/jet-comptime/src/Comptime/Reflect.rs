@@ -2458,6 +2458,7 @@ mod tests {
             gc_scope: false,
             kernel: None,
             markers: Vec::new(),
+            compiler_generated: false,
             body: Vec::new(),
         }
     }

@@ -446,6 +446,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         // getter: it is an internal method, not a second user-facing memo
         // site, and method lowering has no function-result cache.
         markers: Vec::new(),
+        compiler_generated: false,
         body: vec![Stmt::Return(Some(body_expr), span)],
     }
 }

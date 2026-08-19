@@ -237,6 +237,7 @@ impl<'a> Parser<'a> {
                     inline_foreign: None,
                     undo: None,
                     markers: Vec::new(),
+                    compiler_generated: false,
                     body,
                 });
             }
@@ -297,6 +298,7 @@ impl<'a> Parser<'a> {
                 inline_foreign: None,
                 undo: None,
                 markers: Vec::new(),
+                compiler_generated: false,
                 body,
             })
         }

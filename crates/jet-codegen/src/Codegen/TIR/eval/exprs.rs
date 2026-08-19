@@ -8260,11 +8260,13 @@ impl<'a> EvalCtx<'a> {
                 .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { prompt } => {
                 // Ambient input is a runtime-only expression. The quick-run
-                // evaluator must decline it at build time, but runtime deopt
-                // uses the same Core I/O adapter as an ordinary `core.term.input`
-                // call so default `jet run` does not turn the prelude into an
-                // AOT-only surface.
-                if !self.runtime_execution {
+                // evaluator must decline it at build time; a REPL/notebook turn
+                // marshals through the same authorized Core seam as a qualified
+                // `core.term.input` call (lexical grant + invocation policy +
+                // the session's stdin provider), and runtime deopt uses the
+                // same Core I/O adapter so default `jet run` does not turn the
+                // prelude into an AOT-only surface (I9).
+                if !self.runtime_execution && !self.repl_mode {
                     return Err(unsupported("expr `AmbientInput`", self.span()));
                 }
                 let argv = prompt
@@ -8273,6 +8275,15 @@ impl<'a> EvalCtx<'a> {
                     .transpose()?
                     .into_iter()
                     .collect();
+                if !self.runtime_execution {
+                    return self.apply_core_call_with_policy(
+                        "core.term",
+                        "input",
+                        argv,
+                        self.span(),
+                        Some(&expr.ty),
+                    );
+                }
                 let mut sink = self
                     .sink
                     .as_ref()

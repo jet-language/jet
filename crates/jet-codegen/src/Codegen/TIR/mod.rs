@@ -2548,6 +2548,11 @@ pub struct TFunc {
     /// D-COV1: the 1-based Jet source line of this function's name, for the
     /// `jet_cov(line)` coverage probe. Only read in coverage mode.
     pub line: usize,
+    /// Compiler-synthesized function (auto-derive/serde builders). The stack
+    /// frame keeps its file/line/name attribution, but never embeds the raw
+    /// source line — that line is a declaration the user wrote for something
+    /// else (e.g. a `#UnitFamily(...)` marker), not this function.
+    pub synthetic: bool,
     /// c109 Phase 18: an `#Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
     /// (the `unsafe ` keyword prefixes the signature), so the body may use gated pointer
     /// ops directly — calling it is already gated to an `#Unsafe` block in sema (E3103).

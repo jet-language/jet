@@ -93,6 +93,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         inline_foreign: None,
         undo: None,
         markers: Vec::new(),
+        compiler_generated: false,
         body: Vec::new(),
     }
 }

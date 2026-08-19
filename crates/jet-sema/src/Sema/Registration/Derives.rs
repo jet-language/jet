@@ -554,6 +554,7 @@ fn generated_func(
     function.params = params;
     function.return_type = return_type;
     function.return_type_span = function.return_type.as_ref().map(|_| span);
+    function.compiler_generated = true;
     function
 }
 

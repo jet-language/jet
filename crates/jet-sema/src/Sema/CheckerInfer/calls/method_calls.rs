@@ -2434,11 +2434,17 @@ impl<'a> Checker<'a> {
                         if let Some(len) =
                             left_len.combine(&right_len, crate::AST::MeasureRule::Add)
                         {
-                            *recv_type_out = Some("List".to_string());
-                            return Some(Type::FixedList {
+                            // The call rides the ordinary builtin collection
+                            // path (`recv_type` stays None — the TIR subset
+                            // gate and lowering key builtins on that), while
+                            // the recorded return carries the combined length
+                            // measure so emit picks the fixed-shape concat.
+                            let ret = Type::FixedList {
                                 elem: left_elem.clone(),
                                 len,
-                            });
+                            };
+                            *resolved_ret_out = Some(ret.clone());
+                            return Some(ret);
                         }
                     }
                 }

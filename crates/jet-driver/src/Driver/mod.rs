@@ -5761,6 +5761,7 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         inline_foreign: None,
         undo: None,
         markers: Vec::new(),
+        compiler_generated: false,
         body,
     }));
 }

@@ -473,7 +473,11 @@ pub(crate) fn resolve_builtin_op(
         ("count", 1) if is_list => TBuiltinOp::CountList,
         ("count", 1) if is_string => TBuiltinOp::StringCount,
         ("extend", 1) if is_list => TBuiltinOp::ExtendList,
-        ("concat", 1) if is_list => TBuiltinOp::ConcatList,
+        // D-TYPE2-MEASURE1=A: fixed lists join through the same builtin; emit
+        // picks the const-generic fixed shape from the FixedList types.
+        ("concat", 1) if is_list || matches!(&rty, Some(Type::FixedList { .. })) => {
+            TBuiltinOp::ConcatList
+        }
         ("is_alphabetic", 0) if is_string => TBuiltinOp::StringIsAlphabetic,
         ("is_numeric", 0) if is_string => TBuiltinOp::StringIsNumeric,
         ("is_whitespace", 0) if is_string => TBuiltinOp::StringIsWhitespace,

@@ -168,6 +168,7 @@ pub(crate) fn lower_error_conv(
         clone_types: Vec::new(),
         is_main: false,
         line: cov_line(cx, conversion.from_span.start),
+        synthetic: false,
         is_unsafe: false,
         unsafe_gate: None,
         is_pure: true,
@@ -293,6 +294,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),
+        synthetic: f.compiler_generated,
         is_unsafe: f.is_unsafe,
         unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
         is_pure: f.is_pure,
@@ -806,6 +808,7 @@ pub(crate) fn lower_method_for_owner(
         clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),
+        synthetic: f.compiler_generated,
         is_unsafe: f.is_unsafe,
         unsafe_gate: unsafe_gate(f, cx, env.sentries_enabled),
         is_pure: f.is_pure,
@@ -975,6 +978,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         clone_types,
         is_main: false,
         line: cov_line(cx, f.name_span.start),
+        synthetic: f.compiler_generated,
         // The trait-method `unsafe` prefix rides on `TFuncKind::TraitMethod.is_unsafe`
         // (the dedicated trait-method emit reads it there); the top-level flag is unused
         // for this kind, but keep it consistent.
@@ -1072,6 +1076,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         clone_types: Vec::new(),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
+        synthetic: f.compiler_generated,
         // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
         // Same for `#Inline`/`#Inline(Always)` — a delegation method is pure forwarding,
         // never parsed with an inline marker.

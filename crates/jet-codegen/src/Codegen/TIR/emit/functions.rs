@@ -11,12 +11,19 @@ use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TStmt;
 
 fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
-    let source_line = cx
-        .src
-        .lines()
-        .nth(tir.line.saturating_sub(1))
-        .unwrap_or_default()
-        .trim_end();
+    // A synthesized function keeps file/line/name attribution, but the source
+    // line at that position belongs to the declaring item (a struct header, a
+    // `#UnitFamily(...)` marker), not to this function — never embed it (I3:
+    // markers erase in codegen).
+    let source_line = if tir.synthetic {
+        ""
+    } else {
+        cx.src
+            .lines()
+            .nth(tir.line.saturating_sub(1))
+            .unwrap_or_default()
+            .trim_end()
+    };
     let pad = "    ".repeat(indent);
     out.push_str(&format!(
         "{pad}let __jet_stack_frame = crate::jet_stack_enter({}, {}, {}, {});\n",

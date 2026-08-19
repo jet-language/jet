@@ -152,6 +152,7 @@ impl<'a> Parser<'a> {
                 }),
                 undo: None,
                 markers: Vec::new(),
+                compiler_generated: false,
                 body: Vec::new(),
             };
             self.apply_function_markers(function, markers)

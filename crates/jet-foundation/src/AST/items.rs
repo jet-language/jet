@@ -1157,6 +1157,10 @@ pub struct Func {
     /// reads; this is the record every *consumer* reads — formatter, reflection,
     /// and explain — so none of them has to rebuild a marker from flags.
     pub markers: Vec<Marker>,
+    /// Compiler-synthesized callable (auto-derive/serde builders). Carried so
+    /// codegen never attributes a raw source line — e.g. a `#UnitFamily(...)`
+    /// marker line — to a function the user never wrote (stack-frame text).
+    pub compiler_generated: bool,
     pub body: Vec<Stmt>,
 }
 
@@ -1218,6 +1222,7 @@ impl Func {
             inline_foreign: None,
             undo: None,
             markers: Vec::new(),
+            compiler_generated: false,
             body,
         }
     }
