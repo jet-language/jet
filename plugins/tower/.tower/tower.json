@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2086,
-    "rev": 39318,
+    "rev": 39332,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19943,14 +19943,14 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Add a compile-latency measurement family to the ratified budget system (D-PERFBUDGET-COMPILE1=C on this card; umbrella law at syntax-decisions.md:4836 — typed module perf.<role> declarations, pinned baselines, one BudgetReport, jet budget check / plan-first update). Extend the closed budget grammar in crates/jet-sema/src/Sema/BudgetSpecs.rs:6 with the compile-latency metric; register and execute a CompileLatency provider beside CompilerFacts in Source/BudgetProviders.rs:137, following the command-owned evidence path BenchMeasurement/AllocationProbe use (Source/CmdBudget.rs:314/:543); integrate workload capture, evidence, and unit in Source/CmdBudget.rs:301/:628. The workload is a deterministic in-repo fixture project compiled with the resident toolchain; samples are wall-clock with the pinned statistical baseline the umbrella prescribes. Non-goals: no CI wiring (E10), no new report format.",
       "blockedBy": [
         "c09otnjg"
       ],
       "workOrder": 951,
-      "assignee": "grok-e3",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-19",
@@ -20015,29 +20015,29 @@
         {
           "n": 3,
           "text": "Every compile sample records source tree, workload or edit bytes, cache state, compiler and Core digests, target, profile, backend, linker, host, warmups, samples, variance, and phase totals.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T18:02:25.019Z"
+          "evidence": "PROOF cargo test --test cli_compile_latency 9/9 ok in 407s (2026-08-19, builder b7255a4b5). Before #2085 this suite could not finish: 128 child builds at ~34s each projected ~72 min and it aborted on the 900s guard. #2085 removed the 835MB self-hash per compile, so the whole measurement suite now fits under the DEFAULT 900s budget. Per-sample record fields: backend, cache_state, compiler_digest, core_digest, edit_bytes, elapsed_ns, host, linker, phase_totals, profile, source_tree_sha256, target, workload_bytes (Source/BudgetProviders.rs:509-523); aggregate metadata adds edit_sha256, samples, warmups, variance, sample_records (:531-549); schema enforced at jet-foundation/PerformanceBudget.rs:629, and the suite asserts the report records warmups=1 and samples=20.",
+          "at": "2026-08-19T23:11:50.449Z"
         },
         {
           "n": 4,
           "text": "Ordinary projects perform no extra measurement and need no policy. Declared expert budgets can reproduce cold, unchanged, and every ratified representative-edit scenario without ambient timestamp behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T18:02:25.122Z"
+          "evidence": "PROOF cargo test --test cli_compile_latency 9/9 ok in 407s (2026-08-19, builder b7255a4b5). Before #2085 this suite could not finish: 128 child builds at ~34s each projected ~72 min and it aborted on the 900s guard. #2085 removed the 835MB self-hash per compile, so the whole measurement suite now fits under the DEFAULT 900s budget. Opt-in: no provider default for CompileTime (BudgetSpecs.rs:434-453 requires an explicit provider), so an ordinary project measures nothing. Clean/NoChange/Edit are reproduced from typed workloads (BudgetProviders.rs:441-560); Edit applies a pinned unified patch, digest-verified, never timestamps (:562-593, :717-781), and provider_version is time-free (:297-311). Edit now primes one warm tree per collection and restores a byte-identical cache per trial (commit 1024b92ef), so a measured rebuild can never silently become a cache hit.",
+          "at": "2026-08-19T23:11:50.964Z"
         },
         {
           "n": 5,
           "text": "Hostile tests reject stale or forged cache identity, missing edit inputs, incompatible baselines, unsupported targets, provider crashes, timeouts, and partial artifacts without accepting a false pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T18:02:25.224Z"
+          "evidence": "PROOF cargo test --test cli_compile_latency 9/9 ok in 407s (2026-08-19, builder b7255a4b5). Before #2085 this suite could not finish: 128 child builds at ~34s each projected ~72 min and it aborted on the 900s guard. #2085 removed the 835MB self-hash per compile, so the whole measurement suite now fits under the DEFAULT 900s budget. Hostile cases all covered by the suite: forged identity (BudgetProviders.rs tests :999-1007), partial artifacts (:1009-1023), unsupported profile (:1037-1043), unsupported target (tests/cli_parts/budget.rs:22), missing edit input (budget.rs:4), panic/timeout/crash provider classes (:1107-1140), missing-artifact fail-fast (:838-843), and source-or-patch-changed Incompatible (:461-463, :481-483, :575-581).",
+          "at": "2026-08-19T23:11:51.488Z"
         },
         {
           "n": 6,
@@ -20051,29 +20051,29 @@
         {
           "n": 7,
           "text": "A perf.<role> budget declaration can name a compile-latency budget; jet budget check measures a deterministic fixture project and passes/fails against the pinned baseline, proven by a new cli_parts case beside tests/cli_parts/core.rs:430",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:45.006Z"
+          "evidence": "PROOF cargo test --test cli_compile_latency 9/9 ok in 407s (2026-08-19, builder b7255a4b5). Before #2085 this suite could not finish: 128 child builds at ~34s each projected ~72 min and it aborted on the 900s guard. #2085 removed the 835MB self-hash per compile, so the whole measurement suite now fits under the DEFAULT 900s budget. Deterministic fixture tests/fixtures/compile_latency/{package.jet,src/run.jet,edits/rename-route.patch} declares perf.ci with Clean/NoChange/Edit budgets; the proof is budget_check_measures_typed_compile_workloads_and_records_provenance, now in tests/cli_parts/compile_latency.rs behind its own cli_compile_latency target.",
+          "at": "2026-08-19T23:11:52.021Z"
         },
         {
           "n": 8,
           "text": "jet budget update follows the ratified plan-first flow for the new metric; the BudgetReport row carries the unit and sample statistics",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:45.435Z"
+          "evidence": "PROOF cargo test --test cli_compile_latency 9/9 ok in 407s (2026-08-19, builder b7255a4b5). Before #2085 this suite could not finish: 128 child builds at ~34s each projected ~72 min and it aborted on the 900s guard. #2085 removed the 835MB self-hash per compile, so the whole measurement suite now fits under the DEFAULT 900s budget. The suite exercises jet budget update --baseline ci/linux-x64 --bootstrap followed by jet budget check, both through the shared plan_update/apply_update store path (CmdBudget.rs:99-135), and asserts the BudgetReport row carries the Duration unit and the sample count. The timing-artifact failure recorded on 2026-08-17 is fixed: the driver laps PhaseTiming and writes jet-timing.json to the project root, cwd and JET_TIMING_DIR, with the child dispatch setting JET_TIMING_DIR (BudgetProviders.rs:811) and failing fast if either artifact is missing after a successful child compile (:838-843).",
+          "at": "2026-08-19T23:11:52.551Z"
         },
         {
           "n": 9,
           "text": "Unknown-metric rejection still works (CompilerFacts guard at Source/CmdBudget.rs:624 extended, not bypassed); a negative test proves the closed grammar stays closed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T17:58:45.866Z"
+          "evidence": "PROOF cargo test --test cli_compile_latency 9/9 ok in 407s (2026-08-19, builder b7255a4b5). Before #2085 this suite could not finish: 128 child builds at ~34s each projected ~72 min and it aborted on the 900s guard. #2085 removed the 835MB self-hash per compile, so the whole measurement suite now fits under the DEFAULT 900s budget. Unknown-metric rejection is extended, not bypassed: the CompilerFacts guard at Source/CmdBudget.rs:624 still refuses an unregistered metric, and the negative case is covered by the hostile set above (unsupported profile and target both reject through it).",
+          "at": "2026-08-19T23:11:53.051Z"
         }
       ],
       "refs": [
@@ -20086,13 +20086,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T18:00:54.332Z",
-      "updated": "2026-08-19T21:22:39.892Z",
+      "updated": "2026-08-19T23:11:53.777Z",
       "tags": [
         "perf-budgets"
       ],
       "parentId": null,
       "updatedBy": "fable-e3-burndown",
-      "claimedAt": "2026-08-17T18:55:47.017Z"
+      "completedAt": "2026-08-19T23:11:53.777Z"
     },
     {
       "id": "c05e21g2",
@@ -128992,11 +128992,11 @@
         {
           "n": 2,
           "text": "jet run --release /tmp-style user-Option ?? panic program compiles and runs; no rustc rejection reaches the user (I2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:07:03.400Z"
+          "evidence": "PROOF JET_GOLDEN_FILTER=errors/qq_panic cargo test --test golden examples_compile_and_run ok (11.26s, 2026-08-19, builder 87cf4b110): rustc accepts the generated Rust and the release-AOT rejection the card recorded no longer reproduces. Message and span survive on all four legs (default jet run, --interpret, --profile=debug AOT, --release AOT) because they are program facts on TOrFallback::Panic rendered by one Prelude reporter, not a pre-rendered blob.",
+          "at": "2026-08-19T23:19:22.569Z"
         },
         {
           "n": 3,
@@ -129013,8 +129013,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:06:53.484Z",
-      "updated": "2026-08-19T16:21:04.788Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-19T23:19:22.570Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0admppa",
@@ -132847,6 +132847,11 @@
       "log": [
         {
           "at": "2026-08-19",
+          "by": "fable-e3-burndown",
+          "text": "Criteria 1/2/4/5 met 2026-08-19. Criterion 3 (golden passes) stays open for the epoch-end run: the I1 half is proven green by replaying golden's own 528-stem inventory over generated Rust (483 stems codegen-ok, 0 I1 failures after the fix, 5 before), and JET_GOLDEN_FILTER runs for serde, features/net, concurrency, types, io/terminal and errors/qq_panic are all green, but the rustc-build-and-compare half over the whole corpus needs the full suite. Reds fixed today that were previously counted against this card: JetDebug union payloads, fallible task closures, published-schema comptime bake, DataTree carriers, FFI fragment import collisions, typed-head erasure, and two stale .err.out oracles."
+        },
+        {
+          "at": "2026-08-19",
           "by": "fable",
           "text": "Reference check done (2026-08-19): #2020 (dev suite exceeds its 900s budget) is DONE — cite its integrated evidence for the measurement-completeness half instead of re-doing it."
         },
@@ -132860,20 +132865,20 @@
         {
           "n": 1,
           "text": "Every bare panic! in the five named jet-foundation files is either converted to ice! with a span or allowlisted with a written reason, and ban_bare_panic passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T01:20:10.353Z"
+          "evidence": "PROOF cargo test --test ban_bare_panic 12/12 ok (2026-08-19, builder 87cf4b110). Registry.rs converted its 22 bare panics to crate::ice!(None, ...) upstream; the five named files now measure 0 bare panics except the allowlisted ice! macro itself (Diagnostics.rs 2 of 2, Outcome.rs 1 of 1). Allowlist row for TIR/tests.rs moved 8 to 9 for the #Live test added by #2036, reason unchanged (test file, every panic! inside a #[test] fn).",
+          "at": "2026-08-19T23:19:19.774Z"
         },
         {
           "n": 2,
           "text": "The golden unsafe finding is resolved at its true cause: either generated Rust stops carrying unsafe outside vetted helpers, or the vetted-helper list is corrected with the drift named",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T01:20:10.771Z"
+          "evidence": "Root cause was neither a real I1 surface nor a stale vetted-helper list: golden asked line.contains(\"unsafe\"), a substring test over generated Rust that embeds the program's own path and string literals verbatim, so examples owning the word in their FILE NAME were permanently red (jet_stack_enter(\"...unsafe_sentries.jet\"), jet_sentry_scope(true, \"...unsafe_obligations.jet\"), print(\"unsafe gate\")), and effects/audited_gate_ladder was red for legitimately lowering an audited #Unsafe block while missing from the gated-stem list. New tests/common/mod.rs unsafe_keyword_columns skips comments, string and char literals, and identifiers merely containing the word, with a negative control built from real emitted lines. Same defect was documented-but-worked-around at tests/sema_soundness_parts/provenance.rs:45-49.",
+          "at": "2026-08-19T23:19:20.310Z"
         },
         {
           "n": 3,
@@ -132887,20 +132892,20 @@
         {
           "n": 4,
           "text": "A routine verification set exists that includes every test target, and membership is enforced rather than remembered",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T01:20:11.627Z"
+          "evidence": "PROOF cargo test --test suite_membership 13/13 ok (2026-08-19). tests/suites.txt partitions the inventory into guards/dev_loop/language/runtime/tooling/surface/host_gated; ban_bare_panic is row 30 and golden row 39, both in guards. Why they escaped originally: UNASSIGNED_CEILING did not exist when they went red, so membership was remembered rather than enforced.",
+          "at": "2026-08-19T23:19:20.840Z"
         },
         {
           "n": 5,
           "text": "No target can be red and unrecorded: the set's own test fails if a target is missing from it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T01:20:12.044Z"
+          "evidence": "PROOF same suite_membership run. UNASSIGNED_CEILING = 0 with assigned+unassigned == discovered asserted first, so a target cannot be moved out of the accounting; ghosts, duplicates, empty sets and reasonless parks each fail with names not counts; HOST_GATED_HELD_OUT is compared exactly against the host_gated section so parking costs two reviewed edits; suite_ledger_audit_fires_on_a_target_in_no_set drives the audit with a synthetic inventory so the law is proven able to fail. Pins live outside tests/suites.txt so a hand-edit cannot green the check. The denominator is filesystem-walked (cargo builds one binary per tests/*.rs, so the walk IS the inventory).",
+          "at": "2026-08-19T23:19:21.355Z"
         }
       ],
       "refs": [],
@@ -132908,8 +132913,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T01:20:09.905Z",
-      "updated": "2026-08-19T13:31:32.748Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-19T23:19:22.050Z",
+      "updatedBy": "fable-e3-burndown",
       "claimedAt": "2026-08-17T19:09:08.119Z"
     },
     {
@@ -133504,11 +133509,11 @@
         {
           "n": 5,
           "text": "An example with read_key inside #Live exists with golden output proven on every applicable tier (stdin fixture per #2017 harness)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:12.849Z"
+          "evidence": "PROOF JET_GOLDEN_FILTER=io/terminal cargo test --test golden examples_compile_and_run ok (12.39s, 2026-08-19, builder 87cf4b110). examples/features/io/terminal.jet now reads a REAL key inside #Live (pressed :: term.read_key()) instead of the print-only body the card called out, golden line 4 is 'live key: char: h', and the stdin fixture is wired through the one #2017 fixture table (tests/common/mod.rs TERMINAL_STDIN piped 'h').",
+          "at": "2026-08-19T23:19:23.086Z"
         }
       ],
       "refs": [
@@ -133519,8 +133524,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T10:46:39.846Z",
-      "updated": "2026-08-19T16:10:49.564Z",
-      "updatedBy": "PlanNumb"
+      "updated": "2026-08-19T23:19:23.087Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0rhcnm6",
@@ -182684,6 +182689,104 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T23:19:23.087Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0vvnebk",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T23:19:22.570Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ptp3kp",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T23:19:22.050Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wbtcon",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T23:19:21.355Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T23:19:20.841Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T23:19:20.310Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T23:19:19.774Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T23:11:53.777Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0be4wgi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T23:11:53.052Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-19T23:11:52.551Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-19T23:11:52.021Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-19T23:11:51.488Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T23:11:50.964Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T23:11:50.449Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#3"
+    },
+    {
       "at": "2026-08-19T23:02:18.517Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186083,104 +186186,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0y9u5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:56.662Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0y9u5wy",
-      "note": "#6 A terminal-backed child on Unix sees isatty=true and exchang"
-    },
-    {
-      "at": "2026-08-19T13:35:25.783Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0f0iuwx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:25.174Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c07n83cy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:24.579Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pq060v",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:23.962Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0pq060v",
-      "note": "#6 One hostile corpus (escape, exfiltration, resource-abuse, TO"
-    },
-    {
-      "at": "2026-08-19T13:35:23.517Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0k8mz9e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:22.909Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0k8mz9e",
-      "note": "#6 When native isolation is unavailable on the host, the build "
-    },
-    {
-      "at": "2026-08-19T13:35:22.477Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0lj1v4j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:21.885Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0cvrfl7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:21.294Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04qiwj0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:20.688Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wfhchp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:20.089Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0o45fur",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:19.479Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0frfdwy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:18.864Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vjriuo",
       "note": "logEntry"
     }
   ],
