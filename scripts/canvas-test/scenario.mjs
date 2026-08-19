@@ -1231,6 +1231,13 @@ fn run() {
 }
 `);
     await ctx.openCanvas();
+    // `enum Choice` projects derived `encode`/`decode` graphs (13 and 27 nodes)
+    // that outweigh `choose` (7), so the editor's richest-graph default selects
+    // `decode` — whose own `if ==` dispatch node satisfies ctx.node("if ==").
+    // Without pinning the graph, every arm transaction carried
+    // graph_id=decode + the enum's span and was refused with a parse error
+    // instead of touching `choose`. Select the graph under test explicitly.
+    await ctx.switchGraph("choose");
     await expectConsumedDescriptor(ctx, "dispatch", { transaction: "insert_switch", glyph: "◇", defaultEditor: "pattern_arm" });
     let before = await ctx.source();
     await ctx.driver.evaluate(`window.prompt = () => "== .B(n)"`);
@@ -1282,6 +1289,10 @@ fn run() {
 }
 `);
     await ctx.openCanvas();
+    // Same derived-graph trap as pattern-arm-add-edit-remove: pin `choose` so
+    // the refusal proves the E0305 variant check, not a stray parse error from
+    // splicing an arm into the enum declaration.
+    await ctx.switchGraph("choose");
     const before = await ctx.source();
     await ctx.driver.evaluate(`window.prompt = () => "== .Missing(n)"`);
     const pos = await ctx.node("if ==");
