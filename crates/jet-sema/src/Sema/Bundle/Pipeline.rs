@@ -3079,6 +3079,18 @@ fn check_bundle_opts_for_output_inner(
     }) {
         used_core.insert("core.mem::pool_shared".to_string());
     }
+    // D-TYPE2-MEASURE1=A: `Vec<N>` and `Matrix<M, N>` are unqualified core
+    // generics, so a program can name them — and lower `Matrix * Matrix` to
+    // `core.compute::matmul` — without any `use core.compute` import for
+    // `collect_used_core` to see. Same forced-insert shape as D-MEM1 S6 above,
+    // and over-eager for the same harmless reason.
+    if bundle
+        .modules
+        .iter()
+        .any(|m| m.source.contains("Matrix<") || m.source.contains("Vec<"))
+    {
+        used_core.insert("core.compute::shape_alias".to_string());
+    }
     // D-VALIDATE1 (card #506): a `validate { … }` block synthesizes
     // `Type.validate(value)`, which returns `[jet_std::FieldError]` — same
     // forced-insert shape as D-CLIFLAG1/D-MEM1 S6 above, since declaring the
