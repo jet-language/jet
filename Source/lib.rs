@@ -429,6 +429,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile(
         remote_builder,
         profile,
         &BTreeMap::new(),
+        None,
     )
 }
 
@@ -444,6 +445,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
     remote_builder: Option<&str>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
@@ -458,6 +460,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
         remote_builder,
         profile,
         setting_overrides,
+        prepared,
     )
 }
 
@@ -537,6 +540,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
         remote_builder,
         profile,
         &BTreeMap::new(),
+        None,
     )
 }
 
@@ -552,6 +556,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
     remote_builder: Option<&str>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
@@ -566,7 +571,44 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         remote_builder,
         profile,
         setting_overrides,
+        prepared,
     )
+}
+
+/// #2083: run the programmable build front end once, up front.
+///
+/// `jet build` used to load and type-check its program twice — once to compute
+/// the native content-cache key and once to compile — and a third time to
+/// render the effect summary. The CLI now runs this instead: it computes the
+/// key from the returned bundle, renders the effect summary from the returned
+/// facts, and hands the value straight back to
+/// `compile_programmable_build_opts_with_builder_and_profile_and_settings`,
+/// which resumes the pipeline rather than restarting it. Because the key is
+/// hashed from the very bundle that is then emitted, it cannot describe a
+/// different program than the one compiled.
+///
+/// The front end runs behind the same `with_compiler_stack` seam as every
+/// other compiler entry point, so a `comptime` binding cannot observe a
+/// different Core API here than it does inside the compile (D-FRONTENDAPI1=A).
+pub fn prepare_programmable_build_front_end(
+    file: &str,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    let inputs = Driver::FrontEndInputs {
+        file: file.to_string(),
+        profile: profile.to_string(),
+        setting_overrides: setting_overrides.clone(),
+        locked,
+        web_target,
+        plugin_target,
+        cross_target: cross_target.map(str::to_string),
+    };
+    with_compiler_stack(move || Driver::prepare_build_front_end(inputs))
 }
 
 fn compile_programmable_build_opts_inner(
@@ -582,6 +624,7 @@ fn compile_programmable_build_opts_inner(
     remote_builder: Option<&str>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -597,6 +640,10 @@ fn compile_programmable_build_opts_inner(
                 )]
             })?;
         if let Some(checked_workspace) = workspace_build_authority(file)? {
+            // A workspace build compiles each member behind its own authority
+            // boundary, so a front end prepared for the index entry is not the
+            // stage this path resumes. Drop it and let each member load its own.
+            drop(prepared);
             return compile_workspace_build_opts(
                 file,
                 grants,
@@ -618,7 +665,7 @@ fn compile_programmable_build_opts_inner(
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
             .collect();
-        let output = Driver::compile_bundle_path_build(
+        let output = Driver::compile_bundle_path_build_with_front_end(
             file,
             Driver::BuildRunOptions {
                 grants,
@@ -636,6 +683,7 @@ fn compile_programmable_build_opts_inner(
                 setting_overrides: setting_overrides.clone(),
                 remote,
             },
+            prepared,
         )?;
         if emit_generated {
             export_generated_sources(file, &output)?;
@@ -1728,16 +1776,29 @@ pub fn resolve_c_links_for_target(
 ) -> Result<Vec<String>, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let bundle = Loader::load_entry_with_overlay(file, None, false)?;
-        if !bundle.cffi.links_c() {
-            return Ok(Vec::new());
-        }
-        match target {
-            Some(target) => {
-                crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)
-            }
-            None => crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root),
-        }
+        resolve_c_links_for_bundle(&bundle, target)
     })
+}
+
+/// The same C-link resolution over a program the caller already loaded.
+///
+/// #2083: a build resolves its link flags from the one front end it ran
+/// instead of reopening and re-parsing the whole program. Link-arg resolution
+/// reads declared `cffi` facts and the project root — it does not descend the
+/// AST, so it needs no compiler stack of its own.
+pub fn resolve_c_links_for_bundle(
+    bundle: &AST::ProgramBundle,
+    target: Option<&str>,
+) -> Result<Vec<String>, Vec<Diagnostic>> {
+    if !bundle.cffi.links_c() {
+        return Ok(Vec::new());
+    }
+    match target {
+        Some(target) => {
+            crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)
+        }
+        None => crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root),
+    }
 }
 
 /// Compile for `jet test`: optional `main`, at least one test block required.

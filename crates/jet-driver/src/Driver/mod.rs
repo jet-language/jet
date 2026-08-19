@@ -2206,6 +2206,7 @@ pub fn query_build_plan_with_overlay(
         build_query_options(),
         Some((std::path::Path::new(file), source)),
         None,
+        None,
     )
     .map(|output| output.build.map(|build| build.plan))
 }
@@ -2240,6 +2241,122 @@ pub fn build_plan_json(plan: &crate::Comptime::Build::BuildPlan) -> String {
     )
 }
 
+/// #2083: the exact inputs a prepared front end was produced under.
+///
+/// A prepared front end may only be resumed by a compile that asks for the
+/// same program under the same facts. The compile compares this value against
+/// its own `BuildRunOptions` before resuming; a mismatch cannot produce wrong
+/// output, it only costs the second front end this seam exists to remove.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontEndInputs {
+    pub file: String,
+    pub profile: String,
+    pub setting_overrides: BTreeMap<String, String>,
+    pub locked: bool,
+    pub web_target: bool,
+    pub plugin_target: bool,
+    pub cross_target: Option<String>,
+}
+
+impl FrontEndInputs {
+    /// The front-end inputs a `compile_bundle_path_build` call implies. This is
+    /// the one place the correspondence between build options and front-end
+    /// inputs is written down, so a caller that prepares a front end and the
+    /// compile that resumes it cannot describe two different programs.
+    pub fn for_build(file: &str, options: &BuildRunOptions) -> Self {
+        Self {
+            file: file.to_string(),
+            profile: options.profile.clone(),
+            setting_overrides: options.setting_overrides.clone(),
+            locked: options.locked,
+            web_target: options.web_target,
+            plugin_target: options.plugin_target,
+            cross_target: options.cross_target.clone(),
+        }
+    }
+}
+
+/// #2083: one front end per build.
+///
+/// The build pipeline's first stage — load the build-entry closure, seed the
+/// one build-fact snapshot, run sema, classify diagnostics — used to run twice
+/// per `jet build`: once inside the CLI's native content-cache key computation
+/// and once inside the compile, which threw the first result away. This value
+/// is that stage's complete result. The native cache key is computed from
+/// `runtime_program()`, and `compile_bundle_path_build_with_front_end` resumes
+/// the pipeline from here, so the key names the program that is actually
+/// emitted instead of a second, independently reloaded copy of it.
+///
+/// The `PhaseTimer` starts here and is handed to the second half, so
+/// `jet-timing.json` accounts for the load and sema a build pays for.
+pub struct PreparedBuildFrontEnd {
+    inputs: FrontEndInputs,
+    bundle: crate::AST::ProgramBundle,
+    effect_facts: crate::Sema::SemIndexEffectFacts,
+    lints: Vec<Diagnostic>,
+    build_index: Option<usize>,
+    build_span: Option<crate::Diagnostics::Span>,
+    compile_mode: crate::Sema::CompileMode,
+    active_os: crate::Syntax::OSTarget,
+    build_stamp: jet_foundation::Facts::BuildStamp,
+    runtime_bundle_for_package: Option<crate::AST::ProgramBundle>,
+    runtime_source_paths: Vec<std::path::PathBuf>,
+    direct_package_overlay: Option<(std::path::PathBuf, String)>,
+    timing: bool,
+    timer: crate::PhaseTiming::PhaseTimer,
+}
+
+impl PreparedBuildFrontEnd {
+    /// The checked runtime program, when this front end checked it directly.
+    ///
+    /// `None` when a package build entry in another file was selected: the
+    /// checked bundle then describes the *build* program, and the runtime
+    /// program is still unchecked. Keying a content cache on it would let two
+    /// different runtime programs share one cache entry, and rendering the
+    /// effect summary from it would describe the wrong program.
+    pub fn runtime_program(&self) -> Option<&crate::AST::ProgramBundle> {
+        self.runtime_bundle_for_package
+            .is_none()
+            .then_some(&self.bundle)
+    }
+
+    /// The checked program a build will actually emit, when this one front end
+    /// already *is* that program.
+    ///
+    /// `None` when a `fn build` was selected: the plan may materialize
+    /// generated modules, and the emitted program is then the planned bundle
+    /// loaded after execution, not this one. Callers that must describe the
+    /// final program exactly — C link flags, the effect summary — use this
+    /// instead of `runtime_program`, which only has to name the same program
+    /// the content-cache key has always named.
+    pub fn emitted_program(&self) -> Option<&crate::AST::ProgramBundle> {
+        self.build_index.is_none().then(|| self.runtime_program()).flatten()
+    }
+
+    /// The effect facts this front end solved. The build effect summary is a
+    /// projection of these, so a caller never needs a third front end for it.
+    pub fn effect_facts(&self) -> &crate::Sema::SemIndexEffectFacts {
+        &self.effect_facts
+    }
+
+    /// Lap the shared stopwatch, so work a caller does between the two halves
+    /// (hashing the cache key) lands in the same `jet-timing.json` report.
+    pub fn lap(&mut self, phase: &str) {
+        if self.timing {
+            self.timer.lap(phase);
+        }
+    }
+}
+
+/// Run the build front end once, without compiling. The caller computes the
+/// native content-cache key from the result and hands it back to
+/// `compile_bundle_path_build_with_front_end`.
+pub fn prepare_build_front_end(
+    inputs: FrontEndInputs,
+) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    crate::run_compiler_work(move || prepare_build_front_end_on_compiler_stack(inputs, None))
+}
+
 /// D-BUILDENTRY1 complete driver staging: check root bundle, evaluate selected
 /// root `fn build`, materialize/re-check generated Jet, execute canonical graph,
 /// remove build-only entry, then codegen runtime program.
@@ -2247,7 +2364,19 @@ pub fn compile_bundle_path_build(
     file: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, None, None)
+    compile_bundle_path_build_inner(file, options, None, None, None)
+}
+
+/// #2083: `compile_bundle_path_build` resuming a front end the caller already
+/// ran through `prepare_build_front_end`. The prepared bundle is checked
+/// against `options` before it is resumed, so a stale or foreign front end
+/// falls back to a fresh one rather than compiling the wrong program.
+pub fn compile_bundle_path_build_with_front_end(
+    file: &str,
+    options: BuildRunOptions,
+    prepared: Option<PreparedBuildFrontEnd>,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner(file, options, None, None, prepared)
 }
 
 /// Compile a build entry from the checked source snapshot selected by an
@@ -2259,7 +2388,7 @@ pub fn compile_bundle_path_build_with_overlay(
     source: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, Some((source_path, source)), None)
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), None, None)
 }
 
 /// Compile one workspace member as a dependency authority boundary. Its
@@ -2270,7 +2399,7 @@ pub fn compile_bundle_path_build_as_dependency(
     file: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, None, Some(file))
+    compile_bundle_path_build_inner(file, options, None, Some(file), None)
 }
 
 /// Dependency variant of `compile_bundle_path_build_with_overlay`.
@@ -2280,7 +2409,7 @@ pub fn compile_bundle_path_build_as_dependency_with_overlay(
     source: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file))
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file), None)
 }
 
 /// The one build-graph seam. Every `compile_bundle_path_build*` facade and
@@ -2292,6 +2421,7 @@ fn compile_bundle_path_build_inner(
     options: BuildRunOptions,
     overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
+    prepared: Option<PreparedBuildFrontEnd>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
         compile_bundle_path_build_on_compiler_stack(
@@ -2299,6 +2429,7 @@ fn compile_bundle_path_build_inner(
             options,
             overlay,
             dependency_boundary,
+            prepared,
         )
     })
 }
@@ -2308,7 +2439,28 @@ fn compile_bundle_path_build_on_compiler_stack(
     options: BuildRunOptions,
     overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
+    prepared: Option<PreparedBuildFrontEnd>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    let inputs = FrontEndInputs::for_build(file, &options);
+    // #2083: resume the caller's front end only when it checked this program,
+    // under these facts, without an entry overlay. Anything else gets a fresh
+    // stage one — the same work this pipeline always did.
+    let prepared = match prepared {
+        Some(prepared) if overlay.is_none() && prepared.inputs == inputs => prepared,
+        _ => prepare_build_front_end_on_compiler_stack(inputs, overlay)?,
+    };
+    compile_build_from_front_end(file, options, overlay, dependency_boundary, prepared)
+}
+
+/// Stage one of the build pipeline, run exactly once per invocation.
+///
+/// Everything the second half needs is returned, including the stopwatch, so
+/// the front end a build pays for is neither repeated nor invisible.
+fn prepare_build_front_end_on_compiler_stack(
+    inputs: FrontEndInputs,
+    overlay: Option<(&std::path::Path, &str)>,
+) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    let file = inputs.file.as_str();
     // c121: with `JET_TIMING=1` every build writes `jet-timing.json`
     // (docs/spec/spec.md), and the `CompilerProbe` compile-latency budget
     // provider reads that report beside `build/jet-timing-backend.json`. This
@@ -2335,7 +2487,7 @@ fn compile_bundle_path_build_on_compiler_stack(
     let package_entry = package_build_entry_source(&bundle.project_root)?;
     let package_manifest_entry = direct_package_overlay.is_some();
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
-    let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
+    let active_os = crate::Syntax::OSTarget::active(inputs.cross_target.as_deref());
     let entry_path = std::path::Path::new(file);
     let entry_dir = entry_path
         .parent()
@@ -2383,7 +2535,7 @@ fn compile_bundle_path_build_on_compiler_stack(
         Err(error) if error.is_missing() => false,
         Err(error) => return Err(vec![error.diagnostic()]),
     };
-    let compile_mode = if options.plugin_target || has_package_entry || is_workspace_entry {
+    let compile_mode = if inputs.plugin_target || has_package_entry || is_workspace_entry {
         crate::Sema::CompileMode::Check
     } else {
         crate::Sema::CompileMode::Run
@@ -2392,15 +2544,15 @@ fn compile_bundle_path_build_on_compiler_stack(
     // Capture the provenance input once for this package build. Every build
     // entry, generated-source check, and final runtime bundle receives this
     // exact snapshot; only the lock boundary may probe the host.
-    let build_stamp = build_stamp_for_facts(&bundle.project_root, options.locked)?;
+    let build_stamp = build_stamp_for_facts(&bundle.project_root, inputs.locked)?;
     seed_build_facts_from_stamp(
         &mut bundle,
-        &options.profile,
-        &options.setting_overrides,
+        &inputs.profile,
+        &inputs.setting_overrides,
         &[],
         &build_stamp,
     )?;
-    bundle.web_partition_enforced = options.web_target;
+    bundle.web_partition_enforced = inputs.web_target;
     let local_build_indices = bundle.modules[bundle.entry]
         .items
         .iter()
@@ -2455,12 +2607,12 @@ fn compile_bundle_path_build_on_compiler_stack(
             bundle.active_os = active_os;
             seed_build_facts_from_stamp(
                 &mut bundle,
-                &options.profile,
-                &options.setting_overrides,
+                &inputs.profile,
+                &inputs.setting_overrides,
                 &[],
                 &build_stamp,
             )?;
-            bundle.web_partition_enforced = options.web_target;
+            bundle.web_partition_enforced = inputs.web_target;
         }
     }
     let local_build_indices = bundle.modules[bundle.entry]
@@ -2506,7 +2658,7 @@ fn compile_bundle_path_build_on_compiler_stack(
         &diags,
     );
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let mut lints = classify_diagnostics(
+    let lints = classify_diagnostics(
         &bundle,
         parse_teaching
             .into_iter()
@@ -2518,6 +2670,50 @@ fn compile_bundle_path_build_on_compiler_stack(
     if timing {
         timer.lap("sema");
     }
+    Ok(PreparedBuildFrontEnd {
+        inputs,
+        bundle,
+        effect_facts,
+        lints,
+        build_index,
+        build_span,
+        compile_mode,
+        active_os,
+        build_stamp,
+        runtime_bundle_for_package,
+        runtime_source_paths,
+        direct_package_overlay,
+        timing,
+        timer,
+    })
+}
+
+/// Stage two: evaluate the selected build entry, re-check the planned program,
+/// and emit. Resumes the front end `prepare_build_front_end_on_compiler_stack`
+/// produced — it never loads or type-checks the program a second time.
+fn compile_build_from_front_end(
+    file: &str,
+    options: BuildRunOptions,
+    overlay: Option<(&std::path::Path, &str)>,
+    dependency_boundary: Option<&str>,
+    prepared: PreparedBuildFrontEnd,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    let PreparedBuildFrontEnd {
+        inputs: _,
+        mut bundle,
+        effect_facts,
+        mut lints,
+        build_index,
+        build_span,
+        compile_mode,
+        active_os,
+        build_stamp,
+        mut runtime_bundle_for_package,
+        runtime_source_paths,
+        direct_package_overlay,
+        timing,
+        mut timer,
+    } = prepared;
     // The cache capability is constructed only after parser, sema, policy,
     // extension, and diagnostic classification have all succeeded.
     let front_end_completion = crate::Comptime::Build::FrontEndCompletion::all_complete();

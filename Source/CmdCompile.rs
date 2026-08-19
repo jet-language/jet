@@ -521,17 +521,19 @@ pub(crate) fn run_compile_cmd(
     } else {
         "run"
     };
-    let native_key = if output_name.is_none()
+    let cache_profile_tag = format!("{profile_tag};{}", setting_overrides_tag(setting_overrides));
+    // `jet run` needs its key *before* the front end: a hit below replays the
+    // cached binary without loading the program at all. `jet build` stays on
+    // the full path (its effect + capability summaries must print), so #2083
+    // computes its key further down, from the one front end a build actually
+    // runs, instead of from a second independently reloaded copy of the same
+    // program.
+    let mut native_key = if output_name.is_none()
         && !is_web
         && cross_target.is_none()
-        && (cmd == "build" || cmd == "run")
+        && cmd == "run"
     {
-        native_cache_key(
-            file,
-            profile.budget_name(),
-            &format!("{profile_tag};{}", setting_overrides_tag(setting_overrides)),
-            mode_tag,
-        )
+        native_cache_key(file, profile.budget_name(), &cache_profile_tag, mode_tag)
     } else {
         None
     };
@@ -594,6 +596,89 @@ pub(crate) fn run_compile_cmd(
     };
     let is_library = library_output.is_some();
 
+    // #2083: one front end per build. A `jet build` used to load and
+    // type-check its program three times — once inside `native_cache_key`,
+    // once inside the compile, and once more for the effect summary below —
+    // and throw the first two bundles away. Run the build pipeline's own first
+    // stage here, exactly once: the native cache key is hashed from the bundle
+    // this compile then emits, the compile resumes from that bundle instead of
+    // reloading, and the effect summary is projected from its facts. The shared
+    // `PhaseTimer` starts inside it, so `jet-timing.json` accounts for the load
+    // and sema a build pays for instead of hiding them.
+    //
+    // A failure here is deliberately dropped: the compile below runs the same
+    // stage and reports the real diagnostic through the one problem reporter.
+    let mut build_front_end = if !is_library
+        && output_name.is_none()
+        && (cmd == "build" || selects_build_entry)
+    {
+        jet::prepare_programmable_build_front_end(
+            file,
+            locked,
+            is_web,
+            is_plugin,
+            cross_target,
+            profile.budget_name(),
+            setting_overrides,
+        )
+        .ok()
+    } else {
+        None
+    };
+    if cmd == "build" && output_name.is_none() && !is_web && cross_target.is_none() {
+        native_key = match build_front_end
+            .as_ref()
+            .and_then(|prepared| prepared.runtime_program())
+        {
+            // Same bundle in, same key out: the key names the exact program
+            // this invocation checked and is about to hand to codegen, so it
+            // cannot describe a program the compile did not build.
+            Some(program) => native_cache_key_for_program(
+                file,
+                program,
+                &cache_profile_tag,
+                mode_tag,
+                native_toolchain_identity(),
+            ),
+            // A package build entry lives in another file, so the prepared
+            // bundle describes the *build* program and the runtime program is
+            // still unchecked. Keying on it would let two different runtime
+            // programs share one cache entry, so that shape keeps its own key
+            // pass over the runtime program.
+            None => native_cache_key(file, profile.budget_name(), &cache_profile_tag, mode_tag),
+        };
+        if let Some(prepared) = build_front_end.as_mut() {
+            prepared.lap("cache_key");
+        }
+    }
+    // D-EFFBUDGET1's summary is a projection of the checked program, so project
+    // it from the front end above rather than running a third one for it. Taken
+    // before the compile consumes the bundle; printed in its original place.
+    //
+    // `emitted_program`, not `runtime_program`: when a `fn build` is selected
+    // the emitted program is the planned bundle (with generated modules), and
+    // the historic check-only pass ran after the build, so only a build that
+    // never planned may reuse this bundle and still print the same summary.
+    let reused_package_effects = build_front_end.as_ref().and_then(|prepared| {
+        let program = prepared.emitted_program()?;
+        let facts = prepared.effect_facts();
+        Some((
+            jet::EffectBudget::compute_package_effects(
+                program,
+                &facts.solved,
+                &facts.summaries,
+            ),
+            facts.fact_registry.clone(),
+        ))
+    });
+    // S59: same story for the C link flags — resolve them from the one loaded
+    // program instead of reopening and re-parsing it. E3201 still surfaces from
+    // its original place, after the compile succeeds.
+    let reused_clinks = build_front_end
+        .as_ref()
+        .and_then(|prepared| prepared.emitted_program())
+        .map(|program| jet::resolve_c_links_for_bundle(program, cross_target));
+
     // D-LINTPOLICY1=A (the override law): visible lints from this compile,
     // captured here (out of the `match` arm's scope) so the `policy.lints`
     // deny-path enforcement below can see them alongside the already-loaded
@@ -632,6 +717,7 @@ pub(crate) fn run_compile_cmd(
             remote_builder,
             profile.budget_name(),
             setting_overrides,
+            build_front_end.take(),
         )
     } else if cmd == "build" || selects_build_entry {
         jet::compile_programmable_build_opts_with_builder_and_profile_and_settings(
@@ -646,6 +732,7 @@ pub(crate) fn run_compile_cmd(
             remote_builder,
             profile.budget_name(),
             setting_overrides,
+            build_front_end.take(),
         )
     } else if is_web {
         jet::compile_web_with_gates_and_settings(file, gates, setting_overrides)
@@ -713,7 +800,9 @@ pub(crate) fn run_compile_cmd(
                 }
                 // S59 (E2-M14): resolve native C link flags at build time; E3201
                 // (unresolved C lib) surfaces here, not during front-end checking.
-                let clinks = match jet::resolve_c_links_for_target(file, cross_target) {
+                let clinks = match reused_clinks
+                    .unwrap_or_else(|| jet::resolve_c_links_for_target(file, cross_target))
+                {
                     Ok(args) => args,
                     Err(diags) => {
                         report_problems(mode, file, &src, &diags);
@@ -744,20 +833,32 @@ pub(crate) fn run_compile_cmd(
     }
 
     // D-EFFBUDGET1: zero-config effect summary on every build, plus opt-in
-    // whole-graph enforcement when `package.jet` declares `effects:`.
-    // The front-end compile above already succeeded; this reruns the
-    // check-only pass to pull the whole-program effect fixpoint
-    // (`Sema::solve`) that ordinary compilation doesn't need to return.
+    // whole-graph enforcement when `package.jet` declares `effects:`. The
+    // summary is the whole-program effect fixpoint (`Sema::solve`) that
+    // ordinary compilation doesn't need to return.
     if cmd == "build" || cmd == "run" {
-        let (_effect_diags, effect_bundle, effect_facts) =
-            jet::Driver::check_file_with_effect_facts(file, None, false);
-        if let Some(bundle) = &effect_bundle {
-            let entries =
-                jet::EffectBudget::compute_package_effects(
-                    bundle,
-                    &effect_facts.solved,
-                    &effect_facts.summaries,
-                );
+        // #2083: reuse the fixpoint the build front end already solved. Only
+        // the paths that never ran it — a plain `jet run`, a library or named
+        // output, a package build entry — still pay a check-only pass here.
+        let effect_view = match reused_package_effects {
+            Some(view) => Some(view),
+            None => {
+                let (_effect_diags, effect_bundle, effect_facts) =
+                    jet::Driver::check_file_with_effect_facts(file, None, false);
+                match effect_bundle {
+                    Some(bundle) => Some((
+                        jet::EffectBudget::compute_package_effects(
+                            &bundle,
+                            &effect_facts.solved,
+                            &effect_facts.summaries,
+                        ),
+                        effect_facts.fact_registry,
+                    )),
+                    None => None,
+                }
+            }
+        };
+        if let Some((entries, fact_registry)) = effect_view {
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
             // host registers zero host imports, so any effect used by the
             // plugin's own code would fail to instantiate at load time. Catch
@@ -789,7 +890,7 @@ pub(crate) fn run_compile_cmd(
                     if jet::Sema::parse_effect_name(name).is_some() {
                         if let Err(suggestion) = jet::Sema::resolve_effect_name(
                             name,
-                            &effect_facts.fact_registry,
+                            &fact_registry,
                         ) {
                             violations.push(jet::Sema::undeclared_effect(
                                 name,
@@ -3549,11 +3650,9 @@ fn native_cache_key_with_toolchain(
         return None;
     }
     let mut bundle = jet::Loader::load_entry_with_overlay(file, None, false).ok()?;
-    let uses_embed = bundle.modules.iter().any(|m| {
-        m.source.contains(jet::Syntax::BUILTIN_EMBED_FILE)
-            || m.source.contains(jet::Syntax::BUILTIN_EMBED_BYTES)
-    });
-    if uses_embed {
+    // Checked before the front end runs: an `embed_file` program is never
+    // cacheable, so it must not pay a sema pass to find that out.
+    if program_uses_embed(&bundle) {
         return None;
     }
     // #91: instance identity is a sema product. Run the front end before a
@@ -3567,11 +3666,40 @@ fn native_cache_key_with_toolchain(
     {
         return None;
     }
+    native_cache_key_for_program(file, &bundle, profile_tag, mode_tag, toolchain_identity)
+}
+
+/// The one native-key formula, over a program the front end already checked.
+///
+/// #2083: `jet build` calls this with the bundle its own front end produced, so
+/// the key is hashed from the exact program that is then emitted. That is
+/// strictly safer than the previous shape, which loaded and checked the program
+/// a second time and trusted the two passes to agree — a divergence there (a
+/// source edit racing the build, a fact snapshot taken twice, a differing sema
+/// mode) would have stored a binary under a key describing a different program.
+/// The inputs are unchanged: canonical AST + instance identities + dependency
+/// interfaces + runtime/corelib/manifest fingerprints + toolchain salt.
+fn native_cache_key_for_program(
+    file: &str,
+    bundle: &jet::AST::ProgramBundle,
+    profile_tag: &str,
+    mode_tag: &str,
+    toolchain_identity: &str,
+) -> Option<String> {
+    if std::env::var_os("JET_PROVE_FRESH_TEST").is_some() {
+        return None;
+    }
+    // The output depends on external file bytes the AST does not capture, so
+    // this program must never be served from — or stored into — a cache keyed
+    // on the AST alone.
+    if program_uses_embed(bundle) {
+        return None;
+    }
     let instances: Vec<String> = bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
         let jet::AST::Item::CodeModule(cm) = item else { return None };
         cm.instance_identity.as_ref().map(|identity| identity.fingerprint.clone())
     })).collect();
-    let dependency_interfaces = dependency_interface_fingerprint(&bundle);
+    let dependency_interfaces = dependency_interface_fingerprint(bundle);
     let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint();
     let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(&bundle.used_core);
     let manifest = manifest_fingerprint(file)?;
@@ -3585,10 +3713,20 @@ fn native_cache_key_with_toolchain(
         &instances,
     );
     Some(jet::CanonicalAST::ast_cache_key(
-        &bundle,
+        bundle,
         profile_tag,
         &salt,
     ))
+}
+
+/// `embed_file`/`embed_bytes` detection: a conservative source-substring scan.
+/// A false positive only forgoes caching for that build (a safe perf cost); it
+/// never serves a stale binary.
+fn program_uses_embed(bundle: &jet::AST::ProgramBundle) -> bool {
+    bundle.modules.iter().any(|module| {
+        module.source.contains(jet::Syntax::BUILTIN_EMBED_FILE)
+            || module.source.contains(jet::Syntax::BUILTIN_EMBED_BYTES)
+    })
 }
 
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
