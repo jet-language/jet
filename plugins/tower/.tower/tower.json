@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2086,
-    "rev": 39332,
+    "rev": 39335,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -128962,7 +128962,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n`expr ?? panic(\"msg {x}\")` reports the interpolated message and the `??` call's span byte-identical on default `jet run`, `jet run --release`, and interpreter deopt, for both core-call fallbacks (`fs.read(path) ?? panic`) and user-Option fallbacks (`maybe() ?? panic`). The release-AOT user-Option form compiles (no rustc error reaches the user). A golden example pins the report shape.\n\n## Law\n- D-FAIL-CARRIER1=A (one carrier → one `??` lowering) and D-FAIL-BIND1=A (shared `ambient_err` slot; engines only marshal) — TIR mod.rs:776/4268.\n- D-OBS1 (Jet-line panic reports), I2 (no rustc error reaches the user), I9 (tier identity).\n- Card log: close on TIER IDENTITY only — #2044 later redesigns the report shape and re-blesses the golden this card pins.\n\n## Work\n1. Fixtures = the card probes (parity fixtures; byte-identical output required across default run/JIT/AOT): recreate `/tmp/jet-probes/p15_qq_panic.jet` + `p16_which_failed.jet` if gone — direct `panic(\"...{x}\")` control (works everywhere), `fs.read(path) ?? panic(\"text read failed\")` core form, `maybe() ?? panic(\"expected the answer, got none\")` user-Option form. Reproduce all three degradations on the current binary first: (1) JIT 'panic: panic' + line-0 span, (2) release-AOT ICE 'cannot find module or crate jet_std' on the user-Option form, (3) release-AOT core form correct.\n2. JIT loss: `TOrFallback::Panic { msg, loc }` (TIR mod.rs:4793-4796, structured message + TPanicLoc — I3: no pre-rendered blob) is lowered in `jet-jit/src/jit/lower_ctx.rs` OrFallback arms (~17548, 17584, 17673) via `emit_rich_panic` (line 2865). Direct panic is correct on JIT, so the loss is specific to the OrFallback path: find where msg becomes the literal \"panic\" and loc collapses to line 0 — audit ALL OrFallback lowering arms (incl. statement-position and loop/return fallback shapes noted in safety.rs:1008-1010) for a default/placeholder TPanicLoc or a dropped msg expression. Fix the lowering; report text stays Prelude-owned (`jet_panic_rich`).\n3. Release-AOT ICE (I2): the user-Option emit produces Rust referencing `jet_std` without the crate-root prefix (probe evidence build/p15_qq_panic.rs:14266). The `??`-panic emit formats `jet_panic_rich` + a locals expression (`safe_locals_expr`); the correct core-call form proves the template CAN be right — diff the two emitted fragments and add the missing `{root}`/`cx.root_prefix` on the `jet_std::` path in the user-Option branch (TIR emit expressions/statements). Grep the emit for `jet_std` occurrences not preceded by root_prefix in the panic/locals path.\n4. Interpreter deopt: run the probes on the TIR evaluator; it shares the Prelude report renderer — fix marshalling if output differs.\n5. Golden (criterion 3): add an errors-family example exercising a FAILING `?? panic` path (follow `errors/panic` precedent for capturing stderr + exit status) so the report shape stays pinned; regenerate golden. Every existing example golden uses `?? panic` only on success paths — that is how this hid.\n\n## Not building\n- #2044's report-shape redesign (message wording, locals rendering improvements).\n- No changes to direct `panic(...)` reporting (already correct) or to `?? return` / `?? value` fallbacks.\n- jit_gaps ledger work (this is wrong output, not a parked refusal).\n\n## Proof\n- Criterion 1: `maybe() ?? panic(\"custom message here\")` — interpolated message + `??` call span byte-identical on default jet run, release AOT, and interpreter deopt.\n- Criterion 2: `jet run --release` on the user-Option probe compiles and runs; no rustc text reaches the user.\n- Criterion 3: new golden example green on every applicable tier. Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — both defects are located drift in engine lowering/emit; the Prelude report path already works (direct panic proves it).",
       "blockedBy": [],
@@ -128983,11 +128983,11 @@
         {
           "n": 1,
           "text": "maybe() ?? panic(\"custom message here\") reports the interpolated message and the ?? call's span on default jet run, release AOT, and interpreter deopt, byte-identical (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:07:02.958Z"
+          "evidence": "PROOF cargo test --test tir_control_and_data runtime_stop_goldens_match_all_execution_tiers -- --exact ok (74.18s, 2026-08-19, builder 4be9faab1) — the four-tier byte oracle (debug AOT, release AOT, default jet run, --interpret) now agrees on stderr AND requires empty stdout. Root cause of the JIT half: crates/jet-jit/src/jit/runtime_host.rs set rt.exit_code before calling set_trap, and set_runtime_stop returns early when exit_code is already Some, so store_trap never ran, jet_jit_is_trapped kept answering 0, and every emit_trap_check fell through — the tier printed the correct report and then kept executing past the ??, leaking stray stdout (a stale heap string for the core-call form). resident_invoke already carried the __jet_rich_panic__ branch, dead until this fix.",
+          "at": "2026-08-19T23:25:47.327Z"
         },
         {
           "n": 2,
@@ -129001,11 +129001,11 @@
         {
           "n": 3,
           "text": "A golden example exercises a failing ?? panic path so the report shape stays pinned",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:07:03.845Z"
+          "evidence": "PROOF cargo test --test tir_control_and_data runtime_stop_goldens_match_all_execution_tiers -- --exact ok (74.18s, 2026-08-19, builder 4be9faab1) plus JET_GOLDEN_FILTER=errors/qq_panic golden ok. New golden example examples/features/errors/qq_panic.jet deliberately keeps an unreachable print after the stop and the four-tier check requires EMPTY stdout, so a tier that reports without stopping fails by name rather than silently. Stem confirmed resident-JIT under --trace-tiers, so it is a real JIT pin and not a deopt. Panic budget row added with its teaching reason (the panic is the lesson).",
+          "at": "2026-08-19T23:25:47.839Z"
         }
       ],
       "refs": [],
@@ -129013,8 +129013,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:06:53.484Z",
-      "updated": "2026-08-19T23:19:22.570Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-19T23:25:48.560Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T23:25:48.560Z"
     },
     {
       "id": "c0admppa",
@@ -182689,6 +182690,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T23:25:48.560Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ptp3kp",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T23:25:47.839Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ptp3kp",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T23:25:47.327Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ptp3kp",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-19T23:19:23.087Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -186166,27 +186188,6 @@
       "action": "card.criteria-add",
       "ref": "c0f07u66",
       "note": "#6 Binary-safe stdin/stdout/stderr streams, redirection targets"
-    },
-    {
-      "at": "2026-08-19T13:35:58.275Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06r4us6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:57.672Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c06r4us6",
-      "note": "#6 A terminal-backed child on Windows ConPTY sees a console, ex"
-    },
-    {
-      "at": "2026-08-19T13:35:57.255Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y9u5wy",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
