@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2082,
-    "rev": 39288,
+    "nextNum": 2083,
+    "rev": 39299,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -135306,7 +135306,13 @@
       "plan": "## Outcome\nThe ratified D-RUN/D-CLAIM remainder ships end to end: `jet test --measure` is the measurement mode and `#Bench`/`jet bench` retire (D-CLAIM-BENCH1=A); `--record=NAME` works on `run`/`dev`/`test` and `jet debug --replay=NAME` consumes it (D-RUN-RECORD1=A); `require`/`require_eq` are deleted with `assert`/`assert_eq` the one family (D-CLAIM-WORD1=B); the E0601 fix text names live spellings; the `r/R/t/f/q` keys drive the resident `jet dev` session (D-RUN-SESSION1=A); and bare `jet dev` works in a package (D-CLI-BARE1=A). A fresh-build probe transcript shows every shipped flag working with no E2102 for ratified spellings.\n\n## Law\n- D-CLAIM-BENCH1=A (docs/spec/syntax-decisions.md:7293) — `.measure` member + `jet test --measure`; `#Bench` and `jet bench` retire.\n- D-RUN-RECORD1=A (7316) — `--record=NAME` on run/dev/test writes `.jetproof-replay`; `jet debug --replay=NAME` consumes via the ratified adapters; capture preflight and closed `=NAME` grammar unchanged.\n- D-CLAIM-WORD1=B (7287) — `assert`/`assert_eq` are the one assertion family; `require`/`require_eq` deleted (amends S43, D-PRELUDE-LAW1=A registry, D-FAIL-BREACH1=A wording).\n- D-RUN-SESSION1=A (7310) — `jet dev` owns exact keys `r` re-run, `R` restart fresh, `t` tests, `f` failed claims only, `q` quit.\n- D-CLI-BARE1=A (5680) — `dev` is bare-capable in a package.\n- D-JREPLAY1=A / D-PROVE-REPLAY1=A — the shipped `.jetproof-replay` envelope (Source/ProveReplay.rs) is the artifact both flags reuse.\n- I4 (E0601 text change needs registered code + UI snapshot), I9 (measurement/record semantics via shared seams, no engine forks), greenfield (delete replaced forms, migrate all in-repo consumers).\n\n## Work\n1. Inventory first (the flag vocabulary is already reserved: crates/jet-foundation/src/Syntax/math_layout.rs:735 lists `measure`, `record`, `replay`; `.measure` scope member registered at 692). What's missing is CLI wiring and retirement.\n2. `jet test --measure` (D-CLAIM-BENCH1): add the flag to the test arg parse (Source/main.rs test arm ~2426, TestRunOpts CmdCompile.rs:1723) selecting measurement mode — run only `.measure`-marked claims with the measurement evaluator the bench path uses today (trace `run_bench`/bench harness in CmdCompile/CmdDevTools before deleting; the shared budget evaluator per docs/reference/core-library.md:2683 owns samples/baselines/reports). Plain `jet test` keeps running measured claims once as correctness claims (ballot text).\n3. Retire `jet bench` + `#Bench` (greenfield): delete the top-level verb (main.rs:1499-1501, 2333-2336, 2520+; CLI.rs:682 CommandSpec), the `#Bench` item path (parser Item::Bench, `has_bench_blocks` Source/lib.rs:1818, `bench_suite` core-call rows), and migrate in-repo consumers: examples/features/devloop/bench_override.jet, bench goldens, docs. Retired-spelling teaching: follow the repo's retired-verb pattern (`reject_retired_gate_flags`, Syntax retirements.rs table) so `jet bench` prints a teaching error pointing at `jet test --measure`, not an unknown-command E2102. Rewire `jet perf bench` (CLI.rs:318, CmdPerf run/test/bench session at CmdPerf.rs:122) onto the measure mode (`jet perf test` with `--measure` forwarded) or delete the nested spec — whichever keeps D-PERFSESSION1's base-intent mirroring; record the choice in the log.\n4. `--record=NAME` on run/dev/test (D-RUN-RECORD1): parse via the existing `parse_replay_flag`-style helpers (ProveReplay.rs:125 shows the `=NAME`/path validation pattern; capture writer + envelope already ship for `jet prove --capture`). Recording a run = the same safe capture (Time-only default, `--capture-sensitive` consent path unchanged) wrapped around the run/dev/test child. `jet debug --replay=NAME` consumes through the existing replay adapters (ProveReplay read path). Keep the closed `=NAME` grammar; reject other shapes exactly as prove does.\n5. D-CLAIM-WORD1=B deletion: remove `BUILTIN_REQUIRE_EQ` and any `require` registration (math_layout.rs:638-645 currently registers BOTH families), migrate every in-repo user (grep `require(`/`require_eq(` across examples/, tests/, Prelude, docs), update S43 text in docs/spec/spec.md:1136-1139 which still teaches require/require_eq. Retired spellings get the standard teaching diagnostic per the retirement table, not silence.\n6. E0601 fix text (I4): jet-sema Bundle/Pipeline.rs:2691-2695 currently teaches `#Test \"name\" { }` (a spelling E0930 rejects) — fix to `#Test(\"describes what this checks\") { ... }` and assert-family wording; update the E0601 row in Prelude/Diagnostics.jet:320 and re-bless the diagnostic UI snapshot.\n7. D-RUN-SESSION1 keys: trace the `jet dev` resident session loop in crates/jet-devserver (watch/input handling); wire `r` re-run, `R` restart fresh, `t` tests, `f` failed-claims-only, `q` quit using the key constants Syntax.rs registers (Syntax.rs:42-46 note). Exact key bytes; Title-Case action labels per the ballot.\n8. Bare `jet dev` (D-CLI-BARE1): add `dev` to the bare-capable dispatch (main.rs:2315 match — currently run|build|test|check|bench) resolving through the same `resolve_bare_entry`; while there, probe `debug` (also listed bare-capable in the decision) and fix or mint a follow-up card if its seam differs.\n9. If any single item balloons beyond this card (e.g. the measurement evaluator needs real rework), mint a child implementation card for that item and link it — criterion 1 accepts \"live implementation card or shipped proof\" for remainder items beyond the four named must-ships (--measure, --record=, bench retirement, E0601 text).\n\n## Not building\n- Project-mode `#Test` discovery (sibling card #2066).\n- Reverse-step / per-variable history (explicitly deferred by D-RUN-RECORD1's ballot; Epoch 6 territory under D-DEVR-CAUSE1's named amendment).\n- `--watch` changes (D-RUN-WATCH1 already governs; not a probed gap).\n- New receipt/evidence machinery (D-DEVR implementation cards from #2062 own that).\n- Any new flag spellings beyond the ratified `--measure`, `--record=NAME`, `--replay=NAME`.\n\n## Proof\n- Criterion 1: every remainder item maps to shipped code on this card or a linked child card; the four named items ship here. Spec text updated (S43 assert wording; bench references gone).\n- Criterion 2 probe transcript on a fresh build, attached as evidence:\n  - `jet test file.jet --measure` runs measured claims (no E2102); plain `jet test` still runs them once.\n  - `jet bench` prints the retirement teaching error naming `jet test --measure`.\n  - `jet run file.jet --record=snap` writes `.jet/replays/...jetproof-replay`; `jet test`/`jet dev` accept the flag; `jet debug --replay=<path>` consumes it.\n  - Scripted `jet dev` session: each of `r/R/t/f/q` produces its ratified action.\n  - Bare `jet dev` in a `jet new` package starts the session (no E2104).\n  - E0601 output shows the new fix text; pasting its suggested block into a file yields a passing `jet test` (fix text is live-spelling-true).\n- Focused tests: measure-mode harness test, record/replay round-trip test (reuse ProveReplay identity test pattern, ProveReplay.rs:1731), dev-session key test if the harness supports scripted stdin; UI snapshot re-blessed for E0601. Default `jet run` + `--release` parity probe for any Prelude/registry change (require deletion). Full suite at epoch closeout.\n\n## blockedBy\nnone — all governing decisions ratified 2026-08-07 (card #1641); the replay envelope, measure member, flag vocabulary, and retirement machinery all ship today.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-19",
+          "by": "fable-e3-burndown",
+          "text": "Criterion 1 partially answered 2026-08-19: the D-CLAIM-BENCH1=A remainder now HAS an implementation card, #2082 (Benchmarks become measured tests: .measure member and jet test --measure), minted P1 at owner request after a board search found the law ratified on #1641 but no owning implementation slice. The other remainder items named in this card's plan (D-RUN-RECORD1 --record/--replay, D-CLAIM-WORD1 require/assert deletion, D-RUN-SESSION1 keys, D-CLI-BARE1 bare jet dev) still need the same treatment."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -135334,8 +135340,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:02:10.686Z",
-      "updated": "2026-08-19T16:21:26.093Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-19T22:02:41.019Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0khd7fh",
@@ -136125,6 +136131,103 @@
       "created": "2026-08-19T20:54:29.077Z",
       "updated": "2026-08-19T21:10:40.673Z",
       "updatedBy": "owner"
+    },
+    {
+      "id": "c0mantyc",
+      "num": 2082,
+      "title": "Benchmarks become measured tests: .measure member and jet test --measure",
+      "body": "Implements ratified D-CLAIM-BENCH1=A (ballot host card #1641). Owner reconfirmed 2026-08-19: merge bench into test as one marker and one command, with measurement an optional parameter to test, so Jet stops carrying two parallel surfaces. Ratified law: a measured claim is #Test with a .measure member; plain jet test runs it once as a correctness claim, so a crashing benchmark is a failing test; jet test --measure is measurement mode with warmups, auto-scaled iterations, the optimized profile the spec promises, and the tier labeled in every line and artifact; limits live only in typed budgets; typing jet bench or #Bench becomes a teaching error naming the new spelling. Amends D-BENCH-MARKER1=A and D-BENCH1 wording, subsumes D-BENCH-PARITY1=B, completes D-PERFBUDGET-BENCHMIGRATE1=B and the paired D-PERFBUDGET-GAMEMIGRATE1, migrates the Budget scope spelling .Bench(name), and fixes the spec.md:2235 profile drift. No new ballot needed; this is the implementation slice #2067 criterion 1 demands.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "## Outcome\nOne marker and one verb for claims. `#Test` carries an optional `.measure` member; `jet test` runs every claim once for correctness; `jet test --measure` adds measurement mode. `#Bench` and `jet bench` are gone, and typing either teaches the new spelling.\n\n## Law\nD-CLAIM-BENCH1=A is ratified — read it verbatim before building (`tower decision show D-CLAIM-BENCH1`). It amends D-BENCH-MARKER1=A and D-BENCH1, subsumes D-BENCH-PARITY1=B, completes D-PERFBUDGET-BENCHMIGRATE1=B and D-PERFBUDGET-GAMEMIGRATE1, and migrates the Budget scope spelling `.Bench(name)`. Keep D-BENCH-KEEP1's `keep(x)` sink working under the merged surface. Binding invariants: I4 (the retired-spelling diagnostics need registered codes plus tests/ui fixtures), I7 (Syntax.rs rows carry the decision id), I8 (one mechanism — do not leave a second runner), I9 (measurement mode agrees across the tiers it applies to).\n\n## Route\n1. Marker: add the `.measure` member to the `#Test` marker surface as a member on the ratified extension axis (D-DOTSCOPE1), and retire `#Bench` from crates/jet-foundation/src/Syntax.rs in the same change.\n2. Runner: fold the bench runner into the test runner so measurement is a mode, not a second path. `--measure` supplies warmups, auto-scaled iterations, the optimized profile the spec promises (this is the #1647 drift), serial execution for timing integrity, and `--filter` selection. Delete the bench command, its argv parsing, and its dispatch.\n3. Reporting: measured claims report through the one frame and the one machine shape (D-REPORT-TEST1=A, D-REPORT-MACHINE1=A) with the tier labeled in every line and artifact. Limits stay in typed budgets only.\n4. Manifest: migrate the `benchmark` manifest target, and the `.Bench(name)` budget scope spelling, to the test target.\n5. Corpus and docs: respell every `#Bench` region and every `jet bench` mention across examples, tests, docs, completions, and the man page; re-bless the affected goldens and snapshots.\n6. Teaching errors: `jet bench` and `#Bench` each emit a registered diagnostic naming the new spelling, with a tests/ui fixture.\n\n## Not building\nNo new measurement engine, no second reporter, and no compatibility alias for `jet bench`. Entry-level sharding and budget policy changes stay out.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "#Test carries an optional .measure member registered on the ratified extension axis; #Bench is gone from crates/jet-foundation/src/Syntax.rs and from every in-repo spelling, with the I7 rows citing D-CLAIM-BENCH1",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:36.675Z"
+        },
+        {
+          "n": 2,
+          "text": "Plain jet test runs a measured claim once as a correctness claim, so a crashing measured region is a failing test; a named test proves the crash path fails",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:37.208Z"
+        },
+        {
+          "n": 3,
+          "text": "jet test --measure is measurement mode: warmups, auto-scaled iterations, the optimized profile (closing the spec.md:2235 drift #1647 recorded), serial execution for timing integrity, --filter selection, and the tier labeled in every line and artifact",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:37.717Z"
+        },
+        {
+          "n": 4,
+          "text": "Exactly one runner remains: the bench command, its argv parsing and its dispatch are deleted, and no second measurement path or reporter exists (I8); measured claims report through D-REPORT-TEST1 and D-REPORT-MACHINE1 shapes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:38.247Z"
+        },
+        {
+          "n": 5,
+          "text": "Typing jet bench or #Bench emits a registered teaching diagnostic naming the new spelling, each with a tests/ui fixture (I4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:38.752Z"
+        },
+        {
+          "n": 6,
+          "text": "The benchmark manifest target and the .Bench(name) budget scope spelling migrate to the test target; D-BENCH-KEEP1 keep(x) still works under the merged surface",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:39.254Z"
+        },
+        {
+          "n": 7,
+          "text": "Every #Bench region and jet bench mention in examples, tests, docs, completions and the man page is respelled in the same change, with goldens and snapshots re-blessed and no compatibility alias left behind",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:39.773Z"
+        },
+        {
+          "n": 8,
+          "text": "syntax-decisions.md records the shipped outcome, jet devtools grammars are regenerated, and formatter round-trip holds for the .measure member",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T22:02:40.302Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T22:02:08.777Z",
+      "updated": "2026-08-19T22:02:40.302Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -182433,6 +182536,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T22:02:41.019Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0boklxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T22:02:40.302Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#8 syntax-decisions.md records the shipped outcome, jet devtool"
+    },
+    {
+      "at": "2026-08-19T22:02:39.774Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#7 Every #Bench region and jet bench mention in examples, tests"
+    },
+    {
+      "at": "2026-08-19T22:02:39.254Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#6 The benchmark manifest target and the .Bench(name) budget sc"
+    },
+    {
+      "at": "2026-08-19T22:02:38.752Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#5 Typing jet bench or #Bench emits a registered teaching diagn"
+    },
+    {
+      "at": "2026-08-19T22:02:38.248Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#4 Exactly one runner remains: the bench command, its argv pars"
+    },
+    {
+      "at": "2026-08-19T22:02:37.718Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#3 jet test --measure is measurement mode: warmups, auto-scaled"
+    },
+    {
+      "at": "2026-08-19T22:02:37.208Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#2 Plain jet test runs a measured claim once as a correctness c"
+    },
+    {
+      "at": "2026-08-19T22:02:36.676Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mantyc",
+      "note": "#1 #Test carries an optional .measure member registered on the "
+    },
+    {
+      "at": "2026-08-19T22:02:36.173Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0mantyc",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-19T22:02:08.777Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0mantyc",
+      "note": "Benchmarks become measured tests: .measure member and jet test --measure"
+    },
+    {
       "at": "2026-08-19T21:58:10.628Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -185854,83 +186034,6 @@
       "action": "card.criteria-add",
       "ref": "c0vrs94y",
       "note": "#7 Plan and final receipt carry the same policy digest (receipt"
-    },
-    {
-      "at": "2026-08-19T13:34:41.305Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0vrs94y",
-      "note": "#6 plan() on the authority object returns the exact executable "
-    },
-    {
-      "at": "2026-08-19T13:34:40.867Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vrs94y",
-      "note": "body,plan,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:34:40.236Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0mpptrf",
-      "note": "Agent corpus baseline: Node"
-    },
-    {
-      "at": "2026-08-19T13:34:39.796Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0eewb4b",
-      "note": "Agent corpus baseline: Python"
-    },
-    {
-      "at": "2026-08-19T13:34:39.359Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04i1z4x",
-      "note": "#9 Tasks a baseline language cannot express are recorded per ta"
-    },
-    {
-      "at": "2026-08-19T13:34:38.923Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04i1z4x",
-      "note": "#8 Raw transcripts and outputs are stored so a later Jet run ca"
-    },
-    {
-      "at": "2026-08-19T13:34:38.497Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04i1z4x",
-      "note": "#7 Each run is scored by the corpus's existing scoring — no new"
-    },
-    {
-      "at": "2026-08-19T13:34:38.083Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04i1z4x",
-      "note": "#6 Every frozen corpus task has a recorded Bash, Python, and No"
-    },
-    {
-      "at": "2026-08-19T13:34:37.634Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04i1z4x",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:33:27.232Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:33:26.630Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0460ur1",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
