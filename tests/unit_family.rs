@@ -193,24 +193,33 @@ fn run() {
 
 #[test]
 fn measure_rules_cover_fixed_lengths_and_matrix_shapes() {
+    // `jet::compile` checks in `CompileMode::Run`, which requires a `run`
+    // entry (E0101) — the fixtures carry one so the assertion isolates the
+    // measure rules themselves.
     let lengths = r#"
 fn join(left: [Int#2], right: [Int#3]) => [Int#5] {
     return left.concat(right)
 }
+
+fn run() {}
 "#;
+    let length_codes = codes_of(lengths);
     assert!(
-        codes_of(lengths).is_empty(),
-        "fixed-list join must add the two length measures"
+        length_codes.is_empty(),
+        "fixed-list join must add the two length measures, got {length_codes:?}"
     );
 
     let matrices = r#"
 fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) => Result<Matrix<3, 2>, ComputeError> {
     return left * right
 }
+
+fn run() {}
 "#;
+    let matrix_codes = codes_of(matrices);
     assert!(
-        codes_of(matrices).is_empty(),
-        "matrix multiplication must match inner measures and compose outer measures"
+        matrix_codes.is_empty(),
+        "matrix multiplication must match inner measures and compose outer measures, got {matrix_codes:?}"
     );
 }
 
@@ -1189,10 +1198,20 @@ fn family_erases_in_codegen() {
         !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
         "I1: no unsafe in generated code"
     );
-    assert!(
-        !out.rust.contains("UnitFamily"),
-        "the family marker must erase, found UnitFamily in output"
-    );
+    if let Some(position) = out.rust.find("UnitFamily") {
+        let mut start = position.saturating_sub(160);
+        while !out.rust.is_char_boundary(start) {
+            start -= 1;
+        }
+        let mut end = (position + 160).min(out.rust.len());
+        while !out.rust.is_char_boundary(end) {
+            end += 1;
+        }
+        panic!(
+            "the family marker must erase, found UnitFamily in output:\n…{}…",
+            &out.rust[start..end]
+        );
+    }
     assert!(
         out.rust.contains("struct __jet_Usd"),
         "Usd should lower to a distinct newtype"

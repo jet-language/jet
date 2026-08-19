@@ -1333,9 +1333,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Resolve equality capability through the same owner registry as ordinary
+    /// imported struct lookup. Bundle-level auto-derives synthesize `equal`
+    /// bodies whose field types may nest a qualified imported nominal
+    /// (`[[units.Meter]]`), so peel structural containers before selecting the
+    /// nominal's canonical bundle owner — mirroring `is_cloneable_type`.
     pub(crate) fn is_equatable_type(&self, ty: &Type) -> bool {
-        let (normalized, registry, trait_reg) = self.capability_type_context(ty);
-        crate::Sema::Diagnostics::is_equatable(&normalized, registry, trait_reg)
+        match ty {
+            Type::List(inner) | Type::Option(inner) => self.is_equatable_type(inner),
+            Type::Result { ok, err } => {
+                self.is_equatable_type(ok) && self.is_equatable_type(err)
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .all(|(_, field)| self.is_equatable_type(field)),
+            Type::FixedList { elem, .. }
+            | Type::Tagged { inner: elem, .. }
+            | Type::InlineRange { base: elem, .. } => self.is_equatable_type(elem),
+            Type::Union(members) => members
+                .iter()
+                .all(|member| self.is_equatable_type(member)),
+            Type::Apply { args, .. }
+                if !args.iter().all(|arg| self.is_equatable_type(arg)) =>
+            {
+                false
+            }
+            _ => {
+                let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+                crate::Sema::Diagnostics::is_equatable(&normalized, registry, trait_reg)
+            }
+        }
     }
     /// Resolve cloneability through the same owner registry as ordinary
     /// imported struct lookup. Generated codec temporaries often wrap an
