@@ -164,6 +164,18 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // the outermost region exits. D-SHIELDNAME1=A (ratified 2026-07-11) spells this
 // region `#Shield { … }`; codegen lowers the block to
 // `jet_scheduler_shield_enter`/`_leave` around the body (Codegen/TIR emit).
+//
+// Cleanup rule (#2007): a thread that is already unwinding is past the point
+// where an interrupt can be delivered. Its Drop-backed cleanup is running and
+// the frame it unwinds to is the one that reports the outcome, so a raise from
+// drop glue is a double panic — which Rust turns into `panic in a destructor
+// during cleanup` and a process abort, not an outcome. An in-flight unwind is
+// therefore a critical section in exactly the D-CANCELMODEL1=C sense, and
+// `jet_scheduler_shielded` reports it as one: wait points reached from cleanup
+// complete normally, the interrupt stays recorded (a cancel on
+// `JetTaskControl.cancelled`, a blown deadline on
+// `jet_task_deadline_mark_pending`), and it lands on the in-flight unwind's own
+// outcome instead of starting a second one.
 struct JetCancelUnwind;
 
 /// Identify the one internal unwind used by D-CANCELMODEL1=C. Shared
@@ -302,8 +314,23 @@ thread_local! {
     static SHIELD_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
+/// Is an unwind already travelling through this thread? The one place the
+/// cleanup rule above is spelled, so a wait point, a raise door, and the
+/// `#Shield` guard cannot disagree about when an interrupt is deliverable.
+fn jet_scheduler_unwind_in_flight() -> bool {
+    std::thread::panicking()
+}
+
+/// Does this wait point defer its interrupt instead of unwinding here? True
+/// inside a lexical `#Shield` region (SHIELD_DEPTH > 0) and true while an
+/// unwind is already in flight — cleanup is the same kind of critical section,
+/// and a second raise from drop glue aborts the process instead of reporting
+/// an outcome (#2007, cleanup rule above). Both cases defer, never discard:
+/// the cancel stays on `JetTaskControl.cancelled` and the deadline stays
+/// pending, so the next deliverable wait point or the frame that catches the
+/// in-flight unwind reports it.
 pub fn jet_scheduler_shielded() -> bool {
-    SHIELD_DEPTH.with(|d| d.get() > 0)
+    SHIELD_DEPTH.with(|d| d.get() > 0) || jet_scheduler_unwind_in_flight()
 }
 
 #[allow(dead_code)] // wired to the ratified `#Shield` lowering
@@ -339,7 +366,7 @@ pub fn jet_scheduler_shield_leave_status() -> JetShieldExit {
     // If the body is already unwinding, decrement the depth but do not start a
     // second cancellation/deadline unwind from this Drop guard. The original
     // unwind already exits the task and runs every remaining cleanup.
-    if landed && !std::thread::panicking() {
+    if landed && !jet_scheduler_unwind_in_flight() {
         // A deadline that closed while shielded is program-level; raise it first.
         if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
             return JetShieldExit::Deadline;
@@ -373,8 +400,15 @@ fn jet_task_unwind_cancel() -> ! {
 /// are inside a scheduler task (a catch frame exists to turn the unwind into a
 /// `Cancelled` result). Outside a task there is no catch frame, so return and let
 /// the caller fall back to its cooperative sentinel (None/false/Closed).
+///
+/// The one raise door for a cancel, so the cleanup rule holds for every caller —
+/// wait points, the crypto/HTTP host seams that take this function as a pointer,
+/// and the JIT. While an unwind is in flight this returns instead of raising:
+/// the cancel stays recorded on `JetTaskControl.cancelled` and lands on that
+/// unwind's outcome, because a second raise from drop glue aborts the process
+/// (#2007) rather than cancelling anything.
 pub fn jet_task_deliver_cancel() {
-    if jet_scheduler_panic_should_unwind() {
+    if jet_scheduler_panic_should_unwind() && !jet_scheduler_unwind_in_flight() {
         jet_task_unwind_cancel();
     }
 }
@@ -799,14 +833,21 @@ pub fn jet_task_interval_ms_defaulted(millis: i64) -> u64 {
 }
 
 /// Canonical `core.time.sleep` wait. The delay default and deadline wait-point
-/// policy live here; AOT, JIT, and the evaluator only marshal the call.
+/// policy live here; AOT, JIT, and the evaluator only marshal the call. Like
+/// every other wait point, the deadline is deferred inside a shield and while an
+/// unwind is in flight (#2007) — a `defer`red sleep finishes the cleanup instead
+/// of raising a second time.
 pub fn jet_task_sleep_ms_defaulted(millis: i64) {
     let delay = jet_task_delay_ms_defaulted(millis);
-    if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some() {
+    if !jet_scheduler_shielded()
+        && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some()
+    {
         jet_deadline_exceeded("time sleep");
     }
     jet_scheduler_sleep_ms(delay);
-    if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some() {
+    if !jet_scheduler_shielded()
+        && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some()
+    {
         jet_deadline_exceeded("time sleep");
     }
 }
@@ -2635,8 +2676,13 @@ pub struct JetSchedulerJoin<T> {
 
 /// One parent-wait deadline policy for AOT and Cranelift adapters. A child
 /// deadline is a `TaskFailure`; an expired joining context is the E3003 control
-/// diagnostic owned by this wait point.
+/// diagnostic owned by this wait point. Deferred inside a shield and during an
+/// in-flight unwind, like every other wait point (#2007): a `handle.join()`
+/// reached from drop glue must finish the cleanup, not abort the process.
 pub fn jet_task_join_deadline_check() {
+    if jet_scheduler_shielded() {
+        return;
+    }
     if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task join").is_some() {
         jet_deadline_exceeded("task join");
     }
@@ -2724,7 +2770,12 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
     match result {
         Ok(values) => Ok(values),
         Err(JetSchedulerSelectError::ParentDeadline) => jet_deadline_exceeded("task selection"),
-        Err(JetSchedulerSelectError::ParentCancelled) => jet_task_unwind_cancel(),
+        Err(JetSchedulerSelectError::ParentCancelled) => {
+            // Same raise door as every other wait point, so a `task.all/race/any`
+            // reached from drop glue defers instead of double-panicking (#2007).
+            jet_task_deliver_cancel();
+            Err(jet_std::JetTaskFailure::Cancelled)
+        }
         Err(JetSchedulerSelectError::Child(JetSchedulerResult::Deadline(_rendered))) => {
             Err(jet_std::JetTaskFailure::DeadlineBlown)
         }

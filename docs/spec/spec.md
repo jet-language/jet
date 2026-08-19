@@ -2380,6 +2380,14 @@ in the shielded state. At the outermost normal exit, an expired deadline lands
 before a pending cancellation. Outside a task, the region is a transparent
 block; at comptime it has no scheduler effect.
 
+Cleanup itself defers the same way. Once a task is unwinding — for a cancel, a
+blown deadline, or a failure — that unwind already runs every remaining Drop
+and reports the task's outcome, so a wait point reached from cleanup completes
+normally instead of starting a second unwind: the cancel stays requested and
+lands on the outcome the in-flight unwind reports, and a failure already on its
+way out is never replaced by it. A generator's completion notification is
+therefore still delivered while its producer is being cancelled.
+
 `tasks.channel<T>() => (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
 tasks.channel<T>()`. A second sender is `~tx` — there's no combined

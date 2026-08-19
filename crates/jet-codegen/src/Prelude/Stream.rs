@@ -49,16 +49,16 @@ where
                 producer(&sender);
             }));
             if let Err(payload) = result {
-                if jet_scheduler_is_cancel_unwind(payload.as_ref()) {
-                    // Producer defers already ran inside the caught unwind.
-                    // Resume would Drop `sender` during cleanup and abort the
-                    // process (`panic in a destructor during cleanup`), which
-                    // killed the jet-codegen lib suite (#2019). The spawn
-                    // catch frame then sees a normal return; the consumer
-                    // already cancelled the task.
-                    return;
+                // A cancel is not a producer failure, so it never sets the
+                // failure flag — but it still resumes, so the task reports
+                // `Cancelled` and `sender`'s Drop still signals completion on
+                // the way out. Dropping `sender` during that unwind is safe:
+                // its completion send is a wait point reached from cleanup, and
+                // the cleanup rule in `Prelude/Scheduler.rs` defers the cancel
+                // there instead of raising a second time (#2007, #2019).
+                if !jet_scheduler_is_cancel_unwind(payload.as_ref()) {
+                    sender.fail();
                 }
-                sender.fail();
                 std::panic::resume_unwind(payload);
             }
         },
@@ -287,6 +287,10 @@ impl<T> Drop for JetStreamSender<T> {
     fn drop(&mut self) {
         // Completion is signalled after the generator's lexical cleanup has
         // finished, so a dropped consumer can wait for the cleanup boundary.
+        // The send below is a wait point running inside drop glue: when the
+        // producer is cancelled, the cleanup rule in `Prelude/Scheduler.rs`
+        // defers that cancel so this notification is delivered rather than
+        // traded for a second unwind (#2007).
         let completion = if self
             .failed
             .load(std::sync::atomic::Ordering::Acquire)
