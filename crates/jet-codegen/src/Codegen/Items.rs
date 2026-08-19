@@ -2253,7 +2253,9 @@ pub(crate) fn emit_type_impl(
         if !TIR::tir_covers_method(method, type_name, cx) {
             jet_foundation::ice!(
                 None,
-                "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+                "codegen reached a construct the typed IR does not cover: {}, in method `{}.{}` — compiler bug (I2/R7)",
+                TIR::refusal::describe(cx),
+                type_name,
                 method.name
             );
         }
@@ -2337,7 +2339,9 @@ pub(crate) fn emit_trait_impl(
             {
                 jet_foundation::ice!(
                     None,
-                    "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+                    "codegen reached a construct the typed IR does not cover: {}, in method `{}.{}` — compiler bug (I2/R7)",
+                    TIR::refusal::describe(cx),
+                    type_name,
                     method.name
                 );
             }
@@ -2666,7 +2670,8 @@ fn emit_trait_method(
     // be localized costs a whole build cycle to attribute.
     jet_foundation::ice!(
         None,
-        "codegen reached a construct the typed IR does not cover ({}.{} for {}) — compiler bug (I2/R7)",
+        "codegen reached a construct the typed IR does not cover: {}, in `{}.{}` for `{}` — compiler bug (I2/R7)",
+        TIR::refusal::describe(cx),
         trait_name,
         f.name,
         type_name
@@ -2882,9 +2887,13 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         return;
     }
     cx.current_type_params.borrow_mut().clear();
+    // The gate and the emitter disagreed. Name the construct the gate refused,
+    // not just the function that contained it: an I2 abort that only says
+    // "somewhere in `run`" costs a bisect per instance (Tower card #2008).
     jet_foundation::ice!(
         None,
-        "codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+        "codegen reached a construct the typed IR does not cover: {}, in fn `{}` — compiler bug (I2/R7)",
+        TIR::refusal::describe(cx),
         f.name
     );
 }
@@ -2912,7 +2921,9 @@ pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut 
     }
     jet_foundation::ice!(
         None,
-        "codegen reached an error-conversion body construct the typed IR does not cover ({} -> {}) — compiler bug (I2/R7)",
-        ec.from_ty, ec.to_ty
+        "codegen reached an error-conversion body construct the typed IR does not cover: {}, in `{} => {}` — compiler bug (I2/R7)",
+        TIR::refusal::describe(cx),
+        ec.from_ty,
+        ec.to_ty
     );
 }

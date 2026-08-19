@@ -24,6 +24,7 @@ use crate::Codegen::TIR::struct_pattern_values_in_subset;
 use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Syntax;
 use std::collections::HashSet;
+use super::refusal;
 
 fn scoped_stmts_in_subset(
     body: &[Stmt],
@@ -37,7 +38,17 @@ fn scoped_stmts_in_subset(
 /// `locals` is the set of names bound as params/locals so far in this scope.
 /// It is threaded so an `Expr::Ident` can be classified: a name that is not a
 /// local must not be a const/fn-value (excluded). Bindings extend it in order.
+/// I2 self-report: a refusal records the statement it was about (`subset::refusal`)
+/// so a gate/emitter disagreement names a construct, not just a function.
 pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
+    if stmt_in_subset_inner(s, cx, locals) {
+        return true;
+    }
+    refusal::note(refusal::STMT, s.span());
+    false
+}
+
+fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
     match s {
         Stmt::Val(b) => {
             // c109 Phase 19: an `arena_view` binding (`x :: arena.alloc(v)` / `x ::

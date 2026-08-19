@@ -12,6 +12,8 @@ mod methods;
 mod builtin_methods;
 mod core_calls;
 mod handles;
+/// I2 self-report: which construct a `tir_covers*` refusal was about.
+pub(crate) mod refusal;
 
 pub(crate) use entry::*;
 pub(crate) use types::*;

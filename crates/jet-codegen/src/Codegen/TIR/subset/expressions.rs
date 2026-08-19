@@ -19,8 +19,20 @@ use crate::Codegen::TIR::struct_lit_constructible;
 use crate::Codegen::mangle_generated;
 use crate::Syntax;
 use std::collections::HashSet;
+use super::refusal;
 
+/// I2 self-report: a refusal records the expression it was about before the
+/// `false` propagates out, so the `ice!` in `emit_func` can name the construct
+/// instead of only the enclosing function (`subset::refusal`).
 pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
+    if expr_in_subset_inner(e, cx, locals) {
+        return true;
+    }
+    refusal::note(refusal::EXPR, e.without_parens().span());
+    false
+}
+
+fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
     let mut e = e;
     while let Expr::Paren(inner, _) = e {
         e = inner;

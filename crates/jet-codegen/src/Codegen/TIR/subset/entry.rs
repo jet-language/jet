@@ -9,6 +9,7 @@ use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_is_generic;
 use crate::Syntax;
 use std::collections::HashSet;
+use super::refusal;
 
 /// Conservative structural test: `true` only if `f` is a top-level plain
 /// function whose entire body is inside the Phase-1 subset. The rule is
@@ -20,6 +21,7 @@ use std::collections::HashSet;
 /// subset does not lower — a comptime `const` (inlined at use) or a bare
 /// function-as-value ident. Those use sites need codegen the TIR omits in Phase 1.
 pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
+    refusal::begin();
     // c109 Phase 18: an `#Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
     // (the `is_unsafe` flag drives the signature prefix), and its gated body ops are
     // covered below.
@@ -37,7 +39,8 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     }
     // A method always has a `self` first parameter; the subset is top-level
     // functions only. (Top-level funcs never have `self`, but check anyway.)
-    if f.params.iter().any(|p| p.name == Syntax::KW_SELF) {
+    if let Some(p) = f.params.iter().find(|p| p.name == Syntax::KW_SELF) {
+        refusal::note(refusal::SELF_PARAM, p.name_span);
         return false;
     }
     // Params must be scalars, String, or a covered value type. c109 Phase 23: a
@@ -55,12 +58,16 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
             p.ty.clone()
         };
         if !is_subset_param_ty(&param_ty, cx) {
+            refusal::note(refusal::PARAM_TY, p.ty_span);
             return false;
         }
     }
     // Return type, if present, must be a scalar, String, or a covered struct type.
     if let Some(rt) = &f.return_type {
         if !is_subset_return_ty(rt, cx) {
+            if let Some(span) = f.return_type_span {
+                refusal::note(refusal::RETURN_TY, span);
+            }
             return false;
         }
     }
@@ -76,6 +83,7 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
 /// `fn jet_test_N() -> Result<(), String>`. No param/return-type gates apply (the wrapper
 /// signature is fixed by `emit_*_tests`); only the body statements must be in-subset.
 pub(crate) fn tir_covers_test_body(body: &[Stmt], cx: &Cx) -> bool {
+    refusal::begin();
     let mut locals: HashSet<String> = HashSet::new();
     body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
@@ -85,6 +93,7 @@ pub(crate) fn tir_covers_test_body(body: &[Stmt], cx: &Cx) -> bool {
 /// indent 1 inside the `pub fn <conv>(user_self: Old) -> New` `emit_error_conv` opens.
 /// The signature/braces are fixed by `emit_error_conv`; only the body statements gate.
 pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
+    refusal::begin();
     let mut locals: HashSet<String> = HashSet::new();
     locals.insert(Syntax::KW_SELF.to_string());
     body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
@@ -105,6 +114,7 @@ pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
 /// **exclude on any doubt**: a false negative just keeps the method on the AST
 /// path, a false positive risks a silent miscompile (a wrong `self` receiver).
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
+    refusal::begin();
     // Method-owned type parameters are in scope while the structural gate walks
     // the signature and body. This keeps generic methods on the same TIR path as
     // generic free functions without leaking their names into the enclosing item.
@@ -129,13 +139,15 @@ fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
         && !is_covered_struct_ty(&owner_ty, cx)
         && !is_covered_enum_ty(&owner_ty, cx)
     {
+        refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
         return false;
     }
     // The self parameter (if any) must be the FIRST parameter, per the method
     // calling convention. A `self`-bearing method is an instance method; a method
     // with no `self` is a static (associated) function. Any non-first `self` is
     // malformed (sema rejects it) — exclude defensively.
-    if f.params.iter().skip(1).any(|p| p.name == Syntax::KW_SELF) {
+    if let Some(p) = f.params.iter().skip(1).find(|p| p.name == Syntax::KW_SELF) {
+        refusal::note(refusal::EXTRA_SELF_PARAM, p.name_span);
         return false;
     }
     // D-MUTSELF1: self-mutation in a `mut self` method is now FULLY lowered — the
@@ -149,11 +161,15 @@ fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
     // call-site args; codegen never reads `p.default`) — same as the free-fn gate.
     for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
         if !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
+            refusal::note(refusal::PARAM_TY, p.ty_span);
             return false;
         }
     }
     if let Some(rt) = &f.return_type {
         if !is_subset_return_ty(&resolve_self_ty(rt, type_name), cx) {
+            if let Some(span) = f.return_type_span {
+                refusal::note(refusal::RETURN_TY, span);
+            }
             return false;
         }
     }
@@ -181,6 +197,7 @@ pub(crate) fn tir_covers_trait_method(
     cx: &Cx,
     trait_name: &str,
 ) -> bool {
+    refusal::begin();
     let serde_generic_owner = matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE)
         && struct_is_generic(type_name, cx);
     // c109 Phase 18: an `#Unsafe fn` trait method IS
@@ -188,6 +205,7 @@ pub(crate) fn tir_covers_trait_method(
     // in `emit_tir_trait_method`).
     // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
     if !f.type_params.is_empty() && !serde_generic_owner {
+        refusal::note(refusal::TYPE_PARAMS, f.name_span);
         return false;
     }
     // The owning type must be a covered struct, enum, or distinct type.
@@ -197,6 +215,7 @@ pub(crate) fn tir_covers_trait_method(
         && !is_covered_enum_ty(&owner_ty, cx)
         && !cx.distinct_types.contains_key(type_name)
     {
+        refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
         return false;
     }
     // Typed derive methods use the same generic-owner scope as hand-written
@@ -212,25 +231,36 @@ pub(crate) fn tir_covers_trait_method(
         // `&mut self`/`self` per convention). A trait method with no `self` (static trait
         // fn) emits no receiver — exclude it (the emit hook always renders a receiver).
         let Some(first) = f.params.first() else {
+            refusal::note(refusal::MISSING_SELF_PARAM, f.name_span);
             return false;
         };
         if first.name != Syntax::KW_SELF {
+            refusal::note(refusal::MISSING_SELF_PARAM, first.name_span);
             return false;
         }
     }
     // No further `self` parameters (malformed — sema rejects, but be defensive).
-    if f.params.iter().skip(1).any(|p| p.name == Syntax::KW_SELF) {
+    if let Some(p) = f.params.iter().skip(1).find(|p| p.name == Syntax::KW_SELF) {
+        refusal::note(refusal::EXTRA_SELF_PARAM, p.name_span);
         return false;
     }
     // Non-self params + the return type must be covered value types (Self resolves
     // to the owning type). No defaults on a trait method (sema enforces it).
     for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
-        if p.default.is_some() || !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
+        if p.default.is_some() {
+            refusal::note(refusal::DEFAULTED_TRAIT_PARAM, p.name_span);
+            return false;
+        }
+        if !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
+            refusal::note(refusal::PARAM_TY, p.ty_span);
             return false;
         }
     }
     if let Some(rt) = &f.return_type {
         if !is_subset_return_ty(&resolve_self_ty(rt, type_name), cx) {
+            if let Some(span) = f.return_type_span {
+                refusal::note(refusal::RETURN_TY, span);
+            }
             return false;
         }
     }
