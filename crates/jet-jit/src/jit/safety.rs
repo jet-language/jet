@@ -373,6 +373,46 @@ fn intish_ty(ty: &Type) -> bool {
     )
 }
 
+/// `LowerCtx::lower_binary`'s two Option rows, stated once for both copies of
+/// the Binary gate.
+///
+/// Equality is presence-then-payload for any payload
+/// (`LowerCtx::lower_option_eq`). Ordering is Rust's `Option: PartialOrd`
+/// (`LowerCtx::lower_option_order`, the law AOT gets from the plain Rust
+/// operator): presence alone decides unless both sides are present, and then
+/// `lower_value_order` decides on the payload — so ordering is admitted for
+/// exactly the payload types that function has a row for. Arithmetic on an
+/// Option has no row at all, so it stays out rather than reaching a machine op
+/// on the carrier word.
+fn resident_safe_option_binary(op: &BinOp, lhs: &Type, rhs: &Type) -> bool {
+    fn payload_orderable(ty: &Type) -> bool {
+        let Type::Option(inner) = erase_runtime_qualifiers(ty) else {
+            // The non-Option side of a mixed pair: `lower_option_order` reads
+            // the payload type off the Option operand.
+            return true;
+        };
+        matches!(
+            erase_runtime_qualifiers(inner.as_ref()),
+            Type::Int
+                | Type::IntN { .. }
+                | Type::Char
+                | Type::Bool
+                | Type::Float
+                | Type::Float32
+                | Type::String
+                | Type::List(_)
+                | Type::FixedList { .. }
+        )
+    }
+    match op {
+        BinOp::Eq | BinOp::Ne => true,
+        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+            payload_orderable(lhs) && payload_orderable(rhs)
+        }
+        _ => false,
+    }
+}
+
 /// `Signal/Derived/Computed.get()` — TIR often erases the Apply payload to
 /// `Named("Unit")` inside closures. Overflow arithmetic still uses the Int
 /// host path for Int signals (`n.get() * 2`).
@@ -1135,9 +1175,7 @@ fn resident_safe_expr_work_item<'a>(
                     && is_packed_process_signal(lhs)
                     && is_packed_process_signal(rhs)
             } else if matches!(&lhs.ty, Type::Option(_)) || matches!(&rhs.ty, Type::Option(_)) {
-                // `lower_binary` has presence-then-payload rows for
-                // `(Option, Eq | Ne)` and none for arithmetic on an Option.
-                matches!(op, BinOp::Eq | BinOp::Ne)
+                resident_safe_option_binary(op, &lhs.ty, &rhs.ty)
             } else if *overflow {
                 (intish_ty(&lhs.ty) || reactive_get_intish(lhs))
                     && (intish_ty(&rhs.ty) || reactive_get_intish(rhs))
@@ -2188,13 +2226,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
             }
-            // An Option operand: `LowerCtx::lower_binary` carries
-            // presence-then-payload rows for `(Option, Eq | Ne)` only (added
-            // with the Union rows for derived Equatable on `String?` fields).
-            // Arithmetic on an Option has no row, so keep it out rather than
-            // letting it reach a machine op on the carrier word.
+            // An Option operand: `LowerCtx::lower_binary` carries the
+            // presence-then-payload equality row and the `Option: PartialOrd`
+            // ordering row (auto-derived `Comparable` orders each field with
+            // `<` then `>`, so an optional field arrives here as `T? < T?`).
             if matches!(&lhs.ty, Type::Option(_)) || matches!(&rhs.ty, Type::Option(_)) {
-                return matches!(op, BinOp::Eq | BinOp::Ne)
+                return resident_safe_option_binary(op, &lhs.ty, &rhs.ty)
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
             }
