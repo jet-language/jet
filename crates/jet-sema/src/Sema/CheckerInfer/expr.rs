@@ -3616,7 +3616,7 @@ impl<'a> Checker<'a> {
         };
         let span = span;
         let head = match head.or_else(|| self.expected_type.clone()) {
-            Some(h) => self.resolve_type(h),
+            Some(h) => h,
             None => {
                 *e = Expr::TypedLit {
                     head: None,
@@ -3634,6 +3634,17 @@ impl<'a> Checker<'a> {
                 return None;
             }
         };
+        // D-BOUND-HEAD1=A / D-UNIFYLIT1=A: a builtin typed head dispatches on
+        // its canonical SOURCE spelling, but `resolve_type` rewrites `URL` to
+        // the internal `Url` nominal (and a library-declared text head to its
+        // `__JetCheckedText<…>` carrier). Read the descriptor from the written
+        // head first: resolving before the match erased `URL`'s head and left
+        // the body as a bare String, which then bound to a `Url` slot.
+        let head_kind = match &head {
+            Type::Named(name) => Syntax::typed_head_kind(name),
+            _ => None,
+        };
+        let head = self.resolve_type(head);
 
         match (head.clone(), body) {
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
@@ -3697,14 +3708,12 @@ impl<'a> Checker<'a> {
             }
             // D-UNIFYLIT1=A: `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` — typed head
             // is the sole domain-text spelling (no silent bare-quote rewrite).
-            (
-                Type::Named(ref type_name),
-                TypedLitBody::Value(inner),
-            ) if Syntax::typed_head_kind(type_name)
-                .is_some_and(|kind| kind.is_typed_text()) =>
+            (Type::Named(_), TypedLitBody::Value(inner))
+                if head_kind.is_some_and(|kind| kind.is_typed_text()) =>
             {
+                let kind = head_kind.expect("guard read the head descriptor");
                 *e = *inner;
-                return self.rewrite_typed_text_literal(e, type_name.clone(), span);
+                return self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span);
             }
             (
                 Type::Named(ref type_name),
@@ -3714,14 +3723,19 @@ impl<'a> Checker<'a> {
                 *e = *inner;
                 return self.rewrite_regex_literal(e, span);
             }
-            (
-                Type::Named(ref type_name),
-                TypedLitBody::Value(inner),
-            ) if Syntax::typed_head_kind(type_name)
-                .is_some_and(|kind| kind.is_boundary()) =>
+            // D-BOUND-HEAD1=A: `URL`/`Path`/`DateTime` construct their carrier
+            // here. Keyed on the source descriptor so `URL` still reaches
+            // `jet_typed_url_literal` after the head resolved to `Url`.
+            (Type::Named(_), TypedLitBody::Value(inner))
+                if head_kind.is_some_and(|kind| kind.is_boundary()) =>
             {
+                let kind = head_kind.expect("guard read the head descriptor");
                 *e = *inner;
-                return self.rewrite_typed_boundary_literal(e, type_name.clone(), span);
+                return self.rewrite_typed_boundary_literal(
+                    e,
+                    kind.source_name().to_string(),
+                    span,
+                );
             }
             (Type::Apply { name, args }, TypedLitBody::Value(inner))
                 if name == Syntax::TYPE_CHECKED_TEXT
