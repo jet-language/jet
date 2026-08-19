@@ -180,6 +180,24 @@ pub const PERF_BUDGET_PROFILES: &[&str] =
 pub const PERF_BUDGET_UNIT_SUFFIXES: &[&str] =
     &["ns", "us", "ms", "s", "B", "KiB", "MiB", "GiB", "pct"];
 
+/// D-TYPE2-TIME1=A: the normalization scale for each registered budget unit.
+/// Time suffixes are canonical `core.units::Time` members and normalize to the
+/// i64-nanosecond carrier (D-TIMERES1); byte suffixes normalize to bytes.
+/// This registered row is the only scale table — no compiler pass keeps a
+/// private duration suffix table.
+pub fn perf_budget_unit_scale(suffix: &str) -> Option<u128> {
+    Some(match suffix {
+        "ns" | "B" => 1,
+        "us" => 1_000,
+        "ms" => 1_000_000,
+        "s" => 1_000_000_000,
+        "KiB" => 1_024,
+        "MiB" => 1_048_576,
+        "GiB" => 1_073_741_824,
+        _ => return None,
+    })
+}
+
 /// D-JPK-FLEET1=A (ratified 2026-07-02): a fleet is a map of named hosts to
 /// `System` refs — `module fleet.<name> { hosts: { web1: system.<sys>.{ … } } }`.
 /// Distinct from `workspace` (the monorepo index): a fleet is a deployment target.

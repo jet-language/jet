@@ -825,7 +825,7 @@ fn normalize_limit(name: &str, metric: &str, limit: &str, expr: &Expr) -> Result
     }
     let Expr::UnitLit { raw, suffix, .. } = value else { return Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())) };
     if !allowed.contains(&suffix.as_str()) { return Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())); }
-    let multiplier = unit_multiplier(suffix).expect("allowed normalized unit");
+    let multiplier = crate::Syntax::perf_budget_unit_scale(suffix).expect("allowed normalized unit");
     let base = raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).ok_or_else(|| invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", value.span()))?;
     let quantity = if matches!(suffix.as_str(), "B" | "KiB" | "MiB" | "GiB") { BudgetQuantity::Bytes(base) } else { BudgetQuantity::DurationNs(base) };
     Ok(BudgetLimitFact { kind: limit.into(), quantity, raw: BudgetRawQuantity::Scalar { digits: raw.clone(), suffix: Some(suffix.clone()) } })
@@ -857,15 +857,12 @@ fn normalize_rate(name: &str, value: &Expr) -> Result<(BudgetQuantity, BudgetRaw
     let Expr::Int(count, _, _, Some(count_raw)) = count_expr else { return Err(invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span())) };
     let count = u128::try_from(*count).map_err(|_| invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span()))?;
     let Expr::UnitLit { raw: per_raw, suffix, .. } = per_expr else { return Err(invalid(name, "Rate per must be a positive Duration", "write `per: 1s`", per_expr.span())) };
-    let multiplier = unit_multiplier(suffix).filter(|_| matches!(suffix.as_str(), "ns" | "us" | "ms" | "s")).ok_or_else(|| invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", per_expr.span()))?;
+    let multiplier = crate::Syntax::perf_budget_unit_scale(suffix).filter(|_| matches!(suffix.as_str(), "ns" | "us" | "ms" | "s")).ok_or_else(|| invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", per_expr.span()))?;
     let per_ns = per_raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).filter(|n| *n > 0).ok_or_else(|| invalid(name, "Rate per must normalize to a positive Duration", "write a positive whole duration", per_expr.span()))?;
     let divisor = gcd(count, per_ns);
     Ok((BudgetQuantity::Rate { numerator: count / divisor, denominator_ns: per_ns / divisor }, BudgetRawQuantity::Rate { count_digits: count_raw.clone(), per_digits: per_raw.clone(), per_suffix: suffix.clone() }))
 }
 
-fn unit_multiplier(suffix: &str) -> Option<u128> {
-    Some(match suffix { "ns" | "B" => 1, "us" => 1_000, "ms" => 1_000_000, "s" => 1_000_000_000, "KiB" => 1_024, "MiB" => 1_048_576, "GiB" => 1_073_741_824, _ => return None })
-}
 
 fn gcd(mut left: u128, mut right: u128) -> u128 {
     while right != 0 { let remainder = left % right; left = right; right = remainder; }
