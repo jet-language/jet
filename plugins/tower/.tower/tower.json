@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2086,
-    "rev": 39335,
+    "nextNum": 2091,
+    "rev": 39410,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-19T22:18:35.815Z"
+    "completionCursor": "2026-08-19T23:36:45.338Z"
   },
   "epochs": [
     {
@@ -136382,6 +136382,275 @@
       "updated": "2026-08-19T23:02:18.517Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-19T23:02:18.517Z"
+    },
+    {
+      "id": "c0zx7020",
+      "num": 2086,
+      "title": "Tower CLI: help and behavior must agree, and criteria must be reversible",
+      "body": "Retires 12 papercuts, the largest legitimate cluster in a 70-row backlog. Six separate agents logged the SAME defect: tower help documents 'card criteria REF --list' and the CLI rejects it as an unknown flag (pc0p1s3ws, pc001bt4o, pc01aj6tt, pc0g2psws, pc0u17ot3, pc0dgew64). The rest are the same class of help-versus-behavior drift plus missing verbs: help advertises 'card criteria --unmeet n' with no such flag, so a falsely-met criterion cannot be corrected (pc0wjo1qx, pc0l35wty); 'card add' silently ignores unknown flags and creates a card with an empty body (pc04bkdmd); 'card add' minted blank criterion rows so the closure guard passed on empty text (pc0oh8h63); 'card list --epoch/--milestone --json' exits 5 with a null-iterable error (pc0okv05g); 'card show'/'decision show' print null for refs that list --json returns (pc0qnij0i); --blocked-by accepts '#N' and the lane renders it while lint's orphan-blocker check disagrees (pc00ga0sf); there is no card log verb at all (pc0zhix3y); and a running serve served a stale in-memory snapshot while the CLI wrote to disk (pc09n9y05). Every one of these cost an agent a retry loop mid-task.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every flag and subcommand tower help documents is accepted by the CLI, and every flag the CLI accepts is documented: a machine check compares the two and names the mismatched flag on failure",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:56.905Z"
+        },
+        {
+          "n": 2,
+          "text": "card criteria REF --list works as documented, and a met criterion can be corrected without a card rewrite (an unmeet or reopen verb exists and is documented)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:57.345Z"
+        },
+        {
+          "n": 3,
+          "text": "Unknown flags are a hard error on every write verb: card add with an unrecognised flag fails instead of creating a card with a dropped field, and a criterion cannot be created with empty text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:57.764Z"
+        },
+        {
+          "n": 4,
+          "text": "card list --epoch and --milestone with --json exit 0 and emit an array for every epoch and milestone on the board, including ones with no matching cards",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:58.187Z"
+        },
+        {
+          "n": 5,
+          "text": "card show and decision show resolve every ref that list --json returns, and --blocked-by agrees with what lint orphan-blocker expects",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:58.625Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T23:41:01.333Z",
+      "updated": "2026-08-19T23:41:58.625Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c08rdr78",
+      "num": 2087,
+      "title": "Worktree isolation: shared target dir and cwd-resolved board both corrupt state",
+      "body": "Retires 6 papercuts that each caused real damage, not friction. Sharing CARGO_TARGET_DIR across git worktrees let one worktree's build replace target/debug/jet while another used it, and produced a genuine build break (E0599 no variant ComptimeSp...) plus silently swapped binaries under a running test (pc0usdx48, pc08xq6wo, pc0b80fpf). Separately the Tower CLI resolves .tower from cwd, so running it from a worktree silently reads and writes that worktree's stale tracked board instead of the canonical one (pc0womkxu), and a worktree whose branch predates the canonical-board redirect ships a vendored paths.mjs that points at the wrong store (pc0dou50o). AGENTS.md already says the canonical board is the main checkout's .tower and that agents must not treat a worktree copy as truth, but nothing enforces either rule. This card makes both mechanical: a worktree cannot poison the main target dir, and the CLI refuses or redirects when it is not looking at the canonical store.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A build in a git worktree cannot write to or read a half-written artifact from the main checkout target dir: worktree builds are isolated by construction, proven by a test or a script guard rather than by convention",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:59.058Z"
+        },
+        {
+          "n": 2,
+          "text": "The Tower CLI operates on the canonical main-checkout store no matter which worktree it is invoked from, or refuses with a message naming the canonical path; a vendored or stale paths.mjs in an old worktree cannot redirect it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:59.498Z"
+        },
+        {
+          "n": 3,
+          "text": "A regression test or guard script fails if either rule is broken, so the AGENTS.md worktree rules stop depending on agent discipline",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:41:59.924Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T23:41:01.867Z",
+      "updated": "2026-08-19T23:41:59.924Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0hhsiej",
+      "num": 2088,
+      "title": "Devshell provides rustfmt so formatter proofs are runnable",
+      "body": "Retires 3 papercuts from 3 different agents: rustfmt is on PATH in neither 'nix develop' nor 'nix develop .#full', so 'cargo fmt' and 'rustfmt --check' both fail and an agent cannot produce a scoped Rust formatting proof (pc05oaqzm, pc0dxqatf, pc0aeis24). Agents have worked around it by copying files to /tmp and formatting there, or by skipping the proof entirely. The verify skill asks for formatter evidence, so the toolchain must supply the formatter.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "rustfmt is on PATH in both nix develop and nix develop .#full, so cargo fmt and rustfmt --check run inside the pinned shell",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:00.357Z"
+        },
+        {
+          "n": 2,
+          "text": "A scoped formatter proof runs without copying files outside the repo, and the verify skill names the exact command",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:00.793Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T23:41:02.395Z",
+      "updated": "2026-08-19T23:42:00.793Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c03w4kfy",
+      "num": 2089,
+      "title": "Test scratch must not live on RAM-backed /tmp",
+      "body": "Retires 2 papercuts with a documented history of OOM kills. The corpus-gate and three-way batteries write per-stem AOT crate scratch into TMPDIR, which is /tmp and RAM-backed on this machine (pc00l23vy), and an agent once pointed CARGO_TARGET_DIR at /tmp with 15GB of artifacts plus a 5GB scratchpad and filled swap (pc0heo5bk). AGENTS.md already warns that /tmp is tmpfs and that tmpfs pages end in kernel OOM kills, and jet-env rejects a /tmp target dir, but the test batteries still default their own scratch there. Now cheap to fix and more valuable than before: #2074 and #2076 made suite artifacts reusable, so scratch that survives on disk is a speed win rather than a cost.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No test battery writes crate scratch or cargo artifacts into a RAM-backed filesystem by default: the corpus-gate and three-way batteries place per-stem scratch on a gitignored disk path",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:01.228Z"
+        },
+        {
+          "n": 2,
+          "text": "A guard fails when a battery or script points scratch or a target dir at /tmp, extending the jet-env rejection that already exists to the test harness",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:01.654Z"
+        },
+        {
+          "n": 3,
+          "text": "Scratch that can be reused across runs is reused rather than deleted, so the change is a speed win on top of the artifact caches from #2074 and #2076",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:02.107Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T23:41:21.164Z",
+      "updated": "2026-08-19T23:42:02.107Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0csb38y",
+      "num": 2090,
+      "title": "Agent scripts and their docs must not drift apart",
+      "body": "Retires 3 papercuts of the same shape as the Tower CLI cluster, but in scripts/agent: the verify and check instructions tell agents to run check-unsafe-ratchet.mjs --check and the script rejects --check (pc09uoera); require-clean-tree.sh exempts bare agent names such as cavecrew-reviewer while the harness sends plugin-prefixed names, so the exemption never matches (pc00pgfyt); and jet run caches per-file under ~/.cache/jet/run as well as ~/.cache/jet/build, so clearing only build still serves a stale binary (pc0fxetb1). Each one cost an agent a debugging detour on a command a doc told it to run. The durable fix is a check that every flag an in-repo doc or skill tells an agent to pass is a flag the script actually accepts.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every flag an in-repo doc, skill or AGENTS.md instruction tells an agent to pass is a flag the named script actually accepts, enforced by a machine check that names the drifted pair",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:02.556Z"
+        },
+        {
+          "n": 2,
+          "text": "require-clean-tree.sh matches the agent names the harness actually sends, including plugin-prefixed ones, proven by a case in its own test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:02.979Z"
+        },
+        {
+          "n": 3,
+          "text": "Clearing the jet build cache also clears the run cache, or the two are documented as separate with the exact command for each",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T23:42:03.434Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T23:41:21.701Z",
+      "updated": "2026-08-19T23:42:03.434Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -182690,6 +182959,531 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T23:42:26.628Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc05oaqzm",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:26.185Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0l35wty",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:25.756Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0fxetb1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:25.304Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0heo5bk",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:24.875Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc012nx6o",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:24.450Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0b80fpf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:24.006Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc08xq6wo",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:23.564Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0usdx48",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:23.138Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0a9eg3x",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:22.712Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0womkxu",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:22.284Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0dou50o",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:21.865Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc01aj6tt",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:21.427Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0wjo1qx",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:21.001Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0nhi7hi",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:20.564Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0zhix3y",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:20.146Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0l9pb48",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:19.722Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc099d343",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:19.280Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0tlj4ew",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:18.849Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0dgew64",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:18.405Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc001bt4o",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:17.974Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0az0o5b",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:17.526Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0u17ot3",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:17.092Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0dxqatf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:16.636Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc02b703q",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:16.207Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0g2psws",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:15.769Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0aw7d63",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:15.346Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc05hmiyu",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:14.909Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0v86054",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:14.471Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0o10vut",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:14.026Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0pv2fcd",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:13.594Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0lud5zy",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:13.185Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0p1s3ws",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:12.765Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0aeis24",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:12.331Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0yv4h3g",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:11.900Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0opyd3q",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:11.468Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc00ga0sf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:11.040Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc06yux4x",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:10.609Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0ug1c61",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:10.176Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0f9u52i",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:09.737Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0jzcdl0",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:09.297Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0qrtt0j",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:08.862Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0vrv6au",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:08.432Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc09uoera",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:07.981Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc03xlzju",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:07.547Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0n108mn",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:07.113Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0okv05g",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:06.667Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0vau45h",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:06.248Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0vjbo7r",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:05.807Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc03jkmzq",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:05.365Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0oafxd6",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:04.945Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc00l23vy",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:04.493Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc01955qe",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:04.057Z",
+      "by": "owner",
+      "action": "papercut.resolve",
+      "ref": "pc0oh8h63",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T23:42:03.434Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0csb38y",
+      "note": "#3 Clearing the jet build cache also clears the run cache, or t"
+    },
+    {
+      "at": "2026-08-19T23:42:02.979Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0csb38y",
+      "note": "#2 require-clean-tree.sh matches the agent names the harness ac"
+    },
+    {
+      "at": "2026-08-19T23:42:02.556Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0csb38y",
+      "note": "#1 Every flag an in-repo doc, skill or AGENTS.md instruction te"
+    },
+    {
+      "at": "2026-08-19T23:42:02.107Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03w4kfy",
+      "note": "#3 Scratch that can be reused across runs is reused rather than"
+    },
+    {
+      "at": "2026-08-19T23:42:01.655Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03w4kfy",
+      "note": "#2 A guard fails when a battery or script points scratch or a t"
+    },
+    {
+      "at": "2026-08-19T23:42:01.228Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c03w4kfy",
+      "note": "#1 No test battery writes crate scratch or cargo artifacts into"
+    },
+    {
+      "at": "2026-08-19T23:42:00.793Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0hhsiej",
+      "note": "#2 A scoped formatter proof runs without copying files outside "
+    },
+    {
+      "at": "2026-08-19T23:42:00.358Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0hhsiej",
+      "note": "#1 rustfmt is on PATH in both nix develop and nix develop .#ful"
+    },
+    {
+      "at": "2026-08-19T23:41:59.924Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08rdr78",
+      "note": "#3 A regression test or guard script fails if either rule is br"
+    },
+    {
+      "at": "2026-08-19T23:41:59.498Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08rdr78",
+      "note": "#2 The Tower CLI operates on the canonical main-checkout store "
+    },
+    {
+      "at": "2026-08-19T23:41:59.058Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c08rdr78",
+      "note": "#1 A build in a git worktree cannot write to or read a half-wri"
+    },
+    {
+      "at": "2026-08-19T23:41:58.625Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zx7020",
+      "note": "#5 card show and decision show resolve every ref that list --js"
+    },
+    {
+      "at": "2026-08-19T23:41:58.187Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zx7020",
+      "note": "#4 card list --epoch and --milestone with --json exit 0 and emi"
+    },
+    {
+      "at": "2026-08-19T23:41:57.764Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zx7020",
+      "note": "#3 Unknown flags are a hard error on every write verb: card add"
+    },
+    {
+      "at": "2026-08-19T23:41:57.346Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zx7020",
+      "note": "#2 card criteria REF --list works as documented, and a met crit"
+    },
+    {
+      "at": "2026-08-19T23:41:56.906Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zx7020",
+      "note": "#1 Every flag and subcommand tower help documents is accepted b"
+    },
+    {
+      "at": "2026-08-19T23:41:21.702Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0csb38y",
+      "note": "Agent scripts and their docs must not drift apart"
+    },
+    {
+      "at": "2026-08-19T23:41:21.164Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c03w4kfy",
+      "note": "Test scratch must not live on RAM-backed /tmp"
+    },
+    {
+      "at": "2026-08-19T23:41:02.395Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0hhsiej",
+      "note": "Devshell provides rustfmt so formatter proofs are runnable"
+    },
+    {
+      "at": "2026-08-19T23:41:01.867Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c08rdr78",
+      "note": "Worktree isolation: shared target dir and cwd-resolved board both corrupt state"
+    },
+    {
+      "at": "2026-08-19T23:41:01.333Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0zx7020",
+      "note": "Tower CLI: help and behavior must agree, and criteria must be reversible"
+    },
+    {
+      "at": "2026-08-19T23:36:45.338Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-19T23:36:45.338Z"
+    },
+    {
       "at": "2026-08-19T23:25:48.560Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -185663,531 +186457,6 @@
       "action": "card.update",
       "ref": "c06tpil4",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:52.861Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c9q0534j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:52.236Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0oqtn3i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:51.634Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0zqqkvl",
-      "note": "#6 Slice bar: actual WASI entropy (random_get) is exercised und"
-    },
-    {
-      "at": "2026-08-19T13:38:51.178Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0tpkgc7",
-      "note": "#6 Slice bar: Windows entropy source (ProcessPrng/BCryptGenRand"
-    },
-    {
-      "at": "2026-08-19T13:38:50.748Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0zdbl2x",
-      "note": "#6 Slice bar: macOS entropy source (SecRandomCopyBytes/getentro"
-    },
-    {
-      "at": "2026-08-19T13:38:50.331Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0jk3869",
-      "note": "#6 Closeout bar: the stage1/stage2 Jet-built compiler passes th"
-    },
-    {
-      "at": "2026-08-19T13:38:49.884Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#6 Slice bar (supersedes the family template for this card): th"
-    },
-    {
-      "at": "2026-08-19T13:38:26.954Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c01edx3m",
-      "note": "#8 Scaffold emits command files with a commented override, and "
-    },
-    {
-      "at": "2026-08-19T13:38:26.535Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c01edx3m",
-      "note": "#7 A duplicate command file is a registered error with what/why"
-    },
-    {
-      "at": "2026-08-19T13:38:26.103Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c01edx3m",
-      "note": "#6 Each of run/build/dev/test resolves its package-root command"
-    },
-    {
-      "at": "2026-08-19T13:38:25.667Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c01edx3m",
-      "note": "#5 D-ROLEFILE1 and D-CMDOVERRIDE1 are ratified and logged in sy"
-    },
-    {
-      "at": "2026-08-19T13:38:25.235Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xty2bs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:24.617Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0zkd2j5",
-      "note": "#6 The design maps each classic SSA pass to the sema fact that "
-    },
-    {
-      "at": "2026-08-19T13:38:24.184Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0949cz5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:23.565Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0949cz5",
-      "note": "#4 Owner sign-off ballot on bootstrap readiness is raised and r"
-    },
-    {
-      "at": "2026-08-19T13:38:23.132Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0949cz5",
-      "note": "#3 Ratified-surface sweep: every user-typeable surface matches "
-    },
-    {
-      "at": "2026-08-19T13:38:22.684Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0949cz5",
-      "note": "#2 Memory-model v5 soundness campaign completes with zero reach"
-    },
-    {
-      "at": "2026-08-19T13:38:22.262Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0949cz5",
-      "note": "#1 Dogfood portfolio: the named real programs are built and pas"
-    },
-    {
-      "at": "2026-08-19T13:38:21.842Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0jh3z59",
-      "note": "core.game input actions and fixed-step clock"
-    },
-    {
-      "at": "2026-08-19T13:38:21.420Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0onj1hd",
-      "note": "#9 Input disconnect mid-recording and corrupt replay files fail"
-    },
-    {
-      "at": "2026-08-19T13:38:20.991Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0onj1hd",
-      "note": "#8 Rollback restores a prior tick and deterministic re-simulati"
-    },
-    {
-      "at": "2026-08-19T13:38:20.560Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0onj1hd",
-      "note": "#7 A recorded session replays to bit-identical simulation state"
-    },
-    {
-      "at": "2026-08-19T13:38:20.123Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0onj1hd",
-      "note": "#6 Input action mapping + fixed-step clock produce identical ti"
-    },
-    {
-      "at": "2026-08-19T13:38:19.688Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0onj1hd",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:19.095Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0s0594k",
-      "note": "Yielding-loop head misparses ', if' guard as a stride"
-    },
-    {
-      "at": "2026-08-19T13:38:18.666Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#13 Syntax.rs comment, syntax-decisions.md entry, grammars empty"
-    },
-    {
-      "at": "2026-08-19T13:38:18.242Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#12 fmt STABILITY round-trip of the comma-less guard."
-    },
-    {
-      "at": "2026-08-19T13:38:17.804Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#11 Updated loop_values.jet golden identical under AOT, default "
-    },
-    {
-      "at": "2026-08-19T13:38:17.369Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#10 Genuine stride 'loop i, 0..10, 2 -> i' still parses as a str"
-    },
-    {
-      "at": "2026-08-19T13:38:16.958Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#9 ', if' in a yielding loop head produces the new registered E"
-    },
-    {
-      "at": "2026-08-19T13:38:16.521Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0oeuws4",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:53.023Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0x6ysg8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:52.398Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0hx9cco",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:51.787Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0bfcs5p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:51.178Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0tpn16q",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:50.573Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05e21g2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:49.968Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0171611",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:49.358Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wqwqaq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:48.726Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c042mblf",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:37:48.101Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0j678mt",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:37:47.512Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zmoznd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:37:46.916Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08olnwg",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:36:41.271Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0a8hfb2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:40.651Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c03vf9gh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:40.034Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xuaz2s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:39.438Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rx4dw2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:38.843Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ly7q8a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:38.243Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c054l5zl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:37.618Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zljh8e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:36.971Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wbf3js",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:36.376Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0lc8k7l",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:36:10.684Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00307he",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:10.058Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0nc6a15",
-      "note": "#6 Breakpoint/run-control gestures are the observable surface: "
-    },
-    {
-      "at": "2026-08-19T13:36:09.621Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06eyg3s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:09.015Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0fltx8v",
-      "note": "Canvas Details: validation, refusal, undo, and no-dead-control sweep"
-    },
-    {
-      "at": "2026-08-19T13:36:08.594Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0a6y94o",
-      "note": "#8 A structural sweep proves every rendered Details control has"
-    },
-    {
-      "at": "2026-08-19T13:36:08.156Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0a6y94o",
-      "note": "#7 Every refusal path (validation error, stale revision, Escape"
-    },
-    {
-      "at": "2026-08-19T13:36:07.730Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0a6y94o",
-      "note": "#6 Collection and nested-value editors validate input before wr"
-    },
-    {
-      "at": "2026-08-19T13:36:07.302Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0a6y94o",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:06.713Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0ycigaw",
-      "note": "Canvas debugger: local state, stale anchors, and no-fake-liveness proof"
-    },
-    {
-      "at": "2026-08-19T13:36:06.209Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0snu52d",
-      "note": "#9 Negative liveness test: disconnecting the runtime makes the "
-    },
-    {
-      "at": "2026-08-19T13:36:05.780Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0snu52d",
-      "note": "#8 After source edits move code, breakpoint/value anchors discl"
-    },
-    {
-      "at": "2026-08-19T13:36:05.333Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0snu52d",
-      "note": "#7 Local variables of the paused frame render with types and cu"
-    },
-    {
-      "at": "2026-08-19T13:36:04.906Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0snu52d",
-      "note": "#6 Debugger shows real values, stack frames, active node, and t"
-    },
-    {
-      "at": "2026-08-19T13:36:04.462Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0snu52d",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:03.851Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0zpnwk9",
-      "note": "#6 The staged-node materialization rule from #388 (\"first compa"
-    },
-    {
-      "at": "2026-08-19T13:36:03.021Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y6f65g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:02.422Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c03nuhak",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:01.816Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c03nuhak",
-      "note": "#6 Native fixtures cover the compatibility matrix across suppor"
-    },
-    {
-      "at": "2026-08-19T13:36:01.389Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ve1z27",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:36:00.781Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0ve1z27",
-      "note": "#6 Portable resource controls (CPU time, memory, file handles, "
-    },
-    {
-      "at": "2026-08-19T13:36:00.364Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0n5eu5p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:59.764Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0n5eu5p",
-      "note": "#6 Signals, cancellation, and cleanup act on the full process t"
-    },
-    {
-      "at": "2026-08-19T13:35:59.314Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0f07u66",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:35:58.702Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0f07u66",
-      "note": "#6 Binary-safe stdin/stdout/stderr streams, redirection targets"
     }
   ],
   "nextNum": 368,
@@ -186384,8 +186653,8 @@
       "cardId": null,
       "created": "2026-08-07T02:58:54.819Z",
       "status": "resolved",
-      "resolvedAt": "2026-08-07T10:57:20.621Z",
-      "resolvedBy": "claude-fable",
+      "resolvedAt": "2026-08-19T23:42:26.628Z",
+      "resolvedBy": "owner",
       "resolution": "Fixed: pkgs.rustfmt added to both default and full devshells in flake.nix; rustfmt now on PATH via jet-env"
     },
     {
@@ -186395,8 +186664,8 @@
       "cardId": null,
       "created": "2026-08-07T10:11:36.057Z",
       "status": "resolved",
-      "resolvedAt": "2026-08-07T10:57:18.803Z",
-      "resolvedBy": "claude-fable",
+      "resolvedAt": "2026-08-19T23:42:26.185Z",
+      "resolvedBy": "owner",
       "resolution": "Implemented: tower card criteria --unmeet n --evidence why --by X reopens a falsely-met criterion (clears metBy/verifiedBy); CLI + API + tests"
     },
     {
@@ -186406,8 +186675,8 @@
       "cardId": "c09qyavw",
       "created": "2026-08-07T10:29:44.137Z",
       "status": "resolved",
-      "resolvedAt": "2026-08-07T10:57:18.012Z",
-      "resolvedBy": "claude-fable",
+      "resolvedAt": "2026-08-19T23:42:25.755Z",
+      "resolvedBy": "owner",
       "resolution": "Documented: verify skill fresh-binary-smoke section + memory now say rm -rf ~/.cache/jet (build AND run) — clearing only build serves a stale quick-run result"
     },
     {
@@ -186417,8 +186686,8 @@
       "cardId": null,
       "created": "2026-08-07T10:37:14.820Z",
       "status": "resolved",
-      "resolvedAt": "2026-08-07T10:57:16.089Z",
-      "resolvedBy": "claude-fable",
+      "resolvedAt": "2026-08-19T23:42:25.304Z",
+      "resolvedBy": "owner",
       "resolution": "Fixed: jet-env rejects /tmp CARGO_TARGET_DIR, AGENTS.md documents the tmpfs trap, scripts/agent/tmp-guard.sh auto-cleans and blocks under memory pressure"
     },
     {
@@ -186427,7 +186696,9 @@
       "text": "tests/comptime_diff.rs numbered rustc artifacts by per-test case index, so two tests both using index 0 raced for one output path and failed as a fake I2 miscompile; fixed on bd3/reader",
       "cardId": "c09qyavw",
       "created": "2026-08-07T11:34:35.325Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:24.875Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0b80fpf",
@@ -186435,7 +186706,9 @@
       "text": "CARGO_TARGET_DIR=<main>/target shared across worktrees caused a real build break (E0599: no variant ComptimeSplice for jet::AST::Expr in Source/CmdProve.rs) even though the variant exists in my worktree's own crates/jet-foundation/src/AST/expressions.rs — reproducible on retry, not transient. Likely stale rlib reuse across worktrees with divergent AST enum shapes. Fell back to the worktree-local target dir to unblock.",
       "cardId": null,
       "created": "2026-08-07T12:52:31.667Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:24.449Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc08xq6wo",
@@ -186443,7 +186716,9 @@
       "text": "Shared CARGO_TARGET_DIR across worktrees poisons builds: concurrent cargo from worktrees/dollar and worktrees/profile made my build fail with 'no variant ComptimeSplice in jet_foundation::AST::Expr' on unmodified code. Different sources, one target dir, whoever writes last wins. Agents need per-worktree target dirs.",
       "cardId": "c0c86cps",
       "created": "2026-08-07T13:17:35.686Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:24.006Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0usdx48",
@@ -186451,7 +186726,9 @@
       "text": "Sharing CARGO_TARGET_DIR across git worktrees lets another worktree's build replace target/debug/jet and shared dep artifacts mid-session: a stale binary made a working sema fix look broken, and a lib test failed with 'no variant named ComptimeName in jet_lexer::AST::Expr' from another branch's artifacts. Build and run in one command, or verify the binary is yours.",
       "cardId": null,
       "created": "2026-08-07T13:22:46.110Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:23.563Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0a9eg3x",
@@ -186459,7 +186736,9 @@
       "text": "git stash push -- <one-file> with no local changes to that file reports 'No local changes to save' but a following git stash pop still pops whatever is on TOP of the stash stack (an unrelated old stash from a prior session) and can conflict — hit this in the main repo's stash list (foreign-eval-builtins, foreign-wip-during-1478-abi-fix, cleanup-session entries pre-date this session). Resolved safely by restoring the one conflicted file to HEAD; stash entries left untouched. Avoid stash push/pop entirely when just wanting a scoped before/after diff — use git show HEAD:<path> instead.",
       "cardId": null,
       "created": "2026-08-07T13:25:32.481Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:23.138Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0womkxu",
@@ -186467,7 +186746,9 @@
       "text": "tower CLI resolves .tower from cwd, so running it from a worktree silently reads the worktree's stale tracked copy instead of the canonical main board; agents in worktrees must export TOWER_DATA=<main>/plugins/tower/.tower",
       "cardId": null,
       "created": "2026-08-07T14:34:49.314Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:22.712Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0dou50o",
@@ -186475,7 +186756,9 @@
       "text": "A worktree whose branch predates the canonical-board redirect ships a vendored plugins/tower/app/paths.mjs without canonicalDataDir, so tower card add run from that worktree writes to the stale worktree .tower and mints a card number that already exists on the real board, with no warning. Run the main checkout's plugins/tower/tower.mjs for every board write from a worktree.",
       "cardId": null,
       "created": "2026-08-07T16:31:50.466Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:22.284Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc01aj6tt",
@@ -186483,7 +186766,9 @@
       "text": "tower card criteria <ref> --list errors with 'unknown flag for card: --list' although the CLI help documents it; workaround is card show <ref>, which prints the same checklist",
       "cardId": null,
       "created": "2026-08-07T19:28:35.000Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:21.864Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0wjo1qx",
@@ -186491,7 +186776,9 @@
       "text": "tower help advertises 'card criteria --unmeet n' but cli.mjs has no unmeet flag — falsely-met criteria cannot be reopened via CLI",
       "cardId": "c0v5d703",
       "created": "2026-08-08T01:19:32.905Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:21.426Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0nhi7hi",
@@ -186499,7 +186786,9 @@
       "text": "Full-workspace cargo check for jet-sema blocked repeatedly (multiple minutes) by a concurrent agent's in-flight jet-comptime refactor (DataLite.rs deletion / core_calls.rs signature change) leaving apply_data_line_call call sites mismatched (E0061) — not my card's files, can't fix without stepping on their WIP.",
       "cardId": null,
       "created": "2026-08-08T03:34:47.402Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:21.001Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0zhix3y",
@@ -186507,7 +186796,9 @@
       "text": "tower card has no 'show' or 'log' subcommand and no --text/--note flag; a card log line is 'tower card update <ref> --by X --log \"...\"', which tower help does not list under card update.",
       "cardId": "c04sy9ys",
       "created": "2026-08-08T03:49:18.840Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:20.564Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0l9pb48",
@@ -186515,7 +186806,9 @@
       "text": "Repo build was red/flaky mid-task from concurrent wave-6 edits to jet-foundation/jet-lexer/jet-parser (TokKind::KwWhile/KwFor missing, Type::Quantity non-exhaustive matches) landing and clearing repeatedly; unrelated to cards #1660/#1747/#1751. A concurrent agent also swept my uncommitted files for those 3 cards into commit 52a7573fb via a broad add-all, so 'never touch another task's paths' was violated by someone else, not me.",
       "cardId": null,
       "created": "2026-08-08T05:26:20.873Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:20.145Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc099d343",
@@ -186523,7 +186816,9 @@
       "text": "tests/decisions.rs::ratified_decisions_enforced fails: S57 in SURFACE_IN_SYNTAX_RS has no matching /// S57 doc comment in Syntax.rs — core_surface.rs COMPTIME_MARK now carries D-META-STAGE1=B instead (metaprogramming rework). Pre-existing, unrelated to cards #1668-1670.",
       "cardId": null,
       "created": "2026-08-08T05:31:46.665Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:19.722Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0tlj4ew",
@@ -186531,7 +186826,9 @@
       "text": "tests/compute_views.rs AOT tests (tensor_slice_and_mutable_view_run_through_aot, tensor_stored_range_uses_the_same_owned_and_mutable_window_law) fail with 'Tensor mutable view requires exclusive backing storage' panic (exit 70); JIT (jet run) produces correct output for the same source. Unrelated to card #1662 (Compute.rs last touched 2026-08-04, no compute-views/Tensor-refcount code in this diff).",
       "cardId": null,
       "created": "2026-08-08T12:41:47.119Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:19.279Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0dgew64",
@@ -186539,7 +186836,9 @@
       "text": "card criteria --list is documented but rejected by the current CLI flag table; plain card criteria <ref> lists items",
       "cardId": "c0vyzvj1",
       "created": "2026-08-08T14:00:40.644Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:18.848Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc001bt4o",
@@ -186547,7 +186846,9 @@
       "text": "tower card criteria --list documented in tower help but rejected as unknown flag at runtime; no free-text 'tower card log' command exists either -- progress notes have to go through criteria --meet --evidence or card update --body.",
       "cardId": null,
       "created": "2026-08-08T14:05:03.223Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:18.405Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0az0o5b",
@@ -186555,7 +186856,9 @@
       "text": "FFI/lowlevel examples (ffi, inline_asm, inline_c) falsely decline E0956 when 'jet run' is invoked outside scripts/agent/jet-env's nix PATH (no cc/rustc/clang) - backend.rs's bind_bundle_ffi can't build the runtime bridge cdylib and silently falls back to the interpreter, which lacks ExternCall. Same binary passes cleanly under jet-env. Hit repeatedly on card #1763 (bd14/bd15/bd16/orchestrator probes); always reproduce FFI/lowlevel examples via jet-env, never a bare shell.",
       "cardId": null,
       "created": "2026-08-08T16:55:02.110Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:17.974Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0u17ot3",
@@ -186563,7 +186866,9 @@
       "text": "tower help documents card criteria --list, but tower rejects the flag; card show was required to inspect criteria.",
       "cardId": "c012yfzn",
       "created": "2026-08-08T18:04:27.447Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:17.526Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0dxqatf",
@@ -186571,7 +186876,9 @@
       "text": "rustfmt --check could not run: rustfmt is not installed in the sandbox; no formatter proof available.",
       "cardId": "c012yfzn",
       "created": "2026-08-08T18:06:00.075Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:17.092Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc02b703q",
@@ -186579,7 +186886,9 @@
       "text": "scripts/agent/jet-env rg fails before command: read-only /home/nate/.cache/nix/fetcher-cache-v4.sqlite; direct rg fallback used.",
       "cardId": null,
       "created": "2026-08-08T18:24:14.294Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:16.635Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0g2psws",
@@ -186587,7 +186896,9 @@
       "text": "tower card criteria #1687 --list rejected documented --list flag as unknown; card show still exposes criteria.",
       "cardId": "c0uyasoi",
       "created": "2026-08-08T19:05:27.951Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:16.207Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0aw7d63",
@@ -186595,7 +186906,9 @@
       "text": "Managed sandbox blocks scripts/agent/jet-env at the Nix daemon socket; cached Nix-store cargo/rustc fallback required for checks and proofs.",
       "cardId": null,
       "created": "2026-08-09T11:54:23.955Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:15.769Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc05hmiyu",
@@ -186603,7 +186916,9 @@
       "text": "scripts/agent/jet-env cannot connect to /nix/var/nix/daemon-socket/socket in the sandbox; focused project commands need approved escalation.",
       "cardId": null,
       "created": "2026-08-09T15:07:30.640Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:15.346Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0v86054",
@@ -186611,7 +186926,9 @@
       "text": "sandboxed scripts/agent/jet-env cannot reach /nix/var/nix/daemon-socket; focused proof requires escalation.",
       "cardId": "c06m9mgu",
       "created": "2026-08-09T15:13:57.487Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:14.909Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0o10vut",
@@ -186619,7 +186936,9 @@
       "text": "scripts/agent/jet-env cannot reach the Nix daemon socket in this sandbox; nix develop --offline is the working project-command fallback.",
       "cardId": null,
       "created": "2026-08-09T15:17:45.614Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:14.471Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0pv2fcd",
@@ -186627,7 +186946,9 @@
       "text": "scripts/agent/jet-env cannot reach the Nix daemon in the managed sandbox; elevated retry is policy-rejected, so local cargo fallback is required.",
       "cardId": null,
       "created": "2026-08-09T15:37:38.601Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:14.026Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0lud5zy",
@@ -186635,7 +186956,9 @@
       "text": "Jet proof commands are blocked in this sandbox: jet-env cannot access the nix daemon socket, escalation is rejected, and host cargo is unavailable.",
       "cardId": "c0vvhs7e",
       "created": "2026-08-09T15:54:06.617Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:13.594Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0p1s3ws",
@@ -186643,7 +186966,9 @@
       "text": "tower help documents card criteria REF --list, but that exact command is rejected as an unknown tower card flag.",
       "cardId": "c0q9x5ds",
       "created": "2026-08-09T17:15:22.804Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:13.185Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0aeis24",
@@ -186651,7 +186976,9 @@
       "text": "The pinned jet-env shell exposes neither rustfmt nor cargo fmt, so an agent cannot run a scoped Rust formatting check there.",
       "cardId": "c0q9x5ds",
       "created": "2026-08-09T17:15:54.570Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:12.765Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0yv4h3g",
@@ -186659,7 +186986,9 @@
       "text": "scripts/agent/jet-env cargo check cannot reach the Nix daemon socket under sandbox; local cargo fallback lacks a complete linker/sysroot.",
       "cardId": null,
       "created": "2026-08-09T18:33:47.424Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:12.331Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0opyd3q",
@@ -186667,7 +186996,9 @@
       "text": "Worktree-isolated agents (spawned already sandboxed to .claude/worktrees/agent-*) cannot do git ops in the shared builder worktree: any bash command that cd's to .claude/worktrees/builder and runs git is hard-refused by the sandbox ('git operations must target its own worktree'), even for builder-sync.sh --release itself if cd'd there first. builder-sync.sh succeeds (claims the lock) but is then unusable for git in that session. Card #1850: fell back to the agent's own isolated worktree per the exit-75 contingency, and released the builder lock via the script's bare 'rm -f' path (no cd needed) so it didn't sit claimed.",
       "cardId": null,
       "created": "2026-08-10T10:54:18.707Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:11.900Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc00ga0sf",
@@ -186675,7 +187006,9 @@
       "text": "tower card add/update --blocked-by accepts '#N' and the lane renders 'Blocked by #N', but lint's orphan-blockers rule only resolves internal card ids, so every '#N' blocker reads as dangling; pass the card id from 'card show --json'.",
       "cardId": "c0rqe5rb",
       "created": "2026-08-10T18:15:20.382Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:11.468Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc06yux4x",
@@ -186683,7 +187016,9 @@
       "text": "codex workers launched in a linked worktree under .claude/worktrees cannot reach the nix daemon socket (EPERM on /nix/var/nix/daemon-socket/socket) so every scripts/agent/jet-env command dies before cargo starts, and git metadata is read-only so the required commit fails. Hit three workers in one session (cards 1801, 1864, 1650/1775/1844). Workers then report fallback-toolchain greens the orchestrator cannot trust, or leave work staged and uncommitted. The sandbox writable_roots entry for the main .git does not cover a linked worktree's own git dir.",
       "cardId": null,
       "created": "2026-08-10T18:50:30.078Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:11.040Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0ug1c61",
@@ -186691,7 +187026,9 @@
       "text": "Adding /nix/var/nix to a codex worker's sandbox_workspace_write.writable_roots breaks bwrap outright: every shell launch dies with 'bwrap: Cant mkdir /nix/var/nix/.git: Permission denied', including pwd. One worker burned 55k tokens and ran nothing. It was an attempted fix for the daemon-socket EPERM that blocks jet-env in worker sandboxes; it makes things strictly worse. Known-good roots are the repo .git plus ~/.cache/nix, which still hit the socket EPERM intermittently but recover.",
       "cardId": null,
       "created": "2026-08-10T19:40:22.397Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:10.609Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0f9u52i",
@@ -186699,7 +187036,9 @@
       "text": "codex exec workers launched with cwd inside .claude/worktrees/* sometimes apply_patch by absolute path into the MAIN clone (two lanes in one wave); worktree .git pointer resolves there. Briefs now carry an absolute-path ban + orchestrator must diff-check the main tree before every merge.",
       "cardId": null,
       "created": "2026-08-13T15:08:46.443Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:10.175Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0jzcdl0",
@@ -186707,7 +187046,9 @@
       "text": "codex-rescue task agent deterministically fails immediately: configured model claude-sonnet-4-0 returns 404; seven parallel read-only milestone prep jobs all failed identically",
       "cardId": null,
       "created": "2026-08-13T19:08:00.431Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:09.737Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0qrtt0j",
@@ -186715,7 +187056,9 @@
       "text": "codex-rescue task dispatch deterministically fails before work because it requests unavailable model claude-sonnet-4-0; ten parallel lanes failed identically",
       "cardId": null,
       "created": "2026-08-13T21:49:19.930Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:09.296Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0vrv6au",
@@ -186723,7 +187066,9 @@
       "text": "task codex-rescue dispatch deterministically fails before running with unavailable model claude-sonnet-4-0; direct codex exec -p luna works.",
       "cardId": null,
       "created": "2026-08-13T22:58:11.765Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:08.862Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc09uoera",
@@ -186731,7 +187076,9 @@
       "text": "verify/check instructions invoke check-unsafe-ratchet.mjs --check, but the script rejects --check; plain invocation is the actual check mode.",
       "cardId": null,
       "created": "2026-08-14T08:39:42.084Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:08.432Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc03xlzju",
@@ -186739,7 +187086,9 @@
       "text": "Codex 0.144.5 repeatedly logs 'failed to load models cache: missing field base_instructions at line 95 column 5' on Luna launches; runs continue, but every transcript gains error noise.",
       "cardId": null,
       "created": "2026-08-14T14:28:53.256Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:07.981Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0n108mn",
@@ -186747,7 +187096,9 @@
       "text": "Every Luna codex exec warns twice that agent role default lacks a description; fix ~/.codex agent role config to remove deterministic launch noise.",
       "cardId": null,
       "created": "2026-08-14T14:28:54.410Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:07.546Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0okv05g",
@@ -186755,7 +187106,9 @@
       "text": "card list --epoch/--milestone --json deterministically exits 5 with jq-style 'cannot use null as iterable' when current E3 card data contains nullable fields; blocks queue inspection.",
       "cardId": null,
       "created": "2026-08-14T15:30:45.918Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:07.112Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0vau45h",
@@ -186763,7 +187116,9 @@
       "text": "codex-rescue task agent deterministically fails before work: configured model claude-sonnet-4-0 returns 404 not_found; use direct Luna codex exec fallback.",
       "cardId": null,
       "created": "2026-08-14T21:19:05.612Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:06.666Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0vjbo7r",
@@ -186771,7 +187126,9 @@
       "text": "codex-rescue task agent fails immediately with 404 model claude-sonnet-4-0; use working default task agent or direct Luna runtime instead.",
       "cardId": null,
       "created": "2026-08-15T03:11:43.950Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:06.248Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc03jkmzq",
@@ -186779,7 +187136,9 @@
       "text": "codex-rescue subagent fails immediately with 404 model claude-sonnet-4-0, preventing fresh milestone review; agent profile needs a live model.",
       "cardId": null,
       "created": "2026-08-15T08:00:03.324Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:05.807Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0oafxd6",
@@ -186787,7 +187146,9 @@
       "text": "codex/Luna account usage limit exhausted until 2026-08-19 23:30; the burndown skill mandates Luna as the sole implementer, so all five dispatches died in 10s. Implementation fleet switched to Claude task subagents under the same source-only discipline (no builds, orchestrator owns proof).",
       "cardId": null,
       "created": "2026-08-16T11:24:51.182Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:05.364Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc00l23vy",
@@ -186795,7 +187156,9 @@
       "text": "Corpus-gate and three-way batteries write per-stem AOT crate scratch into TMPDIR, which is /tmp and RAM-backed tmpfs here; 745 dirs reached 26G of 31G and drove swap to 22G of 24G. jet-env rejects a /tmp CARGO_TARGET_DIR but nothing redirects the nix-shell TMPDIR. Export TMPDIR to a disk path such as ~/.cache/jet-scratch before long gate runs; scripts/agent/tmp-guard.sh reclaims most of it after the fact.",
       "cardId": null,
       "created": "2026-08-17T10:57:59.774Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:04.945Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc01955qe",
@@ -186803,7 +187166,9 @@
       "text": "codex-rescue harness agent type broken: every spawn fails instantly with 404 model: claude-sonnet-4-0 not found; fell back to scout agents for research fan-out",
       "cardId": null,
       "created": "2026-08-19T11:27:44.289Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:04.493Z",
+      "resolvedBy": "owner"
     },
     {
       "id": "pc0oh8h63",
@@ -186811,7 +187176,9 @@
       "text": "card add minted blank criterion rows on #2056-#2061 (criteria arrays with empty text) — closure guard becomes unsatisfiable-as-intended; the CLI/store should reject empty criterion text at add time.",
       "cardId": null,
       "created": "2026-08-19T13:30:27.571Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-19T23:42:04.057Z",
+      "resolvedBy": "owner"
     }
   ]
 }

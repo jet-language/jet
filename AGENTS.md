@@ -97,17 +97,38 @@ wrong, report it and stop. Board data lives in `plugins/tower/.tower/` (main
 checkout only). Agents read and write board state through the non-serve CLI
 commands, which operate on the store directly.
 
-When agent tooling snags you mid-task — a dead-end command, a broken helper, a
-misleading doc, a stale cache — log it in one line and keep going:
+When this repository's own agent tooling snags you mid-task — a dead-end
+`scripts/agent/*` command, a Tower CLI flag that its own help documents but
+rejects, a stale devshell — log it in one line and keep going:
 `node plugins/tower/tower.mjs papercut add --by <agent> --text "..."`. Do not
 silently push through, and do not derail the task to fix it.
 
-Papercuts record friction that will hit the next agent too: log one only when
-the same snag hit twice, or the cause is plainly deterministic for anyone who
-runs the same command. Do not log one-offs, self-inflicted state (dirty tree,
-stale binary, wrong cwd), collisions with another session, or a single flaky
-failure. A bug in Jet itself — compiler, stdlib, examples, tests — is a card,
-not a papercut.
+A papercut is a bug report against in-repo agent tooling, and every one of the
+four gates below must hold. The bar is high on purpose: 70 accumulated at once,
+and roughly a third were the same external tool failing repeatedly.
+
+1. **In scope.** The broken thing lives in this repository: `scripts/agent/**`,
+   `tools/**`, the Tower CLI, the devshell, or an in-repo doc that told you to
+   run something that does not work. The agent platform is out of scope — model
+   ids, harness agent types, subagent dispatch, account limits, sandbox policy,
+   and daemon-socket denials are not Jet's tooling and never become papercuts.
+2. **Deterministic and reproducible.** You can name the exact command and the
+   exact observed output, and anyone running that command hits it. One flaky
+   failure, a slow command, a concurrent-session collision, or self-inflicted
+   state (dirty tree, stale binary, wrong cwd, wrong worktree) is not a
+   papercut.
+3. **Not already logged.** Check `papercut list` for the same cause first. A
+   second row for a known cause adds noise, not signal; if you have new
+   evidence, put it on the existing row's card instead.
+4. **Not a card.** A bug in Jet itself — compiler, stdlib, examples, tests,
+   diagnostics — is a card. A test that is already red on master is a card. A
+   missing feature is a card. Papercuts are only for tooling that wastes the
+   next agent's time.
+
+Papercuts are triaged in batches: a cause that will keep hitting agents becomes
+a sidequest card that fixes it for good, and everything else is discarded. A
+papercut is a signal, not a to-do list, so it is closed when its cause is
+carded or dismissed — never left open as a reminder.
 
 ## Invariants
 
