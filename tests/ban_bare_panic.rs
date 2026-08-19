@@ -117,7 +117,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
-        8,
+        9,
         "test file — every panic! here is inside a #[test] fn",
     ),
     (
