@@ -88,7 +88,22 @@ pub(crate) fn evaluate_step_with_items(
     session.step += 1;
     let mut out = String::new();
 
-    let kind = match classify(trimmed, session.step) {
+    // Notebook declarations are file-wide (D-NOTEBOOK-SURFACE1): the kernel
+    // already placed every parser-plane item cell (`is_item_input`) into the
+    // session's item set before this call. Such a cell's own turn must run on
+    // the item lane too — `classify`'s keyword heads only cover `fn`/`struct`/…,
+    // so an `@name :: expr` or `#Test` cell would fall into the statement lane,
+    // where `Checker::declare` collides with the cell's own file-wide
+    // declaration (E0118 "already taken"). Hard rejects (D-REPL6) keep priority.
+    let classified = if notebook_items_preloaded
+        && crate::reject_feature(trimmed).is_none()
+        && crate::is_item_input(trimmed)
+    {
+        Ok(InputKind::Item(format!("{trimmed}\n")))
+    } else {
+        classify(trimmed, session.step)
+    };
+    let kind = match classified {
         Ok(k) => k,
         Err(ds) => {
             for d in &ds {

@@ -5504,6 +5504,30 @@ pub(crate) fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
             || jit_list_of_int_list_type(&c.ty)
             || jit_list_record_type(&c.ty);
     }
+    if c.frozen_at_spawn {
+        // D-CONC-FREEZE1=A: sema's `check_freeze` proved this capture is a
+        // deeply immutable, deeply cloneable owned snapshot, and the proof
+        // rides TIR as `frozen_at_spawn`. The spawn clone lowers through the
+        // same `lower_clone` record/list/map/tuple/string doors an ordinary
+        // `Clone` node uses — the engine marshals the fact and never re-runs
+        // crossing policy (I9). Same door set as the call-arg `clone_ok` gate.
+        return matches!(
+            &c.ty,
+            Type::Int
+                | Type::Float
+                | Type::Bool
+                | Type::Char
+                | Type::String
+                | Type::Option(_)
+                | Type::IntN { .. }
+                | Type::Float32
+        ) || jit_struct_type(&c.ty)
+            || jit_compound_type(&c.ty)
+            || jit_tuple_type(&c.ty)
+            || jit_list_native_type(&c.ty)
+            || jit_list_record_type(&c.ty)
+            || jit_map_string_type(&c.ty);
+    }
     if c.clone_at_spawn {
         // Sender and Receiver are Arc-backed handles (Prelude Clone); spawn
         // capture clones the handle id the same way AOT clones JetSender /
