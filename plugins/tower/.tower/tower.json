@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2082,
-    "rev": 39279,
+    "rev": 39283,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-19T21:10:46.592Z"
+    "completionCursor": "2026-08-19T21:37:57.085Z"
   },
   "epochs": [
     {
@@ -135255,7 +135255,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\nBare `jet test` inside a `jet new` project discovers and runs every `#Test` block in the package (spec S43), not just the entry file: a fresh project with tests in a sibling file passes out of the box, parse-broken package files surface their errors instead of being silently skipped, `jet test <file>` behavior is unchanged, and E0601 fires only when the whole package truly has zero `#Test` blocks.\n\n## Law\n- Spec S43 (docs/spec/spec.md:1134-1149) — `jet test` compiles and runs `#Test` blocks; a directory target builds one harness per file. The card's live probe shows bare project mode violating the auto-collect promise (the Zig trap).\n- D-TESTKIT1=A gap #2 — the shared recursive target walk (Source/CmdCompile.rs:1781-1809) skipping build/, dotdirs, and reserved files.\n- D-CLI-BARE1=A — bare project verbs resolve their entry via one shared rule (main.rs `resolve_bare_entry`, 3019).\n- D-TEST4 — doctest-only files stay testable without `#Test` blocks (CmdCompile.rs:1838-1843).\n- I4 — E0601 wording changes (if any) go through the registered diagnostic + UI snapshot. (The E0601 fix-text modernization itself is sibling card #2067's scope.)\n\n## Work\n1. Trace the bug path: bare dispatch main.rs:2314-2332 → `resolve_bare_entry(\"test\", cwd, …)` (3019) returns the single project ENTRY FILE → `run_test_opts` (CmdCompile.rs:1747) runs only that file's module bundle → sema emits E0601 (jet-sema Bundle/Pipeline.rs:2691) when the entry has no `#Test`, even though siblings do.\n2. Enumerate the package: in bare project mode (a package root was found), collect the package's member files instead of the lone entry. Prefer the project-parts automatic discovery seam (`jet::ProjectParts::scan(&root)`, main.rs:747-750) so \"the package\" means exactly what `jet project parts` prints; fall back to `collect_source_files_recursive` on the package root only if ProjectParts cannot yield file paths — and record which route shipped in the card log. Explicit `jet test <file>` / `jet test <dir>` arguments keep today's code path untouched.\n3. Aggregate the run: reuse the existing per-file harness loop (run_test_opts's dir branch, 1753-1772) over the package set with one change — per-file \"no `#Test` blocks\" is no longer an error. Per file: has `#Test` → run harness; doctests only → run doctests (existing 1838-1843 logic); neither → skip silently but count. Track total discovered tests across the package.\n4. E0601 once, package-truthful: if the whole package (all members) discovered zero `#Test` blocks AND no doctests ran, emit E0601 exactly once with the package framing. The sema-side E0601 (Pipeline.rs:2691) stays for single-file invocations; suppress the harness path that would fire it per-file in package mode (the CmdCompile pre-check at 1841 already shows the pattern).\n5. Parse-broken members are NOT skipped: a member that fails to load/parse reports its real compile error and fails the run (the `has_test_blocks` Err→true convention at Source/lib.rs:1840 already encodes \"surface the real error\"); verify ProjectParts discovery doesn't drop them before the runner sees them — if it does, walk must include them so the error surfaces.\n6. Exit codes: any failing test or broken member → exit 1; all pass → 0; zero tests package-wide → E0601 + exit 1 (unchanged code meaning).\n7. Update the shipped docs/spec wording only where it describes bare `jet test` scope (grep docs/ for the bare-test description); S43 itself already promises this behavior — no spec change, this is a bug fix to match ratified law.\n\n## Not building\n- E0601 fix-text spelling modernization (require→assert, `#Test(\"name\")` heading) — owned by sibling card #2067.\n- `jet bench` discovery parity — bench retires under D-CLAIM-BENCH1 (#2067's scope).\n- Cross-package/workspace-wide test collection; `--filter`/`--shuffle`/coverage changes (they ride per-file harnesses unchanged).\n- Changing what `jet test <dir>` does for arbitrary non-package directories (ratified per spec.md:1143).\n\n## Proof\n- Criterion 1 (two-file fixture): integration test — `jet new proj`; add `math.jet` with a passing `#Test`; entry keeps no tests; bare `jet test` from the project root runs the sibling's test, prints its pass line, exits 0. Second fixture variant: tests in BOTH entry and sibling → both run.\n- Criterion 2: `jet test math.jet` output is byte-identical to today (single-file path untouched); a project whose files have zero `#Test` blocks and zero doctests → exactly one E0601, exit 1; a doctest-only project → doctests run, no E0601.\n- Broken-sibling probe: package with a parse-broken member → its compile error prints, exit 1 (no silent skip).\n- Live probe transcript on a fresh binary in a temp project (`jet new` → sibling test → bare `jet test`) attached as evidence; runtime behavior is CLI-tier only (harness selection), so no AOT/interpreter parity probe beyond the fixture running under default `jet test`. Full suite at epoch closeout.\n\n## blockedBy\nnone — pure tooling bug fix against ratified S43; all seams (bare entry resolution, ProjectParts scan, per-file harness walk) ship today.",
       "blockedBy": [],
@@ -135265,20 +135265,20 @@
         {
           "n": 1,
           "text": "Bare jet test in a fresh jet new project discovers #Test blocks in every package file (spec S43), not just the entry file; a two-file fixture proves it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:42.188Z"
+          "evidence": "PROOF cargo test --test jet_test bare_jet_test 3/3 ok (40.97s, 2026-08-19, builder 2679f1037), incl. bare_jet_test_discovers_tests_in_every_package_module: jet new project plus a sibling math.jet #Test, bare jet test reports the pass and exits 0. Discovery walks the driver's authority-checked scan via new ProjectParts::source_files (ProjectParts.rs:146-181) from CmdCompile.rs:1812; harness codegen already collects tests from every bundle module (Codegen/mod.rs:4497-4507).",
+          "at": "2026-08-19T21:53:19.790Z"
         },
         {
           "n": 2,
           "text": "jet test <file> behavior is unchanged; E0601 appears only when the package truly has zero #Test blocks.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:42.629Z"
+          "evidence": "PROOF same run: bare_jet_test_reports_no_tests_once_for_a_testless_package ok (counts one E0601 heading) and bare_jet_test_surfaces_a_broken_package_member ok. Named-file and directory targets still enter run_test_opts unchanged (CmdCompile.rs:1747-1779, package=false keeps the previous branch and call order byte-preserved at :1935-1941); E0601 stays sema-owned (jet-sema Pipeline.rs:2691) and fires once through the entry fallback.",
+          "at": "2026-08-19T21:53:20.315Z"
         }
       ],
       "refs": [],
@@ -135288,8 +135288,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:02:10.142Z",
-      "updated": "2026-08-19T16:21:25.472Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-19T21:53:21.017Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T21:53:21.017Z"
     },
     {
       "id": "c0boklxe",
@@ -182422,6 +182423,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T21:53:21.018Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02ozs3u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T21:53:20.316Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02ozs3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T21:53:19.791Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02ozs3u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T21:37:57.085Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-19T21:37:57.085Z"
+    },
+    {
       "at": "2026-08-19T21:28:32.112Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -185892,34 +185921,6 @@
       "action": "card.update",
       "ref": "c0r3yur2",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:33:23.666Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rwwvb3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:33:23.064Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ebieja",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:33:22.472Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gett6z",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:33:00.146Z",
-      "by": "fable",
-      "action": "card.delete",
-      "ref": "c0gmlscb",
-      "note": "Windows IOCP: emitted Prelude body and AOT/dev conformance"
     }
   ],
   "nextNum": 368,
