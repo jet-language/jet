@@ -9,8 +9,9 @@
 // variant is not in scope as a local variable.
 // Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 //
-// This example exercises Key pattern matching with synthesised values so the
-// golden test runs without requiring interactive stdin.
+// The synthesised keys below exercise `Key` pattern matching without input.
+// The `live { … }` block then reads a REAL key event: one keystroke arrives on
+// stdin, so the same transcript is reproducible on a pipe and on a terminal.
 use core.term as term
 
 fn describe_key(k: Key) => String {
@@ -31,9 +32,11 @@ fn run() {
     print(describe_key(k3))
     print(describe_key(k4))
     // A `live { }` block enters direct-input mode and restores it on exit.
-    // In a real TUI program this block would call `term.read_key()` in a loop.
+    // `term.read_key()` blocks for one key event and answers a `Key`.
     #Live {
-        print("in live block")
+        pressed :: term.read_key()
+        shown :: describe_key(pressed)
+        print("live key: {shown}")
     }
     print("restored")
 }

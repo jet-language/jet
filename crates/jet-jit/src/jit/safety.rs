@@ -1526,7 +1526,10 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             }
             if module == "core.term" {
                 return match method.as_str() {
-                    "args" | "readline" | "buffered" => args.is_empty(),
+                    // `read_key` is nullary and lands on the shared Prelude
+                    // kernel through one host shim, so the resident tier runs
+                    // the same key decode AOT does (I9).
+                    "args" | "readline" | "buffered" | "read_key" => args.is_empty(),
                     "print" | "eprint" | "take"
                     | "read_until" | "binread" | "input" | "confirm" | "input_secret"
                     | "read_all_input" | "stdin" | "stdout" | "stderr"

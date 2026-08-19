@@ -19,6 +19,19 @@ mod progress_semantics {
     include!("../../../Prelude/Core/Progress.rs");
 }
 
+/// D-TERM1: restores the terminal mode a `live { … }` body entered, on every
+/// exit path — normal fall-through, an early `return`, a `?` propagation, or a
+/// panic unwind. This is the evaluator's spelling of the `jet_scope_guard`
+/// closure AOT emits (`emit/statements.rs`, `TStmt::Live`); both ends call the
+/// same shared Prelude dispatchers, so neither tier owns a restore rule.
+struct LiveTerminalMode;
+
+impl Drop for LiveTerminalMode {
+    fn drop(&mut self) {
+        super::term_key::jet_term_leave();
+    }
+}
+
 /// Inclusive place-region handle used while evaluating `TStmt::SplitViews`.
 /// Reuses the `__JetViewMut` field shape so later splits can resolve absolute
 /// windows into the original owner list (local, field, or nested index).
@@ -1991,7 +2004,23 @@ impl<'a> EvalCtx<'a> {
                 self.context_deadline = saved_deadline;
                 result
             }
-            TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
+            // D-TERM1: `live { … }` enters raw, no-echo terminal input mode and
+            // restores the captured mode on EVERY exit path, exactly like the
+            // scope guard AOT emits (`emit/statements.rs` `TStmt::Live`). Both
+            // ends are the shared Prelude dispatchers, so this engine marshals
+            // control flow only and states no raw-mode policy of its own (I9).
+            TStmt::Live { body } => {
+                if !self.runtime_execution {
+                    Err(unsupported(
+                        "a `live { … }` terminal block during compile-time evaluation",
+                        self.span(),
+                    ))
+                } else {
+                    super::term_key::jet_term_enter();
+                    let _restore = LiveTerminalMode;
+                    self.exec_stmts(body, scope)
+                }
+            }
             TStmt::Shield { body } => {
                 if self.task_cancel.is_some() {
                     crate::scheduler::jet_scheduler_shield_enter();

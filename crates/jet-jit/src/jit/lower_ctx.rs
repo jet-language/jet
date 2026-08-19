@@ -13755,6 +13755,12 @@ impl LowerCtx<'_, '_> {
                                 "stdout" if args.is_empty() => (self.host.io.stdout, Vec::new()),
                                 "stderr" if args.is_empty() => (self.host.io.stderr, Vec::new()),
                                 "stdin" if args.is_empty() => (self.host.io.stdin, Vec::new()),
+                                // D-TERM1 / I9: the host marshals the shared
+                                // Prelude `jet_term_read_key` result into the
+                                // scalar `Key` carrier; no decode lives here.
+                                "read_key" if args.is_empty() => {
+                                    (self.host.io.term_read_key, Vec::new())
+                                }
                                 "terminal_width" if args.is_empty() => {
                                     (self.host.io.terminal_width, Vec::new())
                                 }

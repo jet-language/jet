@@ -31,6 +31,37 @@ mod math_lib_pure {
     include!("../../../Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
+/// D-TERM1: project the shared term kernel's `JetKey` into the evaluator's
+/// value carrier. The variant names are the ratified Jet `Key` variant names
+/// and the payloads are the same `Char`/`Int` the AOT and resident tiers carry,
+/// so a key read on one tier renders identically on the others.
+fn key_to_ct(key: super::term_key::JetKey) -> CtValue {
+    use super::term_key::JetKey;
+    // Positional payloads keep `label: None`, the same shape a `Key.Char('h')`
+    // enum literal evaluates to, so a read key and a written key compare and
+    // render identically.
+    let (variant, args): (&str, Vec<(Option<String>, CtValue)>) = match key {
+        JetKey::Char(value) => ("Char", vec![(None, CtValue::Char(value))]),
+        JetKey::Enter => ("Enter", Vec::new()),
+        JetKey::Escape => ("Escape", Vec::new()),
+        JetKey::Backspace => ("Backspace", Vec::new()),
+        JetKey::Tab => ("Tab", Vec::new()),
+        JetKey::Delete => ("Delete", Vec::new()),
+        JetKey::Up => ("Up", Vec::new()),
+        JetKey::Down => ("Down", Vec::new()),
+        JetKey::Left => ("Left", Vec::new()),
+        JetKey::Right => ("Right", Vec::new()),
+        JetKey::F(number) => ("F", vec![(None, CtValue::Int(number))]),
+        JetKey::Ctrl(value) => ("Ctrl", vec![(None, CtValue::Char(value))]),
+        JetKey::Unknown => ("Unknown", Vec::new()),
+    };
+    CtValue::Enum {
+        type_name: crate::Syntax::TYPE_KEY.to_string(),
+        variant: variant.to_string(),
+        args,
+    }
+}
+
 struct EvalOptionValue(CtValue);
 
 impl crate::option_lift2::JetOptionValue for EvalOptionValue {
@@ -4750,6 +4781,20 @@ impl<'a> EvalCtx<'a> {
                 String::new(),
                 Some(source_span),
             ));
+        }
+        // D-TERM1 / I9: `term.read_key()` marshals to THE Prelude term key
+        // kernel — `jet_term_read_key`, the same symbol AOT emits and the
+        // resident Cranelift host calls. The decode table lives there; this arm
+        // only projects `JetKey` into the evaluator's value carrier. Without it
+        // the shared evaluator refused the call and the surface was AOT-only.
+        // Compile time keeps its refusal: `core.term` is a Tier-2 ambient
+        // effect there (E3410), not something a build may read from a terminal.
+        if self.runtime_execution
+            && module == "core.term"
+            && method == "read_key"
+            && args.is_empty()
+        {
+            return Ok(key_to_ct(super::term_key::jet_term_read_key()));
         }
         // D-PIN1 / S58: `mem.address_of(place)` returns the stable address
         // identity and records its allocation provenance in the sentry
@@ -9632,8 +9677,11 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn write_print(&mut self, text: &str, to_stderr: bool) -> Result<(), Diagnostic> {
+        // I4: the refusal is a missing output sink, not a phase. This evaluator
+        // is default `jet run`'s tier 0 as well as the comptime folder, so
+        // "print at comptime" mislabelled a runtime print site.
         let Some(sink) = self.sink.as_ref() else {
-            return Err(unsupported("print at comptime", self.span()));
+            return Err(unsupported("print without an output sink", self.span()));
         };
         // REPL/notebook callers consume the sink as their stdout/stderr event
         // stream and project it into the cell result. Do not bypass it just

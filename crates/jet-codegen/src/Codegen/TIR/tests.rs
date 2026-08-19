@@ -40,6 +40,64 @@
         assert!(covers("fn guarded() { #Shield { value :: 1 } }", "guarded"));
     }
 
+    /// Tower card #2008 / I2: the same harness, reporting WHAT the gate refused.
+    /// `tir_covers` must be false for the answer to mean anything, so assert it
+    /// here rather than in every caller.
+    fn refusal_for(src: &str, fn_name: &str) -> String {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (toks, lex_diags) = crate::Lexer::lex(src);
+            assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+            let prog = crate::Parser::parse(&toks).expect("parse failed");
+            let cx = build_cx(&prog, src, "test.jet");
+            let f = prog
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    Item::Func(f) if f.name == fn_name => Some(f),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no fn {fn_name}"));
+            assert!(
+                !tir_covers(f, &cx),
+                "fn {fn_name} is covered, so there is no refusal to report"
+            );
+            refusal::describe(&cx)
+        })
+    }
+
+    /// Tower card #2008 / I2: when the gate and the emitter disagree, the abort
+    /// must name the construct the gate refused. A signature-level refusal points
+    /// at the parameter type — the shape the build entry had (`BuildContext` has
+    /// no runtime lowering) before sema learned to project it out of the program.
+    #[test]
+    fn gate_refusal_names_an_uncovered_parameter_type() {
+        let detail = refusal_for("fn build(b: BuildContext) => Int {\n    return 1\n}\n", "build");
+        assert!(
+            detail.contains("the parameter type `BuildContext`"),
+            "refusal must name the parameter type, got: {detail}"
+        );
+        assert!(
+            detail.contains("test.jet:1:13"),
+            "refusal must carry file:line:column, got: {detail}"
+        );
+    }
+
+    /// The same self-report for a body construct, and the tie-break that makes it
+    /// useful: the INNERMOST refused node wins, so the enclosing binding statement
+    /// does not mask the expression that actually failed.
+    #[test]
+    fn gate_refusal_names_the_innermost_uncovered_expression() {
+        let detail = refusal_for("fn run() {\n    total :: mystery\n}\n", "run");
+        assert!(
+            detail.contains("the expression `mystery`"),
+            "refusal must name the expression, not the binding around it, got: {detail}"
+        );
+        assert!(
+            detail.contains("test.jet:2:14"),
+            "refusal must carry file:line:column, got: {detail}"
+        );
+    }
+
     #[test]
     fn empty_string_parts_emit_balanced_format_call() {
         let cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new());

@@ -204,6 +204,10 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Memo.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
     include_str!("../Prelude/Term.rs"),
+    // D-TERM1 / I9: the one terminal key kernel. AOT embeds it here; the
+    // canonical TIR evaluator and the resident JIT host `include!` the same
+    // file, so no tier re-decodes key bytes or re-states raw-mode entry.
+    include_str!("../Prelude/Core/TermKey.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/NumericWiden.rs"),
     include_str!("../Prelude/Observe.rs"),
@@ -1953,11 +1957,14 @@ fn strip_unused_txn_prelude(out: String) -> String {
     s
 }
 
-/// D-TERM1: the `jet_term_unix` and `jet_term_windows` platform modules each
-/// carry vetted `unsafe` for terminal I/O FFI. Strip them (along with the
-/// `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatch functions and
-/// the `JetKey` type) when no `live { … }` block or `core.term` call is present
-/// in the generated user code — i.e., when `jet_term_enter` is never called.
+/// D-TERM1: the `jet_term_unix` and `jet_term_windows` byte decoders and the
+/// `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatchers all come
+/// from `Prelude/Core/TermKey.rs`, and reaching a terminal needs the vetted
+/// `unsafe` termios FFI in `Prelude/Term.rs`. Strip that whole span when no
+/// `live { … }` block or `core.term` call is present in the generated user code
+/// — i.e., when `jet_term_enter` is never called. The `JetKey` type itself
+/// stays: `impl JetShow for JetKey` (`Prelude/Core/RuntimeControl.rs`) is
+/// emitted unconditionally and needs it.
 fn strip_unused_term_prelude(out: String) -> String {
     // Fast path: if the term dispatchers are referenced in user code (after the
     // prelude), keep the whole term section.
@@ -2951,6 +2958,8 @@ mod tests {
         let shared_protocol =
             std::fs::read_to_string(root.join("src/Prelude/SharedProtocol.rs")).unwrap();
         let term = std::fs::read_to_string(root.join("src/Prelude/Term.rs")).unwrap();
+        let term_key =
+            std::fs::read_to_string(root.join("src/Prelude/Core/TermKey.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
         let numeric_widen =
@@ -3009,6 +3018,7 @@ mod tests {
             ("src/Prelude/Memo.rs", memo.as_str()),
             ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
             ("src/Prelude/Term.rs", term.as_str()),
+            ("src/Prelude/Core/TermKey.rs", term_key.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
@@ -3136,6 +3146,9 @@ mod tests {
         let term_pos = production_codegen
             .find("include_str!(\"../Prelude/Term.rs\")")
             .unwrap();
+        let term_key_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/TermKey.rs\")")
+            .unwrap();
         let observe_pos = production_codegen
             .find("include_str!(\"../Prelude/Observe.rs\")")
             .unwrap();
@@ -3185,7 +3198,8 @@ mod tests {
                 && iter_pos < collections_pos
                 && collections_pos < memo_pos
                 && memo_pos < term_pos
-                && term_pos < control_pos
+                && term_pos < term_key_pos
+                && term_key_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
                 && exact_units_pos < structural_debug_pos
@@ -3252,6 +3266,7 @@ mod tests {
                 memo.as_str(),
                 shared_protocol.as_str(),
                 term.as_str(),
+                term_key.as_str(),
                 runtime_control.as_str(),
                 numeric_widen.as_str(),
                 observe.as_str(),
@@ -3304,6 +3319,7 @@ mod tests {
                     memo.as_str(),
                     shared_protocol.as_str(),
                     term.as_str(),
+                    term_key.as_str(),
                     runtime_control.as_str(),
                     numeric_widen.as_str(),
                     observe.as_str(),
@@ -4306,7 +4322,8 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
     }
     jet_foundation::ice!(
         None,
-        "codegen reached a #Test body construct the typed IR does not cover — compiler bug (I2/R7)"
+        "codegen reached a #Test body construct the typed IR does not cover: {} — compiler bug (I2/R7)",
+        TIR::refusal::describe(cx)
     );
 }
 

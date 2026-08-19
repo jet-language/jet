@@ -100,6 +100,21 @@ pub(super) mod term_semantics {
     include!("../../../Prelude/Term.rs");
 }
 
+/// D-TERM1 / I9: the one terminal key kernel. AOT embeds
+/// `Prelude/Core/TermKey.rs` into the generated program and the resident
+/// Cranelift host includes it too; the canonical evaluator marshals
+/// `JetKey` into a `CtValue::Enum` and enters/restores terminal mode through
+/// these same dispatchers, so no tier states its own raw-mode or decode policy.
+#[allow(dead_code)]
+pub(super) mod term_key {
+    include!("../../../Prelude/Core/TermKey.rs");
+    // Items are order-independent; the import trails the include so a file
+    // that opens with an inner doc comment still compiles as a module. The
+    // raw-mode kernel these dispatchers call lives in `Prelude/Term.rs`, which
+    // `term_semantics` above compiles from that one source.
+    use super::term_semantics::{jet_term_mode_enter, jet_term_mode_leave};
+}
+
 /// The generated-CLI argv boundary: the interpreter reads the same Prelude
 /// part AOT embeds and the Cranelift host includes, so program-name
 /// normalization and banner termination are decided once.

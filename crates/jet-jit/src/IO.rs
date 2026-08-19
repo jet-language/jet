@@ -18,6 +18,20 @@ pub(crate) mod term_prelude {
     include!("../../jet-codegen/src/Prelude/Term.rs");
 }
 
+/// D-TERM1 / I9: the one terminal key kernel. AOT embeds
+/// `Prelude/Core/TermKey.rs` into the generated program and the canonical TIR
+/// evaluator includes it too; the host shims below only marshal a `JetKey` into
+/// the resident scalar enum carrier. No decode table or raw-mode policy is
+/// restated here.
+#[allow(dead_code)]
+pub(crate) mod term_key {
+    include!("../../jet-codegen/src/Prelude/Core/TermKey.rs");
+    // Items are order-independent; the import trails the include, matching the
+    // other in-process Prelude modules. The raw-mode kernel these dispatchers
+    // call lives in `Prelude/Term.rs`, compiled once above as `term_prelude`.
+    use super::term_prelude::{jet_term_mode_enter, jet_term_mode_leave};
+}
+
 mod progress_semantics {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -1185,12 +1199,45 @@ fn jet_jit_file_writer_flush(handle: i64) -> i64 {
     }
 }
 
+// `live { … }` enter/restore. Both call the shared Prelude dispatchers, so the
+// resident tier cannot drift from AOT's raw-mode entry decision (I9).
 fn jet_jit_term_enter() {
-    let _ = term_prelude::jet_term_mode_enter(true);
+    term_key::jet_term_enter();
 }
 
 fn jet_jit_term_leave() {
-    term_prelude::jet_term_mode_leave();
+    term_key::jet_term_leave();
+}
+
+/// `term.read_key()` — marshal the shared kernel's `JetKey` into the resident
+/// scalar enum carrier (`pack_enum_scalar`: `(payload << 8) | disc`). The
+/// discriminant comes from the generated Prelude enum metadata, which build.rs
+/// derives from the same `JetKey` declaration this matches on, so the resident
+/// and AOT tiers cannot disagree about a variant's number.
+fn jet_jit_term_read_key() -> i64 {
+    use term_key::JetKey;
+    let (variant, payload) = match term_key::jet_term_read_key() {
+        JetKey::Char(value) => ("Char", i64::from(u32::from(value))),
+        JetKey::Enter => ("Enter", 0),
+        JetKey::Escape => ("Escape", 0),
+        JetKey::Backspace => ("Backspace", 0),
+        JetKey::Tab => ("Tab", 0),
+        JetKey::Delete => ("Delete", 0),
+        JetKey::Up => ("Up", 0),
+        JetKey::Down => ("Down", 0),
+        JetKey::Left => ("Left", 0),
+        JetKey::Right => ("Right", 0),
+        JetKey::F(number) => ("F", number),
+        JetKey::Ctrl(value) => ("Ctrl", i64::from(u32::from(value))),
+        JetKey::Unknown => ("Unknown", 0),
+    };
+    let Some(disc) = crate::types_meta::prelude_enum_variant_index(
+        jet_foundation::Syntax::TYPE_KEY,
+        variant,
+    ) else {
+        jet_foundation::ice!(None, "jit read_key: Key variant metadata");
+    };
+    (payload << 8) | disc
 }
 
 host_fns! {
@@ -1282,4 +1329,5 @@ host_fns! {
     file_reader_close: "jet_jit_file_reader_close" => super::enc_stream::jet_jit_file_reader_close: unary_void;
     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
     term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
+    term_read_key: "jet_jit_term_read_key" => jet_jit_term_read_key: nullary;
 }
