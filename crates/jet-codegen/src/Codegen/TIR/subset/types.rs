@@ -638,6 +638,15 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "CryptoError" {
             return true;
         }
+        // D-TYPE2-MEASURE1=A: `ComputeError` is the err side of every fallible
+        // compute operation, including the composed `Matrix<M, P> ? ComputeError`
+        // a matrix product produces. Same argument as `CryptoError` above: it
+        // renders through `cx.rust_type` to the Prelude-owned
+        // `jet_std::JetComputeError` (`core_rust_type_name`), so the payload is
+        // byte-identical on the TIR path.
+        if n == "ComputeError" {
+            return true;
+        }
         // c109 Phase 21 / D-TUPLE-DESTRUCT1: `Closed` is the err type of
         // `Receiver.receive()` → `Result<T, Closed>` (Source/Collections.rs
         // `receiver_method_return`). It renders
@@ -672,6 +681,11 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         || is_covered_shared_ty(ty, cx)
         || is_covered_shared_guard_ty(ty, cx)
         || is_covered_shared_weak_ty(ty, cx)
+        // D-TYPE2-MEASURE1=A / D-COMPUTE-TYPE1: a compute payload is the ok side
+        // of that same composed product. `is_subset_param_ty` already admits the
+        // shape aliases, and every one renders to the single `JetTensor`
+        // representation, so an `Ok(Matrix<M, P>)` needs no special emit.
+        || is_covered_compute_ty(ty)
 }
 
 /// c109 Phase 5: `ty` is a list `[E]` or map `[K:V]` the subset can lower. The
