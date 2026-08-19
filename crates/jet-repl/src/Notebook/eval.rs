@@ -1,8 +1,9 @@
 //! Evaluate one notebook cell against a live REPL [`Session`].
 
 use crate::{
-    classify, collect_moved_names, e1802, normalize_repl_input, rebuild_funcs, type_check_item,
-    type_check_stmts, update_core_imports_from_ledger, InputKind, Session, ReplTurnStatus,
+    classify, collect_moved_names, e1802, normalize_repl_input, rebuild_funcs,
+    repl_executable_stmts, type_check_item, type_check_stmts,
+    update_core_imports_from_ledger, InputKind, Session, ReplTurnStatus,
 };
 use crate::Comptime::{self, CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::AST::{Func, StructDef};
@@ -260,13 +261,13 @@ pub(crate) fn evaluate_step_with_items(
         }
 
         InputKind::Stmts(stmts, suppress, check_src) => {
-            let checked_stmts = match type_check_stmts(
+            let (checked_stmts, checked_core_imports) = match type_check_stmts(
                 session,
                 &stmts,
                 session.step,
                 &check_src,
             ) {
-                Ok(s) => s,
+                Ok(checked) => checked,
                 Err(errors) => {
                     for d in &errors {
                         out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
@@ -292,6 +293,15 @@ pub(crate) fn evaluate_step_with_items(
 
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
             let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+            // A cell executes the AST sema checked, exactly as one interactive
+            // REPL turn does. Sema's one prelude opening (D-NAME-ALIAS1=A) lives
+            // in that AST: `assert`/`assert_eq` already select the shared stop
+            // kernel and `read_file`/`write_file`/`file_exists`/`eprint` are
+            // already calls on a compiler-owned Core alias, so the cell needs
+            // the alias map sema resolved against (D-CTCORE1) beside it.
+            let stmts = repl_executable_stmts(checked_stmts.clone());
+            let mut core_imports = session.core_imports.clone();
+            core_imports.extend(checked_core_imports);
             let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
             let funcs: HashMap<String, &Func> =
                 session.func_defs.iter().map(|(k, v)| (k.clone(), v)).collect();
@@ -313,7 +323,7 @@ pub(crate) fn evaluate_step_with_items(
                     &mut trial_scope,
                     REPL_FUEL_BUDGET,
                     suppress,
-                    &session.core_imports,
+                    &core_imports,
                     &structs,
                     &session.binding_types,
                     &mut tracking,
@@ -327,7 +337,7 @@ pub(crate) fn evaluate_step_with_items(
                     &mut trial_scope,
                     REPL_FUEL_BUDGET,
                     suppress,
-                    &session.core_imports,
+                    &core_imports,
                     &structs,
                     &session.binding_types,
                     &mut tracking,

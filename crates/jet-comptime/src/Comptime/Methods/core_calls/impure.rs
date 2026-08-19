@@ -339,7 +339,11 @@ pub fn apply_impure_core_call_with_type(
                 .join("\n");
             if let Some(s) = sink {
                 let frame = super::term_semantics::jet_term_print_frame(&text);
-                if super::term_semantics::jet_term_stdout_is_terminal() {
+                // A REPL/notebook caller consumes this sink as its transcript
+                // (a cell projects it into its own output bundle), so the host
+                // process having a terminal must not divert the frame away from
+                // it — the same rule the TIR evaluator's `write_print` states.
+                if !repl_mode && super::term_semantics::jet_term_stdout_is_terminal() {
                     let _ = super::term_semantics::jet_term_write_stdout(&frame, true);
                 } else {
                     s.stdout.push_str(&frame);
@@ -355,7 +359,7 @@ pub fn apply_impure_core_call_with_type(
                 .join("\n");
             if let Some(s) = sink {
                 let frame = super::term_semantics::jet_term_print_frame(&text);
-                if super::term_semantics::jet_term_stderr_is_terminal() {
+                if !repl_mode && super::term_semantics::jet_term_stderr_is_terminal() {
                     let _ = super::term_semantics::jet_term_write_stderr(&frame, true);
                 } else {
                     s.stderr.push_str(&frame);

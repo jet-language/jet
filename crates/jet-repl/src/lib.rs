@@ -1761,13 +1761,20 @@ const PRELOAD_SRC: &str = "";
 
 /// Build a complete synthetic Jet source from accumulated declarations +
 /// a new check function, then run sema. `check_src` is the statement(s) text
-/// as produced by `classify` — it already ends in `;` (or `}`). Returns errors only.
+/// as produced by `classify` — it already ends in `;` (or `}`).
+///
+/// Returns the *checked* statements — the AST sema normalized, which is the
+/// only AST any tier executes — together with the checked module's Core alias
+/// map (D-CTCORE1). The map matters because sema's one prelude opening
+/// (D-NAME-ALIAS1=A) rewrites an ambient name such as `read_file` into a call
+/// on a compiler-owned alias that exists only in this turn's synthetic
+/// module, so the interpreter needs the same alias map sema resolved against.
 fn type_check_stmts(
     session: &Session,
     stmts: &[Stmt],
     step: usize,
     check_src: &str,
-) -> Result<Vec<Stmt>, Vec<Diagnostic>> {
+) -> Result<(Vec<Stmt>, HashMap<String, String>), Vec<Diagnostic>> {
     let base_src = format!(
         "{}{}{}",
         PRELOAD_SRC,
@@ -1794,7 +1801,7 @@ fn run_sema_with_body(
     fn_name: &str,
     body: Vec<Stmt>,
     current_len: usize,
-) -> Result<Vec<Stmt>, Vec<Diagnostic>> {
+) -> Result<(Vec<Stmt>, HashMap<String, String>), Vec<Diagnostic>> {
     // Session declarations remain user source even though the final check
     // function is compiler-owned.
     let (_, base_lex_diags) = crate::Lexer::lex(base_src);
@@ -1823,7 +1830,10 @@ fn run_sema_with_body(
     } else {
         let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
         if std::fs::write(&tmp_path, base_src).is_err() {
-            return Ok(current_stmts(&mut prog.items, fn_name, current_len));
+            return Ok((
+                current_stmts(&mut prog.items, fn_name, current_len),
+                HashMap::new(),
+            ));
         }
         let path_str = tmp_path.to_string_lossy().to_string();
         let result = crate::Loader::load_entry(&path_str).map(|mut bundle| {
@@ -1846,10 +1856,11 @@ fn run_sema_with_body(
         .collect();
     if errors.is_empty() {
         let entry = bundle.entry;
-        Ok(current_stmts(
-            &mut bundle.modules[entry].items,
-            fn_name,
-            current_len,
+        let mut core_imports = HashMap::new();
+        update_core_imports_from_ledger(&bundle, &mut core_imports);
+        Ok((
+            current_stmts(&mut bundle.modules[entry].items, fn_name, current_len),
+            core_imports,
         ))
     } else {
         Err(errors)
@@ -2469,13 +2480,13 @@ pub(crate) fn execute_line(
         }
 
         InputKind::Stmts(stmts, suppress, check_src) => {
-            let checked_stmts = match type_check_stmts(
+            let (checked_stmts, checked_core_imports) = match type_check_stmts(
                 session,
                 &stmts,
                 session.step,
                 &check_src,
             ) {
-                Ok(stmts) => stmts,
+                Ok(checked) => checked,
                 Err(errors) => {
                     if !quiet {
                         render_diags(&step_src, trimmed, &errors, color);
@@ -2497,6 +2508,11 @@ pub(crate) fn execute_line(
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
             let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
             let stmts = repl_executable_stmts(checked_stmts.clone());
+            // The turn executes the checked AST, so it resolves aliases against
+            // the map sema used — the session's own accepted `use` aliases plus
+            // the compiler-owned prelude openings for this turn's ambients.
+            let mut core_imports = session.core_imports.clone();
+            core_imports.extend(checked_core_imports);
 
             // Snapshot keys before execution to detect new bindings.
             let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
@@ -2525,7 +2541,7 @@ pub(crate) fn execute_line(
                     &mut trial_scope,
                     REPL_FUEL_BUDGET,
                     suppress,
-                    &session.core_imports,
+                    &core_imports,
                     &structs,
                     &session.binding_types,
                     &mut tracking_authorizer,
@@ -2539,7 +2555,7 @@ pub(crate) fn execute_line(
                     &mut trial_scope,
                     REPL_FUEL_BUDGET,
                     suppress,
-                    &session.core_imports,
+                    &core_imports,
                     &structs,
                     &session.binding_types,
                     &mut tracking_authorizer,
@@ -3241,13 +3257,13 @@ pub fn run_transcript_with_flags(
             }
 
             InputKind::Stmts(stmts, suppress, check_src) => {
-                let checked_stmts = match type_check_stmts(
+                let (checked_stmts, checked_core_imports) = match type_check_stmts(
                     &session,
                     &stmts,
                     session.step,
                     &check_src,
                 ) {
-                    Ok(stmts) => stmts,
+                    Ok(checked) => checked,
                     Err(errors) => {
                         for d in &errors {
                             out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
@@ -3271,6 +3287,8 @@ pub fn run_transcript_with_flags(
                 let newly_moved =
                     collect_moved_names(&stmts, &session_binding_names, &session.scope);
                 let stmts = repl_executable_stmts(checked_stmts.clone());
+                let mut core_imports = session.core_imports.clone();
+                core_imports.extend(checked_core_imports);
 
                 let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
 
@@ -3295,7 +3313,7 @@ pub fn run_transcript_with_flags(
                     &mut trial_scope,
                     REPL_FUEL_BUDGET,
                     suppress,
-                    &session.core_imports,
+                    &core_imports,
                     &structs,
                     &session.binding_types,
                     &mut authorizer,
