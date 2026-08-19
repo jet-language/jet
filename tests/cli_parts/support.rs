@@ -11,12 +11,35 @@ fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
-/// D-LENS-RUN1: native execution proof for programs default `jet run` cannot JIT.
-fn jet_run_release(file: &str) -> Command {
-    let mut cmd = Command::new(jet());
-    cmd.args(["run", "--release", file]);
-    cmd
-}
+// ── #2075: which profile a CLI behavior test pays for ────────────────────────
+//
+// D-LENS-RUN1 keeps the AOT escape hatch for ANY explicit profile, so
+// `jet run --profile=debug` still proves a real native build (I2/I5) — it just
+// stops paying `-O`/opt-level=3 + ThinLTO + symbol stripping (Source/main.rs
+// `ProfileConfig::rustc_args`, `OptimizeLevel::None`) for an assertion about
+// argument binding, diagnostics, process behavior, or a foreign binding's
+// output. Those tests use `--profile=debug`.
+//
+// `--release` stays ONLY where the release lens is what is under test. The
+// named keep set, in full:
+//
+//   cli_parts/expand.rs        `profile_release_flag_is_accepted`
+//                              (`--release` is a blessed profile, no E1219)
+//   cli_parts/budget.rs        `typed_cli_field_markers_add_short_and_env_
+//                              inputs_with_pinned_precedence` — runs its whole
+//                              precedence matrix for `release in [false, true]`,
+//                              which IS the default+release end-to-end proof
+//   cli_parts/core.rs          `jobs_lists_documented_scheduled_project_jobs_
+//                              and_matches_run_outside_projects` (`build
+//                              --release` strips `#Job` dev entries; a debug
+//                              build keeps them, so this needs release)
+//   cli_parts/inspect.rs       `inspect_guarantees_harden_contains_every_
+//                              dependency` (asserts `profile: release` in the
+//                              guarantee report) and
+//                              `hardened_release_sentry_reaches_a_foreign_
+//                              dependency` (hardened release sentry semantics)
+//
+// Everything else in the cli targets is behavior, and pays debug.
 
 fn output_with_retry(cmd: &mut Command) -> Output {
     let mut last = None;

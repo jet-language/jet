@@ -308,9 +308,20 @@ fn doctor_checks_real_state_and_is_read_only() {
     let registry_url = format!("http://user:super-secret@{addr}/index");
     let helper = jetpack::FFI::cached_crypto_helper_path();
     let helper_before = fs::metadata(&helper).unwrap();
-    let mut helper_parent_before = fs::read_dir(helper.parent().unwrap()).unwrap()
-        .map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
-    helper_parent_before.sort();
+    // #2075: that directory is the Cargo target dir SHARED by every bridge key,
+    // so "this bridge's files" is a key filter — another suite building another
+    // bridge concurrently must not read as `doctor` touching this one.
+    let signing_bridge_files = |dir: &std::path::Path, key: &str| {
+        let mut names = fs::read_dir(dir).unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().contains(key))
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    let helper_dir = helper.parent().unwrap().to_path_buf();
+    let helper_key = common::ffi_bridge_key(&helper);
+    let helper_parent_before = signing_bridge_files(&helper_dir, &helper_key);
 
     let healthy = jetpack()
         .args(["doctor", "--json", "--online"])
@@ -323,9 +334,7 @@ fn doctor_checks_real_state_and_is_read_only() {
     let healthy_json = jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
     assert_eq!(json_string(&healthy_json, "status"), "healthy");
     assert_eq!(fs::metadata(&helper).unwrap().len(), helper_before.len(), "doctor changed signing helper");
-    let mut helper_parent_after = fs::read_dir(helper.parent().unwrap()).unwrap()
-        .map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
-    helper_parent_after.sort();
+    let helper_parent_after = signing_bridge_files(&helper_dir, &helper_key);
     assert_eq!(helper_parent_after, helper_parent_before, "doctor changed signing helper cache");
 
     fs::remove_file(keys.join("jet.ed25519")).unwrap();

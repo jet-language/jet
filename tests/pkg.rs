@@ -99,19 +99,23 @@ fn shape6_registry_routes_and_retired_bare_snapshots() {
     fs::remove_dir_all(tmp).unwrap();
 }
 
-// The FFI bridge cache root for a key `K` is
-// `<home>/.cache/jet/ffi/K/target/<triple>/release/`; `cached_crypto_helper_path()`
-// (called against the *test process's own* real HOME) returns the helper path
-// under that layout for the current deps/target key — that key is
-// HOME-independent, so it's safe to reuse for an isolated `home`.
-// `helper.ancestors().nth(4)` is `K`'s cache root (file, release dir, triple
-// dir, target dir, then K) — same arithmetic `crypto_c12.rs` relies on.
+// #2075: every bridge key's built artifacts live in ONE Cargo target dir shared
+// per (toolchain, target, profile) — `<home>/.cache/jet/ffi/deps/<build
+// hash>/<triple>/release/` — with the key in each file NAME
+// (`jet-crypto-helper-<key>`, `libjet_ffi_<key>.rlib`, and the digest sidecar
+// `jet_ffi_<key>.sha256` beside them). `cached_crypto_helper_path()` (called
+// against the *test process's own* real HOME) returns that helper path for the
+// current deps/target key — the key is HOME-independent, so the tail below the
+// cache root is safe to re-root under an isolated `home`.
 fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
     let real_helper = jetpack::FFI::cached_crypto_helper_path();
-    let real_root = real_helper.ancestors().nth(4).unwrap();
-    let relative = real_helper.strip_prefix(real_root.parent().unwrap()).unwrap();
+    let real_root = real_helper
+        .ancestors()
+        .find(|dir| dir.ends_with("ffi"))
+        .expect("the crypto helper lives under the FFI cache root");
+    let relative = real_helper.strip_prefix(real_root).unwrap();
     let helper = home.join(".cache/jet/ffi").join(relative);
-    let cache_key = real_root.file_name().and_then(|n| n.to_str()).unwrap();
+    let cache_key = common::ffi_bridge_key(&helper);
     let rlib = helper
         .parent()
         .unwrap()
@@ -147,13 +151,15 @@ fn install_closed_status_crypto_helper(home: &Path) {
     fs::write(&helper, &helper_bytes).unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let cache_root = helper.ancestors().nth(4).unwrap();
-    let mut manifest = String::from("jet-ffi-artifacts-v1\n");
+    // The sidecar sits beside the artifacts it blesses, one row per file, each
+    // row's path relative to that shared release dir — i.e. a bare file name.
+    let crate_name = crate_stem.strip_prefix("lib").expect("bridge rlib is `lib*`");
+    let mut manifest = String::from("jet-ffi-artifacts-v2\n");
     for (bytes, path) in [(&rlib_bytes, &rlib), (&cdylib_bytes, &cdylib), (&helper_bytes, &helper)] {
-        let relative = path.strip_prefix(cache_root).unwrap().to_str().unwrap();
+        let relative = path.file_name().unwrap().to_str().unwrap();
         manifest.push_str(&format!("{} {relative}\n", jet::SHA256::sha256_hex(bytes)));
     }
-    fs::write(cache_root.join("artifacts.sha256"), manifest).unwrap();
+    fs::write(release.join(format!("{crate_name}.sha256")), manifest).unwrap();
 }
 
 fn install_cached_crypto_helper(home: &Path) {

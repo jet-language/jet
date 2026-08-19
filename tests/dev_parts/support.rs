@@ -17,7 +17,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
-use common::{add_generated_rust, have_rustc, panic_message, test_worker_count, FfiBridgeLock};
+use common::{add_generated_rust, have_rustc, panic_message, test_worker_count};
 use jet::Interpreter::{dev_iteration, dev_run_bundle, run_jit_once, run_named_job, RunOutcome};
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
@@ -227,6 +227,350 @@ fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std
     path
 }
 
+// ── #2076: the run-scoped oracle-binary cache ────────────────────────────────
+//
+// Every dev battery pays an optimized (`-O`) rustc build per example, and the
+// six battery targets walk overlapping slices of the same corpus, so one full
+// dev run compiled the same binary up to ~958 times. That build is a pure
+// function of its inputs — the generated Rust, the toolchain, the flags, the
+// link inputs — so the second caller of one key can reuse the first caller's
+// artifact instead of paying for it again.
+//
+// Where the run scope comes from: `scripts/agent/verify-full.sh` already points
+// TMPDIR at a fresh `jet-verify.XXXXXX` per run and removes it on exit, so a
+// temp-rooted cache is exactly run-scoped for every full verification run, and
+// all six battery processes of that run share it. A second run-scoping
+// mechanism here would be the I8 fork of one; `JET_DEV_ORACLE_CACHE_DIR` only
+// moves the root, for a measurement run that wants its own ledger.
+//
+// An ad-hoc `cargo test` against the system temp dir MAY therefore meet a
+// previous run's entry, and that is reuse rather than a leak: the key covers
+// everything that decides the bytes rustc emits, and the artifact is
+// digest-verified on every hit, so a hit is the same binary the build would
+// have produced. Everything else — a changed key input, a truncated artifact,
+// an unwritable root — is a MISS, and a miss is the old build path unchanged.
+// Nothing here can turn a failing battery green: the cache sits strictly
+// between "generated Rust ready" and "binary on disk", and a failed build is
+// never published.
+
+/// The oracle's rustc flags. ONE list, because it goes into the command AND
+/// into the cache key: a flag cannot enter the build without entering the key.
+const ORACLE_RUSTC_FLAGS: &[&str] = &["-O"];
+
+/// What stopped an oracle build. The strict caller renders each case as the
+/// panic it always did, the `try_` caller reports every case as `None`, and
+/// neither one carries its own copy of the build (AGENTS.md I8).
+enum OracleBuildFailure {
+    Io(std::io::Error),
+    FrontEnd(Vec<jet::Diagnostics::Diagnostic>),
+    CLinks(Vec<jet::Diagnostics::Diagnostic>),
+    Rustc(Output),
+}
+
+impl OracleBuildFailure {
+    /// The panic text each failure has always carried, in one place, so the two
+    /// callers cannot disagree about which failure is which (AGENTS.md I8).
+    fn describe(&self, stem: &str, file: &str) -> String {
+        let rendered = |diags: &[jet::Diagnostics::Diagnostic]| {
+            let src = fs::read_to_string(file).unwrap_or_default();
+            jet::render_diagnostics(file, &src, diags)
+        };
+        match self {
+            OracleBuildFailure::Io(error) => format!(
+                "`{stem}` ran in dev but its oracle I/O failed (source read or scratch dir): {error}"
+            ),
+            OracleBuildFailure::FrontEnd(diags) => format!(
+                "`{}` ran in dev but failed the front end:\n{}",
+                stem,
+                rendered(diags.as_slice())
+            ),
+            OracleBuildFailure::CLinks(diags) => format!(
+                "`{}` ran in dev but AOT C-link resolution failed:\n{}",
+                stem,
+                rendered(diags.as_slice())
+            ),
+            OracleBuildFailure::Rustc(out) => format!(
+                "`{}` ran in dev but generated Rust failed to build (status: {}):\nstdout:\n{}\nstderr:\n{}",
+                stem,
+                out.status,
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        }
+    }
+}
+
+/// The directory this run's oracle artifacts live in, or `None` when it cannot
+/// be created — then every caller builds exactly as it did before #2076.
+///
+/// The path is NOT salted with the toolchain: the key below already carries
+/// `rustc -vV`, so two toolchains get different keys inside one root instead of
+/// two roots that could disagree about which is current.
+static ORACLE_CACHE_ROOT: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+    let root = match std::env::var_os("JET_DEV_ORACLE_CACHE_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => std::env::temp_dir().join("jet_dev_oracle_cache"),
+    };
+    fs::create_dir_all(&root).ok().map(|()| root)
+});
+
+/// The identity of the oracle toolchain: `rustc -vV` names the release, the
+/// commit hash AND the `host:` triple — which is the oracle's target, because
+/// no `--target` is ever passed here. One probe per process.
+///
+/// `None` disables the cache instead of failing a battery: a harness that
+/// cannot ask rustc who it is has no business claiming two builds match.
+static ORACLE_RUSTC_IDENTITY: LazyLock<Option<String>> = LazyLock::new(|| {
+    let out = Command::new("rustc").arg("-vV").output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+});
+
+/// The cache entry for one oracle build, or `None` when there is no usable
+/// cache.
+///
+/// The key is a length-prefixed digest — the shape
+/// `Source/RuntimeCache.rs::cache_key` uses, so no two field lists can collide
+/// — over every input that decides the bytes rustc emits:
+///
+///   1. the generated Rust, which already carries the example's own bytes and
+///      the compiler that lowered them,
+///   2. `rustc -vV`: toolchain release, commit hash, host/target triple,
+///   3. the rustc flags, from the one `ORACLE_RUSTC_FLAGS` list,
+///   4. the FFI bridge link inputs when the example has one — crate name, rlib
+///      path (itself content-keyed by the bridge signature), the rlib's OWN
+///      digest, because that bridge is rebuilt in place under the same path,
+///      and every dependency search dir,
+///   5. the resolved C link flags.
+fn oracle_cache_entry(
+    rust: &str,
+    ffi: Option<&jet::FFI::FfiLink>,
+    clinks: &[String],
+) -> Option<PathBuf> {
+    let root = ORACLE_CACHE_ROOT.as_ref()?;
+    let mut data = Vec::new();
+    push_oracle_key_field(&mut data, b"jet-dev-oracle-bin-v1");
+    push_oracle_key_field(&mut data, rust.as_bytes());
+    push_oracle_key_field(&mut data, ORACLE_RUSTC_IDENTITY.as_deref()?.as_bytes());
+    for flag in ORACLE_RUSTC_FLAGS {
+        push_oracle_key_field(&mut data, flag.as_bytes());
+    }
+    match ffi {
+        None => push_oracle_key_field(&mut data, b"no-ffi"),
+        Some(link) => {
+            push_oracle_key_field(&mut data, link.crate_name.as_bytes());
+            push_oracle_key_field(&mut data, link.rlib_path.to_string_lossy().as_bytes());
+            push_oracle_key_field(
+                &mut data,
+                jet::SHA256::sha256_file_hex(&link.rlib_path).ok()?.as_bytes(),
+            );
+            for deps_dir in link.dependency_dirs() {
+                push_oracle_key_field(&mut data, deps_dir.to_string_lossy().as_bytes());
+            }
+        }
+    }
+    for arg in clinks {
+        push_oracle_key_field(&mut data, arg.as_bytes());
+    }
+    Some(root.join(jet::SHA256::sha256_hex(&data)))
+}
+
+/// Length-prefix every key field, so two different field lists cannot hash to
+/// the same bytes (`Source/RuntimeCache.rs::push_bytes`).
+fn push_oracle_key_field(out: &mut Vec<u8>, value: &[u8]) {
+    out.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    out.extend_from_slice(value);
+}
+
+/// Put this entry's artifact at `bin`, or say the entry cannot be trusted.
+///
+/// Verified on every hit: a recorded digest that does not match the bytes on
+/// disk is a miss, never a reused artifact — `Source/RuntimeCache.rs` verifies
+/// its rlibs the same way. The link lands at the caller's own
+/// `compiled_binary_path`, so argv[0] stays the program's own name and a
+/// generated CLI's usage banner reads the same as it did when this call built
+/// its own binary.
+fn reuse_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) -> bool {
+    let ready = entry.join("ready");
+    let artifact = ready.join("oracle");
+    let Ok(recorded) = fs::read_to_string(ready.join("oracle.sha256")) else {
+        return false;
+    };
+    match jet::SHA256::sha256_file_hex(&artifact) {
+        Ok(actual) if actual == recorded.trim() => {}
+        _ => return false,
+    }
+    let _ = fs::remove_file(bin);
+    // A hard link keeps reuse O(1); `copy` covers a caller whose scratch is on
+    // another filesystem than the cache root.
+    if fs::hard_link(&artifact, bin).is_err() && fs::copy(&artifact, bin).is_err() {
+        return false;
+    }
+    record_oracle_event("hit", entry);
+    true
+}
+
+/// Publish the freshly built `bin` as this entry's artifact, best effort.
+///
+/// The artifact and its digest are staged in a private directory and the whole
+/// directory is renamed into place, so a reader can never meet an artifact whose
+/// digest has not landed yet. `ready` already existing means another process
+/// published this key first: same key, same inputs, nothing to do.
+///
+/// A hard link, not a copy: the run then holds exactly ONE copy of the bytes per
+/// distinct oracle, whoever built it and however many batteries reuse it, which
+/// matters because the verification temp root is RAM-backed tmpfs. It also means
+/// a later build that writes over that same scratch path in place can change the
+/// published bytes — and that is caught rather than served, because a hit
+/// re-hashes the artifact against its recorded digest and a mismatch is a miss.
+fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
+    let ready = entry.join("ready");
+    if ready.is_dir() {
+        return;
+    }
+    let staged = entry.join(format!(
+        "staged.{}.{}",
+        std::process::id(),
+        next_oracle_index()
+    ));
+    let published = (|| -> std::io::Result<()> {
+        fs::create_dir_all(&staged)?;
+        if fs::hard_link(bin, staged.join("oracle")).is_err() {
+            fs::copy(bin, staged.join("oracle"))?;
+        }
+        fs::write(
+            staged.join("oracle.sha256"),
+            jet::SHA256::sha256_file_hex(&staged.join("oracle"))?,
+        )?;
+        fs::rename(&staged, &ready)
+    })();
+    if published.is_err() {
+        let _ = fs::remove_dir_all(&staged);
+    }
+}
+
+/// One line per oracle event in the run's own cache root — the #2076 ledger.
+///
+/// Six battery processes share the root, so a per-process counter cannot state
+/// a per-RUN number and an appended line can. Total builds against the number
+/// of DISTINCT keys built is the duplicate-compile count the card gates on:
+///
+/// ```text
+/// events="$JET_DEV_ORACLE_CACHE_DIR/events"
+/// builds=$(grep -c '^build ' "$events")
+/// distinct=$(awk '$1=="build"{print $2}' "$events" | sort -u | wc -l)
+/// hits=$(grep -c '^hit ' "$events")
+/// echo "duplicate optimized oracle compiles: $((builds - distinct)) (was $((hits + builds - distinct)))"
+/// ```
+///
+/// One run states BOTH sides of the card's gate, so no second run with the
+/// cache off is needed: every `hit` is a compile this run did not pay and the
+/// old harness did, so `hits + (builds - distinct)` is the duplicate count
+/// before the cache and `builds - distinct` the count after it.
+///
+/// `hit` is a reuse, `build` a paid compile, `fail` a compile rustc rejected —
+/// a rejection is deliberately NOT published, so the few examples whose oracle
+/// is known broken (`AOT_BROKEN_HELD_OUT`) still pay their compile in every
+/// battery that reaches them, and the ledger says so by name instead of hiding
+/// them in the duplicate count.
+///
+/// Best effort by construction: this ledger measures the cache and never gates
+/// a battery, so a failed append costs a number, never a verdict.
+fn record_oracle_event(event: &str, entry: &std::path::Path) {
+    let Some(root) = ORACLE_CACHE_ROOT.as_ref() else {
+        return;
+    };
+    let Some(key) = entry.file_name() else {
+        return;
+    };
+    let key = key.to_string_lossy();
+    if let Ok(mut log) = fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(root.join("events"))
+    {
+        use std::io::Write;
+        let _ = log.write_all(format!("{event} {key}\n").as_bytes());
+    }
+}
+
+/// Build the optimized AOT oracle for one example, or reuse the run's artifact
+/// for the same inputs (#2076).
+///
+/// The ONE place a dev battery turns generated Rust into an oracle binary. Both
+/// callers below route through it, so the cache cannot be half-applied and the
+/// two `rustc` invocations they used to carry cannot drift apart (AGENTS.md I8).
+fn build_oracle_binary(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+) -> Result<std::path::PathBuf, OracleBuildFailure> {
+    let src = fs::read_to_string(file).map_err(OracleBuildFailure::Io)?;
+    let compiled = jet::compile_with_path(&src, file).map_err(OracleBuildFailure::FrontEnd)?;
+    let clinks = jet::resolve_c_links(file).map_err(OracleBuildFailure::CLinks)?;
+    // I8: `compiled_binary_path` is the ONE oracle-binary naming rule, and it
+    // exists precisely so argv[0] is the program's own name (see its doc). The
+    // corpus gate's own build site used to keep the old `jet_<tag>_<i>` name, so
+    // its oracle ran as `jet_corpus_gate_aot_0` and the gate read its own
+    // harness binary name back out of a usage banner as a run-tier divergence.
+    let bin = compiled_binary_path(dir, tag, i, file);
+    fs::create_dir_all(bin.parent().expect("oracle binary has a parent"))
+        .map_err(OracleBuildFailure::Io)?;
+    let entry = oracle_cache_entry(&compiled.rust, compiled.ffi.as_ref(), &clinks);
+    if let Some(entry) = &entry {
+        if reuse_cached_oracle(entry, &bin) {
+            return Ok(bin);
+        }
+    }
+    let rs = dir.join(format!("jet_{tag}_{i}.rs"));
+    let mut rustc_cmd = Command::new("rustc");
+    // Match default optimized AOT behavior. `add_generated_rust` caches the
+    // runtime dependency; the entry above is what keeps the USER program from
+    // being compiled and linked again for every battery that walks this stem.
+    add_generated_rust(
+        &mut rustc_cmd,
+        &rs,
+        &compiled.rust,
+        compiled.ffi.is_some(),
+        ORACLE_RUSTC_FLAGS,
+    );
+    rustc_cmd.arg("-o").arg(&bin);
+    if let Some(link) = &compiled.ffi {
+        rustc_cmd
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc_cmd
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
+    for arg in &clinks {
+        rustc_cmd.arg(arg);
+    }
+    let out = command_output_with_timeout(
+        rustc_cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("rustc build for `{stem}`"),
+    );
+    if let Some(entry) = &entry {
+        record_oracle_event(
+            if out.status.success() { "build" } else { "fail" },
+            entry,
+        );
+    }
+    if !out.status.success() {
+        return Err(OracleBuildFailure::Rustc(out));
+    }
+    if let Some(entry) = &entry {
+        publish_cached_oracle(entry, &bin);
+    }
+    Ok(bin)
+}
+
 fn compiled_binary_output(
     dir: &std::path::Path,
     tag: &str,
@@ -252,63 +596,8 @@ fn compiled_binary_output_with_stdin(
     file: &str,
     answers: Option<&str>,
 ) -> ProgramOutput {
-    let src = fs::read_to_string(file).unwrap();
-    let compiled = match jet::compile_with_path(&src, file) {
-        Ok(c) => c,
-        Err(diags) => panic!(
-            "`{}` ran in dev but failed the front end:\n{}",
-            stem,
-            jet::render_diagnostics(file, &src, &diags)
-        ),
-    };
-    let rs = dir.join(format!("jet_{tag}_{}.rs", i));
-    let bin = compiled_binary_path(dir, tag, i, file);
-    fs::create_dir_all(bin.parent().expect("oracle binary has a parent")).unwrap();
-    let mut rustc_cmd = Command::new("rustc");
-    // Match default optimized AOT behavior. Cache only the runtime dependency;
-    // every oracle still compiles and links its generated user program.
-    add_generated_rust(
-        &mut rustc_cmd,
-        &rs,
-        &compiled.rust,
-        compiled.ffi.is_some(),
-        &["-O"],
-    );
-    rustc_cmd.arg("-o").arg(&bin);
-    if let Some(link) = &compiled.ffi {
-        rustc_cmd
-            .arg("--extern")
-            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc_cmd
-                .arg("-L")
-                .arg(format!("dependency={}", deps_dir.display()));
-        }
-    }
-    let clinks = jet::resolve_c_links(file).unwrap_or_else(|diags| {
-        panic!(
-            "`{}` ran in dev but AOT C-link resolution failed:\n{}",
-            stem,
-            jet::render_diagnostics(file, &src, &diags)
-        )
-    });
-    for arg in clinks {
-        rustc_cmd.arg(arg);
-    }
-    let out = command_output_with_timeout(
-        rustc_cmd,
-        DEV_DIFF_TIMEOUT,
-        &format!("rustc build for `{stem}`"),
-    );
-    if !out.status.success() {
-        panic!(
-            "`{}` ran in dev but generated Rust failed to build (status: {}):\nstdout:\n{}\nstderr:\n{}",
-            stem,
-            out.status,
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+    let bin = build_oracle_binary(dir, tag, i, stem, file)
+        .unwrap_or_else(|failure| panic!("{}", failure.describe(stem, file)));
     let mut run_cmd = Command::new(&bin);
     if let Some(answers) = answers {
         run_cmd.stdin(fs::File::open(answer_file(dir, tag, i, answers)).unwrap());
@@ -348,48 +637,7 @@ fn try_compiled_binary_build(
     stem: &str,
     file: &str,
 ) -> Option<std::path::PathBuf> {
-    let src = fs::read_to_string(file).ok()?;
-    let compiled = jet::compile_with_path(&src, file).ok()?;
-    let rs = dir.join(format!("jet_{tag}_{i}.rs"));
-    // I8: `compiled_binary_path` is the ONE oracle-binary naming rule, and it
-    // exists precisely so argv[0] is the program's own name (see its doc). This
-    // site kept the old `jet_<tag>_<i>` name, so the corpus gate's oracle ran as
-    // `jet_corpus_gate_aot_0`; a generated CLI's usage banner names argv[0], so
-    // the gate read its own harness binary name back as a run-tier divergence.
-    let bin = compiled_binary_path(dir, tag, i, file);
-    fs::create_dir_all(bin.parent().expect("oracle binary has a parent")).ok()?;
-    let mut rustc_cmd = Command::new("rustc");
-    add_generated_rust(
-        &mut rustc_cmd,
-        &rs,
-        &compiled.rust,
-        compiled.ffi.is_some(),
-        &["-O"],
-    );
-    rustc_cmd.arg("-o").arg(&bin);
-    if let Some(link) = &compiled.ffi {
-        rustc_cmd
-            .arg("--extern")
-            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc_cmd
-                .arg("-L")
-                .arg(format!("dependency={}", deps_dir.display()));
-        }
-    }
-    let clinks = jet::resolve_c_links(file).ok()?;
-    for arg in clinks {
-        rustc_cmd.arg(arg);
-    }
-    let out = command_output_with_timeout(
-        rustc_cmd,
-        DEV_DIFF_TIMEOUT,
-        &format!("rustc build for `{stem}`"),
-    );
-    if !out.status.success() {
-        return None;
-    }
-    Some(bin)
+    build_oracle_binary(dir, tag, i, stem, file).ok()
 }
 
 fn try_compiled_binary_output(
@@ -1252,7 +1500,6 @@ fn check_dev_default_stem(
     dir: &std::path::Path,
     manifested_divergences: &[String],
 ) -> DevBatteryStats {
-    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let file = example_path(stem);
     eprintln!("dev-default checking {stem}");
     if let Some(answers) = common::example_stdin(stem) {
@@ -1549,11 +1796,11 @@ fn next_oracle_index() -> usize {
 /// children were already isolated — own process, own pid-keyed scratch, own
 /// thread-local JIT state — so the serialization bought nothing.
 ///
-/// The FFI bridge is the one build artifact the children share, and
-/// `FfiBridgeLock` is a cross-process lock, so a bridge stem is still judged
-/// alone. Ten copies of one loop is also why their timeouts had already drifted
-/// apart with nothing naming the difference (AGENTS.md I8); the timeout is a
-/// parameter now.
+/// The FFI bridge is the one build artifact the children share, and the product
+/// locks that cache per key across processes (#2075), so a bridge stem needs no
+/// suite-level serialization. Ten copies of one loop is also why their timeouts
+/// had already drifted apart with nothing naming the difference (AGENTS.md I8);
+/// the timeout is a parameter now.
 fn run_child_stem_battery(
     test_name: &str,
     child_env: &str,
@@ -1597,7 +1844,6 @@ fn run_child_stem_battery(
                     for (key, value) in &extra_env {
                         command.env(key, value);
                     }
-                    let _ffi_lock = uses_ffi_bridge(&stem).then(FfiBridgeLock::acquire);
                     let output = command_output_with_timeout(
                         command,
                         timeout,
@@ -1662,7 +1908,6 @@ fn run_three_way_battery_parallel(stems: Vec<String>) -> usize {
                         break;
                     };
                     eprintln!("three-way battery: checking `{stem}`");
-                    let _ffi_lock = uses_ffi_bridge(&stem).then(FfiBridgeLock::acquire);
                     let judged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         with_jit_test_scope(|| {
                             assert_cranelift_three_way(&example_path(&stem), &stem)
@@ -2744,7 +2989,6 @@ fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -3600,7 +3844,6 @@ fn classify_corpus_stem(
         // Run-path frontend rejection of an AOT/golden-green example is a
         // run-tier parity hole, not a true frontend reject (D-VERDICT-1254-1).
         if have_rustc && example_has_out_golden(stem) && !example_has_err_golden(stem) {
-            let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
             let worker_dir = dir.join(format!("w{worker}"));
             if let Some(aot) =
                 try_compiled_binary_output(&worker_dir, "corpus_gate_aot", 0, stem, &file)
@@ -3643,7 +3886,6 @@ fn classify_corpus_stem(
     // predicate, which is why nothing forced the gate to notice when three
     // examples became services.
     if jet::AST::bundle_serves_until_stopped(&bundle) {
-        let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
         let worker_dir = dir.join(format!("w{worker}"));
         assert!(
             try_compiled_binary_build(&worker_dir, "corpus_gate_service", 0, stem, &file).is_some(),
@@ -3665,7 +3907,6 @@ fn classify_corpus_stem(
         };
     }
 
-    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let worker_dir = dir.join(format!("w{worker}"));
     let aot = try_compiled_binary_output(&worker_dir, "corpus_gate_aot", 0, stem, &file);
     let aot = match aot {

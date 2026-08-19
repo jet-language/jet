@@ -6,7 +6,7 @@ fn no_separator_positional_regression() {
     // guard). `jet run file.jet hello` → len == 2.
     let p = args_fixture(&line!().to_string());
     let out = Command::new(jet())
-        .args(["run", "--release", p.to_str().unwrap(), "hello"])
+        .args(["run", "--profile=debug", p.to_str().unwrap(), "hello"])
         .output()
         .unwrap();
     assert_eq!(

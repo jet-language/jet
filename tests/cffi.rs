@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
-use common::{have_rustc, FfiBridgeLock};
+use common::have_rustc;
 
 #[test]
 fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
@@ -2135,8 +2135,9 @@ fn ffi_example_compiles_and_runs() {
     let shown = "examples/features/lowlevel/ffi.jet";
 
     // This example's FFI bridge (base64@0.22 / b64encode) shares a cache key
-    // with tests/golden.rs's compile of the same fixture — see FfiBridgeLock.
-    let _ffi_lock = FfiBridgeLock::acquire();
+    // with tests/golden.rs's compile of the same fixture. No test-side lock:
+    // the product's own per-key `BuildLock` serializes that (#2075, proved by
+    // `concurrent_processes_share_one_bridge_build_per_key` below).
     let out = jet::compile_with_path(&src, shown).unwrap_or_else(|diags| {
         panic!(
             "22_ffi.jet failed the front end:\n{}",
@@ -2202,8 +2203,8 @@ fn inline_ffi_pin_works_inside_manifest_project() {
 
     let shown = path.to_string_lossy();
     // Same base64@0.22/b64encode signature as `ffi_example_compiles_and_runs`
-    // and tests/golden.rs's `lowlevel/ffi` example — same FFI cache key.
-    let _ffi_lock = FfiBridgeLock::acquire();
+    // and tests/golden.rs's `lowlevel/ffi` example — same FFI cache key, and the
+    // product's per-key lock is what keeps that safe.
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
         panic!(
             "inline FFI pin should work even when package.jet exists:\n{}",
@@ -2211,4 +2212,103 @@ fn inline_ffi_pin_works_inside_manifest_project() {
         );
     });
     assert!(out.ffi.is_some(), "expected an FFI bridge");
+}
+
+/// #2075: the product's per-key `BuildLock` is what makes concurrent bridge
+/// builds safe, so the suite no longer serializes every FFI test behind one
+/// global `/tmp` lock (the deleted `FfiBridgeLock`, whose premise — "the FFI
+/// cache has no synchronization" — the lock at `FFI.rs` `BuildLock` retired).
+///
+/// Two `jet` processes on the SAME bridge key, started together against a cold
+/// cache: both must succeed, and exactly one bridge must be built and blessed.
+#[test]
+fn concurrent_processes_share_one_bridge_build_per_key() {
+    if Command::new("cargo").arg("--version").output().is_err() {
+        eprintln!("note: cargo not found; skipping concurrent FFI bridge test");
+        return;
+    }
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping concurrent FFI bridge test");
+        return;
+    }
+
+    let root = common::unique_tmp("jet_ffi_concurrent");
+    let cache = root.join("ffi-cache");
+    fs::create_dir_all(&cache).unwrap();
+    let source = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) => String = \"base64::encode\";\n}\nfn run() { print(b64encode(\"hi\")) }\n";
+
+    // Separate working directories: same source, so the same bridge key, but no
+    // contention on `build/main` — this test is about the bridge cache, not the
+    // display path two concurrent builds of one file would share.
+    let mut children = Vec::new();
+    for worker in 0..2 {
+        let dir = root.join(format!("w{worker}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("main.jet"), source).unwrap();
+        children.push(
+            Command::new(env!("CARGO_BIN_EXE_jet"))
+                .args(["run", "--profile=debug", "main.jet"])
+                .current_dir(&dir)
+                .env("JET_FFI_CACHE_DIR", &cache)
+                .env("NO_COLOR", "1")
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("spawn concurrent jet run"),
+        );
+    }
+    for (worker, child) in children.into_iter().enumerate() {
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "concurrent worker {worker} failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "aGk=\n");
+    }
+
+    // One key dir (this bridge's inputs), and no leaked lock.
+    let key_dirs = fs::read_dir(&cache)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_dir() && !path.ends_with("deps"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        key_dirs.len(),
+        1,
+        "two processes on one bridge key produced {} key dirs: {key_dirs:?}",
+        key_dirs.len()
+    );
+    assert!(
+        !key_dirs[0].join(".build-lock").exists(),
+        "the per-key build lock leaked: {}",
+        key_dirs[0].display()
+    );
+
+    // One built bridge, blessed by one digest sidecar, in the shared target dir.
+    let mut rlibs = Vec::new();
+    let mut sidecars = Vec::new();
+    let mut pending = vec![cache.join("deps")];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if name.starts_with("libjet_ffi_") && name.ends_with(".rlib") {
+                rlibs.push(name);
+            } else if name.starts_with("jet_ffi_") && name.ends_with(".sha256") {
+                sidecars.push(name);
+            }
+        }
+    }
+    assert_eq!(rlibs.len(), 1, "expected one bridge rlib, got {rlibs:?}");
+    assert_eq!(
+        sidecars.len(),
+        1,
+        "expected one blessed bridge, got {sidecars:?}"
+    );
+    let _ = fs::remove_dir_all(&root);
 }

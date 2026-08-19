@@ -603,7 +603,7 @@ fn run(args: RunArgs) {
     )
     .unwrap();
     let typed = Command::new(jet())
-        .args(["run", "--release", "typed.jet", "--", "--name", "Ada", "--verbose"])
+        .args(["run", "--profile=debug", "typed.jet", "--", "--name", "Ada", "--verbose"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -615,7 +615,7 @@ fn run(args: RunArgs) {
     assert_eq!(String::from_utf8_lossy(&typed.stdout), "Ada\n2\ntrue\n");
 
     let help = Command::new(jet())
-        .args(["run", "--release", "typed.jet", "--", "--help"])
+        .args(["run", "--profile=debug", "typed.jet", "--", "--help"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -682,7 +682,7 @@ fn run(args: RunArgs) {
 
     fs::write(dir.join("plain.jet"), "fn run() { print(\"plain\") }\n").unwrap();
     let plain = Command::new(jet())
-        .args(["run", "--release", "plain.jet"])
+        .args(["run", "--profile=debug", "plain.jet"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -804,7 +804,7 @@ fn run(args: RunArgs) {
     .unwrap();
 
     let run = Command::new(jet())
-        .args(["run", "--release", "run.jet", "--", "--name", "Ada", "--verbose"])
+        .args(["run", "--profile=debug", "run.jet", "--", "--name", "Ada", "--verbose"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -859,7 +859,7 @@ fn run(args: Commands) {}
     .unwrap();
 
     let run = Command::new(jet())
-        .args(["run", "--release", "run.jet", "--", "serve", "--port", "8080"])
+        .args(["run", "--profile=debug", "run.jet", "--", "serve", "--port", "8080"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -940,7 +940,7 @@ fn run(args: RunArgs) { print(args.name) }
     .unwrap();
 
     let run = Command::new(jet())
-        .args(["run", "--release", "run.jet", "--", "--name", "Ada"])
+        .args(["run", "--profile=debug", "run.jet", "--", "--name", "Ada"])
         .current_dir(&dir)
         .output()
         .unwrap();

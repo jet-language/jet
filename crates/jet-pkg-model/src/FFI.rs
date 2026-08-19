@@ -3,7 +3,11 @@
 //! When a program declares `extern rust` blocks with crate dependencies, the
 //! driver materializes a cached cargo project under `~/.cache/jet/ffi/` and
 //! links the built rlib into the user's generated program. `JET_FFI_CACHE_DIR`
-//! overrides that root for isolated test or tool invocations.
+//! overrides that root for isolated test or tool invocations. Each bridge key
+//! owns its generated sources under `<root>/<key>/`; every key that shares a
+//! (toolchain, target, profile, rustflags) build identity shares one Cargo
+//! target dir under `<root>/deps/<hash>/`, so the dependency graph is compiled
+//! once instead of once per key (#2075, `bridge_paths`).
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundle, Type};
@@ -17,7 +21,12 @@ use std::process::Command;
 pub use crate::AST::FfiLink;
 
 const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v3-cabi";
-const BRIDGE_ARTIFACTS_SCHEMA: &str = "jet-ffi-artifacts-v1";
+/// v2: artifact digests are recorded relative to the SHARED Cargo target dir
+/// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
+/// describe where the artifacts are. A v1 sidecar simply fails verification and
+/// the bridge rebuilds.
+const BRIDGE_ARTIFACTS_SCHEMA: &str = "jet-ffi-artifacts-v2";
+const SHARED_DEPS_SCHEMA: &str = "jet-ffi-shared-deps-v1";
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -1563,11 +1572,7 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         None,
         &[],
     );
-    cache_dir()
-        .join(format!("{key:016x}"))
-        .join("target")
-        .join(target)
-        .join("release/jet-crypto-helper")
+    bridge_paths(key, &target, &[]).crypto_helper
 }
 
 fn build_bridge_full(
@@ -1693,42 +1698,40 @@ fn build_bridge_full(
         native_toolchain.as_ref(),
         native_link_args,
     );
-    let cache_root = cache_dir().join(format!("{:016x}", key));
-    let crate_name = format!("jet_ffi_{:016x}", key);
-    let target_dir = cache_root.join("target");
-    let target = target_dir.join(selected_target).join("release");
-    let rlib = target.join(format!("lib{}.rlib", crate_name));
-    let target_deps_dir = target.join("deps");
-    let host_deps_dir = target_dir.join("release/deps");
+    // #2075: `cache_root` owns this key's build INPUTS (generated manifest and
+    // sources, the per-key lock); its OUTPUTS land in a Cargo target dir shared
+    // by every key with the same build identity. See `bridge_paths`.
+    let BridgePaths {
+        cache_root,
+        crate_name,
+        target_dir,
+        target,
+        rlib,
+        target_deps_dir,
+        host_deps_dir,
+        crypto_helper,
+        secrets_helper,
+    } = bridge_paths(key, selected_target, native_link_args);
 
     // c146: when the bridge carries crypto, it also emits a `jet-crypto-helper`
     // binary (a thin stdin wrapper around `jet_crypto_*_impl`) that `jet`'s own
-    // publish/keygen path shells out to. Its path is fixed by the bin target name.
-    let helper_bin = if needs_crypto {
-        Some(target.join("jet-crypto-helper"))
-    } else {
-        None
-    };
+    // publish/keygen path shells out to.
+    let helper_bin = needs_crypto.then_some(crypto_helper);
     // U13: same shape, a `jet-secrets-helper` binary when the bridge carries the
     // age-style crypto bridge — `jetpack secrets *` shells out to it.
-    let secrets_helper_bin = if needs_secrets {
-        Some(target.join("jet-secrets-helper"))
-    } else {
-        None
-    };
+    let secrets_helper_bin = needs_secrets.then_some(secrets_helper);
     // Fast path (cache hit): existence is not proof. The sidecar records the
     // exact bytes of every artifact consumed by the compiler/JIT, so a stale
     // or corrupt cache falls through to a rebuild instead of leaking a later
     // linker failure.
     if let Some(artifacts) = bridge_artifact_paths(
-        &cache_root,
         &rlib,
         &target,
         &crate_name,
         helper_bin.as_deref(),
         secrets_helper_bin.as_deref(),
     )
-    .filter(|artifacts| bridge_cache_verified(&cache_root, artifacts))
+    .filter(|artifacts| bridge_cache_verified(&target, &crate_name, artifacts))
     {
         let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
@@ -1757,24 +1760,25 @@ fn build_bridge_full(
         .map_err(|e| tool_error(&format!("couldn't create the FFI cache folder: {}", e)))?;
 
     // Slow path (cache miss): another `jet` process may be building this same
-    // key right now. Cargo's `CARGO_TARGET_DIR` lock protects `target/`, not
+    // key right now. Cargo's target-dir lock protects the shared `target/`, not
     // the `Cargo.toml`/`src/lib.rs` sources this function is about to
     // (re)write, so guard the write+build with our own cross-process lock,
-    // scoped to this cache key — two processes on *different* keys never
-    // block each other.
+    // scoped to this cache key — two processes on *different* keys never block
+    // each other here, though a concurrent COLD build of another key does queue
+    // inside Cargo on the shared target dir (#2075: the trade for compiling the
+    // dependency graph once instead of once per key).
     let _lock = BuildLock::acquire(&cache_root)?;
 
     // Re-check under the lock: whoever held it may have just finished
     // building this exact key while we were waiting.
     if let Some(artifacts) = bridge_artifact_paths(
-        &cache_root,
         &rlib,
         &target,
         &crate_name,
         helper_bin.as_deref(),
         secrets_helper_bin.as_deref(),
     )
-    .filter(|artifacts| bridge_cache_verified(&cache_root, artifacts))
+    .filter(|artifacts| bridge_cache_verified(&target, &crate_name, artifacts))
     {
         let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
@@ -1861,13 +1865,18 @@ fn build_bridge_full(
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
+    // `src/bin/` holds nothing but the generated helpers below, and #2075 keyed
+    // their names. Clear it first so a helper written under the old unkeyed name
+    // cannot linger as a second bin target that Cargo keeps rebuilding and
+    // uplifting over another key's helper.
+    let bin_dir = src_dir.join("bin");
+    let _ = fs::remove_dir_all(&bin_dir);
     // c146: emit the crypto helper binary alongside the lib when crypto is in play.
     if needs_crypto {
-        let bin_dir = src_dir.join("bin");
         fs::create_dir_all(&bin_dir)
             .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
         fs::write(
-            bin_dir.join("jet-crypto-helper.rs"),
+            bin_dir.join(format!("{}.rs", crypto_helper_bin_name(key))),
             emit_crypto_helper_bin(&crate_name),
         )
         .map_err(|e| tool_error(&format!("couldn't write the crypto helper: {}", e)))?;
@@ -1875,11 +1884,10 @@ fn build_bridge_full(
     // U13: same shape, the secrets helper binary when the age-style crypto
     // bridge is in play.
     if needs_secrets {
-        let bin_dir = src_dir.join("bin");
         fs::create_dir_all(&bin_dir)
             .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
         fs::write(
-            bin_dir.join("jet-secrets-helper.rs"),
+            bin_dir.join(format!("{}.rs", secrets_helper_bin_name(key))),
             emit_secrets_helper_bin(&crate_name),
         )
         .map_err(|e| tool_error(&format!("couldn't write the secrets helper: {}", e)))?;
@@ -1986,7 +1994,6 @@ fn build_bridge_full(
         }
     }
     let artifacts = bridge_artifact_paths(
-        &cache_root,
         &rlib,
         &target,
         &crate_name,
@@ -1994,7 +2001,7 @@ fn build_bridge_full(
         secrets_helper_bin.as_deref(),
     )
     .ok_or_else(|| tool_error("FFI build finished without its complete artifact set"))?;
-    if let Err(error) = publish_bridge_manifest(&cache_root, &artifacts) {
+    if let Err(error) = publish_bridge_manifest(&target, &crate_name, &artifacts) {
         return Err(tool_error(&error));
     }
     let cdylib = artifacts[1].clone();
@@ -2285,6 +2292,87 @@ impl Drop for BuildLock {
     }
 }
 
+/// Where one bridge cache key lives on disk. The one owner of that layout, so
+/// the builder and the health check cannot drift apart (I8).
+///
+/// Two roots, deliberately (#2075):
+///
+/// - `cache_root` (`<ffi cache>/<key>/`) holds the key's INPUTS — the generated
+///   `Cargo.toml`, `src/`, `Cargo.lock` and the per-key `BuildLock`. Private to
+///   the key, exactly as before.
+/// - `target_dir` (`<ffi cache>/deps/<build-identity hash>/`) is the Cargo
+///   target dir, SHARED by every key built with the same toolchain, target,
+///   profile and rustflags. Compiling the dependency graph (`wasmtime`, `age`,
+///   `rustls`, `ed25519-dalek`, …) is the expensive part of a bridge build and
+///   it is identical across keys, so sharing it turns every key after the first
+///   into a leaf-crate-only build instead of a cold graph per key.
+///
+/// Nothing collides in the shared dir: every artifact name embeds the key
+/// (`libjet_ffi_<key>.rlib`, `jet-crypto-helper-<key>`), including the helper
+/// bin targets, whose fixed names would otherwise have two crypto-bearing keys
+/// overwriting each other's blessed binary at Cargo's uplift path.
+struct BridgePaths {
+    /// Per-key inputs and lock.
+    cache_root: PathBuf,
+    crate_name: String,
+    /// Shared Cargo target dir (`CARGO_TARGET_DIR`).
+    target_dir: PathBuf,
+    /// `<target_dir>/<triple>/release` — every blessed artifact and the digest
+    /// sidecar that blesses it.
+    target: PathBuf,
+    rlib: PathBuf,
+    target_deps_dir: PathBuf,
+    host_deps_dir: PathBuf,
+    crypto_helper: PathBuf,
+    secrets_helper: PathBuf,
+}
+
+fn bridge_paths(key: u64, selected_target: &str, native_link_args: &[String]) -> BridgePaths {
+    let cache_root = cache_dir().join(format!("{key:016x}"));
+    let crate_name = format!("jet_ffi_{key:016x}");
+    let target_dir = shared_target_dir(selected_target, native_link_args);
+    let target = target_dir.join(selected_target).join("release");
+    BridgePaths {
+        rlib: target.join(format!("lib{crate_name}.rlib")),
+        target_deps_dir: target.join("deps"),
+        host_deps_dir: target_dir.join("release/deps"),
+        crypto_helper: target.join(crypto_helper_bin_name(key)),
+        secrets_helper: target.join(secrets_helper_bin_name(key)),
+        cache_root,
+        crate_name,
+        target_dir,
+        target,
+    }
+}
+
+/// The Cargo target dir shared by every bridge key with this build identity.
+///
+/// The hash covers exactly what would make Cargo recompile the dependency graph
+/// anyway — the rustc/cargo toolchain, the selected target, and the rustflags
+/// handed to Cargo as `CARGO_ENCODED_RUSTFLAGS` — so sharing never causes a
+/// rebuild a per-key dir would have avoided. The profile is the `release` path
+/// segment Cargo itself appends.
+fn shared_target_dir(selected_target: &str, native_link_args: &[String]) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    SHARED_DEPS_SCHEMA.hash(&mut hasher);
+    selected_target.hash(&mut hasher);
+    native_toolchain_identity().hash(&mut hasher);
+    native_link_args.hash(&mut hasher);
+    cache_dir()
+        .join("deps")
+        .join(format!("{:016x}", hasher.finish()))
+}
+
+/// Bin target names Cargo uplifts into the shared release dir. Keyed, because
+/// the dir is shared and the uplift path is the bin's name.
+fn crypto_helper_bin_name(key: u64) -> String {
+    format!("jet-crypto-helper-{key:016x}")
+}
+
+fn secrets_helper_bin_name(key: u64) -> String {
+    format!("jet-secrets-helper-{key:016x}")
+}
+
 fn collect_crate_deps(entries: &[ExternEntry]) -> BTreeMap<String, String> {
     let mut deps = BTreeMap::new();
     for e in entries {
@@ -2511,7 +2599,6 @@ fn bridge_cdylib(target: &Path, crate_name: &str) -> Option<PathBuf> {
 }
 
 fn bridge_artifact_paths(
-    cache_root: &Path,
     rlib: &Path,
     target: &Path,
     crate_name: &str,
@@ -2535,7 +2622,7 @@ fn bridge_artifact_paths(
         }
         paths.push(helper.to_path_buf());
     }
-    paths.iter().all(|path| path.starts_with(cache_root)).then_some(paths)
+    paths.iter().all(|path| path.starts_with(target)).then_some(paths)
 }
 
 fn invalidate_bridge_artifacts(
@@ -2551,6 +2638,7 @@ fn invalidate_bridge_artifacts(
         target.join(format!("{stem}.so")),
         target.join(format!("{stem}.dylib")),
         target.join(format!("{crate_name}.dll")),
+        bridge_manifest_path(target, crate_name),
     ]
     .into_iter()
     .chain(helper_bin.map(Path::to_path_buf))
@@ -2560,8 +2648,10 @@ fn invalidate_bridge_artifacts(
     }
 }
 
-fn artifact_relative_path(cache_root: &Path, path: &Path) -> Option<String> {
-    let relative = path.strip_prefix(cache_root).ok()?;
+/// Artifact paths are recorded relative to the shared target dir they live in,
+/// which makes every row a bare file name — the key is already in it.
+fn artifact_relative_path(target: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(target).ok()?;
     if relative.components().any(|component| {
         matches!(
             component,
@@ -2573,8 +2663,13 @@ fn artifact_relative_path(cache_root: &Path, path: &Path) -> Option<String> {
     relative.to_str().map(str::to_string)
 }
 
-fn bridge_cache_verified(cache_root: &Path, artifacts: &[PathBuf]) -> bool {
-    let Ok(manifest) = fs::read_to_string(cache_root.join("artifacts.sha256")) else {
+/// The per-key digest sidecar, beside the artifacts it blesses.
+fn bridge_manifest_path(target: &Path, crate_name: &str) -> PathBuf {
+    target.join(format!("{crate_name}.sha256"))
+}
+
+fn bridge_cache_verified(target: &Path, crate_name: &str, artifacts: &[PathBuf]) -> bool {
+    let Ok(manifest) = fs::read_to_string(bridge_manifest_path(target, crate_name)) else {
         return false;
     };
     let mut lines = manifest.lines();
@@ -2608,7 +2703,7 @@ fn bridge_cache_verified(cache_root: &Path, artifacts: &[PathBuf]) -> bool {
         return false;
     }
     artifacts.iter().all(|path| {
-        let Some(relative) = artifact_relative_path(cache_root, path) else {
+        let Some(relative) = artifact_relative_path(target, path) else {
             return false;
         };
         let Some(expected) = expected.get(&relative) else {
@@ -2620,12 +2715,17 @@ fn bridge_cache_verified(cache_root: &Path, artifacts: &[PathBuf]) -> bool {
     })
 }
 
-fn publish_bridge_manifest(cache_root: &Path, artifacts: &[PathBuf]) -> Result<(), String> {
+fn publish_bridge_manifest(
+    target: &Path,
+    crate_name: &str,
+    artifacts: &[PathBuf],
+) -> Result<(), String> {
     let mut manifest = String::from(BRIDGE_ARTIFACTS_SCHEMA);
     manifest.push('\n');
     for path in artifacts {
-        let relative = artifact_relative_path(cache_root, path)
-            .ok_or_else(|| format!("FFI artifact escapes cache root: {}", path.display()))?;
+        let relative = artifact_relative_path(target, path).ok_or_else(|| {
+            format!("FFI artifact escapes the shared target dir: {}", path.display())
+        })?;
         let bytes = fs::read(path)
             .map_err(|error| format!("could not read FFI artifact {}: {error}", path.display()))?;
         manifest.push_str(&crate::SHA256::sha256_hex(&bytes));
@@ -2633,11 +2733,8 @@ fn publish_bridge_manifest(cache_root: &Path, artifacts: &[PathBuf]) -> Result<(
         manifest.push_str(&relative);
         manifest.push('\n');
     }
-    let manifest_path = cache_root.join("artifacts.sha256");
-    let temporary = cache_root.join(format!(
-        ".artifacts.sha256.tmp.{}",
-        std::process::id()
-    ));
+    let manifest_path = bridge_manifest_path(target, crate_name);
+    let temporary = target.join(format!(".{crate_name}.sha256.tmp.{}", std::process::id()));
     fs::write(&temporary, manifest.as_bytes())
         .map_err(|error| format!("could not stage {}: {error}", manifest_path.display()))?;
     if let Err(error) = fs::rename(&temporary, &manifest_path) {
@@ -2755,7 +2852,10 @@ fn inline_toolchain_identity(toolchain: &InlineNativeToolchain) -> String {
     value
 }
 
-fn native_toolchain_identity() -> String {
+/// Cached: every bridge resolution asks for this (cache key AND shared target
+/// dir), it costs a `rustc -vV` child process, and the toolchain a running
+/// process compiles with cannot change under it.
+static NATIVE_TOOLCHAIN_IDENTITY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
     let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
     let version = Command::new(&rustc)
         .arg("-vV")
@@ -2765,6 +2865,10 @@ fn native_toolchain_identity() -> String {
         .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
         .unwrap_or_else(|| "unavailable".into());
     format!("{}\n{version}", PathBuf::from(rustc).display())
+});
+
+fn native_toolchain_identity() -> &'static str {
+    NATIVE_TOOLCHAIN_IDENTITY.as_str()
 }
 
 pub(crate) fn host_target() -> String {
@@ -3644,7 +3748,9 @@ fn normalize_ffi_crate_name(line: &str) -> String {
     out
 }
 
-/// Keep ui snapshots stable across machines (`/home/…/.cache/jet/ffi/…` → `~/.cache/jet/ffi/…`).
+/// Keep ui snapshots stable across machines (`/home/…/.cache/jet/ffi/…` →
+/// `~/.cache/jet/ffi/…`), for both roots under it: the per-key input dir
+/// `<hash>/` and the shared Cargo target dir `deps/<hash>/` (#2075).
 fn normalize_ffi_cache_path(line: &str) -> String {
     let marker = ".cache/jet/ffi/";
     let Some(idx) = line.find(marker) else {
@@ -3660,12 +3766,19 @@ fn normalize_ffi_cache_path(line: &str) -> String {
         })
         .unwrap_or(idx);
     let rest = &line[idx + marker.len()..];
+    let (shared, rest) = match rest.strip_prefix("deps/") {
+        Some(rest) => ("deps/", rest),
+        None => ("", rest),
+    };
     let hash_len = rest.chars().take_while(|c| c.is_ascii_hexdigit()).count();
     if hash_len != 16 {
         return line.to_string();
     }
     let suffix = &rest[hash_len..];
-    format!("{}~/.cache/jet/ffi/<hash>{}", &line[..path_start], suffix)
+    format!(
+        "{}~/.cache/jet/ffi/{shared}<hash>{suffix}",
+        &line[..path_start]
+    )
 }
 
 fn tool_error(msg: &str) -> Vec<Diagnostic> {

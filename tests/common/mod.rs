@@ -671,63 +671,31 @@ fn push_diff_line(out: &mut BoundedDiffOutput, marker: char, line: &str, cut_mid
     }
 }
 
-/// Cross-process advisory lock serializing access to Jet's hidden global FFI
-/// bridge cache (`~/.cache/jet/ffi/<key>/`, keyed by a hash of the `extern
-/// rust`/`core.regex`/`core.archive`/etc. signature — see
-/// `crates/jet-driver/src/FFI.rs` `build_bridge`/`cache_dir`).
+/// #2075: the bridge cache key in an FFI artifact's file name
+/// (`jet-crypto-helper-<key>`, `libjet_ffi_<key>.rlib`, `jet_ffi_<key>.sha256`).
 ///
-/// That cache has no synchronization of its own: `build_bridge` unconditionally
-/// (over)writes `Cargo.toml` + `src/lib.rs` at the cache path and then spawns
-/// `cargo build`, every single call, even when a same-keyed build is already
-/// cached or in flight. Two `jet::compile_with_path` calls that land on the
-/// same cache key — including from *different test binaries*, i.e. different
-/// OS processes, e.g. tests/golden.rs and tests/cffi.rs both building the FFI
-/// bridge for `examples/features/lowlevel/ffi.jet` — race on those writes: one
-/// process's `fs::write` truncates the file out from under a concurrent
-/// `cargo build` reading it, which can hand `rustc`/`cargo` a momentarily
-/// truncated `lib.rs` and surface as a spurious E0704/E0705 from the *other*
-/// process. This is a real product-level concurrency bug (any two real
-/// concurrent `jet build`/`jet run` invocations sharing an `extern rust`
-/// signature can hit it too), reported separately — not silently patched here.
-/// This lock only serializes the *test suite's* known collisions so CI doesn't
-/// flake on it.
-pub struct FfiBridgeLock {
-    dir: PathBuf,
+/// Every key's outputs now live in ONE Cargo target dir shared per (toolchain,
+/// target, profile), so "this bridge's files" is a name filter, not a directory
+/// listing.
+pub fn ffi_bridge_key(artifact: &Path) -> String {
+    let name = artifact
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    name.split(|c: char| !c.is_ascii_hexdigit())
+        .find(|part| part.len() == 16)
+        .unwrap_or_else(|| panic!("no 16-hex FFI bridge key in `{name}`"))
+        .to_string()
 }
 
-impl FfiBridgeLock {
-    /// Blocks until the lock is held. Steals a stale lock (mtime older than 2
-    /// minutes — far longer than any single FFI bridge `cargo build` takes)
-    /// so a killed/timed-out test process can't wedge every later run.
-    pub fn acquire() -> FfiBridgeLock {
-        let dir = std::env::temp_dir().join("jet_ffi_bridge_test.lock");
-        loop {
-            match fs::create_dir(&dir) {
-                Ok(()) => return FfiBridgeLock { dir },
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if let Ok(meta) = fs::metadata(&dir) {
-                        if let Ok(age) = meta.modified().and_then(|m| {
-                            m.elapsed()
-                                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                        }) {
-                            if age > std::time::Duration::from_secs(120) {
-                                let _ = fs::remove_dir(&dir);
-                                continue;
-                            }
-                        }
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                Err(e) => panic!("couldn't create FFI bridge test lock dir: {e}"),
-            }
-        }
-    }
-}
-
-impl Drop for FfiBridgeLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir(&self.dir);
-    }
+/// The per-key input dir (`<ffi cache>/<key>/`, holding the generated
+/// `Cargo.toml` and `src/`) of the bridge that produced `artifact`.
+pub fn ffi_bridge_cache_root(artifact: &Path) -> PathBuf {
+    artifact
+        .ancestors()
+        .find(|dir| dir.ends_with("ffi"))
+        .unwrap_or_else(|| panic!("`{}` is not under an FFI cache root", artifact.display()))
+        .join(ffi_bridge_key(artifact))
 }
 
 /// Compile `src` through the real front end, build it with rustc (linking the

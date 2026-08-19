@@ -1,0 +1,34 @@
+# Measured seconds per cargo test target, read by `tools/ci/test-shards.sh` to
+# balance the CI shards by COST instead of by count
+# (#2075). Four tab-separated columns, keyed exactly like the script's own
+# inventory row so the join cannot be ambiguous:
+#
+#   <package>	<kind: lib|bin|test>	<target name>	<seconds>
+#
+# The metric is what a shard actually pays: the wall clock of ONE
+# `cargo test <line>` invocation for that target — its build AND its run. That
+# is usually larger than the 900s in-process guard, which bounds only the
+# running test binary; a weight over 900 is not a licence to raise that guard.
+#
+# Rules:
+#
+# - MEASURED seconds only. A guessed number is a shard split that lies about its
+#   own cost, and nobody ever revisits a guess. A target with no row here is
+#   charged DEFAULT_WEIGHT (30s) — scheduled, never skipped — so an unmeasured
+#   monster shows up as a visibly skewed real CI run and gets measured.
+# - Measure on the builder host, one target at a time, and round UP:
+#     scripts/agent/time-suites.sh <target>     # e.g. golden; guard stays 900s
+# - Re-measure after anything that changes a target's cost. #2074
+#   (content-addressed Prelude/Core rlibs) will cut the AOT-heavy targets by
+#   most of their wall clock; every row below is stale the day it lands.
+# - Rows are sorted by package, then kind, then target.
+#
+# Provenance of the seeded row:
+#
+# - `jet test golden`: docs/research/test-suite-performance-2026-08-08.md
+#   measures the target at 45-90 min on a full supported host (479 example
+#   entries, ~476 native AOT compilations). Recorded at the 45-min low end
+#   (2700s) — the conservative end, because overstating one target starves the
+#   other shards. This target is why weighted splitting exists: it is atomic, so
+#   until #2074 shortens it no assignment can bring the spread under 2x.
+jet	test	golden	2700

@@ -247,7 +247,7 @@ end module scalar_math
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "--release", "main.jet"])
+        .args(["run", "--profile=debug", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -304,7 +304,7 @@ end module matrix_math
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "--release", "main.jet"])
+        .args(["run", "--profile=debug", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -323,7 +323,7 @@ end module matrix_math
     )
     .unwrap();
     let bad = Command::new(jet())
-        .args(["run", "--release", "bad.jet"])
+        .args(["run", "--profile=debug", "bad.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -382,7 +382,7 @@ func main() {}
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "--release", "main.jet"])
+        .args(["run", "--profile=debug", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -451,7 +451,7 @@ func main() {}
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "--release", "main.jet"])
+        .args(["run", "--profile=debug", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -528,7 +528,7 @@ fn run() =[Java, IO]=> {
     counter.close(^handle)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"embedded JVM binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");
     assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden foreign detail"));
@@ -567,7 +567,7 @@ fn run() =[DotNet, IO]=> {
     counter.close(^handle)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded CoreCLR binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded CoreCLR binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
 }
 
 #[test]
@@ -593,7 +593,7 @@ fn run() =[Tcl, IO]=> {
     tcl.close(^session)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"embedded Tcl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n43\n42\n2.5\ntcl-error\n");
     assert!(!String::from_utf8_lossy(&run.stderr).contains("foreign stack secret"));
@@ -641,7 +641,7 @@ fn run() =[Ada, IO]=> {
     print(geo.calls(0) ?? -1)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"generated Ada binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"-1.0\n0\n42.0\n1\n");
 }
@@ -694,7 +694,7 @@ fn run() =[Pascal, IO]=> {
     print(inv.destroyed_count())
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"generated Pascal binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n42\n0\n1\n");
     fs::write(dir.join("stale.c"),r#"#include <stdint.h>
 extern int64_t jet_pascal_inventory_counter_new(int64_t);
@@ -771,7 +771,7 @@ fn run() =[PowerShell, IO]=> {
     ops.close(^session)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"{\"count\":1,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n{\"count\":2,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n\"failed\"\n\"timeout\"\n");
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"{\"count\":1,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n{\"count\":2,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n\"failed\"\n\"timeout\"\n");
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -801,7 +801,7 @@ fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/perl");fs::copy(example.join("ops.pl"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","perl"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Perl bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/perl");assert!(cache.join("libjet_perl_ops.a").is_file());assert!(cache.join("ops_worker.pl").is_file());assert!(cache.join("ops.provenance").is_file());
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Perl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Perl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>

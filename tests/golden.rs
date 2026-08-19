@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 mod common;
 use common::{
     add_generated_rust, example_stdin, fixture_filter, fixture_matches, have_rustc, panic_message,
-    strip_vetted_prelude_modules, test_worker_count, unified_diff, FfiBridgeLock,
+    strip_vetted_prelude_modules, test_worker_count, unified_diff,
 };
 
 #[derive(Clone)]
@@ -317,7 +317,6 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         return;
     }
 
-    let _ffi_lock = uses_ffi_bridge.then(FfiBridgeLock::acquire);
     // Both compile entry points must name the example with ONE spelling: the
     // repo-relative `entry.shown` every golden was authored against. `entry.path`
     // is absolute (`root.join("examples/features")`), and Loader gives the entry
@@ -678,7 +677,6 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         return;
     }
 
-    let _ffi_lock = FfiBridgeLock::acquire();
     let flat_stem = entry.stem.replace('/', "_");
     let dir = std::env::temp_dir().join(format!(
         "jet_golden_{}_{}",

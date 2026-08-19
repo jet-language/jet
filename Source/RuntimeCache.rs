@@ -15,7 +15,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v3";
+// v4: the block now carries the Core/CoreLib closure and the package edition,
+// and `export_runtime_source` no longer mis-promotes multi-line item headers.
+// Every v3 entry on disk is an empty directory from a runtime crate that never
+// compiled, so nothing of value shares the old namespace.
+const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v4";
 const CRATE_NAME: &str = "jet_runtime";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
@@ -62,6 +66,13 @@ impl PreparedRuntime {
         self.cache_hit
     }
 
+    /// True when the program crate links the cached runtime rlib instead of
+    /// carrying the runtime source itself. A caller that can retry uses this to
+    /// tell a split-only rejection apart from a genuine codegen bug.
+    pub fn is_split(&self) -> bool {
+        self.rlib.is_some()
+    }
+
     pub fn add_rustc_args(&self, command: &mut Command) {
         if let Some(rlib) = &self.rlib {
             command
@@ -106,7 +117,40 @@ pub fn cache_root() -> PathBuf {
     PathBuf::from(home).join(".cache").join("jet").join("runtime")
 }
 
+/// `JET_RUNTIME_CACHE_STATS=1` reports one line per prepared program on stderr:
+/// `hit` links a cached rlib, `store` compiled one, `inline` fell back to the
+/// monolith. Measurement-only, off by default — the numbers behind an
+/// "AOT stopped rebuilding the runtime" claim have to come from somewhere.
 fn prepare_at(
+    root: &Path,
+    rustc: &OsStr,
+    generated: &str,
+    rustc_flags: &[OsString],
+    rustc_env: &[(OsString, OsString)],
+) -> Result<PreparedRuntime, Error> {
+    let prepared = prepare_at_uncounted(root, rustc, generated, rustc_flags, rustc_env)?;
+    if std::env::var_os("JET_RUNTIME_CACHE_STATS").is_some() {
+        let outcome = match (&prepared.rlib, prepared.cache_hit) {
+            (None, _) => "inline".to_string(),
+            (Some(rlib), hit) => format!(
+                "{} key={}",
+                if hit { "hit" } else { "store" },
+                rlib.parent()
+                    .and_then(Path::file_name)
+                    .and_then(OsStr::to_str)
+                    .unwrap_or("?")
+            ),
+        };
+        eprintln!(
+            "jet-runtime-cache {outcome} program_bytes={} generated_bytes={}",
+            prepared.rust.len(),
+            generated.len()
+        );
+    }
+    Ok(prepared)
+}
+
+fn prepare_at_uncounted(
     root: &Path,
     rustc: &OsStr,
     generated: &str,
@@ -498,7 +542,12 @@ fn export_runtime_source(source: &str) -> String {
         }
         let scope = scopes.last().map(|(scope, _)| *scope).unwrap_or(Scope::Other);
         let direct = scopes.last().is_some_and(|(_, level)| *level == depth);
-        let rewritten = if direct {
+        // `pending` is non-empty only while an item header is still open — a
+        // multi-line generic parameter list or `where` clause. Those rows are
+        // continuations, not items: `pub fn jet_fixed_list_concat<\n T: Clone,\n
+        // const LEFT: usize,` would otherwise become `pub const LEFT: usize,`
+        // inside the angle brackets and the runtime crate would not even parse.
+        let rewritten = if direct && pending.is_empty() {
             export_line(line, masked, scope)
         } else {
             line.to_string()
@@ -984,6 +1033,45 @@ fn braces() -> &'static str { "{private}" }
         assert!(exported.contains("    pub waiters: std::sync::Mutex<"));
         assert!(exported.contains("\n        std::collections::VecDeque<u8>,"));
         assert!(!exported.contains("\n        pub std::collections::VecDeque"));
+    }
+
+    /// `Prelude/Core/FixedList.rs` declares `jet_fixed_list_concat` with its
+    /// const-generic parameters on their own lines. Those rows start with
+    /// `const ` at module depth, so the exporter used to write
+    /// `pub const LEFT: usize,` between the angle brackets and rustc rejected
+    /// the runtime crate before it read a single item.
+    #[test]
+    fn export_does_not_promote_multiline_generic_parameter_lists() {
+        let source = r#"pub fn concat<
+    T: Clone,
+    const LEFT: usize,
+    const RIGHT: usize,
+>(
+    left: &[T; LEFT],
+) -> [T; LEFT] {
+    left.clone()
+}
+"#;
+        let exported = export_runtime_source(source);
+        assert!(!exported.contains("pub const LEFT"));
+        assert!(!exported.contains("pub const RIGHT"));
+        assert!(exported.contains("    const LEFT: usize,"));
+        assert!(exported.contains("pub fn concat<"));
+    }
+
+    /// A `where` clause on its own lines is the same continuation case, and its
+    /// rows can start with `type `/`const ` too.
+    #[test]
+    fn export_does_not_promote_where_clause_rows() {
+        let source = r#"pub fn run<T>(value: T) -> T
+where
+    T: Clone,
+{
+    value
+}
+"#;
+        let exported = export_runtime_source(source);
+        assert!(exported.contains("pub fn run<T>(value: T) -> T\nwhere\n    T: Clone,\n{"));
     }
 
     #[cfg(unix)]

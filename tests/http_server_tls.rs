@@ -1,7 +1,7 @@
 use std::process::Command;
 
 mod common;
-use common::{build_and_run, have_rustc, FfiBridgeLock};
+use common::{build_and_run, have_rustc};
 
 fn have_cargo() -> bool {
     Command::new("cargo").arg("--version").output().is_ok()
@@ -17,7 +17,6 @@ fn server_tls_option_validates_fixture_before_binding() {
         eprintln!("note: skipping server TLS bridge test (need cargo + rustc)");
         return;
     }
-    let _lock = FfiBridgeLock::acquire();
     let cert = jet_string(include_str!("../tests/fixtures/tls/localhost.cert.pem"));
     let key = jet_string(include_str!("../tests/fixtures/tls/localhost.key.pem"));
     let src = format!(
@@ -50,7 +49,6 @@ fn server_tls_bad_cert_is_jet_voiced() {
         eprintln!("note: skipping server TLS bridge test (need cargo + rustc)");
         return;
     }
-    let _lock = FfiBridgeLock::acquire();
     let src = r#"
 use core.http.server as server
 
@@ -152,7 +150,6 @@ fn server_bind_tls_validates_fixture_before_binding() {
         eprintln!("note: skipping server bind TLS bridge test (need cargo + rustc)");
         return;
     }
-    let _lock = FfiBridgeLock::acquire();
     let cert = jet_string(include_str!("../tests/fixtures/tls/localhost.cert.pem"));
     let key = jet_string(include_str!("../tests/fixtures/tls/localhost.key.pem"));
     let src = format!(

@@ -559,6 +559,82 @@ fn ci_test_shards_cover_every_workspace_target_exactly_once() {
     );
 }
 
+/// #2075: the shard split is weighted by measured cost, and the weight table is
+/// machine-checked.
+///
+/// A table nobody reads is a second place to remember cost (AGENTS.md I8), and a
+/// row naming a target that no longer exists is a weight that silently stopped
+/// applying — which is exactly how a 45-minute target stayed the critical path
+/// while six jobs looked balanced. So every row must parse, name a real target,
+/// and appear once; and the script must report the load it computed.
+#[test]
+fn ci_test_shards_use_the_committed_weight_table() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let table = fs::read_to_string(root.join("tools/ci/test-weights.tsv"))
+        .expect("read tools/ci/test-weights.tsv");
+    let inventory: std::collections::BTreeSet<String> =
+        full_workspace_test_target_inventory(&root).into_iter().collect();
+
+    let mut weighed = std::collections::BTreeSet::new();
+    for (index, line) in table.lines().enumerate() {
+        let row = index + 1;
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert_eq!(
+            fields.len(),
+            4,
+            "tools/ci/test-weights.tsv:{row} must be \
+             '<package>\\t<kind>\\t<target>\\t<seconds>': {line:?}"
+        );
+        let (package, kind, name, seconds) = (fields[0], fields[1], fields[2], fields[3]);
+        assert!(
+            seconds.parse::<u64>().is_ok(),
+            "tools/ci/test-weights.tsv:{row} seconds must be a whole number: {seconds:?}"
+        );
+        let target = match kind {
+            "lib" => format!("-p {package} --lib"),
+            "bin" => format!("-p {package} --bin {name}"),
+            "test" => format!("-p {package} --test {name}"),
+            other => panic!("tools/ci/test-weights.tsv:{row} has unknown target kind `{other}`"),
+        };
+        assert!(
+            inventory.contains(&target),
+            "tools/ci/test-weights.tsv:{row} weighs `{target}`, which is not a workspace test \
+             target — renamed or deleted, so its weight silently stopped applying"
+        );
+        assert!(
+            weighed.insert(target.clone()),
+            "tools/ci/test-weights.tsv:{row} repeats `{target}`"
+        );
+    }
+    assert!(
+        !weighed.is_empty(),
+        "the weight table must carry at least one measured row, or the weighted split is \
+         round-robin wearing a hat"
+    );
+
+    // The script must actually consult it, and say what it computed: the shard
+    // load and the spread are the numbers that show whether the split is honest.
+    let out = Command::new("bash")
+        .arg(root.join("tools/ci/test-shards.sh"))
+        .args(["0", "6"])
+        .current_dir(&root)
+        .output()
+        .expect("run tools/ci/test-shards.sh");
+    assert!(
+        out.status.success(),
+        "weighted shard enumeration failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let summary = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        summary.contains("predicted ") && summary.contains("spread "),
+        "tools/ci/test-shards.sh must report the load and spread it computed: {summary}"
+    );
+}
+
 #[test]
 fn verify_full_default_run_covers_whole_workspace() {
     // The unsharded default path (no JET_TEST_SHARD set) is what local/manual

@@ -45,7 +45,7 @@ fn positional_bare_form_fills_required_field() {
     let dir = scratch("bare");
     write_todo(&dir);
     let out = Command::new(jet())
-        .args(["run", "--release", "todo.jet", "--", "add", "buy-milk"])
+        .args(["run", "--profile=debug", "todo.jet", "--", "add", "buy-milk"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -65,7 +65,7 @@ fn named_form_still_works_and_optional_stays_flag() {
     let out = Command::new(jet())
         .args([
             "run",
-            "--release",
+            "--profile=debug",
             "todo.jet",
             "--",
             "add",
@@ -94,7 +94,7 @@ fn named_wins_over_positional() {
     let out = Command::new(jet())
         .args([
             "run",
-            "--release",
+            "--profile=debug",
             "todo.jet",
             "--",
             "add",
@@ -120,7 +120,7 @@ fn help_lists_arguments_before_options() {
     let dir = scratch("help");
     write_todo(&dir);
     let out = Command::new(jet())
-        .args(["run", "--release", "todo.jet", "--", "add", "--help"])
+        .args(["run", "--profile=debug", "todo.jet", "--", "add", "--help"])
         .current_dir(&dir)
         .output()
         .unwrap();

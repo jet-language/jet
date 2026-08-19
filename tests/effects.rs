@@ -1098,7 +1098,6 @@ fn cross_module_foreign_undo_bindings_keep_distinct_identities() {
     if !common::have_rustc() {
         return;
     }
-    let _ffi_lock = common::FfiBridgeLock::acquire();
     let root = common::unique_tmp("jet_effects_cross_module_undo");
     fs::create_dir_all(&root).unwrap();
     fs::write(
@@ -1175,7 +1174,6 @@ fn run() {
 /// importing modules. Sema must reject the ambiguity before codegen.
 #[test]
 fn shared_foreign_undo_rejects_ambiguous_owners() {
-    let _ffi_lock = common::FfiBridgeLock::acquire();
     let root = common::unique_tmp("jet_effects_ambiguous_undo");
     fs::create_dir_all(&root).unwrap();
     fs::write(

@@ -5,7 +5,6 @@ fn expiring_secret_lends_then_zeroizes_on_expiry() {
     if !common::have_rustc() {
         return;
     }
-    let _ffi_lock = common::FfiBridgeLock::acquire();
 
     let src = r#"
 use core.crypto as crypto

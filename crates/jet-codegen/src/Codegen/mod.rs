@@ -306,9 +306,28 @@ fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
     ));
 }
 
+/// The primitive types the compiler gives a total order to. One list, read by
+/// the cached-runtime emitter below and by the module-local
+/// `emit_synthetic_operator_traits` — the two copies of the `__jet_Equatable`
+/// list above are the drift this avoids.
+const COMPARABLE_PRIMITIVES: &[&str] = &[
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char",
+    "String",
+];
+
 /// Traits used by both the fixed runtime and generated root-program types.
 /// Imported Jet modules keep their module-local traits; the root imports these
 /// from the cached runtime rlib after the native builder splits the source.
+///
+/// `__jet_Ordering` and `__jet_Comparable` are runtime-owned for the same
+/// reason `__jet_Display` is: the Prelude itself names them — `jet_list_sort_by`
+/// and `jet_ordering_then` in `Prelude/Core.rs`, the `Duration`/`Instant`
+/// comparisons in `Prelude/CoreLib/Top/MathRandomTime.rs`. Leaving them to the
+/// program crate made the cached runtime crate unbuildable (E0425 on
+/// `__jet_Ordering`), so #1785's rlib cache stored nothing and every native
+/// build re-fed rustc the whole runtime. `emit_synthetic_operator_traits` is
+/// the module-local twin; `cached_runtime_owns_every_runtime_owned_trait`
+/// guards the pairing.
 fn push_cached_runtime_traits(out: &mut String) {
     out.push_str("pub trait __jet_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
@@ -323,13 +342,48 @@ fn push_cached_runtime_traits(out: &mut String) {
         ));
     }
     out.push('\n');
+    out.push_str(ORDERING_ENUM);
+    out.push_str(COMPARABLE_TRAIT);
+    push_comparable_primitive_impls(out);
+    out.push('\n');
 }
 
-fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
+const ORDERING_ENUM: &str = concat!(
+    "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n",
+    "pub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n",
+);
+const COMPARABLE_TRAIT: &str =
+    "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
+
+fn push_comparable_primitive_impls(out: &mut String) {
+    for ty in COMPARABLE_PRIMITIVES {
+        out.push_str(&format!(
+            "impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n"
+        ));
+    }
+}
+
+/// Open the cached-runtime block. Everything from here to `CACHED_RUNTIME_END`
+/// is decided by build facts alone — never by user source text — so the native
+/// builder compiles it once into a content-addressed rlib and links it
+/// (`Source/RuntimeCache.rs`).
+fn push_cached_runtime_begin(
+    out: &mut String,
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+) {
     if link.is_some() {
         push_ffi_reporter(out, link);
     }
     out.push_str(CACHED_RUNTIME_BEGIN);
+    // `Prelude/CoreLib/Top/EncodingCodecs.rs` reads this constant and is emitted
+    // inside this block, so the constant belongs to the cached crate. The build
+    // cache still keys the edition through `manifest_fingerprint`.
+    push_package_edition(out, bundle);
+    push_cached_runtime_body(out, link);
+}
+
+fn push_cached_runtime_body(out: &mut String, link: Option<&FfiLink>) {
     if link.is_none() {
         // EnvInit is part of cached runtime and calls this hook. Keep no-FFI
         // stub inside marker block so split rlib has symbol too.
@@ -341,6 +395,17 @@ fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
     push_mem_prelude(out);
     push_gc_prelude(out);
     out.push_str(LAYOUT_PRELUDE);
+}
+
+/// The fixed part of the block on its own — what `cached_runtime_fingerprint`
+/// hashes. Program assemblers use `push_cached_runtime_begin` instead, because
+/// the Core closure joins them inside the same markers.
+fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
+    if link.is_some() {
+        push_ffi_reporter(out, link);
+    }
+    out.push_str(CACHED_RUNTIME_BEGIN);
+    push_cached_runtime_body(out, link);
     out.push_str(CACHED_RUNTIME_END);
 }
 
@@ -957,6 +1022,33 @@ fn force_corelib_prelude(bundle: &ProgramBundle) -> bool {
 
 fn needs_embedded_runtime(bundle: &ProgramBundle) -> bool {
     core_needs_embedded_runtime(&bundle.used_core) || force_corelib_prelude(bundle)
+}
+
+/// The R10 fragments that ride inside the cached-runtime block: the Core
+/// kernel, the scheduler, and the UI/app templates. Every one is selected by
+/// build facts (`used_core`, target OS, native IO) and never by user source
+/// text, so they are content-addressable exactly like the fixed Prelude — and
+/// they are the bulk of an emitted program (3.4 MB of a 4.0 MB `core.encoding`
+/// build). Emitting them outside the markers is what left every native build
+/// re-feeding rustc the whole Core closure, and it also put
+/// `impl __jet_Comparable for JetInstant` in a different crate from
+/// `JetInstant` (E0117), which no visibility fix can repair.
+fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: bool) {
+    if !needs_embedded_runtime(bundle) {
+        return;
+    }
+    let force = force_corelib_prelude(bundle);
+    if test_harness {
+        push_corelib_prelude_for_test_harness(out, &bundle.used_core, force);
+    } else {
+        push_corelib_prelude(out, &bundle.used_core, force);
+    }
+    out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
+    out.push_str(UI_PRELUDE);
+    if uses_gtk_backend(bundle) {
+        out.push_str(UI_GTK_PRELUDE);
+    }
+    push_app_preludes(out, &bundle.used_core);
 }
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
@@ -1991,9 +2083,15 @@ pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_own
     out.push_str("}\n\n");
 }
 
+/// `include_runtime_owned` is false for the root program: the cached runtime
+/// block already defines those items (`push_cached_runtime_traits`), and a
+/// second root copy would be a different type from the one the Prelude's own
+/// `jet_list_sort_by` / `jet_ordering_then` use. Every imported module still
+/// gets its own module-local copy.
 pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_owned: bool) {
-    out.push_str("#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n");
-    out.push_str("pub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n");
+    if include_runtime_owned {
+        out.push_str(ORDERING_ENUM);
+    }
     for (name, method, ret) in [
         ("Add", "add", "Self"),
         ("Sub", "sub", "Self"),
@@ -2002,7 +2100,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
         ("Equatable", "equal", "bool"),
         ("Comparable", "compare", "__jet_Ordering"),
     ] {
-        if name == "Equatable" && !include_runtime_owned {
+        if matches!(name, "Equatable" | "Comparable") && !include_runtime_owned {
             continue;
         }
         if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
@@ -2052,14 +2150,7 @@ pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_o
                 "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
             ));
         }
-    }
-    for ty in [
-        "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char",
-        "String",
-    ] {
-        out.push_str(&format!(
-            "impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n"
-        ));
+        push_comparable_primitive_impls(out);
     }
     out.push('\n');
 }
@@ -3364,6 +3455,31 @@ mod tests {
         );
     }
 
+    /// The cached runtime block and the module-local emitter are two halves of
+    /// one law: whatever `emit_synthetic_*` withholds from the root program must
+    /// already be inside the block, or the runtime crate cannot compile and
+    /// every native build silently falls back to the inline monolith. That is
+    /// exactly how `__jet_Ordering` went missing (E0425 in `jet_list_sort_by`),
+    /// leaving #1785's rlib cache storing nothing at all.
+    #[test]
+    fn cached_runtime_owns_every_runtime_owned_trait() {
+        let mut block = String::new();
+        push_cached_runtime(&mut block, None);
+        let mut module_local = String::new();
+        emit_synthetic_display_trait(&mut module_local, true);
+        emit_synthetic_operator_traits(&mut module_local, true);
+        let mut root = String::new();
+        emit_synthetic_display_trait(&mut root, false);
+        emit_synthetic_operator_traits(&mut root, false);
+        for line in module_local.lines().filter(|line| !root.contains(*line)) {
+            assert!(
+                block.contains(line),
+                "the root program does not emit `{line}`, so the cached runtime \
+                 block must — otherwise the runtime rlib cannot compile"
+            );
+        }
+    }
+
     /// I2: rustc rejecting generated code is an internal compiler error, never a
     /// user diagnostic. `Prelude/Scheduler.rs` and
     /// `Prelude/CoreLib/Top/ServiceAuthority.rs` each imported
@@ -4258,22 +4374,14 @@ pub fn emit_bundle_dbg(
         out.push_str(&format!("// jet:generic-instance module={} fingerprint={} full-key={}\n", provenance.canonical_module, provenance.fingerprint, provenance.full_key_hex));
     }
     out.push_str("#![allow(warnings)]\n\n");
-    push_package_edition(&mut out, bundle);
     emit_command_metadata(bundle, active_os, &mut out);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     push_program_allocator_prelude(&mut out, bundle);
-    push_cached_runtime(&mut out, link);
-    if needs_embedded_runtime(bundle) {
-        push_corelib_prelude(&mut out, &bundle.used_core, force_corelib_prelude(bundle));
-        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
-        out.push_str(UI_PRELUDE);
-        if uses_gtk_backend(bundle) {
-            out.push_str(UI_GTK_PRELUDE);
-        }
-        push_app_preludes(&mut out, &bundle.used_core);
-    }
+    push_cached_runtime_begin(&mut out, bundle, link);
+    push_core_runtime(&mut out, bundle, false);
+    out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
@@ -4533,11 +4641,10 @@ fn emit_bundle_tests_cov_inner(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
-    push_package_edition(&mut out, bundle);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_cached_runtime(&mut out, link);
+    push_cached_runtime_begin(&mut out, bundle, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);
@@ -4548,19 +4655,8 @@ fn emit_bundle_tests_cov_inner(
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    if needs_embedded_runtime(bundle) {
-        push_corelib_prelude_for_test_harness(
-            &mut out,
-            &bundle.used_core,
-            force_corelib_prelude(bundle),
-        );
-        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
-        out.push_str(UI_PRELUDE);
-        if uses_gtk_backend(bundle) {
-            out.push_str(UI_GTK_PRELUDE);
-        }
-        push_app_preludes(&mut out, &bundle.used_core);
-    }
+    push_core_runtime(&mut out, bundle, true);
+    out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
@@ -4826,11 +4922,10 @@ pub fn emit_bundle_fuzz(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
-    push_package_edition(&mut out, bundle);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_cached_runtime(&mut out, link);
+    push_cached_runtime_begin(&mut out, bundle, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);
@@ -4839,19 +4934,8 @@ pub fn emit_bundle_fuzz(
     // runtime is always needed (unlike `jet test`, which only emits it when a
     // property test is present).
     out.push_str(PROP_PRELUDE);
-    if needs_embedded_runtime(bundle) {
-        push_corelib_prelude_for_test_harness(
-            &mut out,
-            &bundle.used_core,
-            force_corelib_prelude(bundle),
-        );
-        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
-        out.push_str(UI_PRELUDE);
-        if uses_gtk_backend(bundle) {
-            out.push_str(UI_GTK_PRELUDE);
-        }
-        push_app_preludes(&mut out, &bundle.used_core);
-    }
+    push_core_runtime(&mut out, bundle, true);
+    out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
@@ -5160,11 +5244,10 @@ fn emit_bundle_benches_inner(
         Syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
-    push_package_edition(&mut out, bundle);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_cached_runtime(&mut out, link);
+    push_cached_runtime_begin(&mut out, bundle, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);
@@ -5175,19 +5258,8 @@ fn emit_bundle_benches_inner(
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    if needs_embedded_runtime(bundle) {
-        push_corelib_prelude_for_test_harness(
-            &mut out,
-            &bundle.used_core,
-            force_corelib_prelude(bundle),
-        );
-        out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
-        out.push_str(UI_PRELUDE);
-        if uses_gtk_backend(bundle) {
-            out.push_str(UI_GTK_PRELUDE);
-        }
-        push_app_preludes(&mut out, &bundle.used_core);
-    }
+    push_core_runtime(&mut out, bundle, true);
+    out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);

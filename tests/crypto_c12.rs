@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{build_and_run, have_rustc, FfiBridgeLock};
+use common::{build_and_run, ffi_bridge_cache_root, have_rustc};
 use jet::Diagnostics::Severity;
 use jet::Interpreter::{dev_iteration, RunOutcome};
 
@@ -56,7 +56,6 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         return;
     }
     std::fs::create_dir_all(std::env::temp_dir()).unwrap();
-    let _ffi_lock = FfiBridgeLock::acquire();
     let path = "examples/features/crypto/typed_crypto.jet";
     let source = std::fs::read_to_string(path).unwrap();
     let expected = std::fs::read_to_string("examples/features/expected/crypto/typed_crypto.out")
@@ -79,11 +78,7 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
     assert_eq!(aot_stdout, expected);
 
     let helper = jetpack::FFI::cached_crypto_helper_path();
-    let cache_root = helper
-        .ancestors()
-        .nth(4)
-        .expect("crypto helper lives below its FFI cache root");
-    let manifest = std::fs::read_to_string(cache_root.join("Cargo.toml"))
+    let manifest = std::fs::read_to_string(ffi_bridge_cache_root(&helper).join("Cargo.toml"))
         .expect("actual emitted crypto bridge manifest exists");
     let dependencies = manifest
         .split_once("[dependencies]\n")

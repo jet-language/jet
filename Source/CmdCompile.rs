@@ -4536,7 +4536,6 @@ pub(crate) fn build(
         rs_path.display(),
         bin.display()
     ));
-    let mut cmd = Command::new("rustc");
     let mut rustc_flags = Vec::new();
     // E2-M15: cross-compilation target triple.
     if let Some(triple) = cross_target {
@@ -4588,7 +4587,6 @@ pub(crate) fn build(
             }
         }
     };
-    cmd.arg("--edition").arg("2021").args(&rustc_flags);
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two
     // concurrent `jet` processes compiling different source that happens to
@@ -4618,46 +4616,63 @@ pub(crate) fn build(
     }
     let tmp_bin = work.join(&bin_name);
     let tmp_rs = work.join(format!("{}.rs", stem(file)));
-    if let Err(e) = fs::write(&tmp_rs, prepared_runtime.rust()) {
-        crate::cli_error!("E2105", "couldn't write {}: {}", tmp_rs.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    }
     // Pin the crate name to the file stem — the name rustc used to infer from
     // `build/<stem>.rs` — so the private working-dir source name doesn't leak
-    // into codegen.
-    cmd.arg("--crate-name")
-        .arg(jet::Syntax::sanitize_crate_name(&stem(file)));
-    // rustc keeps the spelling of a relative input path in ThinLTO bitcode.
-    // Remap both spellings so the per-process work-directory suffix cannot
-    // change a clean release binary.
-    cmd.arg("--remap-path-prefix")
-        .arg(format!("{}=build/.work", work.display()));
-    if let Ok(work_prefix) = fs::canonicalize(&work) {
-        cmd.arg("--remap-path-prefix")
-            .arg(format!("{}=build/.work", work_prefix.display()));
-    }
-    cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
-    prepared_runtime.add_rustc_args(&mut cmd);
-    if let Some(link) = ffi {
-        cmd.arg("--extern")
-            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            cmd.arg("-L")
-                .arg(format!("dependency={}", deps_dir.display()));
-        }
-    }
-    // S59 (E2-M14): native C library link flags (`-L native=…`, `-l <name>`).
-    for arg in clinks {
-        cmd.arg(arg);
-    }
-
-    let out = match cmd.output() {
-        Ok(o) => o,
-        Err(_) => {
-            crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
+    // into codegen. Everything here is decided once and replayed per attempt:
+    // one rustc invocation over one prepared program.
+    let run_rustc = |prepared: &jet::RuntimeCache::PreparedRuntime| -> std::process::Output {
+        if let Err(e) = fs::write(&tmp_rs, prepared.rust()) {
+            crate::cli_error!("E2105", "couldn't write {}: {}", tmp_rs.display(), e);
             exit(ExitCodes::USER_ERROR);
         }
+        let mut cmd = Command::new("rustc");
+        cmd.arg("--edition").arg("2021").args(&rustc_flags);
+        cmd.arg("--crate-name")
+            .arg(jet::Syntax::sanitize_crate_name(&stem(file)));
+        // rustc keeps the spelling of a relative input path in ThinLTO bitcode.
+        // Remap both spellings so the per-process work-directory suffix cannot
+        // change a clean release binary.
+        cmd.arg("--remap-path-prefix")
+            .arg(format!("{}=build/.work", work.display()));
+        if let Ok(work_prefix) = fs::canonicalize(&work) {
+            cmd.arg("--remap-path-prefix")
+                .arg(format!("{}=build/.work", work_prefix.display()));
+        }
+        cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
+        prepared.add_rustc_args(&mut cmd);
+        if let Some(link) = ffi {
+            cmd.arg("--extern")
+                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+                cmd.arg("-L")
+                    .arg(format!("dependency={}", deps_dir.display()));
+            }
+        }
+        // S59 (E2-M14): native C library link flags (`-L native=…`, `-l <name>`).
+        for arg in clinks {
+            cmd.arg(arg);
+        }
+        match cmd.output() {
+            Ok(output) => output,
+            Err(_) => {
+                crate::cli_error!(@full "E2105", "couldn't find `rustc` on this machine", "v1 of this language uses Rust as its backend (docs/spec/architecture.md)", "install Rust from https://rustup.rs, then try again");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
     };
+
+    let mut out = run_rustc(&prepared_runtime);
+    // I5 fail-open: linking the cached runtime rlib is an optimization, so it may
+    // cost a compile but must never cost a working build. If the thin crate is
+    // rejected — a runtime item the exporter left private, an impl the split
+    // moved away from its type — rebuild the exact inline monolith and report on
+    // that instead. `jet build` of correct Jet cannot regress into an I2 banner.
+    if !out.status.success() && prepared_runtime.is_split() {
+        if verbose {
+            step("runtime cache bypassed (split crate rejected — inline retry)".to_string());
+        }
+        out = run_rustc(&jet::RuntimeCache::PreparedRuntime::inline(rust_code));
+    }
     if let Some(timer) = compile_timer.as_mut() {
         timer.lap("backend_link");
         write_backend_timing(timer);

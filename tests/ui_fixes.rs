@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{panic_message, test_worker_count, FfiBridgeLock};
+use common::{panic_message, test_worker_count};
 
 #[test]
 fn ownership_ui_fixes_compile() {
@@ -80,11 +80,6 @@ fn check_fixed_companion(i: usize, path: &PathBuf, have_rustc: bool, have_cargo:
         return;
     }
 
-    let _ffi_guard = if stem_name.starts_with("ffi_") {
-        Some(FfiBridgeLock::acquire())
-    } else {
-        None
-    };
     let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
         panic!(
             "fixed companion {} should compile:\n{}",

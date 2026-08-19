@@ -994,7 +994,6 @@ fn watching_dev_deopts_on_gap_edit_and_recovers() {
 /// forced interpretation uses the same ambient Prelude adapter.
 #[test]
 fn dev_default_runs_auth_verification_resident() {
-    let _guard = FfiBridgeLock::acquire();
     let dir = std::env::temp_dir().join(format!("jet_dev_auth_resident_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
