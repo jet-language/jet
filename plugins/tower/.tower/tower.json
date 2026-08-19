@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2083,
-    "rev": 39299,
+    "rev": 39300,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -135571,6 +135571,11 @@
       "log": [
         {
           "at": "2026-08-19",
+          "by": "fable-e3-burndown",
+          "text": "Integrated 2026-08-19 (landed inside 2679f1037; described in the follow-up commit body). DECISIVE FINDING: the cache had never produced a single artifact — 91 key directories in ~/.cache/jet/runtime, 0 rlibs — because __jet_Ordering/__jet_Comparable were used inside the CACHED_RUNTIME block but emitted outside it, export_runtime_source promoted visibility onto multi-line generic continuation rows so the runtime crate did not parse, and __JET_PACKAGE_EDITION sat in the program head while Core reads it. All three fixed; Core moved inside the markers (push_core_runtime); schema v4; new test cached_runtime_owns_every_runtime_owned_trait pins the invariant that broke it; CmdCompile fail-open rebuilds the inline monolith once if a thin crate is rejected, so a split can cost a compile but never a build. PLAN CORRECTION: the planned second rlib (jet_runtime_core linked with --extern jet_runtime) is impossible — Core's impls on Prelude types (Sub for JetInstant, Comparable for JetInstant) are orphan impls across a crate boundary (E0117). One merged crate is the only shape. MEASURED 2026-08-19 on hello.jet single file: run 1 printed 'jet-runtime-cache store key=93c1d385... generated_bytes=627684' and ~/.cache/jet/runtime/93c1d385.../libjet_runtime.rlib now EXISTS (0 rlibs before), so the substrate works; but runs 2-4 printed NO cache line and stayed at 33.0-34.7s, so the warm-build win is NOT yet demonstrated. Open question handed back to the lane: whether a warm no-change build even reaches prepare_at, or whether the hit path bypasses the stats counter — i.e. whether the ~34s is rustc re-feeding the runtime at all. Criteria 2/3/4 are measurement rows and batch to the epoch-end run (golden wall time before/after, byte-identical expectations, cold jet build time)."
+        },
+        {
+          "at": "2026-08-19",
           "by": "PlanM18Ab",
           "text": "Plan grounding: the audit's 'no reusable runtime object' is stale — #1785's content-addressed runtime rlib cache (Source/RuntimeCache.rs, schema v3) landed 2026-08-08 and is wired into production AOT (CmdCompile.rs:4454) AND golden/corelib/dev via tests/common add_generated_rust. Remaining gap = the Core/CoreLib closure (~1.54MB) is emitted OUTSIDE the CACHED_RUNTIME markers (Codegen/mod.rs:4267 vs :4269) and FFI programs inline by design. Plan targets exactly that; measure baseline before claiming the audited-order drop."
         },
@@ -135637,8 +135642,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:00.157Z",
-      "updated": "2026-08-19T16:21:27.923Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-19T22:07:41.025Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0m0lmh4",
@@ -182536,6 +182541,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T22:07:41.025Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c09otnjg",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-19T22:02:41.019Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186027,13 +186039,6 @@
       "action": "card.criteria-add",
       "ref": "c0vrs94y",
       "note": "#8 When a grant cannot be enforced on the host, plan() reports "
-    },
-    {
-      "at": "2026-08-19T13:34:41.740Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0vrs94y",
-      "note": "#7 Plan and final receipt carry the same policy digest (receipt"
     }
   ],
   "nextNum": 368,
