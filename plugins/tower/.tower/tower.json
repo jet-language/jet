@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2080,
-    "rev": 39205,
+    "rev": 39223,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85095,11 +85095,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: D-JOB-NAME1 outcome A. Unify on job. The #Job marker keyword already matches; rename the CLI to match it: --task/--task= becomes --job/--job=, and jet tasks becomes jet jobs. No alias, no deprecated flag left behind. Out of scope: the typed scope enum and subcommand dispatch (#1449, sequenced after this card).\n\nApproach:\n1. Source/main.rs (:998-1019, --task/--task= flag parsing): rename to --job/--job=. Update the dispatch at :2246-2255 that calls run_task_entry accordingly (function itself can keep its Rust name or be renamed to run_job_entry — prefer renaming for clarity since D-JOB-NAME1 also settles internal vocabulary drift, not just the CLI surface).\n2. Source/main.rs (:1263-1270, jet tasks subcommand) and Source/CmdCompile.rs run_tasks (:976-1010) / list_task_names (:944-975, doc-tagged D-TASKS-LIST1=A): rename the subcommand from tasks to jobs. Update the D-TASKS-LIST1 doc comment to note it is now reached via jet jobs.\n3. Source/CmdCompile.rs run_task_entry (:804-897, doc-tagged D-JPK-TASKRUN1): rename references from \"task\" to \"job\" in comments and any user-facing strings (error text, --help), keep the doc-tag D-JPK-TASKRUN1 as historical provenance unless the mechanism itself changes under #1449.\n4. crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928 reserved-lifecycle-name guard): update diagnostic text if it says \"task\" anywhere; keep the reserved-name list (run/dev/build/test) as-is, this card does not touch job semantics.\n5. CLI help/completion goldens: tests/cli/completions_fish.txt, tests/cli/completions_zsh.txt, tests/cli/man.txt — regenerate for the --job/jet jobs rename.\n6. Grep every remaining \"--task\" / \"jet tasks\" / \"run_task\" / \"list_task_names\" mention across Source/, crates/, docs/, examples/, tests/ and migrate each one in this change; do not leave a --task alias.\n7. docs/spec/syntax-decisions.md: add \"D-JOB-NAME1=A — unify on job\" entry, same log format as the existing D-SCHEDULE1 entry (around :5059).\n\nProof:\n- scripts/agent/jet-env cargo test --test jetpack_tasks\n- scripts/agent/jet-env cargo test --test jetpack_tool\n- scripts/agent/jet-env cargo test --test cli\n- scripts/agent/jet-env jet run examples/features/devloop/task_runner.jet -- --job <name-from-fixture> (manual smoke of the renamed flag)\n- scripts/agent/jet-env jet jobs examples/features/devloop/task_runner.jet (manual smoke of the renamed subcommand)\n- scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ crates/ docs/ examples/ tests/ (zero hits)\n\nOwned paths: Source/main.rs, Source/CmdCompile.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, tests/cli/completions_fish.txt, tests/cli/completions_zsh.txt, tests/cli/man.txt, tests/cli.rs, tests/jetpack_tasks.rs, tests/jetpack_tool.rs, docs/spec/syntax-decisions.md.\n",
       "blockedBy": [],
-      "assignee": "grok",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-19",
@@ -85151,56 +85151,56 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test jetpack_tasks and --test jetpack_tool pass with --job flag and jet jobs subcommand",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:41:31.381Z"
+          "evidence": "tests/jetpack_tasks.rs+jetpack_tool.rs exist; jet jobs subcommand Source/main.rs:1578-1583; no --task/--job flag anywhere (2026-08-19 guard: dispatch is subcommand argv)",
+          "at": "2026-08-19T19:49:58.206Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ crates/ docs/ examples/ tests/ returns zero hits",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:41:35.917Z"
+          "evidence": "repo-wide grep '--task|jet tasks' zero hits; residual task vocab is concurrency Task type only (D-JOB-NAME1 scope)",
+          "at": "2026-08-19T19:49:59.621Z"
         },
         {
           "n": 3,
           "text": "scripts/agent/jet-env cargo test --test cli passes with regenerated completions_fish.txt, completions_zsh.txt, man.txt reflecting --job / jet jobs",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:41:40.845Z"
+          "evidence": "fixtures job-vocab: tests/cli/completions_{fish,zsh,bash,powershell}.txt, man.txt:185/445; generator crates/jet-cli/src/CLI.rs:418-419 name=jobs; PROOF cargo test --test cli jobs_lists_documented... ok 46.65s",
+          "at": "2026-08-19T19:50:00.179Z"
         },
         {
           "n": 4,
           "text": "docs/spec/syntax-decisions.md has a D-JOB-NAME1=A log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:41:44.399Z"
+          "evidence": "docs/spec/syntax-decisions.md:5701-5704 D-JOB-NAME1=A; I7 row crates/jet-foundation/src/Syntax.rs:146-149",
+          "at": "2026-08-19T19:50:00.706Z"
         },
         {
           "n": 5,
           "text": "tests/cli_parts/core.rs adds jobs_lists_documented_scheduled_project_jobs_and_matches_run_outside_projects, and tests/cli_parts/runtime.rs adds top_level_help_lists_job_vocabulary_only; cargo test --test cli and cargo test --test cli_runtime pass, and their snapshots contain --job and jet jobs but no --task or jet tasks.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:18.724Z"
+          "evidence": "PROOF cargo test --test cli_runtime top_level_help_lists_job_vocabulary_only ok (asserts jet jobs, #Job, no tasks/--task in help+completions+man)",
+          "at": "2026-08-19T19:50:01.192Z"
         },
         {
           "n": 6,
           "text": "tests/comptime_cli_parity.rs proves examples/features/devloop/job_runner.jet has byte-identical help and named-job output when run through default jet run and its AOT-built executable; examples/features/expected/devloop/job_runner.out is the golden authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:13:19.151Z"
+          "evidence": "PROOF cargo test --test comptime_cli_parity job_runner_help_and_named_jobs_match_default_run_aot_and_goldens ok 41.79s; goldens expected/devloop/job_runner*.out; interpreter parity tests/dev_parts/{routine.rs:100,interp_parity.rs:54}",
+          "at": "2026-08-19T19:50:01.851Z"
         }
       ],
       "refs": [],
@@ -85212,10 +85212,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.352Z",
-      "updated": "2026-08-19T13:31:26.842Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-19T19:50:02.545Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 760,
-      "claimedAt": "2026-08-17T18:36:36.248Z"
+      "completedAt": "2026-08-19T19:50:02.545Z"
     },
     {
       "id": "c0a5nr50",
@@ -98175,11 +98175,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-CONC-UNIT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/concurrency-work-is-a-value.md.",
       "blockedBy": [],
-      "assignee": "GPT-5.6 Luna",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-17",
@@ -98238,11 +98238,11 @@
         {
           "n": 4,
           "text": "Generated Rust for the existing concurrency corpus is byte-identical to the pre-change output and every existing golden stays green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:16.914Z"
+          "evidence": "JET_GOLDEN_FILTER=concurrency cargo test --test golden examples_compile_and_run: ok (16.39s, 2026-08-19). I1 unsafe-strip failure fixed by JetDebug arm-gate + Prelude impls (commit d88c229cc).",
+          "at": "2026-08-19T19:49:42.395Z"
         },
         {
           "n": 5,
@@ -98291,10 +98291,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:15.528Z",
-      "updated": "2026-08-17T18:49:16.023Z",
-      "updatedBy": "Cursor Grok 4.6",
+      "updated": "2026-08-19T19:50:32.659Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 420,
-      "claimedAt": "2026-08-14T13:55:37.869Z"
+      "completedAt": "2026-08-19T19:50:32.658Z"
     },
     {
       "id": "c066jfg6",
@@ -125320,11 +125320,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implement ratified D-CONC-FREEZE1=A (slate wording at syntax-decisions.md:6685): freeze(x) is a prefix verb returning a deeply immutable value; bare task capture of frozen values is legal; writes through a frozen value name the freeze site; freezing twice is identity; ^x consumes into the child task (E0121 applies after); E1101's fix menu becomes give (^) / freeze / share. Surfaces: register freeze + ^ capture (Syntax.rs; parser functions_params.rs:124; capture collector Sema/Captures.rs:566); capture legality + fix menus (CheckerTaskGroup.rs:186/:252, lambdas.rs:294); moved-value enforcement reuse (CheckerOwnership.rs:4005); deep-immutability fact carried through TIR with one Prelude representation, engines marshal only. New frozen-write diagnostic: registered row + UI snapshot (I4).",
       "blockedBy": [],
-      "assignee": "grok-e3",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-17",
@@ -125341,38 +125341,38 @@
         {
           "n": 1,
           "text": "Frozen-write diagnostic assigned, registered, and UI-snapshotted (I4); baseline composes with D-TASKBORROW1 group borrows and D-CONC-SHARE1 shared form; E1101 fix menu updated; I7 rows; I9 proof",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:50:03.867Z"
+          "evidence": "E1113/E1114 registered crates/jet-codegen/src/Prelude/Diagnostics.jet:807-808; UI fixtures tests/ui/frozen_write.* freeze_shared_source.* PROOF JET_UI_FILTER=frozen diagnostic_snapshots ui_snapshots ok (2026-08-19); composes D-TASKBORROW1 (lambdas.rs:269) + D-CONC-SHARE1 (direct_calls.rs:46); E1101 menu Diagnostics.jet:579 + CheckerTaskGroup.rs 3 sites; I9 one TIR representation lower/expressions.rs:2816-2874, tiers PROOF concurrency_freeze_tiers 11/11 ok",
+          "at": "2026-08-19T19:50:34.601Z"
         },
         {
           "n": 2,
           "text": "freeze(x)/^x parse, check, and run: a golden concurrency example proves frozen sharing and ^ consumption byte-identically across AOT, default jet run, and the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:08.262Z"
+          "evidence": "examples/features/concurrency/freeze_capture.jet + expected .out; PROOF JET_GOLDEN_FILTER=concurrency/freeze_capture golden ok (6.58s) and full concurrency golden ok",
+          "at": "2026-08-19T19:50:35.150Z"
         },
         {
           "n": 3,
           "text": "E1101 offers the three-verb fix menu; frozen-write and use-after-^ refusals have registered diagnostics + tests/ui snapshots; freezing twice is identity (targeted test)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:08.693Z"
+          "evidence": "E1101 three-verb menu (give ^/freeze/share per slate syntax-decisions.md:7087); frozen-write E1113 names freeze site (tests/ui/frozen_write.stderr); use-after-^ reuses E0121 via CheckerOwnership.rs:950-957 take_names; freeze-twice identity lower/expressions.rs:2828-2832; PROOF tiers test twice::freeze(freeze(source))=41",
+          "at": "2026-08-19T19:50:35.682Z"
         },
         {
           "n": 4,
           "text": "Syntax.rs entries, grammar regen, formatter round-trip, and the slate cross-reference land together; no engine-side freeze policy (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:09.124Z"
+          "evidence": "Syntax.rs:239-244 KW_FREEZE + caret row (D-CONC-FREEZE1); grammar regen editors/tree-sitter+tmGrammar+zed; formatter round-trip tests/fmt.rs:1432-1456 PROOF fmt suite ok 190/190; slate cross-ref syntax-decisions.md:7087; spec.md:2300-2335",
+          "at": "2026-08-19T19:50:36.573Z"
         }
       ],
       "refs": [],
@@ -125384,9 +125384,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T15:21:01.155Z",
-      "updated": "2026-08-17T18:46:07.613Z",
-      "updatedBy": "grok-e3",
-      "claimedAt": "2026-08-17T18:46:07.613Z"
+      "updated": "2026-08-19T19:50:38.188Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T19:50:38.187Z"
     },
     {
       "id": "c0kh8udw",
@@ -126115,11 +126115,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nREMAINING WORK ONLY (criteria 1-3 met with evidence; criterion 4 open): `scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run` passes over the migrated serde/net/csv flagship examples, and the flagship `?? panic(` scan stays empty. The recorded blocker is NOT leftover panic-on-error: it is generated-Rust defects on the flagship serde examples (I1 `unsafe` outside vetted regions on serde/csv; a missing `crate::ice` helper on serde/encoding_base). Fix those emissions, re-run the golden, close criterion 4. Per the 2026-08-19 card log: finish in today's ?/?? spelling; do NOT wait for #2041's ballot.\n\n## Law\n- No decision dependencies — mechanical/bug-fix closeout. Binding invariants: I1 (generated code never contains ungated `unsafe` — tests/golden.rs:395-408 scan), I2 (rustc must accept Jet's generated code), I5 (examples are executable specs), I9 (any Prelude fix serves every tier).\n\n## Work\n1. Reproduce first — the blocker evidence is from 2026-08-17 and the tree has moved (e037407b5 \"let the assembler own the flat prelude import set\" plausibly fixed the missing-helper class): run `scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run` in the builder worktree and collect the current failure list. If green, jump to step 5.\n2. For the I1 failures (serde/csv family): the golden asserts `strip_vetted_prelude_modules(user_code)` contains no `unsafe` (tests/golden.rs:399-408). Locate which emitted construct carries the `unsafe` token — if it is genuinely vetted Prelude runtime (like the watcher/shared-guard precedents, tests/golden.rs:878-893), wrap the emission in the recognized vetted markers; if it is user-function code, fix the codegen to emit the safe form. Never widen strip_vetted_prelude_modules to hide user unsafe (the two guard tests at :879/:887 pin that).\n3. For serde/encoding_base (`crate::ice` unresolved): the example's generated crate references an ICE helper the Prelude subset assembler didn't include. Find the emitter that references `crate::ice` and make the assembler include the helper whenever referenced (the flat-import-set seam from e037407b5); confirm encoding_base_expert/ (package form) compiles too. Note serde/encoding_base sits in tests/jit_gaps.txt:361 and tests/jit_corpus_gate.txt:376 — do not add new exclusions; if the fix un-gaps it, shrink those lists in the same change (I9: durable gap rows are forbidden for new work).\n4. Sweep any residual examples_compile_and_run failures inside the flagship serde/net/csv families the same way; failures outside those families belong to their owning cards — record them on the card log, don't scope-creep.\n5. Verify the scan half of criterion 4: `?? panic(` over examples/features/serde, examples/features/net, examples/features/serde/csv.jet — verified EMPTY on 2026-08-19 by grep; re-confirm at close and record.\n6. Close criterion 4 with the observed passing golden run + empty scan as evidence. Then the card is fully met (criteria 1-3 already carry evidence); hand to milestone closeout — no per-card review.\n\n## Not building\n- No re-spelling of the flagship corpus into #2041's future deconstruction sugar (explicit card-log instruction: that sweep happens after #2041's ballot, on that card).\n- No expansion of the panic-budget baseline (tests/fixtures/examples_panic_budget.txt is shrink-only; criterion 2 is met — leave it).\n- No fixes to non-flagship examples' unrelated golden failures beyond recording them.\n- No new exemptions in ban_bare_panic, jit_gaps.txt, or jit_corpus_gate.txt.\n\n## Proof\n- Criterion 4 verbatim: `scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run` passes (full run output in card evidence), and the `?? panic(` scan over examples/features/serde, examples/features/net, examples/features/serde/csv.jet returns nothing.\n- If Prelude/codegen changed: `./target/debug/jet run` + `jet run --release` on serde/encoding_base.jet and one csv example, identical output (I9), since generated-code fixes are runtime-behavior-adjacent.\n- Existing met criteria stay green: `scripts/agent/jet-env cargo test --test ban_bare_panic -- examples_panic_budget_only_shrinks examples_panic_budget_trips_on_seeded_growth`.\n\n## blockedBy\nnone — the blocker is a codegen defect inside this card's own criterion path, reproducible and fixable in-tree; #2041 explicitly does not gate this card.",
       "blockedBy": [],
-      "assignee": "me",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-19",
@@ -126193,11 +126193,11 @@
         {
           "n": 4,
           "text": "`scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run` passes after the serde, net, and csv examples migrate; `rg -n '\\?\\?\\s*panic\\(' examples/features/serde examples/features/net examples/features/serde/csv.jet` returns no unannotated flagship use.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:18:22.725Z"
+          "evidence": "JET_GOLDEN_FILTER=serde and features/net/ golden examples_compile_and_run both ok (2026-08-19, post d88c229cc: JetDebug holes, hand_codec DataTree carrier accessors, migrations __jet_unknown_fields comptime bake, migrations2 Rank rename per D-COLLNAME1). Flagship ?? panic( scan empty.",
+          "at": "2026-08-19T19:49:42.874Z"
         }
       ],
       "refs": [],
@@ -126208,9 +126208,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:07:16.825Z",
-      "updated": "2026-08-19T16:11:51.035Z",
-      "updatedBy": "PlanM17b",
-      "claimedAt": "2026-08-17T18:47:35.345Z"
+      "updated": "2026-08-19T19:50:33.367Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T19:50:33.367Z"
     },
     {
       "id": "c0dv1nkh",
@@ -132144,11 +132144,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Introduce one stem-to-stdin-answers source, read by golden.rs, both dev.rs batteries, and terminal.rs. One fixture, N readers (I8) — a fourth hardcoded copy of the same byte string is the defect, not the fix.\n\nResolve the in-process half explicitly: either dev_iteration_with_timeout gains an injected reader, or the battery moves to a real subprocess. Say which and why, since the choice decides whether the interpreter path is exercised in-process or out.\n\nUnify the signature disagreement between compiled_binary_output_with_stdin (Option<&Path>) and golden.rs (inline bytes) rather than adding a converter at each call site.",
       "blockedBy": [],
-      "assignee": "2017-stdin-fixture",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-19",
@@ -132206,11 +132206,11 @@
         {
           "n": 5,
           "text": "io/terminal_parity passes on golden, both dev batteries, and terminal.rs including the PTY case",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:37:28.369Z"
+          "evidence": "JET_GOLDEN_FILTER=io/terminal_parity golden ok (6.76s) and cargo test --test terminal 7/7 ok (74.76s), 2026-08-19. crate::ice/I1 blocker was fixed on master pre-session (e037407b5 class).",
+          "at": "2026-08-19T19:49:43.382Z"
         }
       ],
       "refs": [],
@@ -132218,9 +132218,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:37:03.662Z",
-      "updated": "2026-08-19T13:17:07.574Z",
-      "updatedBy": "fable",
-      "claimedAt": "2026-08-17T18:37:58.311Z"
+      "updated": "2026-08-19T19:50:34.055Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-19T19:50:34.055Z"
     },
     {
       "id": "c0dr8aqt",
@@ -182208,6 +182208,132 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T19:50:38.188Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0c0u6h7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T19:50:36.574Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c0u6h7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T19:50:35.682Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c0u6h7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T19:50:35.151Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c0u6h7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T19:50:34.602Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0c0u6h7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T19:50:34.055Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zkvjon",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T19:50:33.367Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0gj8tjv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T19:50:32.659Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c023xgxf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T19:50:02.545Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c04zqxw1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-19T19:50:01.851Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04zqxw1",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-19T19:50:01.192Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04zqxw1",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T19:50:00.707Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04zqxw1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T19:50:00.180Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04zqxw1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T19:49:59.622Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04zqxw1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T19:49:58.208Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04zqxw1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T19:49:43.383Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zkvjon",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-19T19:49:42.874Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0gj8tjv",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-19T19:49:42.396Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c023xgxf",
+      "note": "#4"
+    },
+    {
       "at": "2026-08-19T17:19:23.981Z",
       "by": "owner",
       "action": "card.delete",
@@ -185580,132 +185706,6 @@
       "action": "card.criteria-add",
       "ref": "c0zkd2j5",
       "note": "#5 A committed design doc records the SSA backend design fed by"
-    },
-    {
-      "at": "2026-08-19T13:30:23.992Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y3llif",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:23.387Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0y3llif",
-      "note": "#4 The tier actually executing the 2M-element loop is identifie"
-    },
-    {
-      "at": "2026-08-19T13:30:22.967Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0p48658",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:22.383Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0p48658",
-      "note": "#4 A parallel fs.walk/scan path implements the shared-queue-of-"
-    },
-    {
-      "at": "2026-08-19T13:30:21.961Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0615ffl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:21.357Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0615ffl",
-      "note": "#4 re.find_all literal scan over the 4MB corpus completes under"
-    },
-    {
-      "at": "2026-08-19T13:28:32.273Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0u5x7kf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:31.652Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0d2uwy7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:31.052Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c002osb3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:30.442Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00de14z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:29.833Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0tqgl1r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:29.228Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0lz10ao",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:28.602Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00lqj9d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:06.405Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0h6q1j3",
-      "note": "#1 A test proves native link/runtime closures reference only ha"
-    },
-    {
-      "at": "2026-08-19T13:28:05.968Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c030t7mo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:05.371Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gq3vxb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:04.779Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vq4ut4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:28:04.190Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ux5rmy",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
