@@ -413,6 +413,215 @@ fn resident_safe_option_binary(op: &BinOp, lhs: &Type, rhs: &Type) -> bool {
     }
 }
 
+/// The gate is a SECOND copy of tables `lower_ctx.rs` already owns, and every
+/// refusal in this file that turned out to be wrong was that copy lagging the
+/// lowering rather than the lowering missing a row. These checks fail when the
+/// two disagree, and name the row.
+///
+/// What is pinned, and why only this much: a table is checkable here when both
+/// sides reduce to a pure predicate over an enumerable domain. `BinOp` is a
+/// closed enum (`op_name` below has no `_` arm, so a new operator stops the
+/// build until someone decides its Option row), and `lower_value_order`'s
+/// operand table is `LowerCtx::value_order_supported`, which the lowering
+/// refuses through. `THandleOp` and `TBuiltinOp` method tables are NOT pinned:
+/// their lowering halves are `&mut self` emitters that need a live
+/// `FunctionBuilder`, a Cranelift module and a host table, so there is no pure
+/// set to compare against without first lifting each dispatch into a table of
+/// its own — the `service_core_arity` treatment, which removes the second copy
+/// instead of testing it and is the better fix wherever it is affordable.
+///
+/// Known residual, deliberately NOT closed here: the gate reaches the payload
+/// through `erase_runtime_qualifiers` (Tagged only) while the lowering reaches
+/// it through `LowerCtx::erase_distinct_ty`, which also peels `Quantity`, Core
+/// type aliases and `distinct` bases off a `Named`. So `Option<Weight>` for a
+/// `distinct Weight = Int` is ordered by the lowering and refused by the gate.
+/// That direction is a deopt, never a wrong answer, and closing it needs the
+/// `JitMeta` tables the gate has no handle on at planning time — so it is a
+/// named gap, not a silent one.
+#[cfg(test)]
+mod gate_follows_lowering {
+    use super::*;
+    use jet_foundation::AST::Measure;
+
+    /// Every `BinOp`, with no `_` arm: a new operator must fail to compile here
+    /// rather than quietly join or miss the Option table below.
+    fn op_name(op: BinOp) -> &'static str {
+        match op {
+            BinOp::Add => "Add",
+            BinOp::Sub => "Sub",
+            BinOp::Mul => "Mul",
+            BinOp::Div => "Div",
+            BinOp::FloorDiv => "FloorDiv",
+            BinOp::Mod => "Mod",
+            BinOp::Rem => "Rem",
+            BinOp::Pow => "Pow",
+            BinOp::BitAnd => "BitAnd",
+            BinOp::BitOr => "BitOr",
+            BinOp::BitXor => "BitXor",
+            BinOp::Shl => "Shl",
+            BinOp::Shr => "Shr",
+            BinOp::Eq => "Eq",
+            BinOp::Ne => "Ne",
+            BinOp::Lt => "Lt",
+            BinOp::Gt => "Gt",
+            BinOp::Le => "Le",
+            BinOp::Ge => "Ge",
+            BinOp::Compare => "Compare",
+            BinOp::And => "And",
+            BinOp::Or => "Or",
+        }
+    }
+
+    const EVERY_BIN_OP: [BinOp; 22] = [
+        BinOp::Add,
+        BinOp::Sub,
+        BinOp::Mul,
+        BinOp::Div,
+        BinOp::FloorDiv,
+        BinOp::Mod,
+        BinOp::Rem,
+        BinOp::Pow,
+        BinOp::BitAnd,
+        BinOp::BitOr,
+        BinOp::BitXor,
+        BinOp::Shl,
+        BinOp::Shr,
+        BinOp::Eq,
+        BinOp::Ne,
+        BinOp::Lt,
+        BinOp::Gt,
+        BinOp::Le,
+        BinOp::Ge,
+        BinOp::Compare,
+        BinOp::And,
+        BinOp::Or,
+    ];
+
+    /// `lower_binary`'s two `Type::Option` arms, transcribed: `Eq | Ne` reach
+    /// `lower_option_eq`, `Lt | Gt | Le | Ge` reach `lower_option_order`, and no
+    /// other operator has an arm for an Option operand.
+    const LOWERED_OPTION_OPS: [BinOp; 6] = [
+        BinOp::Eq,
+        BinOp::Ne,
+        BinOp::Lt,
+        BinOp::Gt,
+        BinOp::Le,
+        BinOp::Ge,
+    ];
+
+    #[test]
+    fn option_binary_admits_exactly_the_operators_lower_binary_dispatches() {
+        let operand = Type::Option(Box::new(Type::Int));
+        for op in EVERY_BIN_OP {
+            let admitted = resident_safe_option_binary(&op, &operand, &operand);
+            let lowered = LOWERED_OPTION_OPS.contains(&op);
+            assert_eq!(
+                admitted, lowered,
+                "`Int? {} Int?`: the residency gate admits={admitted} but \
+                 lower_binary has an Option arm={lowered}. One of the two is \
+                 behind; fix whichever is.",
+                op_name(op)
+            );
+        }
+    }
+
+    /// Every payload shape a JIT operand can carry, so the comparison below is
+    /// not vacuous on either side of the boundary.
+    fn candidate_payload_types() -> Vec<Type> {
+        vec![
+            Type::Int,
+            Type::IntN {
+                signed: true,
+                bits: 32,
+            },
+            Type::IntN {
+                signed: false,
+                bits: 8,
+            },
+            Type::Char,
+            Type::Bool,
+            Type::Float,
+            Type::Float32,
+            Type::String,
+            Type::List(Box::new(Type::Int)),
+            Type::List(Box::new(Type::String)),
+            Type::FixedList {
+                elem: Box::new(Type::Int),
+                len: Measure::Literal {
+                    kind: "length".to_string(),
+                    value: 4,
+                },
+            },
+            Type::Named("Date".to_string()),
+            Type::Option(Box::new(Type::Int)),
+            Type::Map {
+                key: Box::new(Type::String),
+                key_span: None,
+                value: Box::new(Type::Int),
+            },
+            Type::Tuple(Vec::new()),
+            Type::Union(vec![Type::Int, Type::String]),
+            Type::Apply {
+                name: "Set".to_string(),
+                args: vec![Type::Int],
+            },
+            Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(Type::String),
+            },
+            Type::TraitObject(vec!["Shape".to_string()]),
+        ]
+    }
+
+    #[test]
+    fn option_ordering_admits_exactly_the_payloads_lower_value_order_lowers() {
+        for ty in candidate_payload_types() {
+            let operand = Type::Option(Box::new(ty.clone()));
+            let admitted = resident_safe_option_binary(&BinOp::Lt, &operand, &operand);
+            let lowered = crate::lower_ctx::LowerCtx::value_order_supported(&ty);
+            assert_eq!(
+                admitted, lowered,
+                "`{ty:?}?` under `<`: the residency gate admits={admitted} but \
+                 LowerCtx::value_order_supported={lowered}. This is the #2036 \
+                 shape: one side grew a row and the other did not."
+            );
+        }
+    }
+
+    /// `LowerCtx::lower_expr` emits ONE instruction for both zero-word
+    /// literals — `TExprKind::Absent` and `TExprKind::Unit` are each
+    /// `iconst(I64, 0)` — so the gate may not answer for one and refuse the
+    /// other. It refused `Unit`, which fell into `resident_safe_expr_recursive`'s
+    /// `_ => false`, and that refused every fallible-void `fn run` spelling an
+    /// early bare `return`: D-FAIL-EXIT1 makes such a `run` return `Unit ? Err`,
+    /// and TIR lowers the bare `return` to `Return(Some(Ok(Unit)))`
+    /// (`lower/statements.rs`). `examples/features/io/watcher.jet:15` was the
+    /// corpus case.
+    #[test]
+    fn the_two_zero_word_literals_are_admitted_together() {
+        let callees: HashSet<String> = HashSet::new();
+        let unit = TExpr {
+            ty: Type::Named("Unit".to_string()),
+            kind: TExprKind::Unit,
+        };
+        let absent = TExpr {
+            ty: Type::Option(Box::new(Type::Int)),
+            kind: TExprKind::Absent,
+        };
+        assert_eq!(
+            resident_safe_expr(&unit, &callees),
+            resident_safe_expr(&absent, &callees),
+            "TExprKind::Unit and TExprKind::Absent both lower to iconst(I64, 0); \
+             the gate must not admit one and refuse the other"
+        );
+        assert!(
+            resident_safe_expr(&unit, &callees),
+            "TExprKind::Unit has a lowering row (iconst(I64, 0)), so the gate \
+             must admit it"
+        );
+    }
+}
+
 /// `Signal/Derived/Computed.get()` — TIR often erases the Apply payload to
 /// `Named("Unit")` inside closures. Overflow arithmetic still uses the Int
 /// host path for Int signals (`n.get() * 2`).
@@ -2166,7 +2375,16 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::DecodeUnder { segment, inner } => {
             resident_safe_expr(segment, callees) && resident_safe_expr(inner, callees)
         }
-        TExprKind::Absent => true,
+        // Both zero-word literals, stated where the pair lives: `LowerCtx`
+        // lowers `TExprKind::Absent` and `TExprKind::Unit` with the SAME
+        // instruction (`lower_ctx.rs` `iconst(I64, 0)` for each). The gate
+        // admitted only the first, so a fallible-void `fn run`'s bare `return`
+        // — which TIR lowers to `Return(Some(Ok(Unit)))` under D-FAIL-EXIT1
+        // (`lower/statements.rs` `Stmt::Return(None)`) — refused the whole
+        // entry. `resident_safe_ct_value` already says "`CtValue::Unit` lowers
+        // to the same zero word as `TExprKind::Unit`" and admits it; that made
+        // one fact answer two ways depending on which carrier held it.
+        TExprKind::Absent | TExprKind::Unit => true,
         TExprKind::DistinctCtor { arg, base, .. } => {
             jit_value_type(base) && resident_safe_expr(arg, callees)
         }
@@ -4941,7 +5159,17 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
                 }
                 return Some(format!("{}[{i}]", stmt_kind_tag(s)));
             }
-            TStmt::Let { init, .. } | TStmt::ExprStmt(init) | TStmt::Assign { value: init, .. } => {
+            // `TStmt::Return`'s gate IS its value's (`ret.as_ref().is_none_or(…)`
+            // above), so a refused `return` carries an expression and belongs in
+            // the same drill as the other value-carrying statements. It used to
+            // fall to the `_` arm and report a bare `Return[i]`, which named no
+            // construct at all — the fallible-void `Ok(Unit)` refusal cost a
+            // session to identify for exactly that reason. `Return(None)` never
+            // reaches here: the predicate always admits it.
+            TStmt::Let { init, .. }
+            | TStmt::ExprStmt(init)
+            | TStmt::Assign { value: init, .. }
+            | TStmt::Return(Some(init)) => {
                 let mut detail = format!("{}[{i}]", stmt_kind_tag(s));
                 if let TStmt::Let { name, .. } = s {
                     // The Jet binding name pins the refusal to ONE source
