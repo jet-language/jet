@@ -27320,6 +27320,33 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(done)[0])
     }
 
+    /// The ONE table naming which operand types `lower_value_order` has an
+    /// ordering row for, after `erase_distinct_ty`.
+    ///
+    /// The refusal below goes through this predicate, so it IS the lowering's
+    /// implemented set — a row added to the match without a row here is dead
+    /// code, not a widening. The residency gate keeps its own copy of this set
+    /// (`safety.rs` `resident_safe_option_binary`) because it answers before a
+    /// `LowerCtx` exists, and `safety.rs`'s `gate_follows_lowering` asserts the
+    /// two sets are equal and names the type that differs. #2036 is why: the
+    /// gate admitted only `Eq`/`Ne` on an `Option` for three days after this
+    /// lowering grew its ordering rows, so the tier planner kept deopting the
+    /// very program the lowering was written for.
+    pub(crate) fn value_order_supported(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Int
+                | Type::IntN { .. }
+                | Type::Char
+                | Type::Bool
+                | Type::Float
+                | Type::Float32
+                | Type::String
+                | Type::List(_)
+                | Type::FixedList { .. }
+        )
+    }
+
     /// Value-level ordering for one operand type. This is the same law the
     /// `lower_binary` table encodes for a top-level `<`, `>`, `<=`, `>=`; the
     /// `Option` row needs it again on a payload that is already an SSA value,
@@ -27332,6 +27359,13 @@ impl LowerCtx<'_, '_> {
         r: Value,
     ) -> Result<Value, String> {
         let ty = self.erase_distinct_ty(ty);
+        // One table, one refusal (I8): the trailing `other` arm below can now
+        // only be reached for a type `value_order_supported` already named, so
+        // the predicate the residency gate is pinned against cannot fall behind
+        // this match.
+        if !Self::value_order_supported(&ty) {
+            return Err(format!("jit value ordering unsupported: {ty:?}"));
+        }
         Ok(match &ty {
             // `Bool` (`false < true`), `Char` (code point) and unsigned `IntN`
             // order their carrier unsigned; `Int` and signed `IntN` are signed.
