@@ -3365,7 +3365,9 @@ fn jit_coverage_audit_inner() {
     // row (aec11ad74 dropped `types/unit_literals` while it was a live gap).
     // Pin the row count outside the file: a deletion now has to lower a
     // reviewed constant, exactly like RUN_GAPS_CEILING.
-    const COMPILE_COVERED_FLOOR: usize = 480;
+    // 480 -> 481 with `errors/qq_panic` (#1967), observed tier1 native for both
+    // of its functions under `jet run --trace-tiers`.
+    const COMPILE_COVERED_FLOOR: usize = 481;
     let recorded_count = expected_covered.len();
     assert_eq!(
         recorded_count, COMPILE_COVERED_FLOOR,
@@ -3759,12 +3761,6 @@ const AOT_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[
     ),
     (
         "serde/hand_codec",
-        "AOT exit 1",
-        "#2016: the AOT binary exits 1 for a stem whose golden expects exit 0, \
-         so the oracle disagrees with the golden and cannot arbitrate the tiers",
-    ),
-    (
-        "streams/generators",
         "AOT exit 1",
         "#2016: the AOT binary exits 1 for a stem whose golden expects exit 0, \
          so the oracle disagrees with the golden and cannot arbitrate the tiers",

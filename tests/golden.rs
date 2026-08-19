@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 mod common;
 use common::{
     add_generated_rust, example_stdin, fixture_filter, fixture_matches, have_rustc, panic_message,
-    strip_vetted_prelude_modules, test_worker_count, unified_diff,
+    strip_vetted_prelude_modules, test_worker_count, unified_diff, unsafe_keyword_columns,
 };
 
 #[derive(Clone)]
@@ -276,6 +276,42 @@ fn golden_uses_release_run(stem: &str) -> bool {
     stem.starts_with("serde/encoding")
 }
 
+/// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so
+/// their generated Rust must carry `unsafe` — in gated `unsafe { … }` /
+/// `unsafe fn` / `unsafe extern` form only. Every other stem must generate none.
+///
+/// Both directions are asserted below, which is why this list cannot rot the way
+/// suite membership did (#2025): a stem here that stops lowering `unsafe` fails
+/// the positive assertion, and a stem missing from here that starts lowering it
+/// fails the negative one.
+///
+/// The last four rows were red since 2026-08-13 (`bfc7dbba1`, dev memory
+/// sentries; `08e594d26`, the gate ladder) with nothing watching `golden` — they
+/// lower a real audited block, and three of them ALSO carry the word in their
+/// file name, which the old substring scan could not tell from code. See
+/// `common::unsafe_keyword_columns`.
+const GATED_UNSAFE_STEMS: &[&str] = &[
+    "crypto/crypto_migration",
+    "crypto/vault_keys",
+    "effects/audited_gate_ladder",
+    "effects/single_use_discard",
+    "io/os_process_control",
+    "io/os_stop_cleanup",
+    "io/process_exit_cleanup",
+    "lowlevel/inline_asm",
+    "lowlevel/inline_c",
+    "lowlevel/lowlevel",
+    "lowlevel/mmio_board_write",
+    "lowlevel/pointer_cast_deref",
+    "lowlevel/unsafe_obligations",
+    "memory/pin",
+    "memory/rawptr",
+    "memory/uninit",
+    "memory/unsafe_sentries",
+    "memory/unsafe_sentries_provenance",
+    "memory/unsafe_sentries_source_off",
+];
+
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
     // paths — leaf `greet` stays callable while sibling `seed_data` calls it.
@@ -364,33 +400,15 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let ffi_link = compiled.ffi;
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
-    if stem == "lowlevel/lowlevel"
-        || stem == "lowlevel/pointer_cast_deref"
-        || stem == "lowlevel/inline_c"
-        || stem == "lowlevel/inline_asm"
-        || stem == "lowlevel/unsafe_obligations"
-        || stem == "lowlevel/mmio_board_write"
-        || stem == "memory/rawptr"
-        || stem == "memory/pin"
-        || stem == "io/os_process_control"
-        || stem == "io/os_stop_cleanup"
-        || stem == "io/process_exit_cleanup"
-        || stem == "effects/single_use_discard"
-        || stem == "memory/uninit"
-        || stem == "crypto/crypto_migration"
-        || stem == "crypto/vault_keys"
-    {
+    if GATED_UNSAFE_STEMS.contains(&stem) {
         assert!(
-            user_code.contains("unsafe"),
-            "the low-level example {} should exercise the gated `unsafe` tier",
+            user_code.lines().any(|line| !unsafe_keyword_columns(line).is_empty()),
+            "the audited example {} should exercise the gated `unsafe` tier",
             stem
         );
         for (i, line) in user_code.lines().enumerate() {
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
-            if let Some(col) = line.find("unsafe") {
-                let after = line[col..].trim_start_matches("unsafe").trim_start();
+            for col in unsafe_keyword_columns(line) {
+                let after = line[col + "unsafe".len()..].trim_start();
                 assert!(
                     after.starts_with('{') || after.starts_with("fn "),
                     "{} emits an ungated `unsafe` at line {}: {}",
@@ -406,14 +424,17 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             "raylib user functions must stay safe; bridge unsafe stays in vetted prelude"
         );
     } else {
-        let leftover_unsafe = user_code.lines().any(|line| {
-            let trimmed = line.trim_start();
-            !trimmed.starts_with("//") && line.contains("unsafe")
-        });
+        let leftover: Vec<String> = user_code
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| !unsafe_keyword_columns(line).is_empty())
+            .map(|(i, line)| format!("  line {}: {}", i + 1, line.trim()))
+            .collect();
         assert!(
-            !leftover_unsafe,
-            "generated Rust for {} contains `unsafe` outside vetted memory helpers",
-            stem
+            leftover.is_empty(),
+            "generated Rust for {} contains `unsafe` outside vetted memory helpers:\n{}",
+            stem,
+            leftover.join("\n")
         );
     }
     assert!(
@@ -771,8 +792,11 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
             jet::render_diagnostics(&entry.shown, &src, &diags)
         )
     });
+    let job_runner_user_code = strip_vetted_prelude_modules(&compiled.rust);
     assert!(
-        !strip_vetted_prelude_modules(&compiled.rust).contains("unsafe"),
+        job_runner_user_code
+            .lines()
+            .all(|line| unsafe_keyword_columns(line).is_empty()),
         "generated Rust for job_runner contains ungated `unsafe`"
     );
     assert!(compiled.rust.contains("fn main()"), "job_runner has no fn main");

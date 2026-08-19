@@ -340,6 +340,20 @@ const TERMINAL_PARITY_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "secret\n",
 };
 
+/// `io/terminal` answers: one keystroke for the single `term.read_key()` call
+/// inside the example's `live { … }` block.
+///
+/// Exactly one key, with no trailing newline, on purpose. `read_key` takes up
+/// to six bytes per call, so a piped script of several keys would be split by
+/// pipe buffering instead of by keystroke and the transcript would depend on
+/// the writer's chunking. One key is the same on a pipe and on a terminal, and
+/// the example never reads a second time, so a terminal run cannot block on an
+/// answer a piped run does not need — `tty_only` is therefore empty.
+const TERMINAL_STDIN: ExampleStdin = ExampleStdin {
+    piped: "h",
+    tty_only: "",
+};
+
 /// The stdin an example needs, or `None` for the examples that read nothing.
 ///
 /// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
@@ -351,6 +365,7 @@ const TERMINAL_PARITY_STDIN: ExampleStdin = ExampleStdin {
 pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
     match stem {
         "io/terminal_parity" => Some(&TERMINAL_PARITY_STDIN),
+        "io/terminal" => Some(&TERMINAL_STDIN),
         _ => None,
     }
 }
@@ -1363,6 +1378,87 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         }
     }
     s
+}
+
+/// Byte columns of every real `unsafe` KEYWORD on one line of generated Rust.
+///
+/// #2025: the I1 scans used to ask `line.contains("unsafe")`, which reads DATA
+/// as CODE. Generated Rust embeds the program's own source path and its string
+/// literals verbatim — `crate::jet_stack_enter("examples/features/memory/
+/// unsafe_sentries.jet", …)`, `jet_mem::jet_sentry_scope(true, "…/
+/// unsafe_obligations.jet", …)`, `print("unsafe gate")` — so four examples were
+/// permanently red for owning the word `unsafe` in their FILE NAME, and
+/// `tests/sema_soundness_parts/provenance.rs` had to keep its scratch-dir prefix
+/// free of the substring to avoid false-tripping every case. The property being
+/// checked is about the `unsafe` keyword, so scan for the keyword: skip `//`
+/// comments, string and char literals, and identifiers that merely contain the
+/// word (`unsafe_sentries`, `jet_unsafe_probe`).
+///
+/// Line-scoped, like the checks it serves: a generated statement is one line.
+pub fn unsafe_keyword_columns(line: &str) -> Vec<usize> {
+    let bytes = line.as_bytes();
+    let ident_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80;
+    let mut columns = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => return columns,
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            // A char literal, not a lifetime (`'a`) and not an apostrophe inside
+            // one: `'x'`, `'\n'`. Anything else advances one byte.
+            b'\'' if bytes.get(i + 2) == Some(&b'\'') || bytes.get(i + 1) == Some(&b'\\') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'\'' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'u' if bytes[i..].starts_with(b"unsafe")
+                && (i == 0 || !ident_byte(bytes[i - 1]))
+                && bytes.get(i + 6).is_none_or(|byte| !ident_byte(*byte)) =>
+            {
+                columns.push(i);
+                i += 6;
+            }
+            _ => i += 1,
+        }
+    }
+    columns
+}
+
+/// #2025 negative control: the keyword scan tells generated CODE from generated
+/// DATA. Every string below is a real line from `jet emit --rust` output.
+#[test]
+fn unsafe_keyword_scan_reads_code_not_data() {
+    let path_argument = "    let __jet_stack_frame = crate::jet_stack_enter(\"examples/features/memory/unsafe_sentries.jet\", 5, \"run\", \"fn run() {\");";
+    assert!(
+        unsafe_keyword_columns(path_argument).is_empty(),
+        "an example's own path in a stack-frame argument is data, not an `unsafe` block"
+    );
+    let sentry = "        let _jet_sentry = jet_mem::jet_sentry_scope(true, \"examples/features/lowlevel/unsafe_obligations.jet\", 5, \"cell stays live\");";
+    assert!(unsafe_keyword_columns(sentry).is_empty(), "sentry reason strings are data");
+    let user_string = "        { let _ = jet_term_write_stdout_line(&((\"unsafe gate\".to_string()).jet_show()), false); };";
+    assert!(unsafe_keyword_columns(user_string).is_empty(), "a printed string is data");
+    assert!(unsafe_keyword_columns("// unsafe { … } in a comment").is_empty());
+    assert!(unsafe_keyword_columns("    let unsafe_flag = 1;").is_empty(), "identifier, not keyword");
+
+    assert_eq!(unsafe_keyword_columns("    unsafe {").len(), 1, "the gated block form must count");
+    assert_eq!(
+        unsafe_keyword_columns("unsafe extern \"C\" fn InitWindow() {}").len(),
+        1,
+        "an `unsafe extern` item must count even though the line also holds a string"
+    );
+    assert_eq!(
+        unsafe_keyword_columns("    let p = unsafe { *raw }; // unsafe read").len(),
+        1,
+        "code counts once; the trailing comment does not add a second"
+    );
 }
 
 /// Remove the vetted `jet:scheduler-native` region (raw epoll/kqueue syscalls,
