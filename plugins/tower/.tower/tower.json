@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2039,
-    "rev": 38359,
+    "nextNum": 2052,
+    "rev": 38433,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133712,6 +133712,820 @@
       "created": "2026-08-19T10:46:48.771Z",
       "updated": "2026-08-19T10:47:35.358Z",
       "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0rrypxo",
+      "num": 2039,
+      "title": "Time literals: add week to the Time unit family",
+      "body": "Owner ruling 2026-08-19 (idea b03tx1yi interview): add `week` as a fixed 7d scale to the Time #UnitFamily (604800000000000 ns on the 64-bit ns carrier). Calendar-dependent units (month/year/decade/century/millennium) do NOT become literal suffixes; they stay in the checked Period/date API where calendar context is explicit. Owner picked: \"Add week only; calendar units stay Period API.\" Coordinate with building card #1552 (Time joins the unit plane) — land week in the same family that card unifies, not a parallel table.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2039-1): Add week as the only new Time literal suffix, a fixed 7-day scale on the ns carrier. Calendar-dependent units (month, year, decade, century, millennium) never become literal suffixes; they stay in the checked Period and date API."
+        },
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "1week literal resolves through the Time #UnitFamily as fixed 604800000000000 ns; unit algebra and interpolation work like d",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:17:40.613Z"
+        },
+        {
+          "n": 2,
+          "text": "No month/year/decade/century literal suffix exists; calendar math remains the checked Period/date API",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:17:41.067Z"
+        },
+        {
+          "n": 3,
+          "text": "Example + golden updated; parity proven on AOT, default jet run, and interpreter (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:17:41.527Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/Units.jet",
+        "examples/features/types/dimensional_quantities.jet"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:10.272Z",
+      "updated": "2026-08-19T11:17:41.973Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0zcrs0m",
+      "num": 2040,
+      "title": "Retire @if: plain if folds comptime-known branches, pattern arms included",
+      "body": "Owner ruling 2026-08-19 (idea b32n718r interview), verbatim: \"The goal is a simplified surface/syntax that is INTELLIGENT (NOT AI!). Intentionality in @if is nice for clarity, but in practice is clunky, annoying, and becomes more verbose. The goal is ability to read, write, and REASON about code. Having two (especially non searchable) versions of if bifurcates the mechanism. Sure they are TECHNICALLY two separate mechanisms, but the goal is to streamline and simplify the language. We aspire to have simplicity a-la Go-lang. I strongly prefer just plain if where we have an intelligent compiler that dynamically adjusts if comptime arms are used. Also, we still must support full pattern matching, so ensure we account for that. We wont always just have plain single if statement arms, we support pattern matching branches.\" This amends ratified D-WHEN1/D-WHEN2 (@if selects a branch at compile time; dropped arm gets name-resolution only). Open semantic question the plan must resolve before ballot: when plain if folds, what checking does the dropped arm get — keeping the platform-specific-API use case legal without making checking depth depend invisibly on inference distance. Must cover arm-table pattern matching (if x == { ... }) with comptime-known subjects, not just boolean conditions. Implicit folding infrastructure exists (#1308).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Plan names the folding rule for plain if with a comptime-known condition AND for arm-table pattern matching (if x == { ... }) with a comptime-known subject",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:09.748Z"
+        },
+        {
+          "n": 2,
+          "text": "Plan resolves dropped-arm checking semantics (name-resolution-only vs full typecheck) with the platform-specific-API use case answered explicitly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:10.218Z"
+        },
+        {
+          "n": 3,
+          "text": "Ballot raised amending D-WHEN1/D-WHEN2; @if retired from Syntax.rs, corpus, fmt, and docs in the same change once ratified",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:10.675Z"
+        }
+      ],
+      "refs": [
+        "examples/features/comptime/comptime_if.jet",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:10.730Z",
+      "updated": "2026-08-19T11:18:10.675Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c06s09om",
+      "num": 2041,
+      "title": "Result/Optional deconstruction sugar: competing spellings to ballot",
+      "body": "Owner direction 2026-08-19 (idea b5o7tieh interview): draft a full proposal with 2-3 competing spellings for ballot. Original idea: improved syntax for deconstructing Results/Optionals — a compact do-X-if-ok / do-X-if-err form to prevent boilerplate if structure for the common error-checking case. Feeds the error-UX work (#2044) and the panic-teaching cleanup (#1903). Candidates to explore: an else/handler clause on existing ? propagation, binding-with-handler forms, method-style combinators — judged by frequency-weighted friction, readability, and one-mechanism law (I8).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Proposal presents 2-3 competing spellings as same-program before/after code in real Jet syntax, covering ok-path, err-path, early-return, and chained calls",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:11.791Z"
+        },
+        {
+          "n": 2,
+          "text": "Proposal measures the boilerplate it removes against the current corpus (incl. the 842 panic-teaching sites from #1903) and interacts cleanly with ? propagation",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:12.261Z"
+        },
+        {
+          "n": 3,
+          "text": "Ballot raised; one canonical form ships, no parallel spellings survive ratification",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:12.710Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:11.179Z",
+      "updated": "2026-08-19T11:18:12.710Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0e7kkuf",
+      "num": 2042,
+      "title": "Call arguments: positional when unambiguous, named to deconflict",
+      "body": "Owner ruling 2026-08-19 (idea b65p25sn interview), verbatim: \"draft ballot for positional when unambiguous. Most of the time positional should be fine when youre working with apis you know. for more complex apis, having named args is key for clarity and when ambiguous having named args is necessary to deconflict and use the right signature/body. the lsp should always show the names of args as ghost text but user shouldnt have to type it all out repeatedly.\" Plan produces the ambiguity rule (when positional is allowed, when names are compiler-required), the diagnostic for ambiguous calls, and the LSP inlay-hint requirement, then raises the ballot.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Plan defines \"deterministic mapping\" precisely (types, arity, adjacent same-type params, overload deconfliction) with corpus examples for each boundary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:13.805Z"
+        },
+        {
+          "n": 2,
+          "text": "LSP inlay-hint requirement captured: argument names always shown as ghost text; user never retypes them",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:14.292Z"
+        },
+        {
+          "n": 3,
+          "text": "Ballot raised with beginner and expert passes; diagnostics for the ambiguous-call rejection are I4-grade",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:14.763Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:11.628Z",
+      "updated": "2026-08-19T11:18:14.764Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0lz1y16",
+      "num": 2043,
+      "title": "Function and lambda declaration syntax: first-principles reconstruction",
+      "body": "Owner ruling 2026-08-19 (idea ba1vpbdq interview), verbatim: \"the function declaration for the make_adder function is confusing disgusting sigil soup. I want to rethink syntax for every major structural component of functions, lambdas, and consider rearranging with the :: potentially. fn make_adder(base: Int) => fn(Int) => Int :: (value: Int) => base + value is horrible. It is super unclear what the hell is happening even when you know whats going on. I need a comprehensive analysis and improved proposal from first principles using exceptional syntax to show function definitions, lambda definitions, and complex combinations of both, like the one listed above, to ensure we have an exceptional clear default and most common spelling, but also have a clear, understandable form for the most complex functions. this is a big ask for a potentially huge change/overhaul to structure for 2-3 major aspects of the language. Do it thoroughly, do it right, and impress me with first principles reconstruction, minimizing friction proportionally to frequency of use in the language, and ensure excellent scalability and ergonomics.\" Scope: function declarations, function types, lambdas, and their combinations. Note: the original idea was NOT about .call() — D-CALLVALUE1=B stands unless this proposal argues otherwise. Related standing signal: idea b4j3ce68 (syntax still feels messy/disjointed) stays with the owner for a manual audit.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Analysis inventories every current function/lambda/function-type spelling in the ratified surface with frequency-of-use measured from the examples+tests corpus",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:38.962Z"
+        },
+        {
+          "n": 2,
+          "text": "Proposal shows same-program before/after Jet code for: simple fn, expression-body fn, lambda, higher-order param, returned function (the make_adder case), and a worst-case combination",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:39.436Z"
+        },
+        {
+          "n": 3,
+          "text": "Friction is minimized proportionally to frequency: the most common declaration is the shortest and clearest; the most complex form remains readable without sigil soup",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:39.896Z"
+        },
+        {
+          "n": 4,
+          "text": "Proposal states the role of :: and any rearrangement explicitly, and scales to generics, effects, and markers without new mechanisms (I8)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:40.340Z"
+        },
+        {
+          "n": 5,
+          "text": "Ballot slate raised; if ratified, the migration retires every superseded spelling across corpus, fmt, docs, and diagnostics in one change",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:40.798Z"
+        }
+      ],
+      "refs": [
+        "examples/features/functions/returned_function_call.jet",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:12.098Z",
+      "updated": "2026-08-19T11:18:40.798Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0te2a80",
+      "num": 2044,
+      "title": "Runtime error report redesign: root cause first, then the trail",
+      "body": "Owner ruling 2026-08-19 (idea b85kkzpu interview): full error-report redesign — treat the runtime error report as a product surface like compile diagnostics. Original idea: visibility on error trace is terrible ux/ui; propagation needs much better clarity — the actual error first, then traceability. Design the report format before implementation; coordinate with the Result/Optional deconstruction proposal (#2041) since both shape the error-handling journey.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Report leads with the root error (what/why/fix grade), then the propagation trail with source frames; repeated frames dedup",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:41.917Z"
+        },
+        {
+          "n": 2,
+          "text": "Real terminal state matrix proven: tty vs pipe, ANSI vs NO_COLOR, narrow widths; snapshots for each (I4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:42.381Z"
+        },
+        {
+          "n": 3,
+          "text": "Same report shape on every execution tier: AOT, default jet run, jet dev deopt (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:42.818Z"
+        },
+        {
+          "n": 4,
+          "text": "Before/after comparison on real failing examples shows the actual error is findable first; owner visual acceptance on look-and-feel",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:18:43.270Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": true,
+      "created": "2026-08-19T11:17:12.546Z",
+      "updated": "2026-08-19T11:18:43.921Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c00sln5l",
+      "num": 2045,
+      "title": "jet explain answers glyph and symbol lookups from the syntax registry",
+      "body": "Owner ruling 2026-08-19 (idea b26bk7y4 interview): extend jet explain so newcomers can look up any glyph/symbol/token. Probed 2026-08-19: jet help @ falls through to generic help; jet explain @ errors E1274 (explain only knows build refs and diagnostic codes). Syntax.rs is the ratified registry (I7: every user-typeable keyword/sigil lives there with a decision ID), so the dictionary generates from it — one source of truth, no parallel table.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet explain @ / :: / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, decision ID, and a one-line example from Syntax.rs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:07.930Z"
+        },
+        {
+          "n": 2,
+          "text": "Unknown token gets a real diagnostic with nearest-match suggestion, not the build-log E1274 fallthrough",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:08.386Z"
+        },
+        {
+          "n": 3,
+          "text": "Lookup is generated from the registry (no hand-maintained parallel table); REPL ?name docs reuse the same source",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:08.854Z"
+        },
+        {
+          "n": 4,
+          "text": "CLI snapshot tests cover representative glyph, keyword, marker, and unknown-token queries",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:09.303Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-foundation/src/Syntax.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:12.994Z",
+      "updated": "2026-08-19T11:19:09.304Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c08g04mg",
+      "num": 2046,
+      "title": "Research: embedded/freestanding profile vs the Prelude",
+      "body": "Owner ruling 2026-08-19 (idea b16ocp2x interview): research card. Original worry: effects, markers, facts, and units are defined in the Prelude (Effects.jet, Units.jet) — does excluding the prelude on embedded/freestanding targets kill core functionality? Expected shape of the answer: effect roots and unit families are compile-time tables the checker reads; they cost nothing at runtime and embedded keeps them — but this card must prove it and define the actual embedded profile rather than assume.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Report classifies every Prelude part as comptime-only (checker tables: effects, units, markers, facts) vs runtime-dependent, with evidence from the build pipeline",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:10.390Z"
+        },
+        {
+          "n": 2,
+          "text": "Report defines the embedded/freestanding profile: what compiles and runs without an OS, what is unavailable, and the diagnostic story for unavailable parts",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:10.874Z"
+        },
+        {
+          "n": 3,
+          "text": "Proof-of-concept or named blocking gaps: a minimal no-OS-surface program that still uses effects/units/markers at compile time",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:11.328Z"
+        },
+        {
+          "n": 4,
+          "text": "Findings land as a docs/ research report plus follow-up cards; no implementation in this card",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:11.781Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/Effects.jet",
+        "crates/jet-codegen/src/Prelude/Units.jet"
+      ],
+      "tags": [
+        "research"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:13.456Z",
+      "updated": "2026-08-19T11:19:11.781Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0g5m31z",
+      "num": 2047,
+      "title": "Research: what structure do effect definitions actually need",
+      "body": "Owner ruling 2026-08-19 (idea b2z65gxf interview): research card. Original idea: Effects.jet roots are bare names (effect Net) — should they carry subeffects, prohibitions, requirements? Rule for this card: propose fields only with a real consumer attached; no speculative schema.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Survey names every current consumer of the effect roots (checker, #Caps, facts, diagnostics, audit, repl deny flags) and what each would do with sub-scoping, implication, or prohibition data",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:12.872Z"
+        },
+        {
+          "n": 2,
+          "text": "Each proposed field arrives with a concrete consumer and use case attached; fields with no consumer are explicitly rejected (YAGNI)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:13.333Z"
+        },
+        {
+          "n": 3,
+          "text": "Report recommends adopt/defer per field and raises ballots only for surface-visible changes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:13.789Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/Effects.jet"
+      ],
+      "tags": [
+        "research"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:13.923Z",
+      "updated": "2026-08-19T11:19:13.790Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0nqa5px",
+      "num": 2048,
+      "title": "Research: cross-language library survey for Core absorption",
+      "body": "Owner ruling 2026-08-19 (idea b1trfpk1 interview): research card only — owner runs broader audits manually. Original idea: look at the best and most commonly used libraries across all major languages; what can Core absorb to make exceptional experiences and obviate external libs for as many users as possible.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Survey covers the top libraries by real usage across at least: Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby, PHP \\u2014 with usage evidence, not vibes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:42.623Z"
+        },
+        {
+          "n": 2,
+          "text": "Each candidate maps to: already in Core (evidence), gap worth absorbing (proposed surface), or explicitly out (reason)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:43.068Z"
+        },
+        {
+          "n": 3,
+          "text": "Report ranks absorption candidates by user-reach and cross-references existing Core coverage and the framework-transplant lineage (#1161); follow-up cards minted, no implementation here",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:43.520Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "research"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:14.381Z",
+      "updated": "2026-08-19T11:19:43.520Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0v7cn5o",
+      "num": 2049,
+      "title": "TUI DX audit: every Jet-facing terminal surface vs omp-grade interaction",
+      "body": "Owner ruling 2026-08-19 (idea b1l7zqt1 interview): design-goal audit card. Original idea: Oh My Pi as inspiration for all user-facing TUI ux/dx/ui. Audit every Jet-facing TUI surface against omp-quality interaction patterns and produce a gap list plus follow-up cards.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Audit inventories every user-facing terminal surface: repl, dev loop, test runner, build/progress output, diagnostics, explain, canvas CLI \\u2014 each with current-state capture",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:44.604Z"
+        },
+        {
+          "n": 2,
+          "text": "Each surface scored against named interaction patterns (responsiveness, keyboard model, progressive disclosure, color/NO_COLOR discipline, resize behavior) with concrete gap list",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:45.076Z"
+        },
+        {
+          "n": 3,
+          "text": "Gap list lands as ranked follow-up cards; principles captured in a docs/ reference future TUI work cites",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:45.538Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "design"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:17:14.833Z",
+      "updated": "2026-08-19T11:19:45.539Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0391j1l",
+      "num": 2050,
+      "title": "fmt simplify: owner demo plus IR unification so R2/R3 can enable",
+      "body": "Owner ruling 2026-08-19 (idea bcyn0x8b interview): two-part card. #1514 shipped fmt --simplify with R1 (braced single-return to = expr) and R4 (integer fences to ranges); R2 (else-if chain to one ordered arm table) and R3 (drop redundant Type.{ head) are DISABLED because they change parsed AST identity (subjectless nested Switch vs dispatch; inferred vs named StructLit). Part (a): owner-facing demo of what --simplify does today. Part (b): unify the IR forms so R2/R3 rewrites prove AST equality and can enable. R2/R3 are the two most visible rewrites of the original goal.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-19",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Owner-facing demo: representative before/after examples of jet fmt --simplify on real corpus files, presented for visual acceptance",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:46.619Z"
+        },
+        {
+          "n": 2,
+          "text": "IR forms unified so R2 (else-if chain to arm table) passes the AST-identity check (subjectless nested Switch vs dispatch unify)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:47.081Z"
+        },
+        {
+          "n": 3,
+          "text": "IR forms unified so R3 (drop redundant Type.{ head) passes the identity check (inferred vs named StructLit unify)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:47.541Z"
+        },
+        {
+          "n": 4,
+          "text": "R2/R3 enabled in the simplify catalog; fmt idempotence and corpus --check stay green; second --simplify pass is a no-op",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:47.999Z"
+        }
+      ],
+      "refs": [
+        "docs/spec/syntax-decisions.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": true,
+      "created": "2026-08-19T11:17:15.319Z",
+      "updated": "2026-08-19T11:19:48.617Z",
+      "updatedBy": "fable-ideas"
+    },
+    {
+      "id": "c0ro98g4",
+      "num": 2051,
+      "title": "persist.jet teaches the real hot-reload journey",
+      "body": "From owner interview 2026-08-19 (retired ideas b02bgft8/b7jiiibo). #Persist hot-reload persistence is implemented (#765; test persist_binding_survives_hot_swap_and_resets_on_shape_change) but examples/features/devloop/persist.jet is an inert print of the initial value — it never shows the point: mutate state at runtime, hot-reload code, state survives (the game-dev on-the-fly-test loop). Rework the example (or add a devloop journey doc/example pair) so the teaching corpus shows real survival across a jet dev hot swap, within golden-test constraints. Equality teaching needs no new work: probed 2026-08-19, == works on all primitives and structs auto-derive it; examples/features/types/auto_derive_policy/main.jet covers the policy surface.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "persist.jet (or a paired devloop journey) demonstrates runtime mutation + hot reload + value survival, not just the inert initial print",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:59.165Z"
+        },
+        {
+          "n": 2,
+          "text": "Golden output stays deterministic; dev-tier behavior proven by test or scripted jet dev session",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T11:19:59.642Z"
+        }
+      ],
+      "refs": [
+        "examples/features/devloop/persist.jet"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T11:19:49.171Z",
+      "updated": "2026-08-19T11:19:59.642Z",
+      "updatedBy": "fable-ideas"
     }
   ],
   "decisions": [
@@ -175894,6 +176708,32 @@
       "created": "2026-08-17T02:37:13.833Z",
       "outcome": "B",
       "ratifiedAt": "2026-08-17"
+    },
+    {
+      "id": "D-VERDICT-2039-1",
+      "cardId": "c0rrypxo",
+      "group": "verdict",
+      "title": "Time literal suffixes end at week",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Add week as the only new Time literal suffix, a fixed 7-day scale on the ns carrier. Calendar-dependent units (month, year, decade, century, millennium) never become literal suffixes; they stay in the checked Period and date API.",
+      "comment": "Add week as the only new Time literal suffix, a fixed 7-day scale on the ns carrier. Calendar-dependent units (month, year, decade, century, millennium) never become literal suffixes; they stay in the checked Period and date API.",
+      "created": "2026-08-19T11:17:41.973Z",
+      "ratifiedAt": "2026-08-19"
     }
   ],
   "questions": [
@@ -177498,15 +178338,6 @@
       "cardId": "c06k75xs"
     },
     {
-      "id": "b02bgft8",
-      "text": "Ensure we can support == operator for all primitives out of the box and consider an autoderive for it",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-10T10:57:46.323Z"
-    },
-    {
       "id": "b0qchrto",
       "text": "Terminal render-target backend for the Jet UI seam (D-RENDERTGT1/2): TUI apps from the same UI tree. Demand signal: Go CLI-video comments ask for a pure ncurses replacement and complain about opentui memory bloat. Future-epoch surface; idea only until measured demand.",
       "note": "",
@@ -177521,8 +178352,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-10T11:46:44.462Z"
+      "status": "tagged",
+      "created": "2026-08-10T11:46:44.462Z",
+      "cardId": "c0nqa5px"
     },
     {
       "id": "b2gow3ol",
@@ -177548,8 +178380,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-10T21:47:53.229Z"
+      "status": "tagged",
+      "created": "2026-08-10T21:47:53.229Z",
+      "cardId": "c0v7cn5o"
     },
     {
       "id": "b0lbacs6",
@@ -177575,8 +178408,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-13T17:10:02.735Z"
+      "status": "tagged",
+      "created": "2026-08-13T17:10:02.735Z",
+      "cardId": "c0rrypxo"
     },
     {
       "id": "b16ocp2x",
@@ -177584,8 +178418,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-13T17:11:19.094Z"
+      "status": "tagged",
+      "created": "2026-08-13T17:11:19.094Z",
+      "cardId": "c08g04mg"
     },
     {
       "id": "b2z65gxf",
@@ -177593,8 +178428,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-13T17:13:07.479Z"
+      "status": "tagged",
+      "created": "2026-08-13T17:13:07.479Z",
+      "cardId": "c0g5m31z"
     },
     {
       "id": "b1tlow3s",
@@ -177612,8 +178448,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T15:06:22.373Z"
+      "status": "tagged",
+      "created": "2026-08-17T15:06:22.373Z",
+      "cardId": "c00sln5l"
     },
     {
       "id": "b32n718r",
@@ -177621,8 +178458,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T15:08:52.349Z"
+      "status": "tagged",
+      "created": "2026-08-17T15:08:52.349Z",
+      "cardId": "c0zcrs0m"
     },
     {
       "id": "b4j3ce68",
@@ -177639,8 +178477,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T15:17:44.788Z"
+      "status": "tagged",
+      "created": "2026-08-17T15:17:44.788Z",
+      "cardId": "c06s09om"
     },
     {
       "id": "b65p25sn",
@@ -177648,17 +178487,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T15:19:10.739Z"
-    },
-    {
-      "id": "b7jiiibo",
-      "text": "I dont get how persist marker is supposed to work... it says its a const in @persist.jet so changing it during runtime doesnt work but isnt the point that changes to the initial value persist across reloads of runtime so in game dev you can have persistent state and change behavior to make on the fly tests without constant reloads? I dont get the point of current implementation",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-17T15:27:36.589Z"
+      "status": "tagged",
+      "created": "2026-08-17T15:19:10.739Z",
+      "cardId": "c0e7kkuf"
     },
     {
       "id": "b85kkzpu",
@@ -177666,8 +178497,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T15:57:42.475Z"
+      "status": "tagged",
+      "created": "2026-08-17T15:57:42.475Z",
+      "cardId": "c0te2a80"
     },
     {
       "id": "b9mi76q5",
@@ -177685,8 +178517,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T16:05:38.967Z"
+      "status": "tagged",
+      "created": "2026-08-17T16:05:38.967Z",
+      "cardId": "c0lz1y16"
     },
     {
       "id": "bbq8d3zx",
@@ -177704,11 +178537,530 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-17T18:55:08.698Z"
+      "status": "tagged",
+      "created": "2026-08-17T18:55:08.698Z",
+      "cardId": "c0391j1l"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-19T11:19:59.642Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0ro98g4",
+      "note": "#2 Golden output stays deterministic; dev-tier behavior proven "
+    },
+    {
+      "at": "2026-08-19T11:19:59.166Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0ro98g4",
+      "note": "#1 persist.jet (or a paired devloop journey) demonstrates runti"
+    },
+    {
+      "at": "2026-08-19T11:19:49.171Z",
+      "by": "fable-ideas",
+      "action": "card.add",
+      "ref": "c0ro98g4",
+      "note": "persist.jet teaches the real hot-reload journey"
+    },
+    {
+      "at": "2026-08-19T11:19:48.617Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0391j1l",
+      "note": "needsAcceptance"
+    },
+    {
+      "at": "2026-08-19T11:19:47.999Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0391j1l",
+      "note": "#4 R2/R3 enabled in the simplify catalog; fmt idempotence and c"
+    },
+    {
+      "at": "2026-08-19T11:19:47.541Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0391j1l",
+      "note": "#3 IR forms unified so R3 (drop redundant Type.{ head) passes t"
+    },
+    {
+      "at": "2026-08-19T11:19:47.081Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0391j1l",
+      "note": "#2 IR forms unified so R2 (else-if chain to arm table) passes t"
+    },
+    {
+      "at": "2026-08-19T11:19:46.620Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0391j1l",
+      "note": "#1 Owner-facing demo: representative before/after examples of j"
+    },
+    {
+      "at": "2026-08-19T11:19:46.161Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0391j1l",
+      "note": "title,body,kind,phase,priority,refs"
+    },
+    {
+      "at": "2026-08-19T11:19:45.539Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0v7cn5o",
+      "note": "#3 Gap list lands as ranked follow-up cards; principles capture"
+    },
+    {
+      "at": "2026-08-19T11:19:45.076Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0v7cn5o",
+      "note": "#2 Each surface scored against named interaction patterns (resp"
+    },
+    {
+      "at": "2026-08-19T11:19:44.605Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0v7cn5o",
+      "note": "#1 Audit inventories every user-facing terminal surface: repl, "
+    },
+    {
+      "at": "2026-08-19T11:19:44.140Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0v7cn5o",
+      "note": "title,body,kind,phase,priority,addTags,tags"
+    },
+    {
+      "at": "2026-08-19T11:19:43.520Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0nqa5px",
+      "note": "#3 Report ranks absorption candidates by user-reach and cross-r"
+    },
+    {
+      "at": "2026-08-19T11:19:43.068Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0nqa5px",
+      "note": "#2 Each candidate maps to: already in Core (evidence), gap wort"
+    },
+    {
+      "at": "2026-08-19T11:19:42.624Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0nqa5px",
+      "note": "#1 Survey covers the top libraries by real usage across at leas"
+    },
+    {
+      "at": "2026-08-19T11:19:42.143Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0nqa5px",
+      "note": "title,body,kind,phase,priority,addTags,tags"
+    },
+    {
+      "at": "2026-08-19T11:19:13.790Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0g5m31z",
+      "note": "#3 Report recommends adopt/defer per field and raises ballots o"
+    },
+    {
+      "at": "2026-08-19T11:19:13.334Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0g5m31z",
+      "note": "#2 Each proposed field arrives with a concrete consumer and use"
+    },
+    {
+      "at": "2026-08-19T11:19:12.873Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0g5m31z",
+      "note": "#1 Survey names every current consumer of the effect roots (che"
+    },
+    {
+      "at": "2026-08-19T11:19:12.422Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0g5m31z",
+      "note": "title,body,kind,phase,priority,refs,addTags,tags"
+    },
+    {
+      "at": "2026-08-19T11:19:11.781Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c08g04mg",
+      "note": "#4 Findings land as a docs/ research report plus follow-up card"
+    },
+    {
+      "at": "2026-08-19T11:19:11.329Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c08g04mg",
+      "note": "#3 Proof-of-concept or named blocking gaps: a minimal no-OS-sur"
+    },
+    {
+      "at": "2026-08-19T11:19:10.874Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c08g04mg",
+      "note": "#2 Report defines the embedded/freestanding profile: what compi"
+    },
+    {
+      "at": "2026-08-19T11:19:10.391Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c08g04mg",
+      "note": "#1 Report classifies every Prelude part as comptime-only (check"
+    },
+    {
+      "at": "2026-08-19T11:19:09.945Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c08g04mg",
+      "note": "title,body,kind,phase,priority,refs,addTags,tags"
+    },
+    {
+      "at": "2026-08-19T11:19:09.304Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c00sln5l",
+      "note": "#4 CLI snapshot tests cover representative glyph, keyword, mark"
+    },
+    {
+      "at": "2026-08-19T11:19:08.855Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c00sln5l",
+      "note": "#3 Lookup is generated from the registry (no hand-maintained pa"
+    },
+    {
+      "at": "2026-08-19T11:19:08.387Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c00sln5l",
+      "note": "#2 Unknown token gets a real diagnostic with nearest-match sugg"
+    },
+    {
+      "at": "2026-08-19T11:19:07.930Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c00sln5l",
+      "note": "#1 jet explain @ / :: / #Live / => (every registered user-typea"
+    },
+    {
+      "at": "2026-08-19T11:19:07.455Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c00sln5l",
+      "note": "title,body,kind,phase,priority,refs"
+    },
+    {
+      "at": "2026-08-19T11:18:43.921Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0te2a80",
+      "note": "needsAcceptance"
+    },
+    {
+      "at": "2026-08-19T11:18:43.270Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0te2a80",
+      "note": "#4 Before/after comparison on real failing examples shows the a"
+    },
+    {
+      "at": "2026-08-19T11:18:42.818Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0te2a80",
+      "note": "#3 Same report shape on every execution tier: AOT, default jet "
+    },
+    {
+      "at": "2026-08-19T11:18:42.381Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0te2a80",
+      "note": "#2 Real terminal state matrix proven: tty vs pipe, ANSI vs NO_C"
+    },
+    {
+      "at": "2026-08-19T11:18:41.917Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0te2a80",
+      "note": "#1 Report leads with the root error (what/why/fix grade), then "
+    },
+    {
+      "at": "2026-08-19T11:18:41.429Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0te2a80",
+      "note": "title,body,kind,phase,priority"
+    },
+    {
+      "at": "2026-08-19T11:18:40.798Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0lz1y16",
+      "note": "#5 Ballot slate raised; if ratified, the migration retires ever"
+    },
+    {
+      "at": "2026-08-19T11:18:40.341Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0lz1y16",
+      "note": "#4 Proposal states the role of :: and any rearrangement explici"
+    },
+    {
+      "at": "2026-08-19T11:18:39.896Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0lz1y16",
+      "note": "#3 Friction is minimized proportionally to frequency: the most "
+    },
+    {
+      "at": "2026-08-19T11:18:39.436Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0lz1y16",
+      "note": "#2 Proposal shows same-program before/after Jet code for: simpl"
+    },
+    {
+      "at": "2026-08-19T11:18:38.962Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0lz1y16",
+      "note": "#1 Analysis inventories every current function/lambda/function-"
+    },
+    {
+      "at": "2026-08-19T11:18:38.520Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0lz1y16",
+      "note": "title,body,kind,phase,priority,refs"
+    },
+    {
+      "at": "2026-08-19T11:18:14.764Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0e7kkuf",
+      "note": "#3 Ballot raised with beginner and expert passes; diagnostics f"
+    },
+    {
+      "at": "2026-08-19T11:18:14.293Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0e7kkuf",
+      "note": "#2 LSP inlay-hint requirement captured: argument names always s"
+    },
+    {
+      "at": "2026-08-19T11:18:13.805Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0e7kkuf",
+      "note": "#1 Plan defines \"deterministic mapping\" precisely (types, arity"
+    },
+    {
+      "at": "2026-08-19T11:18:13.349Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0e7kkuf",
+      "note": "title,body,kind,phase,priority"
+    },
+    {
+      "at": "2026-08-19T11:18:12.710Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c06s09om",
+      "note": "#3 Ballot raised; one canonical form ships, no parallel spellin"
+    },
+    {
+      "at": "2026-08-19T11:18:12.261Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c06s09om",
+      "note": "#2 Proposal measures the boilerplate it removes against the cur"
+    },
+    {
+      "at": "2026-08-19T11:18:11.791Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c06s09om",
+      "note": "#1 Proposal presents 2-3 competing spellings as same-program be"
+    },
+    {
+      "at": "2026-08-19T11:18:11.310Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c06s09om",
+      "note": "title,body,kind,phase,priority"
+    },
+    {
+      "at": "2026-08-19T11:18:10.675Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0zcrs0m",
+      "note": "#3 Ballot raised amending D-WHEN1/D-WHEN2; @if retired from Syn"
+    },
+    {
+      "at": "2026-08-19T11:18:10.219Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0zcrs0m",
+      "note": "#2 Plan resolves dropped-arm checking semantics (name-resolutio"
+    },
+    {
+      "at": "2026-08-19T11:18:09.748Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0zcrs0m",
+      "note": "#1 Plan names the folding rule for plain if with a comptime-kno"
+    },
+    {
+      "at": "2026-08-19T11:18:09.259Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0zcrs0m",
+      "note": "title,body,kind,phase,priority,refs"
+    },
+    {
+      "at": "2026-08-19T11:17:41.973Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2039-1",
+      "note": "Add week as the only new Time literal suffix, a fixed 7-day scale on the ns carrier. Calendar-dependent units (month, year, decade, century, millennium) never become literal suffixes; they stay in the checked Period and date API."
+    },
+    {
+      "at": "2026-08-19T11:17:41.527Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0rrypxo",
+      "note": "#3 Example + golden updated; parity proven on AOT, default jet "
+    },
+    {
+      "at": "2026-08-19T11:17:41.067Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0rrypxo",
+      "note": "#2 No month/year/decade/century literal suffix exists; calendar"
+    },
+    {
+      "at": "2026-08-19T11:17:40.613Z",
+      "by": "fable-ideas",
+      "action": "card.criteria-add",
+      "ref": "c0rrypxo",
+      "note": "#1 1week literal resolves through the Time #UnitFamily as fixed"
+    },
+    {
+      "at": "2026-08-19T11:17:40.178Z",
+      "by": "fable-ideas",
+      "action": "card.update",
+      "ref": "c0rrypxo",
+      "note": "title,body,kind,phase,priority,refs"
+    },
+    {
+      "at": "2026-08-19T11:17:16.217Z",
+      "by": "agent",
+      "action": "idea.delete",
+      "ref": "b7jiiibo",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T11:17:15.769Z",
+      "by": "agent",
+      "action": "idea.delete",
+      "ref": "b02bgft8",
+      "note": ""
+    },
+    {
+      "at": "2026-08-19T11:17:15.319Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0391j1l",
+      "note": "Verify, test, see examples, etc. of card 1514 Goal"
+    },
+    {
+      "at": "2026-08-19T11:17:14.833Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0v7cn5o",
+      "note": "Oh my pi as inspiration for all user facing TUI ux/dx/ui"
+    },
+    {
+      "at": "2026-08-19T11:17:14.381Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0nqa5px",
+      "note": "Look for the best and most commonly used libraries across all major languages. W"
+    },
+    {
+      "at": "2026-08-19T11:17:13.923Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0g5m31z",
+      "note": "Should effects definitions in jet-codegen/src/Prelude/Effects.jet have more fiel"
+    },
+    {
+      "at": "2026-08-19T11:17:13.457Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c08g04mg",
+      "note": "Does effects, markers, facts, units being in the prelude mean that none of the c"
+    },
+    {
+      "at": "2026-08-19T11:17:12.994Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c00sln5l",
+      "note": "\"Searchable\" glyph/symbol/token dictionary tool for jet. Ex. newcomer doesnt kno"
+    },
+    {
+      "at": "2026-08-19T11:17:12.546Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0te2a80",
+      "note": "Visibility on error trace is terrible ux/ui. Propogation needs much better ux/ui"
+    },
+    {
+      "at": "2026-08-19T11:17:12.098Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0lz1y16",
+      "note": "@returned_function_call.jet is hideous... how can we improve"
+    },
+    {
+      "at": "2026-08-19T11:17:11.629Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0e7kkuf",
+      "note": "Positional by default inference when deterministic, named inputs when unclear or"
+    },
+    {
+      "at": "2026-08-19T11:17:11.179Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c06s09om",
+      "note": "Some kind of improved syntax for deconstructing results/optionals. maybe built i"
+    },
+    {
+      "at": "2026-08-19T11:17:10.730Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0zcrs0m",
+      "note": "In comptime_if.jet, shouldnt we not support @if and just consider it a comptime"
+    },
+    {
+      "at": "2026-08-19T11:17:10.272Z",
+      "by": "agent",
+      "action": "card.add",
+      "ref": "c0rrypxo",
+      "note": "Built in time units stop at day -> what about week month year decade century mil"
+    },
     {
       "at": "2026-08-19T10:47:35.358Z",
       "by": "fable-ideas",
@@ -180690,524 +182042,6 @@
       "action": "card.criteria-meet",
       "ref": "c0f02mn4",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-16T17:13:48.464Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0f02mn4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T16:28:18.507Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08gtzcw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T16:28:17.943Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08gtzcw",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-16T16:28:17.532Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08gtzcw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T16:28:17.008Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08gtzcw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T16:28:16.562Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08gtzcw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T16:28:16.143Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08gtzcw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T16:28:15.732Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0sv6ejg",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T16:28:14.939Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0sv6ejg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T16:28:14.519Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0sv6ejg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T16:28:14.090Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0sv6ejg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T16:28:13.666Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0sv6ejg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T16:28:13.223Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05tpvho",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T16:28:12.593Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05tpvho",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T16:28:12.177Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05tpvho",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T16:28:11.759Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05tpvho",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T16:28:11.339Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0m8yal5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T16:28:10.770Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m8yal5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T16:28:10.347Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m8yal5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T16:28:09.930Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m8yal5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T14:38:11.755Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c02cuoc0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-16T14:38:11.154Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ejmyy7",
-      "note": "#6 cargo test --test jit_run reports zero failures, and the tar"
-    },
-    {
-      "at": "2026-08-16T14:38:10.698Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ejmyy7",
-      "note": "#5 expert_terminal_model_runs_resident_and_fails_closed runs un"
-    },
-    {
-      "at": "2026-08-16T14:38:10.244Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ejmyy7",
-      "note": "#4 args_parse_or_exit_runs_resident_for_return_help_and_usage_e"
-    },
-    {
-      "at": "2026-08-16T14:38:09.793Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ejmyy7",
-      "note": "#3 The default and release lenses agree for arg_process_spec_bu"
-    },
-    {
-      "at": "2026-08-16T14:38:09.356Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ejmyy7",
-      "note": "#2 The process spec builders lower to host calls on the residen"
-    },
-    {
-      "at": "2026-08-16T14:38:08.931Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ejmyy7",
-      "note": "#1 Each of the five failures has a named root cause, grouped by"
-    },
-    {
-      "at": "2026-08-16T14:38:08.490Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0ejmyy7",
-      "note": "Five jit_run process and args tests fail: builders deopt, parse_or_exit exits 1, expert terminal hits E0956"
-    },
-    {
-      "at": "2026-08-16T14:38:08.058Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08gtzcw",
-      "note": "#5 env_overlay::raw_non_unicode_value_survives_child_snapshot_a"
-    },
-    {
-      "at": "2026-08-16T14:38:07.646Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08gtzcw",
-      "note": "#4 A cross-tier differential covers a String field read through"
-    },
-    {
-      "at": "2026-08-16T14:38:07.229Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08gtzcw",
-      "note": "#3 Field reads where a wrong accessor would still typecheck are"
-    },
-    {
-      "at": "2026-08-16T14:38:06.785Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08gtzcw",
-      "note": "#2 The generated Rust for the env_overlay raw-snapshot fixture "
-    },
-    {
-      "at": "2026-08-16T14:38:06.368Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08gtzcw",
-      "note": "#1 The accessor selection for a field read is fixed at the mech"
-    },
-    {
-      "at": "2026-08-16T14:38:05.945Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c08gtzcw",
-      "note": "Generated Rust reads a String field through jet_int_to_string and rustc rejects it (I2)"
-    },
-    {
-      "at": "2026-08-16T14:38:05.536Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02cuoc0",
-      "note": "#5 run_interpret::data_json_agrees_on_every_tier no longer fail"
-    },
-    {
-      "at": "2026-08-16T14:38:05.115Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02cuoc0",
-      "note": "#4 A UI snapshot pins the corrected behaviour (I4)"
-    },
-    {
-      "at": "2026-08-16T14:38:04.672Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02cuoc0",
-      "note": "#3 The lint produces the same result on every tier: AOT, defaul"
-    },
-    {
-      "at": "2026-08-16T14:38:04.255Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02cuoc0",
-      "note": "#2 Whether a real float comparison exists in that example is st"
-    },
-    {
-      "at": "2026-08-16T14:38:03.840Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02cuoc0",
-      "note": "#1 The L0502 span names an actual float comparison, or the lint"
-    },
-    {
-      "at": "2026-08-16T14:38:03.399Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c02cuoc0",
-      "note": "L0502 float_comparison fires on a struct declaration, not a float comparison"
-    },
-    {
-      "at": "2026-08-16T14:37:01.599Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0h9oynm",
-      "note": "#6 The whole-suite pass/fail tally is a complete measurement an"
-    },
-    {
-      "at": "2026-08-16T14:37:01.163Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0h9oynm",
-      "note": "#5 Any test moved to a separate target is added to a named rout"
-    },
-    {
-      "at": "2026-08-16T14:37:00.721Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0h9oynm",
-      "note": "#4 Redundant corpus compilation across the differential batteri"
-    },
-    {
-      "at": "2026-08-16T14:37:00.272Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0h9oynm",
-      "note": "#3 The 900s budget is met by splitting or speeding up, and the "
-    },
-    {
-      "at": "2026-08-16T14:36:59.856Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0h9oynm",
-      "note": "#2 Every declared test runs: the started count equals the decla"
-    },
-    {
-      "at": "2026-08-16T14:36:59.424Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0h9oynm",
-      "note": "#1 cargo test --no-fail-fast --test dev reaches libtest's own s"
-    },
-    {
-      "at": "2026-08-16T14:36:58.997Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0h9oynm",
-      "note": "The dev suite exceeds its own 900s budget, so ~30 tests never run and no summary prints"
-    },
-    {
-      "at": "2026-08-16T14:03:54.025Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-16T14:03:54.025Z"
-    },
-    {
-      "at": "2026-08-16T12:57:35.490Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c032bed5",
-      "note": "#4 The target is kept runnable by a stated mechanism, so two co"
-    },
-    {
-      "at": "2026-08-16T12:57:35.047Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c032bed5",
-      "note": "#3 The full jet-codegen lib test target runs to libtest's own s"
-    },
-    {
-      "at": "2026-08-16T12:57:34.599Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c032bed5",
-      "note": "#2 Codegen::TIR::tests::covers_labeled_loops completes without "
-    },
-    {
-      "at": "2026-08-16T12:57:34.179Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c032bed5",
-      "note": "#1 Codegen::TIR::tests::covers_generic_optional_return passes b"
-    },
-    {
-      "at": "2026-08-16T12:57:33.755Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c032bed5",
-      "note": "The jet-codegen lib test target never ran, hiding a TIR coverage failure and a stack overflow"
-    },
-    {
-      "at": "2026-08-16T12:57:33.330Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0drec4f",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T12:57:32.710Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0drec4f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T12:57:32.282Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0drec4f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T12:57:31.852Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0drec4f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T12:54:03.699Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0dr8aqt",
-      "note": "#5 OUT_OF_UNIVERSE_CEILING is lowered by exactly the number of "
-    },
-    {
-      "at": "2026-08-16T12:54:03.276Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0dr8aqt",
-      "note": "#4 The 28x E2402 NetError conversion family is resolved at the "
-    },
-    {
-      "at": "2026-08-16T12:54:02.836Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0dr8aqt",
-      "note": "#3 Every (b) stem is fixed, or has its own card with the diagno"
-    },
-    {
-      "at": "2026-08-16T12:54:02.403Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0dr8aqt",
-      "note": "#2 Every (a) family either enters the oracle's universe because"
-    },
-    {
-      "at": "2026-08-16T12:54:01.973Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0dr8aqt",
-      "note": "#1 Each of the 53 stems is established as (a) an in-process har"
-    },
-    {
-      "at": "2026-08-16T12:54:01.077Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0dr8aqt",
-      "note": "53 shipped examples fail in-process Loader or Sema and were invisible to every coverage claim"
-    },
-    {
-      "at": "2026-08-16T12:53:27.924Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c06lni1w",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T12:53:26.659Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06lni1w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T12:53:25.745Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06lni1w",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T12:53:23.589Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06lni1w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T12:53:23.161Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06lni1w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T12:53:22.729Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08cflxy",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T12:53:22.114Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08cflxy",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T12:53:21.688Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08cflxy",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T12:53:20.509Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08cflxy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T12:53:19.563Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08cflxy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T12:53:18.674Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08pvmkh",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
