@@ -250,11 +250,12 @@ pub const NATIVE_BUILD_DEADLINE: Duration = Duration::from_secs(120);
 pub fn collection_deadline(kind: &str, mode: Option<&str>, facts: Duration, native_build: Duration) -> Duration {
     match kind {
         "CompilerProbe" => {
-            // An `Edit` trial compiles the clean tree, applies the patch, and
-            // compiles again; `Clean` and `NoChange` compile once.
-            let compiles_per_trial = if mode == Some("Edit") { 2 } else { 1 };
+            // A trial is one measured child compile. An `Edit` collection also
+            // builds the clean tree once, up front, to produce the warm cache
+            // every trial starts from.
             let trials = COMPILE_WARMUPS as u32 + COMPILE_SAMPLES as u32;
-            trials * compiles_per_trial * native_build + facts
+            let prime = if mode == Some("Edit") { 1 } else { 0 };
+            (trials + prime) * native_build + facts
         }
         // Build the release bench harness, then run its pinned 20 trials.
         "BenchMeasurement" | "AllocationProbe" => native_build + facts,
@@ -304,7 +305,7 @@ pub fn compiler_probe_version(
     let root = project_root.canonicalize().map_err(|error| format!("cannot resolve compile workload root: {error}"))?;
     let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
     Ok(format!(
-        "jet-compile-latency-v1;mode={mode};target={target};profile={profile};backend=rustc;linker={};warmups=1;samples=20;source={};patch={}",
+        "jet-compile-latency-v1;mode={mode};target={target};profile={profile};backend=rustc;linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
         std::env::var("RUSTC_LINKER").or_else(|_| std::env::var("CC")).unwrap_or_else(|_| "native".into()),
         descriptor.source_tree_sha256, descriptor.patch_sha256
     ))
@@ -473,8 +474,25 @@ fn compile_latency_samples(
     } else {
         None
     };
+    // An `Edit` trial measures the rebuild that follows one representative
+    // edit, so it needs a tree that was already built. Building that clean
+    // tree *inside* every trial spent one extra full child compile per trial —
+    // 20 wasted compiles per collection — and let every sample start from an
+    // independently produced state. Build it once here and give each trial a
+    // byte-identical copy of the resulting warm cache: the measured rebuild is
+    // still a real child compile of the patched tree, and every sample now
+    // starts from the same bytes instead of merely the same recipe.
+    let warm = scratch.join("warm");
     if mode == "Edit" {
         std::fs::create_dir_all(scratch).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot create edit workload scratch directory: {error}")))?;
+        copy_compile_project(root, &warm).map_err(ProviderFailure::malformed)?;
+        let copied_source_tree_sha256 = source_tree_digest(&warm).map_err(ProviderFailure::malformed)?;
+        if copied_source_tree_sha256.as_str() != expected_source_tree_sha256 {
+            return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source changed while it was copied"));
+        }
+        reset_compile_cache(&warm)?;
+        clear_compile_timing(&warm)?;
+        run_compile_child(&warm.join(relative_entry), &warm, target, profile)?;
     } else {
         copy_compile_project(root, scratch).map_err(ProviderFailure::malformed)?;
         let copied_source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
@@ -485,7 +503,7 @@ fn compile_latency_samples(
     for _ in 0..warmups {
         if mode == "Edit" {
             let trial = scratch.join("warmup");
-            let _ = compile_edit_trial(root, relative_entry, &trial, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?;
+            let _ = compile_edit_trial(root, relative_entry, &trial, &warm, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?;
         } else {
             let scratch_entry = scratch.join(relative_entry);
             if mode == "Clean" { reset_compile_cache(scratch)?; }
@@ -496,7 +514,7 @@ fn compile_latency_samples(
     for sample_index in 0..sample_count {
         let (elapsed_ns, phase_totals) = if mode == "Edit" {
             let trial = scratch.join(format!("sample-{sample_index}"));
-            compile_edit_trial(root, relative_entry, &trial, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?
+            compile_edit_trial(root, relative_entry, &trial, &warm, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?
         } else {
             let scratch_entry = scratch.join(relative_entry);
             if mode == "Clean" { reset_compile_cache(scratch)?; }
@@ -563,6 +581,7 @@ fn compile_edit_trial(
     root: &Path,
     relative_entry: &Path,
     trial: &Path,
+    warm: &Path,
     patch: &str,
     expected_source_tree_sha256: &str,
     expected_patch_sha256: &str,
@@ -579,11 +598,10 @@ fn compile_edit_trial(
         if sha256_hex(&patch_bytes).as_str() != expected_patch_sha256 {
             return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload patch changed while it was copied"));
         }
-        reset_compile_cache(trial)?;
-        let entry = trial.join(relative_entry);
-        run_compile_child(&entry, trial, target, profile)?;
+        restore_compile_cache(warm, trial)?;
         apply_unified_patch(trial, patch).map_err(ProviderFailure::malformed)?;
         clear_compile_timing(trial)?;
+        let entry = trial.join(relative_entry);
         let started = Instant::now();
         run_compile_child(&entry, trial, target, profile)?;
         Ok((started.elapsed().as_nanos(), read_compile_phases(trial)?))
@@ -698,6 +716,38 @@ fn reset_compile_cache(root: &Path) -> Result<(), ProviderFailure> {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot reset compile workload cache: {error}"))),
+        }
+    }
+    Ok(())
+}
+
+/// Give an `Edit` trial the exact cache state the primed clean build left
+/// behind. `copy_compile_project` deliberately skips build output, so the warm
+/// state is copied here instead: the trial's own cache is replaced first, so a
+/// trial can never inherit an artifact of an earlier *patched* build and turn a
+/// measured rebuild into a cache hit.
+fn restore_compile_cache(warm: &Path, trial: &Path) -> Result<(), ProviderFailure> {
+    reset_compile_cache(trial)?;
+    for name in ["build", ".jet-compile-cache"] {
+        let source = warm.join(name);
+        if !source.is_dir() { continue; }
+        copy_cache_tree(&source, &trial.join(name)).map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?;
+    }
+    Ok(())
+}
+
+fn copy_cache_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(destination).map_err(|error| format!("cannot create compile workload cache directory: {error}"))?;
+    let entries = std::fs::read_dir(source).map_err(|error| format!("cannot read compile workload cache: {error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("cannot enumerate compile workload cache: {error}"))?;
+    for entry in entries {
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| format!("cannot inspect compile workload cache path: {error}"))?;
+        if metadata.file_type().is_symlink() { return Err(format!("compile workload cache contains a symlink: {}", path.display())); }
+        let target = destination.join(entry.file_name());
+        if metadata.is_dir() {
+            copy_cache_tree(&path, &target)?;
+        } else if metadata.is_file() {
+            std::fs::copy(&path, &target).map_err(|error| format!("cannot copy compile workload cache artifact: {error}"))?;
         }
     }
     Ok(())

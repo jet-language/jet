@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2082,
-    "rev": 39246,
+    "rev": 39251,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-19T13:42:18.116Z"
+    "completionCursor": "2026-08-19T21:10:46.592Z"
   },
   "epochs": [
     {
@@ -133708,119 +133708,6 @@
       "updatedBy": "PlanNumb"
     },
     {
-      "id": "c0zcrs0m",
-      "num": 2040,
-      "title": "Retire @if: plain if folds comptime-known branches, pattern arms included",
-      "body": "Owner ruling 2026-08-19 (idea b32n718r interview), verbatim: \"The goal is a simplified surface/syntax that is INTELLIGENT (NOT AI!). Intentionality in @if is nice for clarity, but in practice is clunky, annoying, and becomes more verbose. The goal is ability to read, write, and REASON about code. Having two (especially non searchable) versions of if bifurcates the mechanism. Sure they are TECHNICALLY two separate mechanisms, but the goal is to streamline and simplify the language. We aspire to have simplicity a-la Go-lang. I strongly prefer just plain if where we have an intelligent compiler that dynamically adjusts if comptime arms are used. Also, we still must support full pattern matching, so ensure we account for that. We wont always just have plain single if statement arms, we support pattern matching branches.\" This amends ratified D-WHEN1/D-WHEN2 (@if selects a branch at compile time; dropped arm gets name-resolution only). Open semantic question the plan must resolve before ballot: when plain if folds, what checking does the dropped arm get — keeping the platform-specific-API use case legal without making checking depth depend invisibly on inference distance. Must cover arm-table pattern matching (if x == { ... }) with comptime-known subjects, not just boolean conditions. Implicit folding infrastructure exists (#1308).",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
-      "priority": "P1",
-      "plan": "## Outcome\nAfter ratification of D-IF-FOLD1, Jet has exactly one conditional: plain `if`. When the whole condition (boolean form) or the arm-table subject (`if x == { … }` pattern form) is comptime-evaluable per the E0989 class — `@` bindings, compiler facts (`@build.os`, `@build.settings.*`), literals, pure calls with all-known arguments — sema folds the branch: the taken arm compiles, every dropped arm gets name-resolution only (D-WHEN2 carried forward), so typos are caught but platform-only APIs stay legal. A mixed-plane or unmarked-constant condition is an ordinary runtime `if`: both arms fully type-check even when the optimizer folds. Checking depth thus depends only on the visible `@`/fact tokens in the condition, never on inference distance. Arm-table shape checks (arm validity, OS-dispatch exhaustiveness) run before folding. `@if` is deleted from the surface (Syntax.rs docs, parser, fmt, corpus, examples, spec) in the same change — greenfield, no alias.\n\n## Law\n- D-IF-FOLD1 (this card's ballot, in decide) — amends D-WHEN1/D-WHEN2; option A is the recommended rule above.\n- S68 / D-IF1 / D-IF3 / D-IFDIST1=A — the one branching keyword and arm-table model the fold attaches to.\n- S57 / D-META-STAGE1=B / D-ONCE-AT1=D — `@` belongs to the name; implicit folding infra (#1308).\n- D-OSTARGET2=B — `@build.os` dispatch (spelling becomes `if @build.os == { … }`); its desugar and exhaustiveness checks are preserved.\n- I4 (registered diagnostics), I5 (examples + goldens), I7 (spelling change rides D-IF-FOLD1), I9 (fold decided once in sema; all tiers see one folded program), greenfield (delete `@if`, migrate every consumer).\n\n## Work\n1. Trace the current seam first: parser `crates/jet-parser/src/Parser/Statements/control.rs:1841` (KwComptime+KwIf detect) and `bindings.rs:511` (`comptime_if_stmt`); AST `crates/jet-foundation/src/AST/statements.rs` (`Stmt::ComptimeIf`, `Stmt::ComptimeSwitch`); sema `crates/jet-sema/src/Sema/CheckerCore/control_flow.rs` (E0989), `CheckerCore/statements.rs` (`check_comptime_if`), `mod.rs:1648` (dropped-arm suppression flag), `OSTarget.rs` (`desugar_os_switches`), `Bundle/{Pipeline.rs,InlineCalls.rs,Comptime.rs,Validation/CoreUsage.rs}`; codegen `crates/jet-codegen/src/Codegen/{Tuples.rs,mod.rs,TIR/lower/statements.rs,TIR/subset/statements.rs,TIR/emit/statements.rs}` (Inline emission of the selected arm).\n2. Sema fold path: in `check_stmt` for plain `Stmt::If` (and the if-table form), classify the condition/subject with the existing E0989 comptime-class test. If comptime-plane: evaluate via the comptime interpreter, record the selected arm (reuse `selected_then`-style fold info on the plain node), run name-resolution-only on dropped arms using the existing D-WHEN2 suppression flag, and lower only the selected arm (reuse the Inline TIR path). If not comptime-plane (including mixed like `@debug && x` after constant substitution): ordinary runtime `if`, full checking of all arms.\n3. Pattern arms: extend the same fold to `if <comptime-subject> OP { … }` tables. Validate arm shape and exhaustiveness first (keep E-OSTARGET-DISPATCH-ARM / E-OSTARGET-DISPATCH-EXHAUSTIVE), then select the matching arm with the D-IFDIST1 desugar evaluated at comptime; dropped arms name-resolve only. Rewrite `desugar_os_switches` to target plain-if fold info instead of `ComptimeIf` chains.\n4. Delete the `@if` surface: remove `comptime_if_stmt`, the KwComptime+KwIf branch, `Stmt::ComptimeIf`/`ComptimeSwitch` and every match arm across the ~40 files (`grep -n 'ComptimeIf\\|ComptimeSwitch' crates/` is the worklist), the fmt printers in `crates/jet-parser/src/Formatter/{Statements.rs,mod.rs}`, and the `@if`/`@loop` mention in `crates/jet-foundation/src/Syntax/core_surface.rs:113-116,547-551` (note: `@loop` itself is out of scope; only the `@if` reference text changes).\n5. Diagnostics (I4): retire E0989 in `crates/jet-codegen/src/Prelude/Diagnostics.jet`, `docs/spec/diagnostic-rows.md`, `docs/spec/diagnostics.md` (retired row, D-IF-FOLD1 cited). Add one registered parse-time retirement error for a literal `@if` token pair (what: `@if` is retired; why: plain if folds comptime-known branches, D-IF-FOLD1; fix: delete `@`), with UI snapshot, following the E0988 retired-form pattern.\n6. Migrate every in-repo consumer to plain `if`: `examples/features/comptime/comptime_if.jet` (+ refresh its header comment to cite D-IF-FOLD1), `examples/features/{comptime/fact_plane.jet,io/os_process_control.jet,lowlevel/os_target_gating.jet,packages/typed_settings/run.jet,ui/ui_native_linux.jet}`; tests `tests/{fmt.rs,cross.rs,tir_modules_and_enums.rs,cli_parts/commands.rs}`; fuzz corpus `tests/fuzz/sema/{differential,invalid,valid}/*comptime_if*` and `*os_target*` (the E0989 invalid case becomes a valid runtime-if program or is replaced by the new retirement-error case); `tests/ui/comptime_if_noncomptime_cond.{jet,stderr}` replaced accordingly. Regenerate goldens/snapshots by running each migrated example.\n7. Spec + docs: record the ratified outcome in `docs/spec/syntax-decisions.md` (amend the S57 block at ~line 2476, the D-OSTARGET2 shipped-spelling block at ~line 3962, and the settings fold note at ~line 6618); sweep remaining `@if` mentions in docs. Update `card '#2040'` criteria evidence and log.\n\n## Not building\n- No change to `@` bindings, `@ { }` blocks, or `@loop` (S57 remains; only the `if` verb is affected).\n- No new comptime evaluation power: the foldable class is exactly today's E0989 class; no const-generics, no comptime types (S26).\n- No relaxation for unmarked constants: `x :: true; if x` keeps full checking of both arms.\n- No `@if` alias, lint, or grace period (option C rejected; greenfield).\n- No runtime/Prelude semantics change — folding happens in sema, so no Prelude edits and no engine-host logic (I9).\n\n## Proof\n- Criterion 1: this plan §Outcome/§Work 2-3 name the folding rule for both boolean conditions and arm-table subjects; post-impl probe: `jet run examples/features/comptime/comptime_if.jet` prints the release-mode/unix lines, and `examples/features/lowlevel/os_target_gating.jet` selects the Linux arm.\n- Criterion 2: §Outcome fixes dropped-arm checking as name-resolution-only, triggered only by comptime-plane conditions; platform-specific-API probe: `examples/features/io/os_process_control.jet` migrated to plain `if @build.os == { … }` compiles on Linux with the Windows-only call resolved by name only; typo probe: fuzz invalid case `ui_comptime_if_typo_dropped` (migrated spelling) still errors E0107.\n- Criterion 3: ballot D-IF-FOLD1 is ballot-ready on this card (done); post-ratification, `grep -rn '@if' crates examples tests docs/book` returns zero live-surface hits (spec history text exempt).\n- Targeted tests: `cargo test --test fmt fmt_comptime_os_dispatch_round_trips` (rewritten to plain-if dispatch), `cargo test --test tir_modules_and_enums` phase-15 fold test, `cargo test --test cross` linux-triple fold assert, cli_parts `compare_chain` (migrated), fuzz differential golden for the migrated comptime_if program.\n- I9 parity: `jet run` (default) and `jet run --release` (AOT) agree on the goldens for comptime_if.jet, os_process_control.jet, and typed_settings/run.jet; the TIR Inline emission path is shared, and interpreter/JIT read the same sema fold result.\n- Full-suite proof stays at epoch closeout.\n\n## blockedBy\n- D-IF-FOLD1 — owner must ratify the amendment of D-WHEN1/D-WHEN2 before any surface change (I7: spelling change to user-typeable syntax).",
-      "blockedBy": [
-        "D-IF-FOLD1"
-      ],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-08-19",
-          "by": "fable",
-          "text": "LAW REVERSAL (2026-08-19): the owner's D-STRUCT-ONCE1 ratification comment orders reversing the earlier erase-@if ruling. D-IF-FOLD1 rec flipped A→B (keep @if, consistent with the strengthened @loop family); options unchanged so the owner settles it in one tap. Do NOT implement @if retirement unless the owner ratifies A against the ONCE1 comment. The card's plan implements whichever outcome ratifies."
-        },
-        {
-          "at": "2026-08-19",
-          "by": "Ballot2040b",
-          "text": "blockedBy set: D-IF-FOLD1 ratification gates implementation (I7)"
-        },
-        {
-          "at": "2026-08-19",
-          "by": "Ballot2040b",
-          "text": "Plan written; ballot D-IF-FOLD1 raised and ballot-ready (amends D-WHEN1/D-WHEN2). Card waits in decide."
-        },
-        {
-          "at": "2026-08-19",
-          "text": "Promoted from Ideas"
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Plan names the folding rule for plain if with a comptime-known condition AND for arm-table pattern matching (if x == { ... }) with a comptime-known subject",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:18:09.748Z"
-        },
-        {
-          "n": 2,
-          "text": "Plan resolves dropped-arm checking semantics (name-resolution-only vs full typecheck) with the platform-specific-API use case answered explicitly",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:18:10.218Z"
-        },
-        {
-          "n": 3,
-          "text": "Ballot raised amending D-WHEN1/D-WHEN2; @if retired from Syntax.rs, corpus, fmt, and docs in the same change once ratified",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:18:10.675Z"
-        },
-        {
-          "n": 4,
-          "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T16:41:04.636Z"
-        },
-        {
-          "n": 5,
-          "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T16:41:04.636Z"
-        },
-        {
-          "n": 6,
-          "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T16:41:04.636Z"
-        },
-        {
-          "n": 7,
-          "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T16:41:04.637Z"
-        }
-      ],
-      "refs": [
-        "examples/features/comptime/comptime_if.jet",
-        "docs/spec/syntax-decisions.md"
-      ],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-08-19T11:17:10.730Z",
-      "updated": "2026-08-19T16:41:04.637Z",
-      "updatedBy": "owner"
-    },
-    {
       "id": "c06s09om",
       "num": 2041,
       "title": "Result/Optional deconstruction sugar: competing spellings to ballot",
@@ -136072,6 +135959,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-19T20:57:11.334Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:09:17.036Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:09:17.036Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:09:17.036Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:09:17.037Z"
         }
       ],
       "refs": [],
@@ -136079,8 +136002,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T20:54:28.446Z",
-      "updated": "2026-08-19T20:57:11.334Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-19T21:09:17.037Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0ma0xb6",
@@ -136133,6 +136056,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-19T20:57:13.352Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:10:40.673Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:10:40.673Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:10:40.673Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T21:10:40.673Z"
         }
       ],
       "refs": [],
@@ -136140,8 +136099,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T20:54:29.077Z",
-      "updated": "2026-08-19T20:57:13.352Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-19T21:10:40.673Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -179943,84 +179902,6 @@
       "ratifiedAt": "2026-08-19"
     },
     {
-      "id": "D-IF-FOLD1",
-      "cardId": "c0zcrs0m",
-      "group": "syntax",
-      "title": "Retire @if: plain if folds compile-time branches",
-      "gist": "Whether Jet keeps a separate @if keyword or lets plain if fold branches the compiler already knows.",
-      "lesson": "Jet has two if forms today. Plain if branches at run time. @if branches at compile time and drops the untaken arm, which keeps platform-only code legal. Two forms mean readers learn, format, and search both. The owner ruled for one intelligent if on this card; this ballot fixes the exact folding and dropped-arm checking rules, pattern arms included.",
-      "explainer": "",
-      "story": "Priya writes a process-control module. It must call win32 APIs on Windows and POSIX APIs everywhere else. She writes if, then learns a second keyword exists for the same shape, and asks why one decision needs two spellings.",
-      "inWild": "// examples/features/io/os_process_control.jet — today's spelling\nfn run() {\n    @if @build.os == {\n        .Linux   -> { posix_control() }\n        .MacOS   -> { posix_control() }\n        .Windows -> { win32_control() }   // legal today: dropped arms skip type-check\n    }\n}",
-      "detail": "AMENDED 2026-08-19 after D-STRUCT-ONCE1 ratified. The owner's ratification comment is verbatim law here. It reads: \"With this decision, we need to reverse the decision made earlier today to erase @if and collapse to if.\" The recommendation therefore moves from A to B. @if stays as the explicit comptime-plane spelling, in one family with the strengthened @loop. The owner's original friction (two non-searchable ifs) is preserved in the options. Picking A remains possible but contradicts the ONCE1 comment.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One if: plain if folds comptime-plane conditions, pattern arms included",
-          "detail": "Retire @if. Plain if is the only conditional. When the whole condition, or the arm-table subject, lives on the compile-time plane — @ bindings, compiler facts like @build.os, literals, pure calls with known arguments — the compiler folds it. The taken arm compiles; every dropped arm gets name-resolution only, so typos are still caught but platform-only APIs stay legal. The @ inside the condition is the searchable folding signal. A runtime condition that merely happens to be constant may be optimized, but both arms always type-check in full.",
-          "technical": "The fold-with-relaxed-checking trigger is definitional, not inference-based: it fires exactly when the condition or subject is comptime-evaluable per today's E0989 class (@ names, compiler facts, literals, pure calls with all-known arguments). A mixed-plane condition such as `@debug && x` is a runtime if: the @ names fold to constants and both arms fully type-check. A plain (unmarked) binding never relaxes checking, even when the optimizer can fold it.\n\nArm tables with a comptime subject keep their shape checks (arm validity, exhaustiveness such as E-OSTARGET-DISPATCH-EXHAUSTIVE) before folding; dropped arms keep D-WHEN2 name-resolution-only. E0989 retires with the keyword: demanding foldability is spelled on the binding (`@cond :: expr` fails the build if unknowable), not on the branch. Amends D-WHEN1/D-WHEN2; `Stmt::ComptimeIf`/`ComptimeSwitch` merge into the plain if/if-table nodes carrying a fold result.",
-          "code": "@debug :: false\n\nfn run() {\n    if @debug -> print(\"debug build\")\n    if @build.os == {\n        .Linux   -> { posix_control() }\n        .MacOS   -> { posix_control() }\n        .Windows -> { win32_control() }   // dropped on Linux: names resolve, no type-check\n    }\n}"
-        },
-        {
-          "key": "B",
-          "name": "Keep @if as the explicit-intent spelling (status quo)",
-          "detail": "Keep both keywords. @if states folding intent at the branch site; plain if never changes checking depth. Readers spot a fold from the keyword alone. The cost is two if mechanisms to learn, document, format, lint, and search, more verbose conditional code, and a direct contradiction of the owner ruling recorded on this card.",
-          "technical": "No spec change. D-WHEN1/D-WHEN2 stand as ratified 2026-06-19: @if requires a comptime condition (E0989 otherwise); the dropped arm is name-resolved only. Plain if with a constant condition type-checks both arms.",
-          "code": "@debug :: false\n\nfn run() {\n    @if @debug { print(\"debug build\") }\n    @if @build.os == {\n        .Linux   -> { posix_control() }\n        .MacOS   -> { posix_control() }\n        .Windows -> { win32_control() }   // dropped on Linux: names resolve, no type-check\n    }\n}"
-        },
-        {
-          "key": "C",
-          "name": "Plain if folds; @if survives as a linted alias",
-          "detail": "Adopt option A's folding rules for plain if, but keep @if parsing as a deprecated alias. A lint flags every @if and fmt auto-fixes it to plain if. Old code keeps compiling during a grace period. The cost is two live spellings of one mechanism, a lasting lint, and a compatibility shim in a language that has no external users to protect.",
-          "technical": "Parser keeps `Stmt::ComptimeIf`/`ComptimeSwitch` as alias nodes that lower to the option-A fold path. A new L-code lint (registered per I4) fires on every @if; `jet fmt` rewrites it to plain if. All other option-A semantics apply unchanged.",
-          "code": "@debug :: false\n\nfn run() {\n    @if @debug { print(\"debug build\") }   // L05xx: `@if` is retired — write `if @debug` (auto-fix)\n    if @build.os == {\n        .Linux   -> { posix_control() }\n        .MacOS   -> { posix_control() }\n        .Windows -> { win32_control() }\n    }\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Zig",
-          "note": "Zig has one if. A comptime-known condition folds, and lazy analysis never fully checks the untaken branch. Option A adopts this model and adds name-resolution of dropped arms so typos are still caught.",
-          "code": "if (builtin.os.tag == .windows) {\n    win32Control();\n} else {\n    posixControl();\n}"
-        },
-        {
-          "lang": "Rust",
-          "note": "Rust splits the job in two. cfg!() looks like a runtime boolean and both arms must compile — the platform-API trap. #[cfg] removes code before type-check. Two spellings with different checking depth is the bifurcation the owner rejects.",
-          "code": "#[cfg(windows)]\nfn control() { win32_control() }\n\nif cfg!(debug_assertions) { /* both arms must still compile */ }"
-        }
-      ],
-      "rec": "B",
-      "recommendation": {
-        "why": "Keeping @if preserves one visible comptime-plane family: @if, @loop, and the @ mark itself. D-STRUCT-ONCE1=A just extended @loop into marker bodies, impl items, and test blocks. The ONCE1 ratification comment explicitly orders reversing the earlier erase-@if ruling. A reader sees the plane at the keyword itself.",
-        "whyNot": [
-          {
-            "key": "A",
-            "reason": "A was the owner's earlier interview ruling. The later D-STRUCT-ONCE1 comment orders that ruling reversed. Erasing @if while strengthening @loop would split the @ family Jet just unified."
-          },
-          {
-            "key": "C",
-            "reason": "A linted alias keeps two spellings alive forever and contradicts one-mechanism law. It inherits A's family split without A's simplicity win."
-          }
-        ],
-        "tradeoff": "Under A a reader scans the condition, not the keyword, to spot a folding branch. We accept this because every comptime name already carries the @ mark, so the signal is always present exactly where the decision is made."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "reviewPasses": {
-        "base": "Drafted three options around the owner ruling, set option A's fold trigger to the existing E0989 comptime class, and carried D-WHEN2 name-resolution forward for dropped arms, pattern arm tables included.",
-        "boilOcean": "Surveyed C #if, Zig comptime, Rust cfg/cfg!, and D version(). A fourth option — folding only inside @ { } blocks — was folded into B because it still keeps a second spelling alive.",
-        "hybrid": "Tested an A-plus-C blend (new semantics with a lasting alias) and rejected it as a shim. Kept one gain: the C-style fmt rewrite becomes the one-shot in-repo migration tool, not a shipped alias.",
-        "cooperative": "Steelmanned B: keyword-level intent reads well in diffs. Strengthened A to match by making the rule teachable in one line — a branch folds exactly when its condition is all compile-time-plane.",
-        "adversarial": "Attacked A with mixed-plane conditions, constant unmarked bindings, and arm-table exhaustiveness; each stays fully checked or keeps its shape checks, so checking depth never depends on inference distance. The recommendation held."
-      },
-      "checkInstructions": null,
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-08-19T16:05:04.467Z",
-      "outcome": "B",
-      "ratifiedAt": "2026-08-19"
-    },
-    {
       "id": "D-CALLPOS1",
       "cardId": "c0e7kkuf",
       "group": "syntax",
@@ -180633,8 +180514,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-19T20:56:49.114Z"
+      "status": "ratified",
+      "created": "2026-08-19T20:56:49.114Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-19"
     },
     {
       "id": "D-ARROW-UNIFY1",
@@ -180730,8 +180613,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-19T20:56:49.612Z"
+      "status": "ratified",
+      "created": "2026-08-19T20:56:49.612Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-19"
     }
   ],
   "questions": [
@@ -182523,6 +182408,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-19T21:21:23.614Z",
+      "by": "fable-e3-burndown",
+      "action": "card.delete",
+      "ref": "c0zcrs0m",
+      "note": "Retire @if: plain if folds comptime-known branches, pattern arms included"
+    },
+    {
+      "at": "2026-08-19T21:21:23.109Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.delete",
+      "ref": "D-IF-FOLD1",
+      "note": "Retire @if: plain if folds compile-time branches"
+    },
+    {
+      "at": "2026-08-19T21:10:46.592Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-19T21:10:46.592Z"
+    },
+    {
+      "at": "2026-08-19T21:10:40.673Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ARROW-UNIFY1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-19T21:10:40.673Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-19T21:10:40.673Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-19T21:10:40.673Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-19T21:10:40.673Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#5 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-19T21:09:17.037Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LIT-DOT1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-19T21:09:17.037Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-19T21:09:17.037Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-19T21:09:17.036Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-19T21:09:17.036Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#5 Syntax.rs entry updated"
+    },
     {
       "at": "2026-08-19T21:08:12.708Z",
       "by": "fable-e3-burndown",
@@ -185930,97 +185906,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c04yd90c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:57.430Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0yzzaom",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:33.965Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0psk4rw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:33.348Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gqalzc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:32.748Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wbtcon",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:32.128Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ku9me4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:31.523Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pdzfiu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:30.920Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zpske1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:30.309Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:29.709Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0i0wm0m",
-      "note": "body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:29.121Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0r2uq88",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:28.524Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#8 The D-CONC-GROUP1 rename ships: TaskGroup is renamed Group a"
-    },
-    {
-      "at": "2026-08-19T13:31:28.092Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05y3gfw",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:27.444Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0a5nr50",
       "note": "logEntry"
     }
   ],

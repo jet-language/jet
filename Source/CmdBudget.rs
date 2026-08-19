@@ -813,12 +813,12 @@ mod tests {
 
     /// A provider that only reads facts keeps the strict bound. A provider
     /// that compiles or benchmarks must be allowed the inner deadlines it is
-    /// pinned to spend: 21 trials of child compiles for CompilerProbe (twice
-    /// per trial in `Edit`, which compiles the clean tree and then the patched
-    /// one), and one real native build for a bench harness. A CompilerProbe
-    /// child compile *is* one real native build, so it spends the same
-    /// allowance. Cancelling sooner than that kills a healthy measurement
-    /// instead of a stuck one.
+    /// pinned to spend: 21 measured child compiles for CompilerProbe, plus one
+    /// priming compile in `Edit` (the clean tree is built once and every trial
+    /// starts from that warm cache), and one real native build for a bench
+    /// harness. A CompilerProbe child compile *is* one real native build, so it
+    /// spends the same allowance. Cancelling sooner than that kills a healthy
+    /// measurement instead of a stuck one.
     #[test]
     fn measuring_provider_deadlines_cover_their_pinned_inner_work() {
         use jet::BudgetProviders::collection_deadline;
@@ -833,7 +833,7 @@ mod tests {
 
         assert_eq!(bound("CompilerProbe", Some("Clean")), Duration::from_secs(21 * 120 + 30));
         assert_eq!(bound("CompilerProbe", Some("NoChange")), Duration::from_secs(21 * 120 + 30));
-        assert_eq!(bound("CompilerProbe", Some("Edit")), Duration::from_secs(21 * 2 * 120 + 30));
+        assert_eq!(bound("CompilerProbe", Some("Edit")), Duration::from_secs(22 * 120 + 30));
         assert_eq!(bound("BenchMeasurement", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE);
         assert_eq!(bound("AllocationProbe", None), SELECTED_BUILD_DEADLINE + PROVIDER_DEADLINE);
 

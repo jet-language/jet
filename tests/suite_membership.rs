@@ -54,9 +54,10 @@ const HOST_GATED: &str = "host_gated";
 /// with no row raises `unassigned` and fails against the ceiling below.
 ///
 /// Measured on 2026-08-17: 289 `tests/*.rs` targets in this package, 8 in
-/// workspace crates, plus this file. Lower it only in the same reviewed diff as
-/// a deleted test file.
-const TEST_TARGET_FLOOR: usize = 298;
+/// workspace crates, plus this file. 2026-08-19 (#677): `cli_compile_latency`
+/// split out of `cli`, so 290 in this package. Lower it only in the same
+/// reviewed diff as a deleted test file.
+const TEST_TARGET_FLOOR: usize = 299;
 
 /// How many declared targets may belong to NO set (#2025).
 ///
