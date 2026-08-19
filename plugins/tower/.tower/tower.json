@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2082,
-    "rev": 39251,
+    "rev": 39256,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19946,10 +19946,17 @@
       "phase": "building",
       "priority": "P2",
       "plan": "Add a compile-latency measurement family to the ratified budget system (D-PERFBUDGET-COMPILE1=C on this card; umbrella law at syntax-decisions.md:4836 — typed module perf.<role> declarations, pinned baselines, one BudgetReport, jet budget check / plan-first update). Extend the closed budget grammar in crates/jet-sema/src/Sema/BudgetSpecs.rs:6 with the compile-latency metric; register and execute a CompileLatency provider beside CompilerFacts in Source/BudgetProviders.rs:137, following the command-owned evidence path BenchMeasurement/AllocationProbe use (Source/CmdBudget.rs:314/:543); integrate workload capture, evidence, and unit in Source/CmdBudget.rs:301/:628. The workload is a deterministic in-repo fixture project compiled with the resident toolchain; samples are wall-clock with the pinned statistical baseline the umbrella prescribes. Non-goals: no CI wiring (E10), no new report format.",
-      "blockedBy": [],
+      "blockedBy": [
+        "c09otnjg"
+      ],
       "workOrder": 951,
       "assignee": "grok-e3",
       "log": [
+        {
+          "at": "2026-08-19",
+          "by": "fable-e3-burndown",
+          "text": "BLOCKED on #2074 (c09otnjg), measured 2026-08-19. The proof cannot fit any 900s suite guard: the ratified policy pins 1 warmup + 20 samples per workload and the test runs two measuring commands, so 128 child jet builds at ~34s each is ~72 min. The 2026-08-17 '102s' log was a FAILED run that died at Clean sample 0 after 3 front-end passes (102.7/3 = ~34s per pass), so nothing regressed. Root cause of the 34s tax is #2074: the Core/CoreLib closure (~1.54MB) is emitted outside the CACHED_RUNTIME markers (Codegen/mod.rs:4267 vs :4269), so every child compile re-feeds it to rustc. Timing-artifact root cause from the earlier lane IS fixed (Driver laps PhaseTiming + JET_TIMING_DIR). Landed meanwhile (1024b92ef): Edit primes one warm tree per collection instead of a cold clean build inside every trial (168 -> 128 child compiles, cold 128 -> 88), and the proof moved to its own cli_compile_latency target so it stops aborting every other cli case. Criteria 1/2/6 met on source+decision evidence; 3/4/5/7/8/9 need the runnable proof, which unblocks when #2074 lands."
+        },
         {
           "at": "2026-08-17",
           "by": "grok-e3",
@@ -19990,20 +19997,20 @@
         {
           "n": 1,
           "text": "D-PERFBUDGET-COMPILE1 is ratified before any public metric, provider, workload value, manifest field, command spelling, or diagnostic is implemented.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T18:02:24.806Z"
+          "evidence": "D-PERFBUDGET-COMPILE1 ratified=C; docs/spec/performance-budget-decisions.md:25-38 (one fixed warmup, twenty samples); syntax-decisions.md:5081",
+          "at": "2026-08-19T21:22:37.781Z"
         },
         {
           "n": 2,
           "text": "The chosen option is implemented exactly through #241 shared BudgetSpec evaluation, provider protocol, baseline storage, reports, diagnostics, JSON, CI, and proof integration; no second engine exists.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T18:02:24.911Z"
+          "evidence": "CompilerProbe registered beside CompilerFacts in the one registry (Source/BudgetProviders.rs:141-153); evidence flows the shared build_report/evaluate/verify path (CmdBudget.rs:303-475); baselines via shared store.plan_update/apply_update",
+          "at": "2026-08-19T21:22:38.287Z"
         },
         {
           "n": 3,
@@ -20035,11 +20042,11 @@
         {
           "n": 6,
           "text": "Syntax registry, syntax decision log, formatter, grammars, diagnostics, examples, docs, AOT and dev parity, targeted tests, independent review, and full verification follow the selected ruling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T18:02:25.325Z"
+          "evidence": "I7 rows: crates/jet-foundation/src/Syntax/jetpack_config.rs:141-145 (D-PERFBUDGET-COMPILE1=C citation) + :183-199 perf_budget_unit_scale; PERF_BUDGET_PROVIDERS CompilerProbe, PERF_BUDGET_METRICS CompileTime; parser Modules.rs:135-441; formatter Items.rs:400-413; sema BudgetSpecs.rs:387-658; command-owned measurement so no runtime semantics (I9 clean)",
+          "at": "2026-08-19T21:22:39.041Z"
         },
         {
           "n": 7,
@@ -20079,12 +20086,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T18:00:54.332Z",
-      "updated": "2026-08-17T18:55:47.017Z",
+      "updated": "2026-08-19T21:22:39.892Z",
       "tags": [
         "perf-budgets"
       ],
       "parentId": null,
-      "updatedBy": "grok-e3",
+      "updatedBy": "fable-e3-burndown",
       "claimedAt": "2026-08-17T18:55:47.017Z"
     },
     {
@@ -182409,6 +182416,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-19T21:22:39.892Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0be4wgi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T21:22:39.042Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-19T21:22:38.287Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-19T21:22:37.782Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0be4wgi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T21:22:21.381Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0be4wgi",
+      "note": "blockedBy"
+    },
+    {
       "at": "2026-08-19T21:21:23.614Z",
       "by": "fable-e3-burndown",
       "action": "card.delete",
@@ -185871,41 +185913,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0te2a80",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:32:00.513Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06s09om",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:59.896Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gj8tjv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:59.303Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0lz1y16",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:58.689Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0cu6duy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:31:58.042Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04yd90c",
       "note": "logEntry"
     }
   ],
