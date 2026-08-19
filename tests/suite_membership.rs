@@ -25,6 +25,8 @@
 //! cannot fall out of a set on their own, which is the failure mode this file
 //! exists to stop.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -66,6 +68,18 @@ const TEST_TARGET_FLOOR: usize = 299;
 /// genuinely cannot run on a normal host is parked in `host_gated:` WITH its
 /// observed gate, which costs an edit here as well — it is never simply absent.
 const UNASSIGNED_CEILING: usize = 0;
+
+/// How many suites may exceed the guard's 900s default (#677).
+///
+/// The guard's default is deliberately hostile: almost every suite that outruns
+/// 900s is defective, and the remedy is to split it or speed it up. A
+/// measurement suite whose sample count is ratified policy is the real
+/// exception, so `tests/suite_budgets.txt` exists — and this number is what
+/// keeps that exception an exception. It equals the row count today, so a
+/// SECOND exemption cannot land without moving this pin in the same reviewed
+/// diff. That friction is the feature: the goal is to speed development up, not
+/// to let the slow suites become the norm they were guarded against.
+const OVER_DEFAULT_BUDGET_CEILING: usize = 1;
 
 /// The targets that cannot run in any executable set, with the observed gate and
 /// the card that owes the fix. Sorted, and compared EXACTLY against the
@@ -466,4 +480,173 @@ fn the_suite_runner_reads_the_ledger() {
              come from tests/suites.txt so the runner and the ledger cannot disagree"
         );
     }
+}
+
+/// What the budget table got wrong, as NAMES rather than a count — same rule as
+/// `SuiteLedgerAudit` above: a number tells a reader something is wrong and
+/// nothing about what.
+fn audit_suite_budgets(rows: &[common::SuiteBudgetRow<'_>], discovered: &[String]) -> Vec<String> {
+    let names: Vec<&str> = discovered
+        .iter()
+        .map(|target| target.rsplit('/').next().unwrap_or(target.as_str()))
+        .collect();
+    let mut violations = Vec::new();
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in rows {
+        *seen.entry(row.suite).or_default() += 1;
+        if row.secs <= 900 {
+            violations.push(format!(
+                "`{}` asks for {}s, at or under the 900s default — a row that buys nothing is a \
+                 row to delete, and the env var is what tightens a budget",
+                row.suite, row.secs
+            ));
+        }
+        if !names.contains(&row.suite) {
+            violations.push(format!(
+                "`{}` names no test target — a stale row keeps an exemption alive for a suite that \
+                 no longer exists, and spends the ceiling on nothing",
+                row.suite
+            ));
+        }
+    }
+    for (suite, count) in seen {
+        if count > 1 {
+            violations.push(format!(
+                "`{suite}` has {count} rows; the guard takes the first, so the others are \
+                 exemptions nobody reads"
+            ));
+        }
+    }
+    violations
+}
+
+/// #677: the over-default budget rows stay a named minority.
+///
+/// The guard in `tests/common/mod.rs` no longer holds a flat 900s constant — it
+/// resolves each suite's budget from `tests/suite_budgets.txt`, defaulting to
+/// 900s. That flexibility is one edit away from becoming "everything is slow
+/// now", so the exemption list is itself guarded: the pin lives HERE, outside
+/// the file it guards, for the same reason `TEST_TARGET_FLOOR` does — a
+/// hand-edit of the table cannot green the check that limits the table.
+#[test]
+fn suite_budget_rows_stay_a_named_minority() {
+    let rows = common::parse_suite_budgets(common::SUITE_BUDGET_LEDGER).unwrap_or_else(|err| {
+        panic!(
+            "{} does not parse, so the guard silently falls back to the 900s default for every \
+             listed suite: {err}",
+            common::SUITE_BUDGET_LEDGER_PATH
+        )
+    });
+    let discovered = discover_test_targets();
+    let violations = audit_suite_budgets(&rows, &discovered);
+
+    // The denominator, printed pass or fail.
+    eprintln!(
+        "suite budgets: {} of {} declared test target(s) exceed the 900s default (ceiling \
+         {OVER_DEFAULT_BUDGET_CEILING}):",
+        rows.len(),
+        discovered.len()
+    );
+    for row in &rows {
+        eprintln!("  {} {}s — {}", row.suite, row.secs, row.reason);
+    }
+
+    assert!(
+        violations.is_empty(),
+        "{} is {} row(s) wrong:\n  {}",
+        common::SUITE_BUDGET_LEDGER_PATH,
+        violations.len(),
+        violations.join("\n  ")
+    );
+    assert!(
+        rows.len() <= OVER_DEFAULT_BUDGET_CEILING,
+        "{} suite(s) now exceed the 900s guard default, over the ceiling of \
+         {OVER_DEFAULT_BUDGET_CEILING}:\n  {}\nThe guard is flexible for a NAMED minority, not for \
+         the majority: a suite that outruns 900s is normally defective and gets split or sped up. \
+         If this row genuinely belongs, raise OVER_DEFAULT_BUDGET_CEILING in the same reviewed \
+         diff and say why here (#677).",
+        rows.len(),
+        rows.iter()
+            .map(|row| format!("{} {}s — {}", row.suite, row.secs, row.reason))
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+
+    // The table's third reader. `scripts/agent/time-suites.sh` sets the external
+    // `timeout` per target and must NOT export a blanket deadline, because
+    // JET_TEST_DEADLINE_SECS only tightens: a runner that exports 900 hands the
+    // exempt suite its abort back (AGENTS.md I8).
+    let runner = include_str!("../scripts/agent/time-suites.sh");
+    assert!(
+        runner.contains("suite_budgets.txt"),
+        "scripts/agent/time-suites.sh no longer reads {}, so it runs every target on one deadline \
+         and the committed rows are decorative",
+        common::SUITE_BUDGET_LEDGER_PATH
+    );
+}
+
+/// #677 negative control: the budget law actually fires.
+///
+/// A pin that has never been watched fail is a pin nobody should trust — the
+/// same reason `suite_ledger_audit_fires_on_a_target_in_no_set` exists. Hand the
+/// audit a row that buys nothing, a row naming no target, and a duplicated row,
+/// and require it to name each one; hand the parser a reasonless row and require
+/// it to refuse.
+#[test]
+fn suite_budget_audit_fires_on_a_row_that_should_not_exist() {
+    let discovered = vec![
+        "tests/cli_compile_latency".to_string(),
+        "tests/some_unit_suite".to_string(),
+    ];
+    let rows = vec![
+        common::SuiteBudgetRow {
+            suite: "cli_compile_latency",
+            secs: 5400,
+            reason: "ratified sample policy",
+        },
+        common::SuiteBudgetRow {
+            suite: "cli_compile_latency",
+            secs: 4000,
+            reason: "a second row for the same suite",
+        },
+        common::SuiteBudgetRow {
+            suite: "some_unit_suite",
+            secs: 900,
+            reason: "at the default, so it buys nothing",
+        },
+        common::SuiteBudgetRow {
+            suite: "deleted_suite",
+            secs: 1200,
+            reason: "target no longer exists",
+        },
+    ];
+    let violations = audit_suite_budgets(&rows, &discovered);
+    assert_eq!(
+        violations.len(),
+        3,
+        "one row at the default, one naming no target, one duplicated: {violations:?}"
+    );
+    assert!(
+        violations.iter().any(|v| v.contains("some_unit_suite") && v.contains("900s default")),
+        "a row at the default must be named: {violations:?}"
+    );
+    assert!(
+        violations.iter().any(|v| v.contains("deleted_suite") && v.contains("no test target")),
+        "a row naming no target must be named: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("cli_compile_latency") && v.contains("2 rows")),
+        "a duplicated row must be named: {violations:?}"
+    );
+
+    // The parser is the other half of the law: a row with a budget but no reason
+    // is an exemption nobody can review or retire, so it never becomes a row.
+    let err = common::parse_suite_budgets("some_unit_suite 5400\n")
+        .expect_err("a reasonless row must be refused");
+    assert!(err.contains("states no reason"), "{err}");
+    let err = common::parse_suite_budgets("some_unit_suite ninety minutes, please\n")
+        .expect_err("a non-numeric budget must be refused");
+    assert!(err.contains("not a budget in whole seconds"), "{err}");
 }

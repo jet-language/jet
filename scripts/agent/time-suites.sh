@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Time test binaries independently, one named verification set at a time.
-# The in-process guard remains the authority: no binary may run past 900s.
+# The in-process guard remains the authority: every binary runs on the 900s
+# default unless tests/suite_budgets.txt names it (#677), and this script sets
+# the external `timeout` from that same table so a committed row is not clipped
+# by a shorter kill.
 #
 # #2025: the set names and their members come from tests/suites.txt and nowhere
 # else. This script keeps no list of its own, so a target cannot be in a set the
@@ -22,22 +25,48 @@ ledger="tests/suites.txt"
 # on a normal host, so `all` must skip them rather than fail on them.
 parked="host_gated"
 
-budget="${JET_TEST_DEADLINE_SECS:-900}"
-external="${JET_TEST_TIMEOUT_SECS:-1000}"
-case "$budget" in
-  ''|*[!0-9]*) echo "error: JET_TEST_DEADLINE_SECS must be a positive integer" >&2; exit 64 ;;
-esac
-case "$external" in
-  ''|*[!0-9]*) echo "error: JET_TEST_TIMEOUT_SECS must be a positive integer" >&2; exit 64 ;;
-esac
-if [ "$budget" -lt 1 ] || [ "$budget" -gt 900 ]; then
-  echo "error: test-binary budget must be between 1 and 900 seconds, got $budget" >&2
-  exit 64
+# The committed per-suite budget table (#677). The guard's default is 900s; a
+# suite gets more only through a row here, with its reason. This script keeps no
+# copy of those numbers, for the same reason it keeps no copy of the set
+# membership above (AGENTS.md I8).
+budgets="tests/suite_budgets.txt"
+
+# JET_TEST_DEADLINE_SECS may only TIGHTEN, in the guard and here: an exported
+# deadline is granted to all 290 targets at once, which is the drift the table
+# exists to stop. Leave it unset for the committed budgets.
+override="${JET_TEST_DEADLINE_SECS:-}"
+# An absolute external timeout, when the caller wants one. Otherwise it is
+# derived per target as budget + 100s, the slack this script has always used.
+slack="${JET_TEST_TIMEOUT_SECS:-}"
+if [ -n "$override" ]; then
+  case "$override" in
+    ''|*[!0-9]*) echo "error: JET_TEST_DEADLINE_SECS must be a positive integer" >&2; exit 64 ;;
+  esac
+  if [ "$override" -lt 1 ] || [ "$override" -gt 900 ]; then
+    echo "error: JET_TEST_DEADLINE_SECS may only tighten, so it must be 1..900, got $override. A longer deadline is a committed row in $budgets with its reason (#677)." >&2
+    exit 64
+  fi
 fi
-if [ "$external" -lt "$budget" ]; then
-  echo "error: external timeout ($external) must cover the $budget-second test guard" >&2
-  exit 64
+if [ -n "$slack" ]; then
+  case "$slack" in
+    ''|*[!0-9]*) echo "error: JET_TEST_TIMEOUT_SECS must be a positive integer" >&2; exit 64 ;;
+  esac
 fi
+
+if [ ! -f "$budgets" ]; then
+  echo "error: $budgets is missing — it is the only table of per-suite guard budgets" >&2
+  exit 1
+fi
+
+# One target's committed budget, or empty for the default. Same shape as
+# ledger_rows below: the file is parsed, never mirrored.
+budget_for() {
+  awk -v want="$1" '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    $1 == want { print $2; exit }
+  ' "$budgets"
+}
 
 if [ ! -f "$ledger" ]; then
   echo "error: $ledger is missing — it is the only list of verification sets" >&2
@@ -122,12 +151,29 @@ if [ "${#rows[@]}" -eq 0 ]; then
   exit 1
 fi
 
-echo "time-suites: set '$selection' — ${#rows[@]} target(s), guard ${budget}s"
+echo "time-suites: set '$selection' — ${#rows[@]} target(s), guard 900s unless $budgets names them"
 
 status=0
 for row in "${rows[@]}"; do
   read -r -a args <<<"$(cargo_args_for "$row")"
-  echo "time-suites: $row (guard ${budget}s)"
+  # The target name is the binary name, which is the spelling the budget table
+  # and the guard both use.
+  budget="$(budget_for "${row##*/}")"
+  budget="${budget:-900}"
+  budget_source="$budgets"
+  if [ "$budget" -eq 900 ]; then
+    budget_source="default"
+  fi
+  if [ -n "$override" ] && [ "$override" -lt "$budget" ]; then
+    budget="$override"
+    budget_source="JET_TEST_DEADLINE_SECS"
+  fi
+  external="${slack:-$((budget + 100))}"
+  if [ "$external" -lt "$budget" ]; then
+    echo "error: JET_TEST_TIMEOUT_SECS ($external) does not cover ${row##*/}'s ${budget}s guard budget" >&2
+    exit 64
+  fi
+  echo "time-suites: $row (guard ${budget}s from ${budget_source}, timeout ${external}s)"
   started=$SECONDS
   target_status=0
   if JET_TEST_DEADLINE_SECS="$budget" timeout "${external}s" \

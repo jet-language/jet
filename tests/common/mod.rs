@@ -128,19 +128,154 @@ fn guard_start_watchdog() {
     }
 }
 
-fn guard_watchdog_main() {
-    // Backstop, not an accommodation: no test suite should run past 15-20
-    // minutes. A suite that hits this is itself defective — split or speed
-    // it up, don't raise the cap.
-    let secs: u64 = std::env::var("JET_TEST_DEADLINE_SECS")
+/// The wall-clock budget for one test binary when nothing names it. #677: this
+/// number does not move. A suite that outruns it is normally defective — split
+/// it or speed it up — and the rare suite that genuinely cannot fit (a
+/// measurement suite whose sample count is ratified policy) earns a NAMED row
+/// in the table below instead of a bigger number here.
+const DEFAULT_SUITE_BUDGET_SECS: u64 = 900;
+
+/// The committed exemption table, embedded rather than read at run time: the
+/// guard must not depend on a cwd, and a deleted table becomes a compile error
+/// instead of a silently restored default. `tests/suite_membership.rs` reads
+/// this same text through this module — never a second copy — and pins how many
+/// rows may exceed the default (AGENTS.md I8).
+pub const SUITE_BUDGET_LEDGER: &str = include_str!("../suite_budgets.txt");
+
+/// Named once so the abort message, the ledger checks and the runner all cite
+/// the same path.
+pub const SUITE_BUDGET_LEDGER_PATH: &str = "tests/suite_budgets.txt";
+
+/// One table row: the test target name (`--test <name>`), its budget in
+/// seconds, and the one-line reason it is not the default. Borrowed from the
+/// ledger text, so resolving a budget allocates nothing but the message.
+#[derive(Debug)]
+pub struct SuiteBudgetRow<'a> {
+    pub suite: &'a str,
+    pub secs: u64,
+    pub reason: &'a str,
+}
+
+/// Parse the table. Strict on purpose: a malformed row is an error naming the
+/// line, never a skipped row, because a row nobody parses is an exemption
+/// nobody voted for. The guard below treats an unparseable table as "no rows"
+/// and so falls back to the strict default; `tests/suite_membership.rs` fails
+/// on the same input, which is where the drift gets reported.
+pub fn parse_suite_budgets(text: &str) -> Result<Vec<SuiteBudgetRow<'_>>, String> {
+    let mut rows = Vec::new();
+    for (index, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let number = index + 1;
+        let mut fields = line.splitn(3, char::is_whitespace);
+        let suite = fields.next().unwrap_or_default();
+        let secs = fields.next().unwrap_or_default();
+        let reason = fields.next().unwrap_or_default().trim();
+        let secs: u64 = secs.parse().map_err(|_| {
+            format!(
+                "{SUITE_BUDGET_LEDGER_PATH}:{number}: `{secs}` is not a budget in whole seconds. \
+                 Row shape: <test target name> <seconds> <reason, one line>"
+            )
+        })?;
+        if reason.is_empty() {
+            return Err(format!(
+                "{SUITE_BUDGET_LEDGER_PATH}:{number}: the `{suite}` row states no reason. An \
+                 exemption without a reason is one nobody can review or retire (#677)"
+            ));
+        }
+        rows.push(SuiteBudgetRow {
+            suite,
+            secs,
+            reason,
+        });
+    }
+    Ok(rows)
+}
+
+/// The suite a running test binary belongs to. Cargo names the binary
+/// `<target>-<metadata hash>`, so the stem minus that hash is the target name —
+/// exactly the spelling `tests/suites.txt` and the budget table use.
+pub fn suite_name_from_exe_stem(stem: &str) -> &str {
+    match stem.rsplit_once('-') {
+        Some((head, hash))
+            if !head.is_empty()
+                && hash.len() >= 8
+                && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+        {
+            head
+        }
+        _ => stem,
+    }
+}
+
+/// Resolve one suite's budget and say where it came from, so the abort can name
+/// the rule that bit the reader instead of only the number (#677).
+///
+/// `JET_TEST_DEADLINE_SECS` may only TIGHTEN: an env var that could loosen is a
+/// deadline handed to every target at once by whoever exported it, which is the
+/// opposite of a committed, named, reviewable minority. Pure, so the unit tests
+/// below drive it with synthetic input instead of the real environment.
+fn resolve_suite_budget(suite: &str, ledger: &str, env_raw: Option<&str>) -> (u64, String) {
+    let row = parse_suite_budgets(ledger)
         .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(900);
+        .and_then(|rows| {
+            rows.into_iter()
+                .find(|row| row.suite == suite)
+                .map(|row| (row.secs, row.reason.to_string()))
+        });
+    let (mut secs, mut source) = match row {
+        Some((secs, reason)) => (
+            secs,
+            format!("the committed `{suite}` row in {SUITE_BUDGET_LEDGER_PATH} — {reason}"),
+        ),
+        None => (
+            DEFAULT_SUITE_BUDGET_SECS,
+            format!(
+                "the {DEFAULT_SUITE_BUDGET_SECS}s default (no `{suite}` row in \
+                 {SUITE_BUDGET_LEDGER_PATH})"
+            ),
+        ),
+    };
+    // 1..secs, both ends meaningful: 0 would abort instantly (garbage, not a
+    // tightening) and anything at or above the resolved budget is the loosening
+    // this law refuses.
+    if let Some(requested) = env_raw
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|requested| (1..secs).contains(requested))
+    {
+        source = format!("JET_TEST_DEADLINE_SECS={requested}, tightening {source}");
+        secs = requested;
+    }
+    (secs, source)
+}
+
+fn guard_watchdog_main() {
+    // Backstop, not an accommodation: a suite that hits this is itself
+    // defective — split or speed it up. The one exception is a measurement
+    // suite whose sample count is ratified policy, and that exception is a
+    // committed row in the table, naming itself and its reason (#677).
+    let stem = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let suite = suite_name_from_exe_stem(&stem);
+    let (secs, source) = resolve_suite_budget(
+        suite,
+        SUITE_BUDGET_LEDGER,
+        std::env::var("JET_TEST_DEADLINE_SECS").ok().as_deref(),
+    );
+    let started = std::time::Instant::now();
     std::thread::sleep(std::time::Duration::from_secs(secs));
+    let elapsed = started.elapsed().as_secs();
     guard_abort(|out| {
         let _ = writeln!(
             out,
-            "jet test guard: exceeded the {secs}s suite budget — aborting; this suite must be split or sped up, not given a longer deadline"
+            "jet test guard: suite `{suite}` exceeded its {secs}s budget after {elapsed}s — \
+             aborting. Budget source: {source}. Split the suite or speed it up; a longer deadline \
+             is a committed row in {SUITE_BUDGET_LEDGER_PATH} with its reason, never a raised \
+             default (#677)."
         );
     });
 }
@@ -1367,4 +1502,75 @@ fn garbage_alloc_cap_env_value_clamps_to_a_sane_cap() {
     assert_eq!(parsed_cap_gb(None), 10);
     assert_eq!(parsed_cap_gb(Some("not a number")), 10);
     assert_eq!(parsed_cap_gb(Some("0")), 1, "0 GB must clamp up to the 1 GB floor");
+}
+
+#[test]
+fn suite_budget_defaults_to_900s_and_env_can_only_tighten() {
+    // #677: the table is the only way up. Everything unlisted keeps the flat
+    // default, and the abort names which of the two rules applied.
+    let ledger = "# comment\nslow_measurement 5400 ratified sample policy\n";
+
+    let (secs, source) = resolve_suite_budget("some_unit_suite", ledger, None);
+    assert_eq!(secs, 900, "an unlisted suite keeps the 900s default");
+    assert!(source.contains("900s default"), "source: {source}");
+    assert!(source.contains("no `some_unit_suite` row"), "source: {source}");
+
+    let (secs, source) = resolve_suite_budget("slow_measurement", ledger, None);
+    assert_eq!(secs, 5400, "a named row is the suite's budget");
+    assert!(source.contains("committed `slow_measurement` row"), "source: {source}");
+    assert!(source.contains("ratified sample policy"), "the reason travels: {source}");
+
+    // Tightening is the env var's whole job — the guard self-test runs on it.
+    let (secs, source) = resolve_suite_budget("some_unit_suite", ledger, Some("3"));
+    assert_eq!(secs, 3);
+    assert!(source.starts_with("JET_TEST_DEADLINE_SECS=3, tightening"), "source: {source}");
+
+    // Loosening is not. An exported deadline is granted to every target at
+    // once, which is exactly the drift the committed table exists to stop.
+    assert_eq!(resolve_suite_budget("some_unit_suite", ledger, Some("36000")).0, 900);
+    assert_eq!(resolve_suite_budget("slow_measurement", ledger, Some("36000")).0, 5400);
+    assert_eq!(
+        resolve_suite_budget("some_unit_suite", ledger, Some("0")).0,
+        900,
+        "a zero deadline would abort instantly; it is garbage, not a tightening"
+    );
+
+    // A malformed table falls back to the strict default rather than to the
+    // last row that happened to parse. tests/suite_membership.rs is what turns
+    // that fallback into a reported failure.
+    assert_eq!(resolve_suite_budget("slow_measurement", "slow_measurement lots", None).0, 900);
+    assert_eq!(resolve_suite_budget("slow_measurement", "slow_measurement 5400", None).0, 900);
+}
+
+#[test]
+fn suite_name_comes_from_the_test_binary_cargo_built() {
+    // Cargo runs `target/debug/deps/<target>-<metadata hash>`; the budget table
+    // and tests/suites.txt both spell the target name, so the hash comes off.
+    assert_eq!(
+        suite_name_from_exe_stem("cli_compile_latency-1a2b3c4d5e6f7a8b"),
+        "cli_compile_latency"
+    );
+    // Run by hand, or by a runner that copied the binary: no hash to strip.
+    assert_eq!(suite_name_from_exe_stem("cli_compile_latency"), "cli_compile_latency");
+    // A trailing word that is not a metadata hash is part of the name.
+    assert_eq!(suite_name_from_exe_stem("cli-runtime"), "cli-runtime");
+    assert_eq!(suite_name_from_exe_stem("-1a2b3c4d5e6f7a8b"), "-1a2b3c4d5e6f7a8b");
+}
+
+#[test]
+fn the_committed_suite_budget_table_parses() {
+    // The guard reads this table in a watchdog thread and falls back to the
+    // default when it cannot parse it, so a typo would otherwise cost a suite
+    // its exemption silently. Every suite binary carries this check.
+    let rows = parse_suite_budgets(SUITE_BUDGET_LEDGER)
+        .unwrap_or_else(|err| panic!("{SUITE_BUDGET_LEDGER_PATH} does not parse: {err}"));
+    for row in &rows {
+        assert!(
+            row.secs > DEFAULT_SUITE_BUDGET_SECS,
+            "{SUITE_BUDGET_LEDGER_PATH}: `{}` asks for {}s, at or under the \
+             {DEFAULT_SUITE_BUDGET_SECS}s default. A row that buys nothing is a row to delete.",
+            row.suite,
+            row.secs
+        );
+    }
 }

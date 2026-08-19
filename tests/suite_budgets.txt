@@ -1,0 +1,21 @@
+# Committed per-suite wall-clock budgets for the in-process test guard (#677).
+#
+# The guard in tests/common/mod.rs aborts any test binary that runs past its
+# budget. THE DEFAULT IS 900 SECONDS AND DOES NOT MOVE. A suite that cannot fit
+# it is normally defective — split it or speed it up — so the only way to get
+# longer is one row here that NAMES the suite and says why on the same line.
+# `JET_TEST_DEADLINE_SECS` may only TIGHTEN a budget; no env var, and no runner,
+# can buy a longer one, because a deadline granted by an environment gets
+# granted to all 290 targets at once.
+#
+# Rows are a minority on purpose. tests/suite_membership.rs
+# (`suite_budget_rows_stay_a_named_minority`) fails when the row count exceeds
+# OVER_DEFAULT_BUDGET_CEILING there, so this table cannot quietly become the
+# norm: a new exemption costs a reviewed edit in two files, in one diff.
+#
+# A row is not a licence to get slower. It states a measured cost with a named
+# cause, and it shrinks or leaves when that cause is fixed.
+#
+# format: <test target name> <seconds> <reason, one line>
+
+cli_compile_latency 5400 measurement suite, not a slow unit suite: ratified D-PERFBUDGET-COMPILE1=C pins one warmup plus twenty samples per workload and the proof runs two measuring commands, so 128 child `jet build` invocations at the ~34s measured on 2026-08-19 is ~72 min; #2074 removes that per-compile tax, and this row shrinks with it
