@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2062,
-    "rev": 38466,
+    "rev": 38474,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -134545,11 +134545,11 @@
         {
           "n": 1,
           "text": "Six ballots D-STRUCT-PLANE1/LIVE1/LIFE1/EDGE1/POLICY1/ONCE1 are ballot-ready on this card with full review passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:43:19.279Z"
+          "evidence": "D-STRUCT-PLANE1/LIVE1/LIFE1/EDGE1/POLICY1/ONCE1 added on card #2052, full ballotMode with five review-pass summaries each; tower validation passed on add",
+          "at": "2026-08-19T11:52:09.468Z"
         },
         {
           "n": 2,
@@ -134563,11 +134563,11 @@
         {
           "n": 3,
           "text": "Drift bugs found by probes are filed as their own cards with repro evidence",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:43:20.219Z"
+          "evidence": "Cards #2053 (trait-value E0112 vs spec.md:814, repro target-probes/sr/trait3.jet), #2054 (inline-module struct E0119 + E0113 contradictory fix, repros vis3.jet/vis2.jet), #2055 (stringly watcher API)",
+          "at": "2026-08-19T11:52:09.934Z"
         },
         {
           "n": 4,
@@ -134590,7 +134590,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:43:07.845Z",
-      "updated": "2026-08-19T11:43:20.675Z",
+      "updated": "2026-08-19T11:52:09.934Z",
       "updatedBy": "fable"
     },
     {
@@ -177194,6 +177194,515 @@
       "comment": "Add week as the only new Time literal suffix, a fixed 7-day scale on the ns carrier. Calendar-dependent units (month, year, decade, century, millennium) never become literal suffixes; they stay in the checked Period and date API.",
       "created": "2026-08-19T11:17:41.973Z",
       "ratifiedAt": "2026-08-19"
+    },
+    {
+      "id": "D-STRUCT-PLANE1",
+      "cardId": "c0b6kkbv",
+      "group": "tooling",
+      "title": "Structure is a fact plane: liveness, lifecycle, and edges under the fact law",
+      "gist": "Whether facts about a program's own structure join the one fact registry, or stay separate checks.",
+      "lesson": "Jet holds facts about values, rights, effects, and time under one ratified law: one home, silent tightening, one written word to loosen, one ledger (D-FACT-LAW1). The audit on card #2052 found structure truths with no home: whether a name is used, what stage an API is in, which import edges are legal. This ballot decides where those truths live. The follow-up ballots (D-STRUCT-LIVE1, LIFE1, EDGE1) decide each surface; this one decides the substrate.",
+      "explainer": "",
+      "story": "Mara's team has a wiki page: 'delete dead imports, don't import the DB layer from UI, use parse not decode'. None of it is checked. A new agent session breaks all three rules in one afternoon, and review catches one of them. Mara wants the compiler to hold the rules the way it already holds effects.",
+      "inWild": "// jet check today, over this file: \"ok: no problems\"\nmodule bank\nuse core.files as files      // dead since a refactor\n\nfn unused_helper() => Int {  // never called\n    return 7\n}\n\nfn run() {\n    a :: bank.open()\n    print(a.owner)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One plane: structure facts join the fact registry",
+          "detail": "Liveness, lifecycle stage, and edge legality register as fact rows with a stated safe direction and a gate word. Every bypass lands in the one gate ledger. `jet inspect structure` reads the rows the same way `jet inspect gates` reads gates. Users get one mental model: the compiler learns structure facts for you, never forgets one, and every exception is one written word.",
+          "technical": "Rows: liveness (safe direction = referenced; gate = `_name`), lifecycle (safe direction = fewer promises announced, more warnings honored; gate = policy allow), edge (safe direction = fewer edges; gate = manifest rule edit, on the record). All rows erase at runtime (I3). Drift guard from D-FACT-LAW1=B applies: a row that states no direction or gate fails the build of the compiler itself.",
+          "code": "$ jet inspect structure app/\nliveness   app/main.jet:3  use core.files   unused — remove, or mark `_files`\nlifecycle  store.decode    retiring 1.2     replacement: store.parse\nboundary   app.api → core.files   DENIED by package.jet boundaries[0]\ngates      _files (main.jet:3)    1 use"
+        },
+        {
+          "key": "B",
+          "name": "Lints only: verdicts without registry rows",
+          "detail": "Ship the same warnings and errors, but as ordinary diagnostics with no fact rows, no ledger entries, and no inspect lens. Simpler to picture. The cost: suppressions are invisible to audit, and the structure story cannot be asked for. Each verdict becomes its own small system — the fragmentation the fact law was ratified to end.",
+          "code": "// same warnings appear inline; nothing else exists\nwarn[L__]: import `files` is never used\n// no `jet inspect structure`; `_files` suppressions live nowhere"
+        },
+        {
+          "key": "C",
+          "name": "External analyzer: keep the compiler out of it",
+          "detail": "Leave structure checking to a separate tool, the way Java leaves it to ArchUnit and Python to import-linter. The compiler stays smaller. The cost: a second source of truth about the program, a second config surface, and no I4 diagnostics contract. Every peer that took this road ended with rules teams do not run.",
+          "code": "$ jet-structure check .   # hypothetical side tool\n# separate install, separate config, separate output format"
+        },
+        {
+          "key": "D",
+          "name": "Decline: structure stays folklore",
+          "detail": "No new checks. Wikis, review comments, and agent prompts keep carrying the rules. Nothing changes for any current program. The four audit losses to clippy, eslint, ArchUnit, and rust's deprecated attribute stay open.",
+          "code": "// status quo: jet check prints \"ok\" over dead imports, dead functions,\n// silent layering breaks, and un-deprecatable APIs"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust / Clippy",
+          "note": "Rustc holds unused checks in the compiler with one suppression spelling (`_x`, `#[allow]`); architecture rules live nowhere. Jet can hold both in one registry with one audited gate story.",
+          "code": "warning: unused variable: `dead`\n  = note: `#[warn(unused_variables)]` on by default"
+        },
+        {
+          "lang": "Java / ArchUnit",
+          "note": "Architecture rules are a test-library bolt-on. Teams that skip the test suite skip the rules. Compiler-held rules cannot be skipped silently.",
+          "code": "ArchRuleDefinition.noClasses().that().resideInAPackage(\"..ui..\")\n  .should().dependOnClassesThat().resideInAPackage(\"..db..\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The fact law already answers every hard question these checks raise: where the truth lives, how it tightens, how a bypass is spelled, and where the bypass is recorded. Registering structure rows buys the ledger, the inspect lens, and the drift guard for free, and keeps one mental model for beginners: Jet learns facts for you.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Plain lints rebuild the pre-fact-law world: each verdict becomes its own small system with invisible suppressions. That fragmentation is what D-FACT-LAW1 was ratified to end."
+          },
+          {
+            "key": "C",
+            "reason": "A side tool is a second source of truth with no I4 contract. The peer evidence is uniform: bolt-on analyzers get skipped, which is why this gap exists in every mainstream language."
+          },
+          {
+            "key": "D",
+            "reason": "Declining keeps the four measured losses open, and agents keep eroding structure that no oracle defends."
+          }
+        ],
+        "tradeoff": "The fact registry gains three row kinds whose subjects are names and edges rather than values. That widens the registry's job description, and we accept it because the law's own text already names scopes and the build as fact subjects."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared registry rows, plain lints, and declining, and recommended rows because the ledger and inspect lens come free.",
+        "boilOcean": "The breadth pass added the external-analyzer option, since ArchUnit-style tools are the real incumbents. It stayed a losing option: every one of them is skippable and un-contracted.",
+        "hybrid": "Tested lints-first-rows-later as a staged hybrid. Rejected: staging is implementation shape, not a distinct final design, so no option was added.",
+        "cooperative": "Strengthened B (it can reuse the `_name` gate and policy walls) and C (it could ship in-repo and versioned). Both still lack the ledger, the lens, and the diagnostics contract.",
+        "adversarial": "Attacked A on registry bloat and beginner noise. Each row has a subject, a safe direction, and a gate word, and warnings never fail builds, so the recommendation survived."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T11:51:51.168Z"
+    },
+    {
+      "id": "D-STRUCT-LIVE1",
+      "cardId": "c0b6kkbv",
+      "group": "tooling",
+      "title": "Liveness verdicts: unused imports, bindings, functions, and unreachable exports",
+      "gist": "Which dead names the compiler reports, and how a user silences one.",
+      "lesson": "Today Jet says nothing about dead code. A probe this run passed `jet check` with an unused import, an unused function, and an unused binding in eleven lines. Every mainstream toolchain reports these. Dead code also costs agents directly: they pay tokens to read names the compiler already knows are dead. The suppression spelling already exists — the underscore ladder (D-NAME-SIGIL1) makes `_name` the human mark for internal or discarded names. This ballot decides how far the verdict family reaches.",
+      "explainer": "",
+      "story": "An agent refactors Priya's service across forty edits. Each edit orphans an import or a helper. Nothing ever says so. Three weeks later a quarter of the file is dead weight, every future agent reads all of it, and Priya cannot tell live code from fossil without tracing by hand.",
+      "inWild": "// all three pass `jet check` today with \"ok: no problems\"\nuse core.files as files      // orphaned by a refactor\n\nfn retry_once() => Int {     // caller was deleted last month\n    return 1\n}\n\nfn run() {\n    attempts :: 3            // never read\n    print(\"hi\")\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full family: file-local dead names plus unreachable package exports",
+          "detail": "Four verdicts: unused import, unused binding, unused private function, and a `pub(package)` or application-target export nothing reaches. All are warnings under the override law — they never fail a build unless a team wall says so. Renaming to `_name` or deleting is the whole fix. Library `pub` items are exempt by definition: their consumers live outside the build.",
+          "technical": "File-local verdicts need only the existing resolver. The export tier decides reachability from the explicit import graph plus ApiFreeze consumer data, and applies only where the full consumer set is visible: `pub(package)` items and application (payload) targets. Never fires on library `pub`. Policy names: unused_import, unused_binding, unused_fn, unreachable_export.",
+          "code": "warn: import `files` is never used\n  fix: remove it, or name it `_files`\nwarn: `attempts` is never read\n  fix: remove it, or name it `_attempts`\nwarn: `retry_once` has no callers in this package\n  fix: remove it, or name it `_retry_once`\n\n// team wall, package.jet:\npolicy: .{ lints: .{ deny: [unused_import] } }"
+        },
+        {
+          "key": "B",
+          "name": "File-local only: imports, bindings, private functions",
+          "detail": "The same verdicts without the export tier. Everything is decidable inside one file's resolver output, so no reachability question exists. The cost: exported-but-orphaned code — the largest and longest-lived kind of dead weight — stays invisible.",
+          "code": "warn: import `files` is never used\nwarn: `attempts` is never read\n// `pub(package) fn old_path()` with zero consumers: silence"
+        },
+        {
+          "key": "C",
+          "name": "Imports only",
+          "detail": "Report only unused imports, the least controversial verdict. Smallest possible step. Bindings and functions keep rotting silently, which is where most of the measured waste sits.",
+          "code": "warn: import `files` is never used\n// everything else: silence"
+        },
+        {
+          "key": "D",
+          "name": "Decline",
+          "detail": "No liveness verdicts. Jet stays the only modern toolchain that says nothing about dead code. Scratch scripts stay perfectly quiet, which is the one honest gain.",
+          "code": "$ jet check main.jet\nok: `main.jet` has no problems   // including the dead third of it"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Unused imports and locals are hard errors. Users hate the interruption mid-edit; the ecosystem grew `_ = x` idioms to fight the compiler. Jet's warning-plus-underscore keeps the teaching without the fight.",
+          "code": "./main.go:5:2: declared and not used: attempts"
+        },
+        {
+          "lang": "Rust",
+          "note": "Warnings by default, `_x` to silence, deny-able per project. Widely considered the right default. This is option A's shape, minus the export tier rustc lacks (dead pub detection needs external tools there).",
+          "code": "warning: unused variable: `attempts`\nhelp: if this is intentional, prefix it with an underscore: `_attempts`"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Dead exports are the dead code that matters most and lasts longest, and Jet is unusually able to catch them: imports are explicit, wildcards are banned, and ApiFreeze already snapshots consumers. The family is one law — every declared name is reachable or carries the `_` mark — and one law teaches better than a shrinking subset. Warnings never block anyone, and the fix is one rename with exactly one obvious repair.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Stops exactly where the value is highest. File-local rot is annoying; orphaned exports are the fossils that survive for years."
+          },
+          {
+            "key": "C",
+            "reason": "Unused bindings are the most common dead name in the corpus and the cheapest to detect. Reporting only imports leaves most of the waste."
+          },
+          {
+            "key": "D",
+            "reason": "Keeps the one hygiene loss to every peer toolchain, and keeps paying agent tokens for names the compiler knows are dead."
+          }
+        ],
+        "tradeoff": "The export tier can mislabel code kept deliberately for external or future use inside an application. We accept it because the `_name` mark and the policy allow are both one written word, and library `pub` is exempt by scope."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed the four-verdict family with `_name` as the one suppression, over file-local-only, imports-only, and decline.",
+        "boilOcean": "The breadth pass tested hard errors (Go's model) and silent auto-deletion. Both folded: errors fight users mid-edit, and silent deletion changes programs without a verdict.",
+        "hybrid": "Tested pairing every verdict with a `jet fix` edit. That strengthened all options rather than creating a new one, so the fix note moved into A.",
+        "cooperative": "Strengthened B (no reachability analysis needed anywhere) and D (scripts stay noise-free). Both remain weaker than A on the audit's measured waste.",
+        "adversarial": "Attacked the export tier: library `pub` has zero in-repo consumers by design. Repaired by scoping that tier to `pub(package)` items and application targets, so the recommendation survived."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T11:51:51.619Z"
+    },
+    {
+      "id": "D-STRUCT-LIFE1",
+      "cardId": "c0b6kkbv",
+      "group": "syntax",
+      "title": "One lifecycle ladder: user-facing #Deprecated and the end of the Core-only table",
+      "gist": "How a library tells its users an API is going away.",
+      "lesson": "A Jet name already climbs a ladder: `_name` internal, `pub _name` soft-public with warning L0601, `pub` stable with its shape frozen by ApiFreeze. The ladder has no top: nothing marks an API as retiring. Core hoards that power in a hardcoded two-row table inside dead staging code (Sema/Edition.rs), and no package can use it. Amendment note: this ballot opens the E2001/E2002/L2001 deprecation area, today scoped to compiler-known Core items, to every package.",
+      "explainer": "",
+      "story": "Ana ships a config library. Version 1.2 renames `decode` to `parse` because the old name collided with a family verb. She cannot say so in code. Her options today are a comment, a changelog, and hope. Every consumer learns about the rename when `decode` disappears and their build breaks with no pointer to the replacement.",
+      "inWild": "// store.jet 1.2 — today, all Ana can do:\n// TODO: stop using decode, call parse instead (see CHANGELOG)\npub fn decode(bytes: [Byte]) => Config ? DecodeError { ... }\npub fn parse(bytes: [Byte]) => Config ? DecodeError { ... }\n\n// consumer: no warning, no pointer, until the breaking release",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The full ladder: #Deprecated marker, Core table deleted into it",
+          "detail": "Any package marks any `pub` item `#Deprecated(since: \"1.2\", use: \"parse\")`. Consumers get one warning carrying the replacement; `jet fix` applies it when the replacement is a plain rename. Core's two hardcoded rows become ordinary markers on `cbor.encode` and `cbor.decode`, and the Edition.rs staging table is deleted. One mechanism, top to bottom of the ladder, same for Core and everyone.",
+          "technical": "Marker registers in Prelude/Markers.jet (law zero). Warning rides the existing L2001/E2002 window; `removed_in:` is optional and only binds when package editions are wired. ApiFreeze remains the enforcement half: removing the item later is the same named-delta error it is today. Policy names: deprecated_use (warn by default; deny-able; allow-able for vendored deps).",
+          "code": "// store.jet 1.2\n#Deprecated(since: \"1.2\", use: \"parse\")\npub fn decode(bytes: [Byte]) => Config ? DecodeError { ... }\n\n// consumer build:\nwarn: `store.decode` is retiring (since 1.2) — use `store.parse`\n  fix: rename this call to `store.parse` (jet fix applies it)"
+        },
+        {
+          "key": "B",
+          "name": "Marker only: users get #Deprecated, Core keeps its table",
+          "detail": "Same user-facing marker, but Core's hardcoded table and staging code stay as a second mechanism. Users gain everything option A gives them. The compiler keeps two homes for one truth, which the corpus law names a defect.",
+          "code": "#Deprecated(since: \"1.2\", use: \"parse\")\npub fn decode(bytes: [Byte]) => Config ? DecodeError { ... }\n// meanwhile Edition.rs still ships DEPRECATIONS = [cbor.encode, cbor.decode]"
+        },
+        {
+          "key": "C",
+          "name": "Manifest-declared deprecation",
+          "detail": "Deprecations live in package.jet as data (`deprecations: .{ \"decode\": .{ since: \"1.2\", use: \"parse\" } }`), not at the item. Keeps source files untouched and the list auditable in one place. The cost: the truth sits away from the item, so readers of the source see nothing, and the fact law wants the word at the site.",
+          "code": "// package.jet\ndeprecations: .{\n    \"store.decode\": .{ since: \"1.2\", use: \"store.parse\" }\n}\n// store.jet: unmarked; readers see a healthy function"
+        },
+        {
+          "key": "D",
+          "name": "Decline",
+          "detail": "No user-facing deprecation. Libraries keep breaking consumers cold, or keep old names forever. Note the tension: keeping old names forever is what the greenfield law forbids Jet's own corpus.",
+          "code": "// v2.0 ships; consumer build:\nerror: there's no function called `decode` in `store`\n// no pointer to `parse`; archaeology begins"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`#[deprecated(since, note)]` is available to every crate and is the single most-used evolution tool in the ecosystem. Note is free text; Jet's `use:` names the replacement, so the fix is typed.",
+          "code": "#[deprecated(since = \"1.2\", note = \"use parse\")]\npub fn decode(bytes: &[u8]) -> Config { ... }"
+        },
+        {
+          "lang": "Go",
+          "note": "Deprecation is a comment convention (`// Deprecated: ...`) that tools grep for. It works only because gopls chose to honor prose. A convention held up by one tool is the outcome to avoid.",
+          "code": "// Deprecated: Use Parse instead.\nfunc Decode(b []byte) (Config, error) { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The ladder completes with one marker in the registry every other marker already lives in, the warning window already spec'd, and the enforcement half already shipped as ApiFreeze. Core eating its own dogfood — its two rows becoming ordinary markers — is the proof the mechanism is honest. The replacement lands in the consumer's hands as a typed edit, which is the repair-determinism win agents need.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeps two homes for one truth. The corpus law (D-ONCE-LAW1) makes an underivable second copy a defect, and the second copy here is inside the compiler itself."
+          },
+          {
+            "key": "C",
+            "reason": "Moves the truth away from the item. Source readers see a healthy function, and the fact law's own words ask for the written word at the site."
+          },
+          {
+            "key": "D",
+            "reason": "Leaves libraries the choice between breaking consumers cold and hoarding stale names forever — both outcomes the rest of Jet's law system exists to prevent."
+          }
+        ],
+        "tradeoff": "The `removed_in:` field stays dormant until package editions are wired, so the ladder's last rung is warn-only for now. We accept a ladder with a soft top over no ladder, because ApiFreeze already makes removal a named, non-silent event."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed the site marker with a named replacement and recommended deleting the Core table into it.",
+        "boilOcean": "The breadth pass added the manifest-declared option and tested runtime warnings (Node's model). Runtime warnings folded because Jet facts erase at runtime by law.",
+        "hybrid": "Tested marker-at-site plus a rendered manifest summary. Folded into A: `jet inspect api` renders the lifecycle table from the markers, giving C's auditability without its scattering.",
+        "cooperative": "Strengthened C (survives file moves without touching source) and D (pre-1.0 breaking with good notes is defensible). Both still lose on where the reader looks and on typed fixes.",
+        "adversarial": "Attacked the edition coupling: `removed_in:` implies machinery that is staged, not wired. Repaired by making the field optional and warn-only until editions land, with removal staying on ApiFreeze."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T11:51:52.092Z"
+    },
+    {
+      "id": "D-STRUCT-EDGE1",
+      "cardId": "c0b6kkbv",
+      "group": "tooling",
+      "title": "Boundary rules: import edges as manifest policy",
+      "gist": "Whether a package can declare which of its own modules may import which.",
+      "lesson": "Every team past a certain size writes the same rule in prose: the UI layer never touches storage, the core never imports upward. No mainstream language can check it, so a whole tool family bolts it on (ArchUnit, import-linter, eslint-boundaries). Jet already constrains what a dependency may do — effect budgets in package.jet, with E1220 naming the offender (D-EFFBUDGET1). This ballot decides whether the same manifest can constrain the package's own import graph. The compiler already holds that graph completely: imports are explicit, wildcards are banned, cycles are errors.",
+      "explainer": "",
+      "story": "Tom's team agreed in review: handlers call the store module, never core.files directly. Six months and two hundred agent edits later, eleven handlers read disk directly. Nothing objected at any point. The wiki page was correct the whole time.",
+      "inWild": "// app/api.jet — the edit nothing objects to today\nuse core.files as files            // \"handlers never touch disk\" — wiki, 2026\n\npub fn config(req: HTTPRequest) => HTTPResponse {\n    raw :: files.read(\"cfg.cbor\") ?? []   // layering gone, silently\n    return http_server.response(200, render(raw))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A boundaries: key, shaped like effect budgets",
+          "detail": "One manifest key lists denied (or exclusively allowed) import edges between module paths. A violating `use` is one error naming the edge and the rule, the way E1220 names a dependency. No key means no rules — today's behavior exactly. Policy narrows and never widens, per the ratified policy law.",
+          "technical": "Edge = `.{ from: module.path, to: module.path }` with `*` as a trailing subtree wildcard on either side. Checked at import resolution; zero runtime presence. Rules bind the declaring package's own modules only — dependencies police themselves. Diagnostic names the edge, the rule index, and the two fixes: route through an allowed layer, or amend the manifest (one written line, on the record).",
+          "code": "// package.jet\nboundaries: .{\n    deny: [\n        .{ from: app.api,  to: core.files },\n        .{ from: app.core, to: app.* },\n    ]\n}\n\n// app/api.jet\nuse core.files as files\n// error: import edge app.api → core.files is denied by boundaries[0]\n//  fix: route through `app.store`, or amend boundaries in package.jet"
+        },
+        {
+          "key": "B",
+          "name": "One merged rules surface for effects and imports",
+          "detail": "Fold effect budgets and import rules into a single `rules:` key, since both are allow/deny edge policy. One law on paper. The cost: the two rule kinds bind different graphs — the dependency graph versus the package's own module graph — and a merged key hides which graph a rule touches. This option amends the ratified D-EFFBUDGET1 spelling.",
+          "code": "// package.jet — merged surface (amends D-EFFBUDGET1)\nrules: .{\n    deny: [\n        .{ dep: \"leftpad\", effect: Net },\n        .{ from: app.api,  to: core.files },\n    ]\n}"
+        },
+        {
+          "key": "C",
+          "name": "Site markers on modules",
+          "detail": "Declare constraints where the module is declared: `#NoImport(core.files)` on the module. The rule sits next to the code it governs. The cost: the architecture story scatters across files, and package-level policy already has a ratified home — the manifest, which only tightens (D-PACKAGE-POLICY-SCOPE1).",
+          "code": "// app/api.jet\n#NoImport(core.files)\nmodule api\n// the full layering story now requires reading every module header"
+        },
+        {
+          "key": "D",
+          "name": "Decline",
+          "detail": "No import rules. Layering stays prose. Jet keeps parity with every other language here, and teams that care adopt review discipline or wait for an ecosystem tool that does not exist yet.",
+          "code": "// wiki: \"handlers never import core.files\"\n// compiler: no opinion, forever"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java / ArchUnit",
+          "note": "The most-adopted architecture checker anywhere, and it runs only when the test suite runs. The demand is proven; the delivery mechanism is the weakness Jet can fix by holding the rule in the compiler.",
+          "code": "noClasses().that().resideInAPackage(\"..api..\")\n  .should().accessClassesThat().resideInAPackage(\"..files..\")"
+        },
+        {
+          "lang": "Go",
+          "note": "The `internal/` directory is the one architecture rule Go ever added, retrofitted into the toolchain after conventions failed. Evidence that when a boundary rule matters enough, it ends up compiler-held.",
+          "code": "package foo/internal/db  // importable only from within foo/"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The compiler already holds the whole import graph explicitly, so the check is a table lookup at resolution time. The key mirrors a shape the owner already ratified for effects, so there is nothing new to learn: allow/deny, policy only narrows, the error names the offender and both fixes. No language owns this surface; it is a categorical win at near-zero conceptual cost, and absent the key nothing changes for anyone.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Merging hides which graph a rule binds — a dependency's behavior versus my own module edges are different questions, and D-EFFBUDGET1's spelling would be amended for a legibility loss."
+          },
+          {
+            "key": "C",
+            "reason": "Scatters the architecture story across module headers and creates a second home for package policy, against the ratified rule that the manifest is where policy tightens."
+          },
+          {
+            "key": "D",
+            "reason": "Keeps the most-requested architecture check in industry unexpressible, in the one language positioned to hold it natively."
+          }
+        ],
+        "tradeoff": "Module-path wildcards (`app.*`) enter the manifest vocabulary, a small new matching surface to specify precisely. We accept it because a rules list without subtree matching forces one row per module pair and rots as the tree grows."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed the sibling key with effect-budget shape and deny-first semantics, against merged-surface, site-marker, and decline options.",
+        "boilOcean": "The breadth pass tested directory-convention rules (Go's internal/) and a standalone rules file. The convention folds into the existing `_name` ladder; the file lost to the one-manifest law.",
+        "hybrid": "Tested manifest rules plus a read-only site echo. Folded into the inspect story: `jet inspect boundaries` shows per-module bindings without a second writable surface.",
+        "cooperative": "Strengthened B (one edge-policy law is the deeper unification on paper) and C (locality helps single-module readers). Both still lose on graph legibility and the manifest's ratified role.",
+        "adversarial": "Attacked rules-rot and allow-mode lockout. Repaired: a rule matching zero edges becomes a liveness warning, and deny-first is documented as the default posture, so the recommendation survived."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T11:51:52.593Z"
+    },
+    {
+      "id": "D-STRUCT-POLICY1",
+      "cardId": "c0b6kkbv",
+      "group": "syntax",
+      "title": "A home for cross-cutting policy: transforms, middleware, or markers",
+      "gist": "Where tracing, retry, metrics, and auth live, instead of being pasted into every function.",
+      "lesson": "A cross-cutting concern is behavior that applies to many functions: time this, retry that, check auth first. Jet has no home for one. Policy must be written inside every function or hand-wrapped per exact signature, because function values cannot carry `&` or `^` parameters and `#Context` keys are compiler-known only. The field audit conceded this vector to Python and asked for exactly this decision (docs/audits/field-audit-2026-08-03.md:179); no ballot was ever minted. This is that ballot.",
+      "explainer": "",
+      "story": "Sam's team must trace every handler for an audit. In Python that was one decorator on twelve functions. In Jet, Sam pastes a timer and a log line into all twelve bodies. Two months later three of the twelve have drifted — one logs before the work, two forgot the error path. The concern has twelve homes, so it has no home.",
+      "inWild": "// today: the concern pasted per function, already drifting\npub fn config(req: HTTPRequest) => HTTPResponse {\n    t0 :: clock.now()                              // paste 1\n    out :: build_config(req)\n    log.info(\"config took {clock.now() - t0}\")     // paste 2, misses error path\n    return out\n}\npub fn users(req: HTTPRequest) => HTTPResponse {\n    // forgot the timer entirely\n    return build_users(req)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed transforms, applied by value or by marker",
+          "detail": "One canonical mechanism: a transform is an ordinary function that takes a callable and returns a callable with the same checked contract — parameter modes, effects, errors, and returned views preserved. Experts compose transforms as values. Beginners apply one with a marker that names it: `#With(trace.wrap)`. One mechanism, two spellings, and the marker is sugar for the value.",
+          "technical": "Requires a signature-preserving callable type — the capability the field audit names as missing (function values today erase modes and cannot carry `&`/`^` parameters). The transform's own contract: it may observe and wrap, and its effects add to the wrapped row visibly. No AST access, no signature edits, no macro; the wrapped function's checked signature is the law the transform must return. Design of the callable type is its own follow-up spec, gated on this ballot.",
+          "code": "// Core or user library:\npub fn wrap<F: Callable>(f: F) => F =[Clock, Log]=> { ... }   // proposed type surface\n\n// expert: compose values\ntraced_config :: trace.wrap(config)\n\n// beginner: one marker, sugar for the same call\n#With(trace.wrap)\npub fn config(req: HTTPRequest) => HTTPResponse { ... }"
+        },
+        {
+          "key": "B",
+          "name": "Middleware values at registration points",
+          "detail": "No language change. Frameworks accept policy values where callables register: the mux, the job runner, the CLI dispatcher. Covers framework code well and costs nothing new. Free functions, library APIs, and anything not passing through a registration point keep the paste-per-function reality.",
+          "code": "mux.use(trace.middleware())\nmux.use(auth.require(role: .Admin))\nmux.get(\"/cfg\", (req: HTTPRequest) => config(req))\n// but a plain library function still cannot be traced without editing it"
+        },
+        {
+          "key": "C",
+          "name": "First-party markers only",
+          "detail": "A closed, compiler-known policy set: `#Traced`, `#Retry(times: 3)`, `#Timed`. Bodies live in Core; users apply markers and never author policy. Maximally safe and uniform. The cost: every new concern needs a compiler release — the policy surface is closed exactly where open/closed matters most, the same defect as the Core-only deprecation table.",
+          "code": "#Traced #Retry(times: 3)\npub fn fetch(url: String) => Response ? NetError { ... }\n// team needs #Audited? File a compiler feature request and wait."
+        },
+        {
+          "key": "D",
+          "name": "Decline: keep hand-threading",
+          "detail": "The concern stays pasted per function. The corpus shows the price today: repeated attributes, drifting log lines, forgotten error paths. Python keeps the conceded API-composition vector.",
+          "code": "// twelve functions, twelve slightly different timers, forever"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "A decorator is an ordinary callable plus application sugar — one mechanism, two spellings. It won because policy authors and policy users are different people. It loses types, which is exactly what Jet's version must not lose.",
+          "code": "@trace\ndef config(req): ...   # trace is just a function"
+        },
+        {
+          "lang": "Java / Spring AOP",
+          "note": "Policy applied by annotation, resolved by a runtime container through proxies. The magic is invisible and famously undebuggable. The lesson: application may be sugar, but the mechanism must stay an ordinary value a reader can follow.",
+          "code": "@Transactional @Retryable\npublic Response fetch(String url) { ... }"
+        },
+        {
+          "lang": "Go",
+          "note": "Middleware-at-registration only (option B lived out). Works for servers; the ecosystem's answer for everything else is copy-paste, measured in every large Go codebase.",
+          "code": "mux.Handle(\"/cfg\", Trace(Auth(handler)))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A transform-as-value gives both audiences their rung: beginners apply a named policy with one marker; experts author and compose policy as ordinary typed values. It also forces the fix for a standing hole this audit hit independently — function values that erase modes — which blocks dependency inversion today. Options B and C are both subsets: a middleware value is a transform at one call site, and a first-party marker is a transform Core authored.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Covers only code that passes a registration point. The corpus's pasted timers are in plain functions; they stay pasted."
+          },
+          {
+            "key": "C",
+            "reason": "Closes the policy set inside the compiler — the Core-only deprecation table's defect repeated at the exact place users need to author, not just apply."
+          },
+          {
+            "key": "D",
+            "reason": "The measured drift in the story is the steady state: twelve homes for one concern, agents re-learning each variant, and the conceded Python vector stays conceded."
+          }
+        ],
+        "tradeoff": "This is the one ballot in the slate that commits new type-system surface: a signature-preserving callable type, with its design as a gated follow-up spec. We accept the gate because the alternative options avoid the type work only by not solving the problem."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft carried the field audit's three shapes plus decline and recommended the typed transform for generality.",
+        "boilOcean": "The breadth pass tested user-extensible `#Context` keys alone and effect-handler interception. Context keys solve a sibling problem and ride any winner; handlers broke the law that effects erase.",
+        "hybrid": "The hybrid pass merged the separate marker option into A, since a marker naming a transform is application sugar, not a second mechanism. That made A a complete two-audience design.",
+        "cooperative": "Strengthened B (shippable now, matches Go's proven server story) and C (auditable, I8-clean, can never smuggle control flow). Both hearings are reflected in their details.",
+        "adversarial": "Attacked A's typing risk against the no-HKT wall and its invisible control flow. Repaired: the callable-contract design is a gated follow-up spec, transform effects surface in the wrapped row, and application stays a written mark."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T11:51:53.062Z"
+    },
+    {
+      "id": "D-STRUCT-ONCE1",
+      "cardId": "c0b6kkbv",
+      "group": "syntax",
+      "title": "Say it once, in programs: @loop reaches marker bodies, impl items, and test blocks",
+      "gist": "Whether the existing template loop can generate registry rows, impls, and benches from one written table.",
+      "lesson": "Jet's corpus law says every truth has one home and every copy is rendered (D-ONCE-LAW1). Jet programs cannot obey it in three positions, and the stdlib is the proof. Units.jet copy-pastes a 24-row SI-prefix block 28 times (~700 of 911 lines). Errors.jet hand-writes 13 identical conversion impls, and one bench file unrolls a 4-by-3 matrix into 24 blocks. The ratified template machinery (`@loop`, typed item templates, D-META-*) stops at type members. This ballot decides whether it reaches marker bodies, top-level impl items, and test or bench blocks.",
+      "explainer": "",
+      "story": "A contributor adds the SI prefix `quetta` to Jet's unit catalog. The change is one concept. Today it is 28 edits — one per unit family — and review must confirm all 28 are identical. Family 17 gets a typo'd exponent; golden tests catch it a release later.",
+      "inWild": "// Prelude/Units.jet today — this block, 28 times, ~700 lines\npub #UnitFamily(Resistance, dimension: M*L*L/T/T/T/A/A, base: ohm) {\n    ohm\n    quectoohm(scale: 1/1000000000000000000000000000000)\n    rontoohm(scale: 1/1000000000000000000000000000)\n    // ... 21 more identical-shape rows, per family\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Templates reach the three positions",
+          "detail": "The existing `@loop` becomes legal inside marker bodies, at top-level impl-item position, and inside test and bench declarations. Loop sources must be written literal tables or comptime-pure values — closed lists a reader can see, never reflection over open sets. The checker sees each generated declaration one by one, exactly as derive templates already work. No new evaluator, no macro, no string splicing.",
+          "technical": "S26 holds: no type is created, parameterized, or selected; loops contribute declarations. Coherence: generated impls obey the ordinary orphan rule at the expansion site, and the source list being written at the site keeps the impl set closed and auditable. `jet inspect expand` covers these expansions like every other compiler-wrote-this mechanism (spec.md:3710).",
+          "code": "pub #UnitFamily(Resistance, dimension: M*L*L/T/T/T/A/A, base: ohm) {\n    ohm\n    @loop p, si.prefixes { unit(\"{p.name}ohm\", scale: p.scale) }\n}\n\n@loop E, [BrowserError, DBError, NetError] {\n    impl E => Err { return Err(\"{self}\") }\n}\n\n@loop n, [64, 512, 4096] { @loop c, [1, 4, 16] {\n    #Bench(\"para_map n{n} c{c}\") { require_eq(para_map_case(n, c), expected(n, c)) }\n} }"
+        },
+        {
+          "key": "B",
+          "name": "Stdlib-internal expansion only",
+          "detail": "The compiler gets a blessed expansion path for its own Prelude files; user programs get nothing. The 700 lines die, but the capability is hoarded — the same closed-table defect this audit found in the deprecation machinery, repeated in the metaprogramming layer.",
+          "code": "// Prelude builds shrink; a user's 24-case bench matrix stays hand-unrolled"
+        },
+        {
+          "key": "C",
+          "name": "Parameterize each DSL instead",
+          "detail": "No loops. Each registry surface grows its own knob: `#UnitFamily(..., prefixes: si.all)`, `#Bench` accepts a case table, error families get a derive. Every knob is small and safe. The cost: N bespoke mini-features doing one job — the many-coats shape the one-mechanism invariant exists to prevent — and the next DSL starts at zero again.",
+          "code": "pub #UnitFamily(Resistance, dimension: M*L*L/T/T/T/A/A, base: ohm, prefixes: si.all)\n#Bench(cases: para_matrix) { require_eq(para_map_case(case.n, case.c), case.expect) }\n// error impls: still waiting for their own knob"
+        },
+        {
+          "key": "D",
+          "name": "Decline",
+          "detail": "The three positions stay literal-only. The stdlib keeps its 700 pasted lines, review keeps confirming 28 copies are identical by eye, and user registries inherit the same ceiling as they grow.",
+          "code": "// quetta lands as 28 hand edits; family 17's typo ships"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "This exact pressure produced `macro_rules!` tables in every large crate — untyped token expansion that Jet's walls forbid. The demand is real; the question is whether Jet's typed loop answers it before users hit the wall.",
+          "code": "macro_rules! impl_err { ($($t:ty),*) => { $(impl From<$t> for Err { ... })* } }"
+        },
+        {
+          "lang": "Zig",
+          "note": "Comptime loops generating declarations from written tables is Zig's signature move, and it stays fully checked. Closest existing shape to option A.",
+          "code": "inline for (prefixes) |p| { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One ratified mechanism reaching three more positions beats three bespoke knobs and beats a hoarded compiler-only path. The lists stay written at the site, so nothing becomes less auditable. A visible table and shape is strictly more reviewable than 28 hand copies that merely claim to be identical. The stdlib's own 700 lines are the acceptance test.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Repeats the closed-table defect inside the metaprogramming layer: the compiler keeps a power users are denied, and user registries hit the same wall unfixed."
+          },
+          {
+            "key": "C",
+            "reason": "N mini-features for one job is the many-coats shape I8 exists to prevent, and every future DSL starts the fight over."
+          },
+          {
+            "key": "D",
+            "reason": "Keeps measurable, review-hostile duplication in the compiler's own source while the corpus law calls that a defect."
+          }
+        ],
+        "tradeoff": "Marker bodies stop being purely literal: a reader may now meet a loop where rows used to be. We accept it because the loop's source table is written at the same site and `jet inspect expand` renders the rows on demand."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed extending @loop to the three measured positions against stdlib-only, per-DSL knobs, and decline.",
+        "boilOcean": "The breadth pass tested build-step file generation and runtime case tables for benches. Both folded: generation loses provenance and review locality; runtime tables lose per-case compile-time identity.",
+        "hybrid": "Tested adopting loops plus a #Bench case-table knob as sugar. Folded: once loops reach the position, a knob is a second spelling for the same rows.",
+        "cooperative": "Strengthened C (each surface gets a designed, minimal vocabulary) and B (the stdlib is where all three measured offenders live). Both remain subsets of A's coverage.",
+        "adversarial": "Attacked A on the S26 wall and on auditability drift. Generated impls stay closed and written at the site under the ratified derive precedent, and loop sources must be literal tables named at the site."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T11:51:53.530Z"
     }
   ],
   "questions": [
@@ -178985,6 +179494,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-19T11:52:09.935Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-19T11:52:09.468Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-19T11:51:53.530Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-STRUCT-ONCE1",
+      "note": "Say it once, in programs: @loop reaches marker bodies, impl items, and test blocks"
+    },
+    {
+      "at": "2026-08-19T11:51:53.063Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-STRUCT-POLICY1",
+      "note": "A home for cross-cutting policy: transforms, middleware, or markers"
+    },
+    {
+      "at": "2026-08-19T11:51:52.593Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-STRUCT-EDGE1",
+      "note": "Boundary rules: import edges as manifest policy"
+    },
+    {
+      "at": "2026-08-19T11:51:52.092Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-STRUCT-LIFE1",
+      "note": "One lifecycle ladder: user-facing #Deprecated and the end of the Core-only table"
+    },
+    {
+      "at": "2026-08-19T11:51:51.620Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-STRUCT-LIVE1",
+      "note": "Liveness verdicts: unused imports, bindings, functions, and unreachable exports"
+    },
+    {
+      "at": "2026-08-19T11:51:51.168Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-STRUCT-PLANE1",
+      "note": "Structure is a fact plane: liveness, lifecycle, and edges under the fact law"
+    },
     {
       "at": "2026-08-19T11:46:29.135Z",
       "by": "fable",
@@ -182428,62 +182993,6 @@
       "action": "card.update",
       "ref": "c0c9pndv",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-16T23:58:47.813Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0c9pndv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T23:58:46.961Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0c9pndv",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T23:58:46.128Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0c9pndv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-16T23:58:44.992Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0c9pndv",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-16T23:58:43.950Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c014nejk",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-16T23:58:43.333Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c014nejk",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-16T23:58:42.916Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c014nejk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-16T23:58:42.485Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c014nejk",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
