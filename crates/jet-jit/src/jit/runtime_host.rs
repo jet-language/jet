@@ -1453,9 +1453,16 @@ fn jet_jit_rich_panic(
             Concurrency::set_rich_panic_report(report.rendered);
             Concurrency::set_local_rich_panic();
         } else {
-            rt.stderr.push_str(&report.rendered);
-            rt.exit_code = Some(report.exit_code);
-            rt.set_trap("__jet_rich_panic__");
+            // The report is already rendered, so it takes the pre-rendered
+            // stop seam (`jet_jit_contract_fail` uses the same one). Writing
+            // `exit_code` by hand and then calling `set_trap` recorded the
+            // report but left `trapped` empty: `set_runtime_stop` keeps the
+            // FIRST stop and returns early once `exit_code` is set, so
+            // `store_trap` never ran, `jet_jit_is_trapped` kept answering 0,
+            // and generated code sailed past `emit_trap_check` — the stop
+            // reported but did not stop (I9: AOT's `jet_panic_rich` is `!`
+            // and the evaluator raises).
+            rt.set_rendered_runtime_stop(report.rendered, report.exit_code);
         }
         0
     })

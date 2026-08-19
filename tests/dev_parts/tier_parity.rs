@@ -73,6 +73,9 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "errors/error_context",
         "errors/must_use",
         "errors/panic",
+        // #1967: `?? panic(…)` on a failing carrier. Named here so a tier that
+        // reports the stop without ending the program fails by name.
+        "errors/qq_panic",
         "errors/rollback_trait",
         "errors/transact",
         "errors/default_error_conversion",
