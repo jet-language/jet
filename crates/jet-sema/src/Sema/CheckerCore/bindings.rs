@@ -850,7 +850,7 @@ impl<'a> Checker<'a> {
                     "`TaskGroup` cannot be stored inside another value".to_string(),
                     "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
                         .to_string(),
-                    "pass `group: TaskGroup` directly to a named helper and use it there"
+                    "pass `group: TaskGroup` directly to a helper function or method and use it there"
                         .to_string(),
                     Some(b.name_span),
                 ));

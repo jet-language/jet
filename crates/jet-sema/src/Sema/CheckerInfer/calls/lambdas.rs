@@ -245,10 +245,10 @@ use std::collections::HashSet;
                         self.diags.push(Diagnostic::error(
                             "E1110",
                             format!("`{name}` is a `TaskGroup` and cannot escape in a lambda"),
-                            "a task group is a scoped spawn authority that may flow only through direct named-function calls"
+                            "a task group is a scoped spawn authority that may flow only through a direct function or method parameter"
                                 .to_string(),
                             format!(
-                                "move this work to `fn helper({name}: TaskGroup)` and call the helper directly"
+                                "move this work to a function or method that takes `{name}: TaskGroup` and call it directly"
                             ),
                             Some(lam.span),
                         ));
@@ -378,7 +378,22 @@ use std::collections::HashSet;
                     // D-CONC-FREEZE1=A: a bare mutable capture is rejected by
                     // the same E1101 rail as a body write. A consuming `^`
                     // capture or a frozen snapshot removes the outer alias.
+                    //
+                    // A `Condition` has no outer alias to remove. `JetCondition`
+                    // is `Arc<JetConditionProtocol>` behind `#[derive(Clone)]`
+                    // (`Prelude/CoreLib/JetStd/MathTaskMem.rs`), so a clone
+                    // aliases the ONE waiter queue, and the protocol's own
+                    // `Mutex` plus epoch counter order the crossing — the same
+                    // reason `Shared<T>` crosses. A wait set exists precisely so
+                    // `guard.wait` in one task and `notify_all` in another
+                    // rendezvous, so refusing it AT the task boundary refuses
+                    // its only purpose. It is not put on the reactive rail:
+                    // `is_reactive_handle_ty` also carries the `#Local` pin and
+                    // the reactive-upgrade note, neither of which says anything
+                    // about a wait set. Genuine sendability is still checked
+                    // below by `crossing_problem_for_name`.
                     let shared_capture = matches!(&cap_ty, Type::Shared(_))
+                        || matches!(&cap_ty, Type::Named(name) if name == Syntax::TYPE_CONDITION)
                         || is_reactive_handle_ty(&cap_ty)
                         || self.type_contains_cell_guard(&cap_ty);
                     let mutable_capture = self.lookup(name).is_some_and(|info| info.mutable);

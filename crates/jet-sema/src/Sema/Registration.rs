@@ -213,8 +213,25 @@ impl<'a> Checker<'a> {
             );
         }
         if let Some(return_type) = &f.return_type {
-            let return_type = self.resolve_type(return_type.clone());
-            self.check_declared_type(&return_type, f.return_type_span.unwrap_or(f.name_span));
+            // D-CONC-GROUP1=A: parameter positions admit a group; the return
+            // position stays banned, and it teaches with the E1110 family
+            // instead of falling through to a bare "no such type" (E0119).
+            // Returning the handle would let a child outlive the scope that
+            // joins it, which is the one thing the ban exists to stop.
+            if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
+                self.diags.push(Diagnostic::error(
+                    "E1110",
+                    "`TaskGroup` cannot be returned".to_string(),
+                    "a task group is a scoped spawn authority; the block that owns it joins its children when it closes, so a returned handle would already be dead"
+                        .to_string(),
+                    "take `group: TaskGroup` as a parameter of a function or method and do the work there"
+                        .to_string(),
+                    Some(f.return_type_span.unwrap_or(f.name_span)),
+                ));
+            } else {
+                let return_type = self.resolve_type(return_type.clone());
+                self.check_declared_type(&return_type, f.return_type_span.unwrap_or(f.name_span));
+            }
         }
         for p in &f.params {
             // D-FAIL-BIND1=A: parameters share the ordinary binding namespace,
@@ -235,8 +252,16 @@ impl<'a> Checker<'a> {
             // `variadic_bound_list`) — nothing to declared-type-check there.
             let skip_type_check = (p.name == Syntax::KW_SELF || p.variadic_bound_list.is_some())
                 && matches!(&p.ty, Type::Named(n) if n.is_empty());
-            let taskgroup_parameter = owner_type.is_none()
-                && matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP);
+            // D-CONC-GROUP1=A: a group is a borrow of its scope, so it may be
+            // named in EVERY direct parameter position — a method's parameter
+            // list exactly like a free function's. `TaskGroup` is a
+            // compiler-private handle type, not a registered one, so the
+            // declared-type check is skipped for it here; every other position
+            // (struct field, return type, local annotation, lambda parameter)
+            // still rejects the name, which is what keeps a group from
+            // outliving its scope.
+            let taskgroup_parameter =
+                matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP);
             if !skip_type_check && !taskgroup_parameter {
                 let pty = self.resolve_type(p.ty.clone());
                 self.check_declared_type(&pty, p.ty_span);
@@ -439,12 +464,13 @@ impl<'a> Checker<'a> {
             self.pop_scope();
         }
         let taskgroup_floor = self.taskgroup_stack.len();
-        if owner_type.is_none() {
-            self.taskgroup_stack.extend(f.params.iter().filter_map(|param| {
-                matches!(&param.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
-                    .then(|| TaskGroupCtx::parameter(param.name.clone()))
-            }));
-        }
+        // D-CONC-GROUP1=A: a method's group parameter is spawn authority in the
+        // same way a free function's is — `self` holds the receiver, never the
+        // group, so admitting methods opens no new escape.
+        self.taskgroup_stack.extend(f.params.iter().filter_map(|param| {
+            matches!(&param.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
+                .then(|| TaskGroupCtx::parameter(param.name.clone()))
+        }));
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);

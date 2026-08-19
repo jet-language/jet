@@ -1146,7 +1146,7 @@ pub(crate) fn register_struct(
                 "`TaskGroup` cannot be stored in a struct field".to_string(),
                 "a task group is a scoped spawn authority, not a value that can escape its call stack"
                     .to_string(),
-                "pass `group: TaskGroup` directly to a named helper function instead".to_string(),
+                "pass `group: TaskGroup` directly to a helper function or method instead".to_string(),
                 Some(f.name_span),
             ));
         }
