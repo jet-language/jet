@@ -1,0 +1,89 @@
+{
+  "cardId": "CARD_PENDING",
+  "id": "D-ARROW-UNIFY1",
+  "title": "One arrow for callables, arms, and lambdas",
+  "group": "syntax",
+  "ballotMode": "full",
+  "gist": "Whether every arrow in Jet becomes one spelling.",
+  "lesson": "Jet has three arrow spellings today. `=>` gives a function its result type and writes a lambda. `->` picks a dispatch arm, a one-line body, or a loop item. `=[IO]=>` adds an effect ceiling. A ratified rule split callable syntax from control syntax on purpose. This choice asks whether one arrow now serves all three jobs, and what that split was buying.",
+  "story": "Priya teaches a two-day Jet workshop. On day one she explains that `=>` hands back a value. An hour later a student writes `->` in a dispatch arm and asks why the arrow changed. Priya answers that one arrow means results and the other means selection. Half the room writes the wrong arrow for the rest of the day. The compiler catches each one, but the lesson time is gone.",
+  "inWild": "// Real shapes from examples/features today.\nfn label(n: Int) => String {\n    return if {\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 3 == 0 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) =[IO]=> {\n    loop n, rows -> print(label(n))\n    bumped :: rows.lazy().map(value => value + 1)\n    print(bumped.count())\n}",
+  "options": [
+    {
+      "key": "A",
+      "name": "Keep three arrows (today's rule)",
+      "detail": "Nothing changes. `=>` means a value comes back. `->` means one branch or item is selected. `=[IO]=>` marks the effect ceiling. Readers can tell a result from a selection without reading further. New writers must learn which arrow each position wants, and the compiler teaches them by rejecting the wrong one.",
+      "technical": "Status quo: OP_CALLABLE_ARROW `=>`, OP_ARM_ARROW `->`, EFFECT_ARROW_OPEN/CLOSE `=[` / `]=>` (crates/jet-foundation/src/Syntax.rs:135-153). Ratified by D-ARROW-CONTROL1=A (card #1209), D-LOOP-STMT-ARROW1=C (card #1453), D-BODY-ARROW1. Zero migration.",
+      "code": "fn label(n: Int) => String {\n    return if {\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 3 == 0 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) =[IO]=> {\n    loop n, rows -> print(label(n))\n    bumped :: rows.lazy().map(value => value + 1)\n    print(bumped.count())\n}"
+    },
+    {
+      "key": "B",
+      "name": "One arrow `:>` everywhere",
+      "detail": "Every arrow becomes `:>`. Function results, dispatch arms, loop bodies, and lambdas all read the same. The effect ceiling becomes `:[IO]>`.\n\nThere is one arrow to learn and one to type. Readers lose the instant cue that told a result from a selection, and every arrow in the repository and in user code changes.",
+      "technical": "Retires `=>`, `->`, `=[`, and `]=>`. Adds one token `:>` plus the effect form `:[Effects]>`.\n\nFallible spellings compose unchanged, as in `fn read() :> String ?`. Migration covers 1,716 `=>` sites, 977 `->` sites, and 123 effect arrows across in-repo `.jet` files. The formatter, grammar files, editor packs, and arrow-quoting diagnostics move in the same change.",
+      "code": "fn label(n: Int) :> String {\n    return if {\n        n % 15 == 0 :> \"FizzBuzz\"\n        n % 3 == 0 :> \"Fizz\"\n        else :> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) :[IO]> {\n    loop n, rows :> print(label(n))\n    bumped :: rows.lazy().map(value :> value + 1)\n    print(bumped.count())\n}"
+    },
+    {
+      "key": "C",
+      "name": "`:>` for arms and lambdas; keep `=>` for results",
+      "detail": "Arms, one-line bodies, and lambdas take `:>`. A function result keeps `=>`, and the effect ceiling becomes `:[IO]>`. The result arrow stays distinct, so a signature still reads differently from a branch. Two arrows remain, so the workshop question does not fully go away.",
+      "technical": "Retires `->`, `=[`, `]=>`; keeps OP_CALLABLE_ARROW `=>`; adds `:>` and `:[Effects]>`. Migration touches 977 `->` sites and 123 effect arrows; the 1716 `=>` sites stay. D-ARROW-CONTROL1's callable/control split survives in weakened form.",
+      "code": "fn label(n: Int) => String {\n    return if {\n        n % 15 == 0 :> \"FizzBuzz\"\n        n % 3 == 0 :> \"Fizz\"\n        else :> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) :[IO]> {\n    loop n, rows :> print(label(n))\n    bumped :: rows.lazy().map(value :> value + 1)\n    print(bumped.count())\n}"
+    },
+    {
+      "key": "D",
+      "name": "One arrow, but reuse `=>`",
+      "detail": "Everything unifies on the arrow Jet already has. Arms, loop bodies, and lambdas take `=>`, and the effect ceiling becomes `=[IO]=>` unchanged. Writers learn one arrow and no new symbol enters the language. Existing code that uses `=>` keeps working, so the change is smaller.",
+      "technical": "Retires `->` only; keeps `=>` and the current effect arrow. Adds no token, so no new Syntax.rs sigil row. Migration touches 977 `->` sites. Risk: `=>` then means both result and selection, and `if x == { 200 => ... }` reads like a lambda table to readers from other languages.",
+      "code": "fn label(n: Int) => String {\n    return if {\n        n % 15 == 0 => \"FizzBuzz\"\n        n % 3 == 0 => \"Fizz\"\n        else => \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) =[IO]=> {\n    loop n, rows => print(label(n))\n    bumped :: rows.lazy().map(value => value + 1)\n    print(bumped.count())\n}"
+    }
+  ],
+  "comparisons": [
+    {
+      "lang": "Rust",
+      "note": "Two arrows, split the way Jet splits them today: `->` for a result type, `=>` for a match arm.",
+      "code": "fn label(n: i64) -> String {\n    match n % 15 {\n        0 => \"FizzBuzz\".to_string(),\n        _ => n.to_string(),\n    }\n}"
+    },
+    {
+      "lang": "Scala",
+      "note": "One arrow for both jobs. Results use a colon, and `=>` covers arms and lambdas.",
+      "code": "def label(n: Int): String = n % 15 match {\n  case 0 => \"FizzBuzz\"\n  case _ => n.toString\n}\nval bump = (v: Int) => v + 1"
+    },
+    {
+      "lang": "Erlang",
+      "note": "One arrow, `->`, introduces every clause body. Readers never choose between arrows.",
+      "code": "label(N) when N rem 15 =:= 0 -> \"FizzBuzz\";\nlabel(N) -> integer_to_list(N)."
+    },
+    {
+      "lang": "Go",
+      "note": "No arrow at all. Results are bare types and cases use a colon, which shows a fourth path exists.",
+      "code": "func label(n int) string {\n    switch n % 15 {\n    case 0:\n        return \"FizzBuzz\"\n    }\n    return strconv.Itoa(n)\n}"
+    }
+  ],
+  "rec": "B",
+  "recommendation": {
+    "why": "One arrow removes a rule that readers must hold but that no program needs. The compiler already knows whether a position wants a result or a branch.\n\nSpelling that difference twice gains the reader nothing. `:>` also frees Jet from the `=[IO]=>` bracket sandwich, which is the least readable token in the language today.",
+    "whyNot": [
+      {
+        "key": "A",
+        "reason": "The split it protects is taught by compiler errors, not by reading. It spends beginner attention on a distinction the machine never needs."
+      },
+      {
+        "key": "C",
+        "reason": "It keeps two arrows, so a writer still has to ask which arrow a position wants. It pays most of the migration cost for part of the gain."
+      },
+      {
+        "key": "D",
+        "reason": "Reusing `=>` for arms makes a dispatch table look like a table of lambdas. It also keeps `=[IO]=>`, the form readers report as hardest to scan."
+      }
+    ],
+    "tradeoff": "Jet accepts one large mechanical migration and the loss of an at-a-glance result cue. That is acceptable because the compiler enforces the distinction, the formatter performs the rewrite, and the language is still greenfield."
+  },
+  "reviewPasses": {
+    "base": "The first draft compared today's three arrows with the owner's single `:>` form and recommended `:>`, because the arrow choice is decided by position and the compiler already knows the position.",
+    "boilOcean": "The breadth review also tested a colon-only result form as in Go, an arrow-free layout rule, and per-context words such as `then`. Those became option D and the Go comparison, because none of them changed who decides the arrow.",
+    "hybrid": "The hybrid review produced option C, which unifies arms and lambdas but keeps `=>` for results. It survives as a real design because the result arrow is the one arrow a signature reader scans for.",
+    "cooperative": "Steelmanning option A named what the split buys, because a reader sees at once whether a line returns a value or selects a branch. It also confirmed that the fallible spellings compose with `:>` without a new rule.",
+    "adversarial": "The attack pass found four risks in `:>`, namely a crowded colon family, the characters `:[` inside map types, comparison-like reads in generic argument lists, and a 2,800-site migration. Each is answered by pinning `:>` to arm, body, and signature positions and by landing the formatter rewrite in the same change."
+  }
+}

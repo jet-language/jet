@@ -1,0 +1,89 @@
+{
+  "cardId": "CARD_PENDING",
+  "id": "D-LIT-DOT1",
+  "title": "Drop the leading dot from literal constructors",
+  "group": "syntax",
+  "ballotMode": "full",
+  "gist": "Whether literal constructors keep the dot before their braces, as in `Point.{x: 1}`, or lose it, as in `Point{x: 1}`.",
+  "lesson": "Every Jet construction carries a dot before its braces, as in `Point.{x: 1}` and `[Int].{1, 2, 3, 4}`. The dot marks that a brace opens a value, not a block. It is one universal rule, yet it is ceremony on every construction, and no peer language writes it. The corpus holds about 3,500 dotted constructions. This choice decides whether the dot stays, goes everywhere, or goes only after a named head. The variant selector `.Tls13` stays in every option.",
+  "story": "Priya ports a Go service to Jet. Her fingers type `Config{host: h}` and the compiler answers E0320: 'named construction has a dot before the brace'. She fixes it, then hits it again in the next file, because every language she knows — Go, Rust, C, TypeScript — writes construction without a dot. Reading back her finished config code, she sees `.{` on nearly every line and asks what the dots are buying her. The honest answer today is: they buy the parser one guaranteed token, and they buy her nothing.",
+  "inWild": "// real shape from examples/features/net/email_dkim.jet\nconfig :: email.SMTPConfig.{\n    host: \"smtp.example.com\",\n    port: 587,\n    security: .StartTls,\n    auth: .Password.{username: \"mailer\", password: password},\n    recipient_policy: .RequireAll,\n    limits: email.Limits.safe(),\n}\n\n// and from examples/features/basics/loop_values.jet\nvalues :: [Int].{1, 2, 3, 4}\n\n// config-heavy code repeats `.{` on nearly every line;\n// every new contributor types the dotless form first and hits E0320.",
+  "options": [
+    {
+      "key": "A",
+      "name": "Keep the dot everywhere (status quo)",
+      "detail": "No change. Every construction keeps its leading dot, including named structs, list and map literals, enum payloads, and anonymous records.\n\nThe gain is one law with no position limits. Because `.{` can never open a block, constructions parse inside `if` and `loop` headers, where dotless braces would be ambiguous.\n\nThe loss is permanent ceremony. Every construction pays two extra characters, and each new writer meets error E0320 by muscle memory.",
+      "technical": "Ratified law: D-DOTCTOR1/2/3, D-UNIFYLIT1, D-BINPAT1, D-BOUND-HEAD1. Parser: `.{` and `Type.{` are accepted even where `allow_struct_lit` is false (card #1441, Parser/Expressions/binary_unary.rs:618-627), so construction works inside every control header. Dotless `Type { }` stays teaching error E0320 with parse recovery (primary.rs:422-438).",
+      "code": "fn boot() ? {\n    backoff :: [Int].{1, 2, 4, 8}\n    tls :: TlsConfig.{min: .Tls13, alpn: [\"h2\", \"http/1.1\"]}\n    auth :: .Password.{username: \"mailer\", password: secret()}\n    server :: Server.{name: \"edge\", tls: tls, auth: auth}\n    serve(server, .{port: 8080, on: true}, backoff)\n    if server.status() == .Listening -> print(\"up\")\n    // constructions parse inside headers today — no parens needed:\n    if tls == TlsConfig.{min: .Tls13, alpn: [\"h2\"]} { print(\"strict\") }\n}"
+    },
+    {
+      "key": "B",
+      "name": "Drop the dot everywhere",
+      "detail": "The owner's sketch. Named heads write `Point{x: 1}` and `[Int]{1, 2, 3, 4}`. Enum payloads write `.Password{username: u}`. Anonymous records write `{port: 8080, on: true}`.\n\nCode then reads like every peer language. The reflex that E0320 punishes today becomes the correct spelling.\n\nThree costs follow, each with a fixed answer. Brace literals stop parsing inside control headers, so you add parentheses or bind first. A headless brace is a record only when its first token is a field name or a string key. Statement-position destructuring keeps working through one bounded look-ahead to `::`.",
+      "technical": "Grammar law. `Ident{`, `[T]{`, `[K:V]{`, `[T#N]{`, `.Variant{`, and `alias.Type{` in value position are construction heads.\n\nThe existing `brace_body_looks_like_fields` probe already separates field bodies from element bodies (Parser/Expressions/collections_structs.rs:127). Lowercase unit heads such as `px{100}` parse by the same head-adjacent rule, which is safe because trailing blocks were retired (D-TRAILBLOCK2, E0335).\n\nHeader positions keep `allow_struct_lit=false` (ptr_tuple.rs:433-447), and the card #1441 dot carve-out is deleted. A header construction then needs parentheses. A fallback brace after the coalescing operator stays a block unless it is field-led. `.{ id, sev } :: x` respells as `{ id, sev } :: x` through a save-and-restore probe.",
+      "code": "fn boot() ? {\n    backoff :: [Int]{1, 2, 4, 8}\n    tls :: TlsConfig{min: .Tls13, alpn: [\"h2\", \"http/1.1\"]}\n    auth :: .Password{username: \"mailer\", password: secret()}\n    server :: Server{name: \"edge\", tls: tls, auth: auth}\n    serve(server, {port: 8080, on: true}, backoff)\n    if server.status() == .Listening -> print(\"up\")\n    // header positions need parens now (the Rust/Go rule):\n    if tls == (TlsConfig{min: .Tls13, alpn: [\"h2\"]}) { print(\"strict\") }\n}"
+    },
+    {
+      "key": "C",
+      "name": "Drop the dot after a head; keep `.{ }` when headless",
+      "detail": "Named heads lose the dot, so you write `Point{x: 1}`, `[Int]{1, 2, 3, 4}`, and `.Password{username: u}`.\n\nThe headless record keeps its dot as `.{port: 8080, on: true}`. Headless destructuring and dispatch patterns keep it too. The head token anchors the parse, so the dot survives only where a bare brace is genuinely unclear.\n\nThis is Zig's split. The gain is that the risky headless cases never change, so no field-led rule is needed. The loss is two spellings for one idea, and a record changes spelling when it gains a typed head.",
+      "technical": "Headed forms follow option B's head-adjacent grammar. Headless `.{` keeps today's grammar unchanged, including card #1441 header parsing for the `.{` form only; headed forms in headers need parens. Amends the headed halves of D-DOTCTOR1/3, D-UNIFYLIT1, D-BINPAT1, D-BOUND-HEAD1, D-UNINIT-SENTINEL2; leaves D-DOTCTOR2 (`.{ }` inferred), S74 destructuring, and dispatch-arm struct heads untouched. Formatter auto-fix migrates headed sites only (~85% of corpus occurrences).",
+      "code": "fn boot() ? {\n    backoff :: [Int]{1, 2, 4, 8}\n    tls :: TlsConfig{min: .Tls13, alpn: [\"h2\", \"http/1.1\"]}\n    auth :: .Password{username: \"mailer\", password: secret()}\n    server :: Server{name: \"edge\", tls: tls, auth: auth}\n    serve(server, .{port: 8080, on: true}, backoff)   // headless keeps the dot\n    if server.status() == .Listening -> print(\"up\")\n    // headed form in a header needs parens; headless `.{` still parses bare:\n    if tls == (TlsConfig{min: .Tls13, alpn: [\"h2\"]}) { print(\"strict\") }\n}"
+    },
+    {
+      "key": "D",
+      "name": "Retire brace construction; construct with parentheses",
+      "detail": "Construction becomes a call shape. You write `Point(x: 1, y: 2)`, `[Int](1, 2, 4, 8)`, and `.Password(username: u)`. The anonymous record becomes the existing named tuple `(port: 8080, on: true)`.\n\nSwift and Python work this way. Parentheses never open a block, so construction parses in every position with no restriction and no probe.\n\nThe loss is large. Jet's ratified rubric separates the inert literal `Type.{ }` from a call that may run code. That distinction dies, and every list and map literal respells.",
+      "technical": "Amends D-API-CTOR1's literal/call split and the whole D-DOTCTOR family. Named arguments at construction sites reuse S61 named-argument grammar. `[Int](…)` requires a new head production because a bracket type followed by `(` currently has no meaning. Named-payload enums already parse `(…)` (binary_unary.rs:693-705); only named fields inside are new. Typed text heads become one-argument calls; validation stays in sema. Uninit becomes `Int(uninit)`. Empty collection: `[T]()`.",
+      "code": "fn boot() ? {\n    backoff :: [Int](1, 2, 4, 8)\n    tls :: TlsConfig(min: .Tls13, alpn: [\"h2\", \"http/1.1\"])\n    auth :: .Password(username: \"mailer\", password: secret())\n    server :: Server(name: \"edge\", tls: tls, auth: auth)\n    serve(server, (port: 8080, on: true), backoff)\n    if server.status() == .Listening -> print(\"up\")\n    // parens never collide with blocks — headers just work:\n    if tls == TlsConfig(min: .Tls13, alpn: [\"h2\"]) { print(\"strict\") }\n}"
+    }
+  ],
+  "comparisons": [
+    {
+      "lang": "Rust",
+      "note": "Dotless struct literals, with exactly the restriction option B adopts: a struct literal cannot appear in an `if`/`while`/`match` header; you add parentheses or bind first. Decades of use show the rule is learnable and rarely hit.",
+      "code": "let p = Point { x: 1, y: 2 };\nif p == (Point { x: 1, y: 2 }) { }   // parens required in the header"
+    },
+    {
+      "lang": "Go",
+      "note": "Dotless composite literals for structs, slices, and maps — the closest match to Jet's whole literal family. Go bans composite literals in statement headers unless parenthesized, the same escape hatch as option B.",
+      "code": "p := Point{X: 1, Y: 2}\nxs := []int{1, 2, 3, 4}\nif p == (Point{X: 1, Y: 2}) { }      // parens required in the header"
+    },
+    {
+      "lang": "Zig",
+      "note": "The split option C proposes: a named head is dotless (`Point{ }`), and only the headless inferred literal keeps a leading dot (`.{ }`). Jet already declined Zig's inner `.field = value` spelling (D-DOTFIELD1); this is only about the head.",
+      "code": "const p = Point{ .x = 1, .y = 2 };\nconst q: Point = .{ .x = 1, .y = 2 };  // headless keeps the dot"
+    },
+    {
+      "lang": "Swift",
+      "note": "No struct literal at all — construction is an initializer call with named arguments, which is option D. Braces stay reserved for closures and blocks, so Swift never has the brace ambiguity; the price is that data and code construction look identical.",
+      "code": "let p = Point(x: 1, y: 2)\nlet xs: [Int] = [1, 2, 3, 4]\nif p == Point(x: 1, y: 2) { }        // no restriction needed"
+    }
+  ],
+  "rec": "B",
+  "recommendation": {
+    "why": "Option B gives Jet the spelling every programmer already types. One rule covers it. A brace after a head, or a field-led brace in a value slot, builds a value.\n\nThe ambiguity the dot solved is real but small, and it lives only in control headers. Rust and Go have proven the parenthesis escape there for decades.\n\nThe parser already owns every tool the change needs. The header restriction exists, the field-body probe exists, and the formatter already carries the E0320 rewrite machinery pointed the other way.",
+    "whyNot": [
+      {
+        "key": "A",
+        "reason": "The dot taxes every construction forever to buy convenience in the rare header case. Every new writer types the dotless form first and is corrected by E0320; keeping the dot keeps that permanent friction."
+      },
+      {
+        "key": "C",
+        "reason": "Two spellings for one idea. A record changes its dot when it gains or loses a head, so readers must track position, not meaning. It also keeps the dot in the manifests and config files where it is most visible and least loved."
+      },
+      {
+        "key": "D",
+        "reason": "It erases the ratified literal-versus-call distinction (D-API-CTOR1): today `Type.{ }` is inert data and `Type(…)` may run code. Merging them hides that difference, and it forces the largest respell of all — every list and map literal in existence."
+      }
+    ],
+    "tradeoff": "B accepts three costs. Brace literals no longer parse inside control headers, so you parenthesize or bind first. A headless brace must be field-led to be a record. The migration touches corpus, docs, snapshots, and teaching text at once, so it must ship as one formatter-driven cutover."
+  },
+  "reviewPasses": {
+    "base": "The first draft compared keeping the dot, dropping it everywhere, and dropping it only after a head, using one shared program. It sized the blast radius at 521 dotted sites in examples, 2,211 in tests, and 764 in docs.",
+    "boilOcean": "The breadth pass added parenthesized construction as option D and rejected a whitespace rule, because whitespace-significant grammar breaks under reformatting. A `#{ }` record head was also rejected, since `#` already carries three ratified jobs.",
+    "hybrid": "The hybrid pass tested dropping headed dots now and keeping `.{ }` for records until manifests migrate. It was rejected as option C with an expiry date, so C's field-led insight was folded into option B instead.",
+    "cooperative": "Steelmanning found real strength in A, which has no position limits at all, and in C, which quarantines every parser risk to sites that never change. Option D also composes with existing named-tuple grammar rather than a brace probe.",
+    "adversarial": "The attack pass hunted grammar breaks in option B and found each one answered, because a fieldless selector never takes a brace and a fallback brace is never field-led. Statement-start destructuring also survives through the bounded look-ahead probe the parser already uses elsewhere."
+  }
+}

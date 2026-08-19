@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2080,
-    "rev": 39230,
+    "nextNum": 2082,
+    "rev": 39242,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -136020,6 +136020,128 @@
       "created": "2026-08-19T13:40:11.956Z",
       "updated": "2026-08-19T13:49:24.238Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0buajsm",
+      "num": 2080,
+      "title": "Literal constructors drop the leading dot",
+      "body": "Owner request 2026-08-19: remove the leading dot from literal constructors, so [Int].{1, 2, 3, 4} becomes [Int]{1, 2, 3, 4} and an anonymous record reads {port: 8080, on: true}. Owner scoped it to ALL literal constructors: named struct literals and enum payload literals lose the dot too; the leading-dot enum variant selector (.Tls13) stays. Ballot D-LIT-DOT1 carries the choice.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ratified D-LIT-DOT1 outcome recorded in docs/spec/syntax-decisions.md with the decision id, and the affected D-DOTCTOR/D-UNIFYLIT rows amended or retired in the same change",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:09.828Z"
+        },
+        {
+          "n": 2,
+          "text": "Parser implements the ratified spelling with the header and field-led rules the outcome names; dotless-vs-dotted teaching diagnostic (E0320 class) points the ratified direction and carries a tests/ui fixture",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:10.331Z"
+        },
+        {
+          "n": 3,
+          "text": "Every in-repo consumer migrated in one change: 488 example and 516 test .jet occurrences, docs, snapshots, editor grammars; jet fmt emits only the ratified form and fmt lossless corpus stays green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:10.828Z"
+        },
+        {
+          "n": 4,
+          "text": "Tier parity proved: golden examples_compile_and_run plus default jet run and interpreter agree on a construction-heavy example after the respell",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:11.334Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T20:54:28.446Z",
+      "updated": "2026-08-19T20:57:11.334Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0ma0xb6",
+      "num": 2081,
+      "title": "One arrow for callables, arms, and lambdas",
+      "body": "Owner request 2026-08-19: unify every arrow on :> for control arms, function definitions, and lambdas, with the effect ceiling spelled :[Effect1, Effect2]>. Owner scoped it to all three plus the return-type arrow. Ballot D-ARROW-UNIFY1 carries the choice.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ratified D-ARROW-UNIFY1 outcome recorded in docs/spec/syntax-decisions.md; D-ARROW-CONTROL1, D-LOOP-STMT-ARROW1 and D-BODY-ARROW1 rows amended or retired in the same change; I7 rows updated in crates/jet-foundation/src/Syntax.rs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:11.833Z"
+        },
+        {
+          "n": 2,
+          "text": "Parser pins the ratified arrow to arm, body, lambda and signature positions so map types and generic argument lists never mis-parse; a tests/ui fixture proves the rejection message for the retired spelling",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:12.352Z"
+        },
+        {
+          "n": 3,
+          "text": "All 2816 in-repo arrow sites migrated in one change (1716 callable, 977 arm, 123 effect), plus formatter, tree-sitter and editor grammars, and every diagnostic that quotes an arrow",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:12.870Z"
+        },
+        {
+          "n": 4,
+          "text": "Tier parity proved after the respell: fmt lossless corpus green and golden examples_compile_and_run green across AOT, default jet run, and interpreter",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-19T20:57:13.352Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T20:54:29.077Z",
+      "updated": "2026-08-19T20:57:13.352Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -180416,6 +180538,200 @@
       "created": "2026-08-19T16:20:02.152Z",
       "outcome": "C",
       "ratifiedAt": "2026-08-19"
+    },
+    {
+      "id": "D-LIT-DOT1",
+      "cardId": "c0buajsm",
+      "group": "syntax",
+      "title": "Drop the leading dot from literal constructors",
+      "gist": "Whether literal constructors keep the dot before their braces, as in `Point.{x: 1}`, or lose it, as in `Point{x: 1}`.",
+      "lesson": "Every Jet construction carries a dot before its braces, as in `Point.{x: 1}` and `[Int].{1, 2, 3, 4}`. The dot marks that a brace opens a value, not a block. It is one universal rule, yet it is ceremony on every construction, and no peer language writes it. The corpus holds about 3,500 dotted constructions. This choice decides whether the dot stays, goes everywhere, or goes only after a named head. The variant selector `.Tls13` stays in every option.",
+      "explainer": "",
+      "story": "Priya ports a Go service to Jet. Her fingers type `Config{host: h}` and the compiler answers E0320: 'named construction has a dot before the brace'. She fixes it, then hits it again in the next file, because every language she knows — Go, Rust, C, TypeScript — writes construction without a dot. Reading back her finished config code, she sees `.{` on nearly every line and asks what the dots are buying her. The honest answer today is: they buy the parser one guaranteed token, and they buy her nothing.",
+      "inWild": "// real shape from examples/features/net/email_dkim.jet\nconfig :: email.SMTPConfig.{\n    host: \"smtp.example.com\",\n    port: 587,\n    security: .StartTls,\n    auth: .Password.{username: \"mailer\", password: password},\n    recipient_policy: .RequireAll,\n    limits: email.Limits.safe(),\n}\n\n// and from examples/features/basics/loop_values.jet\nvalues :: [Int].{1, 2, 3, 4}\n\n// config-heavy code repeats `.{` on nearly every line;\n// every new contributor types the dotless form first and hits E0320.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep the dot everywhere (status quo)",
+          "detail": "No change. Every construction keeps its leading dot, including named structs, list and map literals, enum payloads, and anonymous records.\n\nThe gain is one law with no position limits. Because `.{` can never open a block, constructions parse inside `if` and `loop` headers, where dotless braces would be ambiguous.\n\nThe loss is permanent ceremony. Every construction pays two extra characters, and each new writer meets error E0320 by muscle memory.",
+          "technical": "Ratified law: D-DOTCTOR1/2/3, D-UNIFYLIT1, D-BINPAT1, D-BOUND-HEAD1. Parser: `.{` and `Type.{` are accepted even where `allow_struct_lit` is false (card #1441, Parser/Expressions/binary_unary.rs:618-627), so construction works inside every control header. Dotless `Type { }` stays teaching error E0320 with parse recovery (primary.rs:422-438).",
+          "code": "fn boot() ? {\n    backoff :: [Int].{1, 2, 4, 8}\n    tls :: TlsConfig.{min: .Tls13, alpn: [\"h2\", \"http/1.1\"]}\n    auth :: .Password.{username: \"mailer\", password: secret()}\n    server :: Server.{name: \"edge\", tls: tls, auth: auth}\n    serve(server, .{port: 8080, on: true}, backoff)\n    if server.status() == .Listening -> print(\"up\")\n    // constructions parse inside headers today — no parens needed:\n    if tls == TlsConfig.{min: .Tls13, alpn: [\"h2\"]} { print(\"strict\") }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Drop the dot everywhere",
+          "detail": "The owner's sketch. Named heads write `Point{x: 1}` and `[Int]{1, 2, 3, 4}`. Enum payloads write `.Password{username: u}`. Anonymous records write `{port: 8080, on: true}`.\n\nCode then reads like every peer language. The reflex that E0320 punishes today becomes the correct spelling.\n\nThree costs follow, each with a fixed answer. Brace literals stop parsing inside control headers, so you add parentheses or bind first. A headless brace is a record only when its first token is a field name or a string key. Statement-position destructuring keeps working through one bounded look-ahead to `::`.",
+          "technical": "Grammar law. `Ident{`, `[T]{`, `[K:V]{`, `[T#N]{`, `.Variant{`, and `alias.Type{` in value position are construction heads.\n\nThe existing `brace_body_looks_like_fields` probe already separates field bodies from element bodies (Parser/Expressions/collections_structs.rs:127). Lowercase unit heads such as `px{100}` parse by the same head-adjacent rule, which is safe because trailing blocks were retired (D-TRAILBLOCK2, E0335).\n\nHeader positions keep `allow_struct_lit=false` (ptr_tuple.rs:433-447), and the card #1441 dot carve-out is deleted. A header construction then needs parentheses. A fallback brace after the coalescing operator stays a block unless it is field-led. `.{ id, sev } :: x` respells as `{ id, sev } :: x` through a save-and-restore probe.",
+          "code": "fn boot() ? {\n    backoff :: [Int]{1, 2, 4, 8}\n    tls :: TlsConfig{min: .Tls13, alpn: [\"h2\", \"http/1.1\"]}\n    auth :: .Password{username: \"mailer\", password: secret()}\n    server :: Server{name: \"edge\", tls: tls, auth: auth}\n    serve(server, {port: 8080, on: true}, backoff)\n    if server.status() == .Listening -> print(\"up\")\n    // header positions need parens now (the Rust/Go rule):\n    if tls == (TlsConfig{min: .Tls13, alpn: [\"h2\"]}) { print(\"strict\") }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Drop the dot after a head; keep `.{ }` when headless",
+          "detail": "Named heads lose the dot, so you write `Point{x: 1}`, `[Int]{1, 2, 3, 4}`, and `.Password{username: u}`.\n\nThe headless record keeps its dot as `.{port: 8080, on: true}`. Headless destructuring and dispatch patterns keep it too. The head token anchors the parse, so the dot survives only where a bare brace is genuinely unclear.\n\nThis is Zig's split. The gain is that the risky headless cases never change, so no field-led rule is needed. The loss is two spellings for one idea, and a record changes spelling when it gains a typed head.",
+          "technical": "Headed forms follow option B's head-adjacent grammar. Headless `.{` keeps today's grammar unchanged, including card #1441 header parsing for the `.{` form only; headed forms in headers need parens. Amends the headed halves of D-DOTCTOR1/3, D-UNIFYLIT1, D-BINPAT1, D-BOUND-HEAD1, D-UNINIT-SENTINEL2; leaves D-DOTCTOR2 (`.{ }` inferred), S74 destructuring, and dispatch-arm struct heads untouched. Formatter auto-fix migrates headed sites only (~85% of corpus occurrences).",
+          "code": "fn boot() ? {\n    backoff :: [Int]{1, 2, 4, 8}\n    tls :: TlsConfig{min: .Tls13, alpn: [\"h2\", \"http/1.1\"]}\n    auth :: .Password{username: \"mailer\", password: secret()}\n    server :: Server{name: \"edge\", tls: tls, auth: auth}\n    serve(server, .{port: 8080, on: true}, backoff)   // headless keeps the dot\n    if server.status() == .Listening -> print(\"up\")\n    // headed form in a header needs parens; headless `.{` still parses bare:\n    if tls == (TlsConfig{min: .Tls13, alpn: [\"h2\"]}) { print(\"strict\") }\n}"
+        },
+        {
+          "key": "D",
+          "name": "Retire brace construction; construct with parentheses",
+          "detail": "Construction becomes a call shape. You write `Point(x: 1, y: 2)`, `[Int](1, 2, 4, 8)`, and `.Password(username: u)`. The anonymous record becomes the existing named tuple `(port: 8080, on: true)`.\n\nSwift and Python work this way. Parentheses never open a block, so construction parses in every position with no restriction and no probe.\n\nThe loss is large. Jet's ratified rubric separates the inert literal `Type.{ }` from a call that may run code. That distinction dies, and every list and map literal respells.",
+          "technical": "Amends D-API-CTOR1's literal/call split and the whole D-DOTCTOR family. Named arguments at construction sites reuse S61 named-argument grammar. `[Int](…)` requires a new head production because a bracket type followed by `(` currently has no meaning. Named-payload enums already parse `(…)` (binary_unary.rs:693-705); only named fields inside are new. Typed text heads become one-argument calls; validation stays in sema. Uninit becomes `Int(uninit)`. Empty collection: `[T]()`.",
+          "code": "fn boot() ? {\n    backoff :: [Int](1, 2, 4, 8)\n    tls :: TlsConfig(min: .Tls13, alpn: [\"h2\", \"http/1.1\"])\n    auth :: .Password(username: \"mailer\", password: secret())\n    server :: Server(name: \"edge\", tls: tls, auth: auth)\n    serve(server, (port: 8080, on: true), backoff)\n    if server.status() == .Listening -> print(\"up\")\n    // parens never collide with blocks — headers just work:\n    if tls == TlsConfig(min: .Tls13, alpn: [\"h2\"]) { print(\"strict\") }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Dotless struct literals, with exactly the restriction option B adopts: a struct literal cannot appear in an `if`/`while`/`match` header; you add parentheses or bind first. Decades of use show the rule is learnable and rarely hit.",
+          "code": "let p = Point { x: 1, y: 2 };\nif p == (Point { x: 1, y: 2 }) { }   // parens required in the header"
+        },
+        {
+          "lang": "Go",
+          "note": "Dotless composite literals for structs, slices, and maps — the closest match to Jet's whole literal family. Go bans composite literals in statement headers unless parenthesized, the same escape hatch as option B.",
+          "code": "p := Point{X: 1, Y: 2}\nxs := []int{1, 2, 3, 4}\nif p == (Point{X: 1, Y: 2}) { }      // parens required in the header"
+        },
+        {
+          "lang": "Zig",
+          "note": "The split option C proposes: a named head is dotless (`Point{ }`), and only the headless inferred literal keeps a leading dot (`.{ }`). Jet already declined Zig's inner `.field = value` spelling (D-DOTFIELD1); this is only about the head.",
+          "code": "const p = Point{ .x = 1, .y = 2 };\nconst q: Point = .{ .x = 1, .y = 2 };  // headless keeps the dot"
+        },
+        {
+          "lang": "Swift",
+          "note": "No struct literal at all — construction is an initializer call with named arguments, which is option D. Braces stay reserved for closures and blocks, so Swift never has the brace ambiguity; the price is that data and code construction look identical.",
+          "code": "let p = Point(x: 1, y: 2)\nlet xs: [Int] = [1, 2, 3, 4]\nif p == Point(x: 1, y: 2) { }        // no restriction needed"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "Option B gives Jet the spelling every programmer already types. One rule covers it. A brace after a head, or a field-led brace in a value slot, builds a value.\n\nThe ambiguity the dot solved is real but small, and it lives only in control headers. Rust and Go have proven the parenthesis escape there for decades.\n\nThe parser already owns every tool the change needs. The header restriction exists, the field-body probe exists, and the formatter already carries the E0320 rewrite machinery pointed the other way.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "The dot taxes every construction forever to buy convenience in the rare header case. Every new writer types the dotless form first and is corrected by E0320; keeping the dot keeps that permanent friction."
+          },
+          {
+            "key": "C",
+            "reason": "Two spellings for one idea. A record changes its dot when it gains or loses a head, so readers must track position, not meaning. It also keeps the dot in the manifests and config files where it is most visible and least loved."
+          },
+          {
+            "key": "D",
+            "reason": "It erases the ratified literal-versus-call distinction (D-API-CTOR1): today `Type.{ }` is inert data and `Type(…)` may run code. Merging them hides that difference, and it forces the largest respell of all — every list and map literal in existence."
+          }
+        ],
+        "tradeoff": "B accepts three costs. Brace literals no longer parse inside control headers, so you parenthesize or bind first. A headless brace must be field-led to be a record. The migration touches corpus, docs, snapshots, and teaching text at once, so it must ship as one formatter-driven cutover."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared keeping the dot, dropping it everywhere, and dropping it only after a head, using one shared program. It sized the blast radius at 521 dotted sites in examples, 2,211 in tests, and 764 in docs.",
+        "boilOcean": "The breadth pass added parenthesized construction as option D and rejected a whitespace rule, because whitespace-significant grammar breaks under reformatting. A `#{ }` record head was also rejected, since `#` already carries three ratified jobs.",
+        "hybrid": "The hybrid pass tested dropping headed dots now and keeping `.{ }` for records until manifests migrate. It was rejected as option C with an expiry date, so C's field-led insight was folded into option B instead.",
+        "cooperative": "Steelmanning found real strength in A, which has no position limits at all, and in C, which quarantines every parser risk to sites that never change. Option D also composes with existing named-tuple grammar rather than a brace probe.",
+        "adversarial": "The attack pass hunted grammar breaks in option B and found each one answered, because a fieldless selector never takes a brace and a fallback brace is never field-led. Statement-start destructuring also survives through the bounded look-ahead probe the parser already uses elsewhere."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T20:56:49.114Z"
+    },
+    {
+      "id": "D-ARROW-UNIFY1",
+      "cardId": "c0ma0xb6",
+      "group": "syntax",
+      "title": "One arrow for callables, arms, and lambdas",
+      "gist": "Whether every arrow in Jet becomes one spelling.",
+      "lesson": "Jet has three arrow spellings today. `=>` gives a function its result type and writes a lambda. `->` picks a dispatch arm, a one-line body, or a loop item. `=[IO]=>` adds an effect ceiling. A ratified rule split callable syntax from control syntax on purpose. This choice asks whether one arrow now serves all three jobs, and what that split was buying.",
+      "explainer": "",
+      "story": "Priya teaches a two-day Jet workshop. On day one she explains that `=>` hands back a value. An hour later a student writes `->` in a dispatch arm and asks why the arrow changed. Priya answers that one arrow means results and the other means selection. Half the room writes the wrong arrow for the rest of the day. The compiler catches each one, but the lesson time is gone.",
+      "inWild": "// Real shapes from examples/features today.\nfn label(n: Int) => String {\n    return if {\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 3 == 0 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) =[IO]=> {\n    loop n, rows -> print(label(n))\n    bumped :: rows.lazy().map(value => value + 1)\n    print(bumped.count())\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep three arrows (today's rule)",
+          "detail": "Nothing changes. `=>` means a value comes back. `->` means one branch or item is selected. `=[IO]=>` marks the effect ceiling. Readers can tell a result from a selection without reading further. New writers must learn which arrow each position wants, and the compiler teaches them by rejecting the wrong one.",
+          "technical": "Status quo: OP_CALLABLE_ARROW `=>`, OP_ARM_ARROW `->`, EFFECT_ARROW_OPEN/CLOSE `=[` / `]=>` (crates/jet-foundation/src/Syntax.rs:135-153). Ratified by D-ARROW-CONTROL1=A (card #1209), D-LOOP-STMT-ARROW1=C (card #1453), D-BODY-ARROW1. Zero migration.",
+          "code": "fn label(n: Int) => String {\n    return if {\n        n % 15 == 0 -> \"FizzBuzz\"\n        n % 3 == 0 -> \"Fizz\"\n        else -> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) =[IO]=> {\n    loop n, rows -> print(label(n))\n    bumped :: rows.lazy().map(value => value + 1)\n    print(bumped.count())\n}"
+        },
+        {
+          "key": "B",
+          "name": "One arrow `:>` everywhere",
+          "detail": "Every arrow becomes `:>`. Function results, dispatch arms, loop bodies, and lambdas all read the same. The effect ceiling becomes `:[IO]>`.\n\nThere is one arrow to learn and one to type. Readers lose the instant cue that told a result from a selection, and every arrow in the repository and in user code changes.",
+          "technical": "Retires `=>`, `->`, `=[`, and `]=>`. Adds one token `:>` plus the effect form `:[Effects]>`.\n\nFallible spellings compose unchanged, as in `fn read() :> String ?`. Migration covers 1,716 `=>` sites, 977 `->` sites, and 123 effect arrows across in-repo `.jet` files. The formatter, grammar files, editor packs, and arrow-quoting diagnostics move in the same change.",
+          "code": "fn label(n: Int) :> String {\n    return if {\n        n % 15 == 0 :> \"FizzBuzz\"\n        n % 3 == 0 :> \"Fizz\"\n        else :> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) :[IO]> {\n    loop n, rows :> print(label(n))\n    bumped :: rows.lazy().map(value :> value + 1)\n    print(bumped.count())\n}"
+        },
+        {
+          "key": "C",
+          "name": "`:>` for arms and lambdas; keep `=>` for results",
+          "detail": "Arms, one-line bodies, and lambdas take `:>`. A function result keeps `=>`, and the effect ceiling becomes `:[IO]>`. The result arrow stays distinct, so a signature still reads differently from a branch. Two arrows remain, so the workshop question does not fully go away.",
+          "technical": "Retires `->`, `=[`, `]=>`; keeps OP_CALLABLE_ARROW `=>`; adds `:>` and `:[Effects]>`. Migration touches 977 `->` sites and 123 effect arrows; the 1716 `=>` sites stay. D-ARROW-CONTROL1's callable/control split survives in weakened form.",
+          "code": "fn label(n: Int) => String {\n    return if {\n        n % 15 == 0 :> \"FizzBuzz\"\n        n % 3 == 0 :> \"Fizz\"\n        else :> \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) :[IO]> {\n    loop n, rows :> print(label(n))\n    bumped :: rows.lazy().map(value :> value + 1)\n    print(bumped.count())\n}"
+        },
+        {
+          "key": "D",
+          "name": "One arrow, but reuse `=>`",
+          "detail": "Everything unifies on the arrow Jet already has. Arms, loop bodies, and lambdas take `=>`, and the effect ceiling becomes `=[IO]=>` unchanged. Writers learn one arrow and no new symbol enters the language. Existing code that uses `=>` keeps working, so the change is smaller.",
+          "technical": "Retires `->` only; keeps `=>` and the current effect arrow. Adds no token, so no new Syntax.rs sigil row. Migration touches 977 `->` sites. Risk: `=>` then means both result and selection, and `if x == { 200 => ... }` reads like a lambda table to readers from other languages.",
+          "code": "fn label(n: Int) => String {\n    return if {\n        n % 15 == 0 => \"FizzBuzz\"\n        n % 3 == 0 => \"Fizz\"\n        else => \"{n}\"\n    }\n}\n\nfn report(rows: [Int]) =[IO]=> {\n    loop n, rows => print(label(n))\n    bumped :: rows.lazy().map(value => value + 1)\n    print(bumped.count())\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Two arrows, split the way Jet splits them today: `->` for a result type, `=>` for a match arm.",
+          "code": "fn label(n: i64) -> String {\n    match n % 15 {\n        0 => \"FizzBuzz\".to_string(),\n        _ => n.to_string(),\n    }\n}"
+        },
+        {
+          "lang": "Scala",
+          "note": "One arrow for both jobs. Results use a colon, and `=>` covers arms and lambdas.",
+          "code": "def label(n: Int): String = n % 15 match {\n  case 0 => \"FizzBuzz\"\n  case _ => n.toString\n}\nval bump = (v: Int) => v + 1"
+        },
+        {
+          "lang": "Erlang",
+          "note": "One arrow, `->`, introduces every clause body. Readers never choose between arrows.",
+          "code": "label(N) when N rem 15 =:= 0 -> \"FizzBuzz\";\nlabel(N) -> integer_to_list(N)."
+        },
+        {
+          "lang": "Go",
+          "note": "No arrow at all. Results are bare types and cases use a colon, which shows a fourth path exists.",
+          "code": "func label(n int) string {\n    switch n % 15 {\n    case 0:\n        return \"FizzBuzz\"\n    }\n    return strconv.Itoa(n)\n}"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "One arrow removes a rule that readers must hold but that no program needs. The compiler already knows whether a position wants a result or a branch.\n\nSpelling that difference twice gains the reader nothing. `:>` also frees Jet from the `=[IO]=>` bracket sandwich, which is the least readable token in the language today.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "The split it protects is taught by compiler errors, not by reading. It spends beginner attention on a distinction the machine never needs."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps two arrows, so a writer still has to ask which arrow a position wants. It pays most of the migration cost for part of the gain."
+          },
+          {
+            "key": "D",
+            "reason": "Reusing `=>` for arms makes a dispatch table look like a table of lambdas. It also keeps `=[IO]=>`, the form readers report as hardest to scan."
+          }
+        ],
+        "tradeoff": "Jet accepts one large mechanical migration and the loss of an at-a-glance result cue. That is acceptable because the compiler enforces the distinction, the formatter performs the rewrite, and the language is still greenfield."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared today's three arrows with the owner's single `:>` form and recommended `:>`, because the arrow choice is decided by position and the compiler already knows the position.",
+        "boilOcean": "The breadth review also tested a colon-only result form as in Go, an arrow-free layout rule, and per-context words such as `then`. Those became option D and the Go comparison, because none of them changed who decides the arrow.",
+        "hybrid": "The hybrid review produced option C, which unifies arms and lambdas but keeps `=>` for results. It survives as a real design because the result arrow is the one arrow a signature reader scans for.",
+        "cooperative": "Steelmanning option A named what the split buys, because a reader sees at once whether a line returns a value or selects a branch. It also confirmed that the fallible spellings compose with `:>` without a new rule.",
+        "adversarial": "The attack pass found four risks in `:>`, namely a crowded colon family, the characters `:[` inside map types, comparison-like reads in generic argument lists, and a 2,800-site migration. Each is answered by pinning `:>` to arm, body, and signature positions and by landing the formatter rewrite in the same change."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-19T20:56:49.612Z"
     }
   ],
   "questions": [
@@ -182207,6 +182523,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-19T20:57:13.352Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#4 Tier parity proved after the respell: fmt lossless corpus gr"
+    },
+    {
+      "at": "2026-08-19T20:57:12.870Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#3 All 2816 in-repo arrow sites migrated in one change (1716 ca"
+    },
+    {
+      "at": "2026-08-19T20:57:12.352Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#2 Parser pins the ratified arrow to arm, body, lambda and sign"
+    },
+    {
+      "at": "2026-08-19T20:57:11.834Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ma0xb6",
+      "note": "#1 Ratified D-ARROW-UNIFY1 outcome recorded in docs/spec/syntax"
+    },
+    {
+      "at": "2026-08-19T20:57:11.334Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#4 Tier parity proved: golden examples_compile_and_run plus def"
+    },
+    {
+      "at": "2026-08-19T20:57:10.828Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#3 Every in-repo consumer migrated in one change: 488 example a"
+    },
+    {
+      "at": "2026-08-19T20:57:10.331Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#2 Parser implements the ratified spelling with the header and "
+    },
+    {
+      "at": "2026-08-19T20:57:09.828Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0buajsm",
+      "note": "#1 Ratified D-LIT-DOT1 outcome recorded in docs/spec/syntax-dec"
+    },
+    {
+      "at": "2026-08-19T20:56:49.612Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-ARROW-UNIFY1",
+      "note": "One arrow for callables, arms, and lambdas"
+    },
+    {
+      "at": "2026-08-19T20:56:49.114Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-LIT-DOT1",
+      "note": "Drop the leading dot from literal constructors"
+    },
+    {
+      "at": "2026-08-19T20:54:29.077Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0ma0xb6",
+      "note": "One arrow for callables, arms, and lambdas"
+    },
+    {
+      "at": "2026-08-19T20:54:28.446Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0buajsm",
+      "note": "Literal constructors drop the leading dot"
+    },
     {
       "at": "2026-08-19T20:36:36.252Z",
       "by": "fable-e3-burndown",
@@ -185622,90 +186022,6 @@
       "action": "card.criteria-add",
       "ref": "c0js0lqr",
       "note": "#10 cargo test --no-fail-fast --test dev reaches libtest's own s"
-    },
-    {
-      "at": "2026-08-19T13:30:57.228Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0js0lqr",
-      "note": "#9 The named Concurrency.rs panic!/.expect sites either cannot "
-    },
-    {
-      "at": "2026-08-19T13:30:56.780Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0js0lqr",
-      "note": "#8 A cancel raised at an interpreter wait point inside jet_deop"
-    },
-    {
-      "at": "2026-08-19T13:30:56.343Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0js0lqr",
-      "note": "#7 A mechanical check — not review discipline — proves no host "
-    },
-    {
-      "at": "2026-08-19T13:30:55.912Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0js0lqr",
-      "note": "#6 The unwind mechanism (FDE registration vs boundary conversio"
-    },
-    {
-      "at": "2026-08-19T13:30:55.487Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0js0lqr",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:54.891Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rrypxo",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:30:54.313Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:30:53.740Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0p0jpo1",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:30:53.124Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0be7t09",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:30:52.522Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vvnebk",
-      "note": "track,milestoneId,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T13:30:51.930Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0n4n1pz",
-      "note": "track,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:30:51.335Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ptp3kp",
-      "note": "track,milestoneId,logEntry"
     }
   ],
   "nextNum": 368,
