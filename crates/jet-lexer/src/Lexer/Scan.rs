@@ -34,10 +34,18 @@ fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Toke
 }
 
 impl<'a> Lexer<'a> {
-    /// D-BOUND-RAW1=A: the quote immediately follows the opening `.{` of a
+    /// D-BOUND-RAW1=A: the quote immediately follows the opening brace of a
     /// typed head body. Only that body's literal substream changes the
     /// backslash rule; brace lexing and interpolation substreams remain
     /// ordinary Jet lexer input.
+    ///
+    /// D-LIT-DOT1=B spells that head `Regex{"\d+"}`, so the `.{` that used to
+    /// mark it is gone and the head name itself is the signal. A PascalCase
+    /// identifier before the brace is always a type, never a value: S54 /
+    /// D-SHAPE-CASE1=C makes casing a machine-enforced law with zero
+    /// exceptions, so a block subject like `if flag {` is snake_case and
+    /// cannot reach this rule. The `Dot` arm reads the retired spelling and
+    /// leaves with the rest of the migration shim.
     fn starts_typed_head_body(toks: &[Token]) -> bool {
         let significant = toks
             .iter()
@@ -49,8 +57,14 @@ impl<'a> Lexer<'a> {
             })
             .collect::<Vec<_>>();
         significant.len() >= 2
-            && matches!(significant[significant.len() - 2].kind, TokKind::Dot)
             && matches!(significant[significant.len() - 1].kind, TokKind::LBrace)
+            && match &significant[significant.len() - 2].kind {
+                TokKind::Dot => true,
+                TokKind::Ident(name) => {
+                    name.starts_with(|first: char| first.is_ascii_uppercase())
+                }
+                _ => false,
+            }
     }
 
     fn starts_inline_foreign_body(toks: &[Token]) -> bool {

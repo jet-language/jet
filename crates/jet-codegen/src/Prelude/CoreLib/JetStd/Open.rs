@@ -1498,129 +1498,20 @@ mod jet_std {
         None
     }
 
+    // I1: a byte scan does not earn `unsafe`. The win here is algorithmic —
+    // the literal prefilter means the VM only ever sees candidates — and this
+    // scan is a straight `position` over a byte slice, which LLVM vectorizes.
+    // Four hand-written `std::arch` variants (x86/x86_64 by avx2/sse2) once
+    // lived here; they widened the generated-`unsafe` surface that
+    // tests/golden.rs guards, for a constant factor nobody had measured. If a
+    // benchmark ever shows the intrinsics are needed, that is an owner-gated
+    // I1 carve-out with numbers attached, not a quiet helper.
     fn regex_find_byte(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        {
-            if is_x86_feature_detected!("avx2") {
-                // JET_VETTED_UNSAFE_BEGIN: regex_literal_prefilter_cpu_simd
-                return unsafe { regex_find_byte_avx2(haystack, needle, start) };
-                // JET_VETTED_UNSAFE_END: regex_literal_prefilter_cpu_simd
-            }
-            if is_x86_feature_detected!("sse2") {
-                // JET_VETTED_UNSAFE_BEGIN: regex_literal_prefilter_cpu_simd
-                return unsafe { regex_find_byte_sse2(haystack, needle, start) };
-                // JET_VETTED_UNSAFE_END: regex_literal_prefilter_cpu_simd
-            }
-        }
         haystack
             .get(start..)?
             .iter()
             .position(|byte| *byte == needle)
             .map(|offset| start + offset)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2")]
-    unsafe fn regex_find_byte_avx2(
-        haystack: &[u8],
-        needle: u8,
-        start: usize,
-    ) -> Option<usize> {
-        use std::arch::x86_64::{
-            _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
-        };
-        let mut pos = start;
-        let target = _mm256_set1_epi8(needle as i8);
-        while pos <= haystack.len().saturating_sub(32) {
-            let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
-            let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
-            if mask != 0 {
-                return Some(pos + mask.trailing_zeros() as usize);
-            }
-            pos += 32;
-        }
-        haystack
-            .get(pos..)?
-            .iter()
-            .position(|byte| *byte == needle)
-            .map(|offset| pos + offset)
-    }
-
-    #[cfg(target_arch = "x86")]
-    #[target_feature(enable = "avx2")]
-    unsafe fn regex_find_byte_avx2(
-        haystack: &[u8],
-        needle: u8,
-        start: usize,
-    ) -> Option<usize> {
-        use std::arch::x86::{
-            _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
-        };
-        let mut pos = start;
-        let target = _mm256_set1_epi8(needle as i8);
-        while pos <= haystack.len().saturating_sub(32) {
-            let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
-            let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
-            if mask != 0 {
-                return Some(pos + mask.trailing_zeros() as usize);
-            }
-            pos += 32;
-        }
-        haystack
-            .get(pos..)?
-            .iter()
-            .position(|byte| *byte == needle)
-            .map(|offset| pos + offset)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "sse2")]
-    unsafe fn regex_find_byte_sse2(
-        haystack: &[u8],
-        needle: u8,
-        start: usize,
-    ) -> Option<usize> {
-        use std::arch::x86_64::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8};
-        let mut pos = start;
-        let target = _mm_set1_epi8(needle as i8);
-        while pos <= haystack.len().saturating_sub(16) {
-            let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
-            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
-            if mask != 0 {
-                return Some(pos + mask.trailing_zeros() as usize);
-            }
-            pos += 16;
-        }
-        haystack
-            .get(pos..)?
-            .iter()
-            .position(|byte| *byte == needle)
-            .map(|offset| pos + offset)
-    }
-
-    #[cfg(target_arch = "x86")]
-    #[target_feature(enable = "sse2")]
-    unsafe fn regex_find_byte_sse2(
-        haystack: &[u8],
-        needle: u8,
-        start: usize,
-    ) -> Option<usize> {
-        use std::arch::x86::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8};
-        let mut pos = start;
-        let target = _mm_set1_epi8(needle as i8);
-        while pos <= haystack.len().saturating_sub(16) {
-            let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
-            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
-            if mask != 0 {
-                return Some(pos + mask.trailing_zeros() as usize);
-            }
-            pos += 16;
-        }
-        haystack
-            .get(pos..)?
-            .iter()
-            .position(|byte| *byte == needle)
-            .map(|offset| pos + offset)
     }
 
     fn regex_next_search_pos(text: &str, start: usize, end: usize) -> usize {

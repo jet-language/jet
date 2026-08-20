@@ -4,18 +4,18 @@ use core.regex as re
 
 fn run() ? {
     text :: "order 42 shipped to zip 90210"
-    print(re.is_match({"\d+"}, text))
-    print(re.full_match({"[a-z]+"}, "hello123"))
-    nums :: re.find_all({"\d+"}, text)
+    print(re.is_match(Regex{"\d+"}, text))
+    print(re.full_match(Regex{"[a-z]+"}, "hello123"))
+    nums :: re.find_all(Regex{"\d+"}, text)
     print(nums[0])
     print(nums.len())
-    m :: re.match({"(\d+) shipped"}, text)
+    m :: re.match(Regex{"(\d+) shipped"}, text)
     if m == .Val(mat) {
         print(mat.group(0) ?? "none")
         print(mat.group(1) ?? "none")
     }
-    print(re.replace_all({"\d+"}, text, "#"))
-    print(re.split({"\s+"}, text).len())
+    print(re.replace_all(Regex{"\d+"}, text, "#"))
+    print(re.split(Regex{"\s+"}, text).len())
     print(Regex{"\d+"}.is_match(text))
     print(Regex{"[a-z]+"}.full_match("hello123"))
 
