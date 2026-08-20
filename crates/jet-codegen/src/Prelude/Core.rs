@@ -1760,7 +1760,7 @@ where
 fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
     xs.sort_by(|left, right| right.cmp(left));
 }
-fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
 where
     F: FnMut(&T) -> K,
 {

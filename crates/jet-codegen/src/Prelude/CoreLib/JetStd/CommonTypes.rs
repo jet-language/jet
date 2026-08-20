@@ -874,6 +874,16 @@
         }
     }
 
+    // A duration renders as whole nanoseconds with its unit, the same text the
+    // TIR evaluator and the JIT print, so `print("{1d}")` reads alike on every
+    // tier (I9). Without this, AOT emitted `.jet_display()` on a type that had
+    // no such method and rustc rejected the generated program (I2).
+    impl super::JetDisplay for Duration {
+        fn jet_display(&self) -> String {
+            format!("{}ns", self.ns)
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub enum DurationUnit {
         Nanoseconds,
