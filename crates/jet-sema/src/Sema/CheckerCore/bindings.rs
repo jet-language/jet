@@ -621,10 +621,45 @@ impl<'a> Checker<'a> {
             // D-SHAPE-PLACE1=A: a bare maximal place bound locally is a checked
             // read window, never an implicit move/copy. Decide this before
             // `infer`'s owning-position rewrite (#642).
+            //
+            // The field carve-out below is root-sensitive, because the two laws
+            // that meet here answer for different roots:
+            //
+            //   * Rooted in a LOCAL owned value, `s :: p.name` is an owning
+            //     position and materializes, so the generated Rust never moves
+            //     a field out of its struct (`field_read_clones_instead_of_
+            //     moving`, `owning_nonscalar_field_read_clones` — the latter
+            //     pins the emit byte-exactly and runs it).
+            //   * Rooted in a READ/WRITE PARAMETER, the projection lives inside
+            //     a borrow, and spec.md:338-339 promises that a read call is
+            //     "allocation-free for every non-scalar shape" while
+            //     spec.md:339-340 and 438-439 say a bare `::` binding of a
+            //     place — "a name followed by its maximal field, index, or
+            //     range projection" — stays a read window. Materializing there
+            //     allocates off the borrow and drops the loan on the owner.
+            //
+            // This is the same `param_conv` fact `infer_checked`'s
+            // `borrowed_param_place` and `implicit_copy_target` already use to
+            // separate a borrowed projection from an ordinary owning read; the
+            // binding path was the one place that did not consult it.
+            // Excluding `Shared<T>` is not a carve-out for convenience: under
+            // D-CONC-SHARE1=A a field read on a shared handle IS a locked read
+            // (`desugar_shared_field_read` rewrites it during inference), so it
+            // never was a window and must not be wrapped as one.
+            let borrowed_param_place = crate::Sema::Diagnostics::expr_root_ident(&b.init)
+                .is_some_and(|root| {
+                    self.lookup(root).is_some_and(|info| {
+                        matches!(
+                            info.param_conv,
+                            Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                        ) && !self.type_contains_shared(&info.ty)
+                    })
+                });
             if !b.mutable
                 && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
                 && self.place_from_expr(&b.init).is_some()
-                && !field_read_to_clone(&b.init, self.registry, self.imports)
+                && (borrowed_param_place
+                    || !field_read_to_clone(&b.init, self.registry, self.imports))
             {
                 let span = b.init.span();
                 let inner = std::mem::replace(&mut b.init, Expr::Absent(span));
@@ -905,10 +940,17 @@ impl<'a> Checker<'a> {
             // completed sema, leaving its range metadata unresolved. Keep
             // view-bearing runtime values on the ordinary typed path.
             let skip_ct_view_bake = self.type_contains_view_boundary(&final_ty);
-            let skip_ct_field_read_bake = matches!(
-                &b.init,
-                Expr::Copy(inner, _) if field_read_to_clone(inner, self.registry, self.imports)
-            );
+            // A field read never bakes at compile time, whichever shape it took
+            // above: `Expr::Copy` when an owning destination materialized it, or
+            // `Expr::Place` when the `::` binding kept it as a read window
+            // (spec.md:339-340). Matching only the copy form would have started
+            // folding the window form the moment the window was restored.
+            let skip_ct_field_read_bake = match &b.init {
+                Expr::Copy(inner, _) | Expr::Place(inner, _, _) => {
+                    field_read_to_clone(inner, self.registry, self.imports)
+                }
+                _ => false,
+            };
             let skip_ct_memo_fold = !b.mutable
                 && !b.is_comptime
                 && self.implicit_fold_reaches_memoized_function(&b.init);

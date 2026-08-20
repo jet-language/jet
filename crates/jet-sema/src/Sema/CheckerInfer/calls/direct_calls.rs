@@ -1411,6 +1411,22 @@ impl<'a> Checker<'a> {
                         arg.flags.implicit_clone = true;
                     }
                 }
+                // D-MEM1/S2 vs D-MEM-COPYSEM1. The owning-slot materialization
+                // below rewrites a bare name into `Expr::Copy`, and E0209 /
+                // E0201 are stated over exactly that bare name ("a named
+                // binding passed where it would be silently cloned — Move-param
+                // arg without the move marker `^`", diagnostic-rows.md:167). A
+                // parameter-rooted name reaches `implicit_copy_target`'s
+                // borrowed-place arm, so the copy landed BEFORE the convention
+                // check read the name, and the hard error the law demands was
+                // never reported — a clone became silent, which is the one thing
+                // D-MEM1/S2 forbids. `~name` and `^name` are not bare names
+                // (`Expr::Copy` / `AccessConvention::Move`), so the caller's own
+                // ownership decision is still recognized and still exempt.
+                let bare_arg_name = match &arg.expr {
+                    Expr::Ident(name, span) => Some((name.clone(), *span)),
+                    _ => None,
+                };
                 let saved_exp = self.expected_type.clone();
                 let saved_esc = self.lambda_escapes;
                 if let Some((param_conv, param_ty)) = effective_params.get(i) {
@@ -1711,7 +1727,7 @@ impl<'a> Checker<'a> {
     
                 match (param_conv, arg.convention) {
                     (AccessConvention::Move, AccessConvention::Read) => {
-                        if let Expr::Ident(name, span) = &arg.expr {
+                        if let Some((name, span)) = &bare_arg_name {
                             if type_is_copy(param_ty) {
                                 // Copy values cross an owning parameter by bits.
                             } else if !self.is_resource_type(param_ty)

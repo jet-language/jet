@@ -37,16 +37,17 @@ fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
 }
 
-fn parse_codes(source: &str) -> Vec<String> {
+fn parse_diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-    match jet::Parser::parse(&tokens) {
-        Ok(_) => Vec::new(),
-        Err(diagnostics) => diagnostics
-            .into_iter()
-            .map(|diagnostic| diagnostic.code)
-            .collect(),
-    }
+    jet::Parser::parse(&tokens).err().unwrap_or_default()
+}
+
+fn parse_codes(source: &str) -> Vec<String> {
+    parse_diagnostics(source)
+        .into_iter()
+        .map(|diagnostic| diagnostic.code)
+        .collect()
 }
 
 #[test]
@@ -203,6 +204,14 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
             "#Job fn work() {}\nfn run() {}",
             jet::Policy::RuleSite::Function,
         ),
+        // D-CONSTMARK1=A / spec.md:718-720: the `.Constant` site is the marked
+        // compile-time binding. An unmarked `limit :: 10` is not a declaration
+        // at this scope, so this is the only spelling that reaches the row.
+        (
+            "#Static on a marked constant",
+            "#Static @limit :: 10\nfn run() {}",
+            jet::Policy::RuleSite::Constant,
+        ),
     ];
     for (label, source, expected_site) in fixtures {
         let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
@@ -231,6 +240,32 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
             .any(|declaration| declaration.scope == jet::Policy::PolicyScope::Module),
         "#Policy module declaration: {:?}",
         program.policy_declarations
+    );
+}
+
+/// I4: a wrong-site report has to name a spelling that works. `#Static` is the
+/// one active row whose only site is `.Constant`, and the only way to reach
+/// that site is the marked compile-time binding (spec.md:718-720) — so the
+/// generic "move it to a registered site" fix has nowhere to send the writer.
+#[test]
+fn a_constant_only_row_teaches_the_marked_binding() {
+    let unmarked = parse_diagnostics("#Static limit :: 10\nfn run() {}");
+    let wrong_site = unmarked
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0355")
+        .unwrap_or_else(|| panic!("expected the wrong-site report: {unmarked:?}"));
+    assert_eq!(
+        wrong_site.fix,
+        "write `#Static @name :: value` — a constant is a marked compile-time binding"
+    );
+
+    // A row with more than one legal site keeps the generic fix: moving it
+    // really is the whole instruction there.
+    let elsewhere = parse_diagnostics("#Off\nfn run() {}");
+    assert!(
+        elsewhere.iter().any(|diagnostic| diagnostic.code == "E0355"
+            && diagnostic.fix == "move `#Off` to one of its registered sites"),
+        "{elsewhere:?}"
     );
 }
 

@@ -470,8 +470,31 @@ fn local_cell_runtime_releases_original_loans_on_drop_and_unwind() {
         return;
     }
     let cell = include_str!("../crates/jet-codegen/src/Prelude/LocalCell.rs");
+    // f855ee91f (2026-08-06) stated LocalCell's optional-slot policy over the
+    // one outcome carrier: `T?` is `JetOutcome<T, JetAbsent>`
+    // (D-FAIL-CARRIER1=A, crates/jet-foundation/src/Outcome.rs:15-22). This
+    // harness compiles LocalCell.rs on its own, so it has to supply that
+    // carrier — and supplying a DIFFERENT optional shape is precisely the
+    // second representation D-FAIL-CARRIER1 exists to remove. Take the
+    // declarations from the canonical file verbatim and prove they are still
+    // the canonical declarations, the same way the FFI bridge projects them
+    // into its standalone crate (crates/jet-pkg-model/src/FFI.rs:1448-1463).
+    let outcome = include_str!("../crates/jet-foundation/src/Outcome.rs");
+    let carrier = "pub type JetOutcome<T, E> = Result<T, E>;";
+    let absent_derive =
+        "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]";
+    let absent = "pub struct JetAbsent;";
+    for line in [carrier, absent_derive, absent] {
+        assert!(
+            outcome.contains(line),
+            "the outcome carrier moved; this harness now declares a second shape: {line}"
+        );
+    }
     let harness = [
         "mod jet_cell {",
+        carrier,
+        absent_derive,
+        absent,
         cell,
         "}",
         r#"
@@ -4049,6 +4072,20 @@ fn run() {
     assert!(out.rust.contains("-> __jet_Outer<'__jet___view>"), "{}", out.rust);
 }
 
+/// The property: a wrapper around a view-bearing value renders the view
+/// lifetime on the NAMED LEAF that actually holds the window, never on the
+/// wrapper itself. Put it on the wrapper and every value of that wrapper type
+/// would be tied to one owner's storage, whether or not it carries a window.
+///
+/// The wrappers are spelled `JetOutcome<…>` now, not `Option`/`Result`.
+/// D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06,
+/// crates/jet-foundation/src/Outcome.rs:1-22) make one carrier serve both
+/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T ? E` is
+/// `JetOutcome<T, E>`. A raw `Option` here would be the second optional
+/// representation that decision exists to remove. The leaf-not-wrapper
+/// property is untouched by the rename, so the negative guards move to the
+/// carrier's own name — without them these assertions would still pass on a
+/// build that parameterized the wrapper too.
 #[test]
 fn wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves() {
     let src = r#"
@@ -4074,11 +4111,27 @@ fn tuple(values: [Int]) => (window: Window, count: Int) {
 fn run() { print(0) }
 "#;
     let out = jet::compile(src).expect("wrapper returns must preserve view provenance");
-    assert!(out.rust.contains("Option<__jet_Window<'__jet___view>>"), "{}", out.rust);
-    assert!(out.rust.contains("Result<__jet_Window<'__jet___view>, String>"), "{}", out.rust);
+    assert!(
+        out.rust
+            .contains("JetOutcome<__jet_Window<'__jet___view>, JetAbsent>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust
+            .contains("JetOutcome<__jet_Window<'__jet___view>, String>"),
+        "{}",
+        out.rust
+    );
     assert!(out.rust.contains("pub __jet_window: __jet_Window<'__jet___view>"), "{}", out.rust);
     assert!(out.rust.contains("pub struct __jet_GenericHolder<'__jet___view, T"), "{}", out.rust);
-    assert!(out.rust.contains("pub __jet_maybe: Option<__jet_Window<'__jet___view>>"), "{}", out.rust);
+    assert!(
+        out.rust
+            .contains("pub __jet_maybe: JetOutcome<__jet_Window<'__jet___view>, JetAbsent>"),
+        "{}",
+        out.rust
+    );
+    assert!(!out.rust.contains("JetOutcome<'__jet___view"), "{}", out.rust);
     assert!(!out.rust.contains("Option<'__jet___view"), "{}", out.rust);
     assert!(!out.rust.contains("Result<'__jet___view"), "{}", out.rust);
 }
@@ -5055,8 +5108,23 @@ fn run() {
     assert!(escape.fix.contains("~text"), "fix must name explicit copy: {escape:?}");
 }
 
+/// D-MEM-COPYSEM1=A: a cloneable read value entering an owning destination is
+/// materialized automatically (spec.md:339-340), and the return slot is an
+/// owning destination — `tests/ui/return_borrowed_param.stderr` is the same
+/// shape for a concrete `String` and expects no errors at all. E0120 survives
+/// only for the cases spec.md:340 and diagnostic-rows.md:115 name: a
+/// non-cloneable value or `copies: .Explicit`.
+///
+/// The property this test defends is unchanged: a read parameter never escapes
+/// as owned WITHOUT an ownership decision. For a generic the decision cannot be
+/// made at the definition, so the compiler pays for it visibly — it borrows the
+/// parameter, materializes at the return, and puts the resulting `Clone`
+/// obligation in the signature where every caller must satisfy it. Assert all
+/// three, because dropping any one of them is a different (and wrong) compiler:
+/// `&T` alone would allow a move out of a borrow, and `T: Clone` alone would
+/// allow the parameter to be taken by value.
 #[test]
-fn generic_borrowed_parameter_cannot_return_as_owned() {
+fn generic_borrowed_parameter_materializes_an_owned_return() {
     let src = r#"
 fn identity<T>(value: T) => T {
     return value
@@ -5066,12 +5134,32 @@ fn run() {
     print(0)
 }
 "#;
-    let diags = jet::compile(src).expect_err("generic read parameter cannot escape as owned");
-    let escape = diags
-        .iter()
-        .find(|diag| diag.code == "E0120")
-        .expect("generic borrowed return must report E0120 before codegen");
-    assert!(escape.fix.contains("^T"), "fix must name take ownership: {escape:?}");
+    let out = jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
+    assert!(
+        out.rust
+            .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> T {"),
+        "the escape must be paid for in the signature, not laundered: {}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("return ((*__jet_value)).clone();"),
+        "the owned return must copy through the borrow, never move out of it: {}",
+        out.rust
+    );
+    // The boundary, from the same output: nothing turned the read parameter
+    // into an owned one. A compiler that "solved" the escape by taking the
+    // parameter by value would satisfy both assertions above while quietly
+    // changing the signature's access.
+    assert!(
+        !out.rust.contains("__jet_value: T"),
+        "the parameter must stay a read borrow, not become an owned slot: {}",
+        out.rust
+    );
+    // The refusal rail this test used to own now lives with the cases
+    // diagnostic-rows.md:115 names — a non-cloneable value or
+    // `copies: .Explicit` (tests/ui/param_owned_field_needs_copy_explicit) —
+    // and the `Clone` obligation is only added where a copy is actually
+    // demanded (`generic_clone_bound_is_usage_sensitive`, above).
 }
 
 #[test]
@@ -5125,7 +5213,20 @@ fn run() {
     assert!(out.rust.contains("__jet_values: &Vec<i64>"), "{}", out.rust);
     assert!(out.rust.contains("__jet_parcel: &__jet_Parcel"), "{}", out.rust);
     assert!(out.rust.contains("__jet_value: &T"), "{}", out.rust);
-    assert!(out.rust.contains("__jet_f: &Box<dyn Fn"), "{}", out.rust);
+    // A function value is stored as `Rc` since f003de290 (2026-07-31) so
+    // collections can clone it. The property under test is the leading `&`:
+    // every unmarked non-scalar parameter, callbacks included, arrives borrowed
+    // (spec.md:338-341 — "allocation-free for every non-scalar shape,
+    // including strings, collections, structs, generic values, and callbacks").
+    assert!(out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn"), "{}", out.rust);
+    // The read-only generic takes no `Clone`: a borrow that never escapes must
+    // not levy a copy obligation on callers (`generic_clone_bound_is_usage_
+    // sensitive` states the other direction).
+    assert!(
+        out.rust.contains("pub fn __jet_read_generic<T>(__jet_value: &T)"),
+        "a read-only generic parameter must stay bound-free: {}",
+        out.rust
+    );
     assert!(!out.rust.contains("((*__jet_text)).clone()"), "{}", out.rust);
 }
 
@@ -5143,7 +5244,18 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("function-value call must preserve read access");
-    assert!(out.rust.contains("__jet_f: &Box<dyn Fn(&String)"), "{}", out.rust);
+    // f003de290 (2026-07-31) stores function values as `Rc` so a collection can
+    // clone them; `Box` was the container, never the property. The property is
+    // the `&`: the callback crosses this call as a read borrow, so the caller
+    // still owns its function value afterwards. Pin the whole prefix — the
+    // parameter's own borrow AND the callback's read-borrowed `&String`
+    // argument — so neither half can drift into an owned slot unnoticed.
+    assert!(
+        out.rust
+            .contains("__jet_f: &std::rc::Rc<dyn Fn(&String)"),
+        "the function value must arrive as a read borrow: {}",
+        out.rust
+    );
     assert!(out.rust.contains("__jet_value: &String"), "{}", out.rust);
     assert!(out.rust.contains("((*__jet_f))(&((*__jet_value)))"), "{}", out.rust);
     assert!(!out.rust.contains("((*__jet_value)).clone()"), "{}", out.rust);
@@ -5168,6 +5280,17 @@ fn run() {
     assert!(diags.iter().any(|d| d.code == "E0212"), "{diags:?}");
 }
 
+/// The callback's returned window must stay tied to the list the callback was
+/// handed, and the wrapper's own return must stay tied to the wrapper's own
+/// parameter. Both are one-lifetime-on-both-ends facts, and they are what makes
+/// a later `values.push(…)` reachable as E0212 through a function value.
+///
+/// 56f4f7bd4 (2026-07-31) gave the callback's binder its own name: reusing the
+/// enclosing function's `'__jet___view` inside a `for<…>` binder is an E0496
+/// shadow whenever a view-returning fn takes a view-returning callback. The
+/// rename is why the old spelling no longer appears; the provenance it carries
+/// is unchanged, so assert the whole trait shape rather than one lifetime name,
+/// and assert the two binders stay distinct.
 #[test]
 fn parameter_rooted_lambda_and_generic_callback_preserve_view_provenance() {
     let src = r#"
@@ -5182,10 +5305,28 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("callback provenance is hidden in the function value");
+    // One binder, on the callback's argument AND on its result: the window the
+    // callback returns can only come from the list it was given.
     assert!(
-        out.rust.contains("for<'__jet___view> Fn(&'__jet___view Vec<i64>)")
-            && out.rust.contains("-> &'__jet___view [i64]"),
-        "{}",
+        out.rust.contains(
+            "dyn for<'__jet___fn_view> Fn(&'__jet___fn_view Vec<i64>) -> &'__jet___fn_view [i64]"
+        ),
+        "the callback must return a window into its own argument: {}",
+        out.rust
+    );
+    // The wrapper's own return is tied to the wrapper's own parameter.
+    assert!(
+        out.rust
+            .contains("__jet_values: &'__jet___view Vec<i64>) -> &'__jet___view [i64]"),
+        "the wrapper's returned window must be tied to its list parameter: {}",
+        out.rust
+    );
+    // The E0496 half of the same shape: the callback's binder is not the
+    // enclosing function's lifetime, so the two windows are never conflated.
+    assert!(
+        !out.rust
+            .contains("dyn for<'__jet___view>"),
+        "the callback binder must not shadow the enclosing view lifetime: {}",
         out.rust
     );
 }
@@ -5471,6 +5612,17 @@ fn run() { print(0) }
     }
 }
 
+/// Two windows over the same subplace of a read parameter, in the two positions
+/// that decide differently, in one function so neither can disturb the other:
+/// spec.md:339-340 — "a cloneable read value entering an owning destination is
+/// materialized automatically; a bare `::` binding remains a read window" — and
+/// spec.md:438-439, where a place ends in "its maximal field, index, or range
+/// projection", so a FIELD place is the same window a range place is.
+///
+/// The function value is the trap: `callback(parcel.label, 1)` is a borrow
+/// position, and a copy inserted there would hand the callback a fresh
+/// allocation instead of the caller's own storage, silently breaking
+/// spec.md:338's allocation-free read call.
 #[test]
 fn function_value_borrow_context_preserves_parameter_place_window() {
     let src = r#"
@@ -5483,9 +5635,37 @@ fn apply_to(parcel: Parcel, callback: fn(String, Int)) {
 fn run() { apply_to(Parcel.{ label: "hello" }, inspect) }
 "#;
     let out = jet::compile(src).expect("bare parameter subplace is a read window");
+    assert!(out.rust.contains("__jet_parcel: &__jet_Parcel"), "{}", out.rust);
+    // The borrow position: the subplace is reborrowed out of the parameter's
+    // own storage, not materialized.
+    assert!(
+        out.rust
+            .contains("((*__jet_callback))(&(((*__jet_parcel)).__jet_label),"),
+        "the callback argument must reborrow the subplace: {}",
+        out.rust
+    );
+    // The bare `::` binding: still a read window.
     assert!(out.rust.contains("let __jet_alias = &"), "{}", out.rust);
+    assert!(
+        !out.rust.contains("((*__jet_parcel)).__jet_label).clone()"),
+        "a bare `::` binding must not allocate a copy of the subplace: {}",
+        out.rust
+    );
 }
 
+/// Three refusal rails, one per access the caller failed to write. The middle
+/// one is the load-bearing case for D-MEM-COPYSEM1: a move (`^`) parameter is
+/// an owning slot, so the automatic materialization applies to it too — but a
+/// bare NAME at that slot is E0209 first ("a named binding passed where it
+/// would be silently cloned — Move-param arg without the move marker `^`",
+/// diagnostic-rows.md:167; "no clone is ever silent", D-MEM1/S2). If the
+/// materialization is allowed to rewrite the name before that check reads it,
+/// the hard error disappears and the clone becomes silent — which is why the
+/// convention check reads the argument as it was WRITTEN.
+///
+/// The third rail is the survivor of the E0120 side: a `fn` value is not
+/// cloneable (`is_cloneable`, Sema/Diagnostics.rs:502), so nothing materializes
+/// it and the escape is still refused outright.
 #[test]
 fn plain_parameter_write_take_and_escape_diagnostics_name_explicit_access() {
     let write_src = r#"
