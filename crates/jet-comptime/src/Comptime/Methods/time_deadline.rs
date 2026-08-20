@@ -1,8 +1,14 @@
-// Comptime has no resident scheduler host. This is the one host-side
-// scheduler primitive for the shared deadline kernel; the policy itself
-// remains in Prelude/CoreLib/Top/TimeSleep.rs.
+// Comptime has no resident scheduler host. These are the host-side scheduler
+// primitives for the shared deadline kernel; the policy itself remains in
+// Prelude/CoreLib/Top/TimeSleep.rs.
 pub(super) fn jet_scheduler_sleep_ms(millis: u64) {
     std::thread::sleep(std::time::Duration::from_millis(millis));
+}
+
+// A comptime evaluation runs no task, so no wait is ever shielded and no
+// cancellation can be in flight around it.
+fn jet_scheduler_shielded() -> bool {
+    false
 }
 
 fn jet_deadline_exceeded(_wait_kind: &str) -> ! {
