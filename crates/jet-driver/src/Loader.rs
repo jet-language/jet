@@ -820,13 +820,28 @@ fn load_entry_with_overlays_mode_on_stack(
         // `realized_libs` exactly like a hangar-realized `library` (U17).
         let project_root = workspace_root.clone().unwrap_or_else(|| entry_dir.clone());
         let mut resolution = PkgResolution::default();
-        let (entry_resolver, entry_checked, raw) = match checked_source_file(
-            &entry_abs,
-            &entry_abs.display().to_string(),
-        ) {
-            Ok(checked) => checked,
-            Err(error) => return Err(record_loader_error(&mut sink, error)),
+        // An overlay owns its path's text (an LSP unsaved buffer, a staged
+        // codemod tree) exactly as it does in `load_file`: a manifest-less
+        // entry may have no bytes on disk at all, so this inline-dep pre-pass
+        // reads the overlay instead of failing the whole load with E0603.
+        let entry_overlay = overlays
+            .iter()
+            .rev()
+            .find(|(candidate, _)| normalize_path(candidate) == entry_abs)
+            .map(|(_, text)| *text);
+        let entry_authority = match entry_overlay {
+            Some(_) => None,
+            None => match checked_source_file(&entry_abs, &entry_abs.display().to_string()) {
+                Ok(checked) => Some(checked),
+                Err(error) => return Err(record_loader_error(&mut sink, error)),
+            },
         };
+        let raw = entry_overlay.map(str::to_string).unwrap_or_else(|| {
+            entry_authority
+                .as_ref()
+                .map(|(_, _, source)| source.clone())
+                .expect("one source reader must provide the entry text")
+        });
         let (toks, lex_diags) = crate::Lexer::lex(&raw);
         if lex_diags.is_empty() {
             if let Ok(prog) = crate::Parser::parse(&toks) {
@@ -848,15 +863,17 @@ fn load_entry_with_overlays_mode_on_stack(
                 }
             }
         }
-        if let Err(error) = entry_resolver.revalidate_file(&entry_checked) {
-            return Err(record_loader_error(
-                &mut sink,
-                LoaderError::at(
-                    &entry_abs.display().to_string(),
-                    &raw,
-                    vec![error.diagnostic()],
-                ),
-            ));
+        if let Some((entry_resolver, entry_checked, _)) = entry_authority.as_ref() {
+            if let Err(error) = entry_resolver.revalidate_file(entry_checked) {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &entry_abs.display().to_string(),
+                        &raw,
+                        vec![error.diagnostic()],
+                    ),
+                ));
+            }
         }
         (
             project_root,

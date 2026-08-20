@@ -540,9 +540,15 @@ fn run() {
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
+        // #1801 (one name ledger): a root scope identity is the module *alias*
+        // from the ledger — the sanitized file stem — never the on-disk path.
+        let entry_alias = std::path::Path::new(project.entry())
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .expect("entry file stem");
         let symbol = db
             .symbols
-            .lookup_identity(&format!("fn:module:{}::add", project.entry()))
+            .lookup_identity(&format!("fn:module:{entry_alias}::add"))
             .expect("add fact");
         let (tokens, _) = crate::Lexer::lex(src);
         let hover_offset = src.find("\nfn add").unwrap() + 4;

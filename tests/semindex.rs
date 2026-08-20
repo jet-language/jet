@@ -294,8 +294,10 @@ fn run() {
 "#;
     let path = temp_fixture("semantic_docs.jet", src);
     let symbols = open_symbols(&path).expect("semantic symbols");
+    // #1801 (one name ledger): a root scope identity is the module alias — the
+    // sanitized file stem — never the on-disk path.
     let score = symbols
-        .lookup_identity(&format!("fn:module:{}::score", path.display()))
+        .lookup_identity("fn:module:semantic_docs::score")
         .expect("score identity");
     assert_eq!(score.signature, "fn score(name: String) =[]=> Int");
     assert_eq!(score.summary, "Scores one name.");

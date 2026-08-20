@@ -282,7 +282,7 @@ mod generic_instance_tests {
         let db = jet_semindex::build_symbol_db(&bundle, &facts);
         let (tokens, lex_diagnostics) = crate::Lexer::lex(left_source);
         assert!(lex_diagnostics.is_empty());
-        let offset = left_source.find("same =").unwrap();
+        let offset = left_source.find("same ::").unwrap();
         let references = compute_references(&db, &tokens, &shown_left, offset, true);
         assert!(references.iter().any(|(path, span)| path == &shown_left && &left_source[span.start..span.end] == "same"), "refs={references:?} defs={:#?} instances={:#?}", db.defs, db.index.instances());
         assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct value(4) instance joined by alias spelling: {references:?}");

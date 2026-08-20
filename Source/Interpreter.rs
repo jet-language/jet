@@ -59,9 +59,11 @@ fn stmt_is_resident(stmt: &Stmt) -> bool {
 }
 
 /// True when `e` is, at this level, a compiler-lowered `task` spawn method
-/// call. The parser lowers the one-word surface before resident-mode checks.
+/// call. The parser lowers the one-word surface to the compiler-private
+/// dispatch name (`Syntax::INTERNAL_TASK_SPAWN_METHOD`) before resident-mode
+/// checks, so this reads the constant rather than a user-visible spelling.
 fn expr_has_spawn(e: &Expr) -> bool {
-    matches!(e, Expr::MethodCall { method, .. } if method == "spawn")
+    matches!(e, Expr::MethodCall { method, .. } if method == crate::Syntax::INTERNAL_TASK_SPAWN_METHOD)
 }
 
 /// Collect every top-level function across all modules into the flat name→func
@@ -980,7 +982,14 @@ mod tests {
     #[test]
     fn scheduled_tasks_filter_always_skipped_tasks() {
         let src = "#Job(.Dev, skip: \"disabled\") #Every(5min) fn skipped() {}\n#Job(.Dev, skip: .Unless(.Platform(.MacOS))) #Every(5min) fn mac_only() {}\n#Job #Every(5min) fn active() {}\nfn run() {}\n";
-        let bundle = bundle_from(src, "scheduled_skip");
+        let mut bundle = bundle_from(src, "scheduled_skip");
+        // D-SCHEDULE1: sema resolves `#Every(…)` once and writes the schedule
+        // onto the marker (`CheckerSchedule::check_every_marker`); `jet dev`
+        // only ever asks a checked bundle, so the fixture checks it the same
+        // way — on the compiler's sized stack, not a 2 MiB libtest thread.
+        let _ = crate::run_compiler_work(|| {
+            crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run)
+        });
         let mut names = scheduled_tasks(&bundle)
             .into_iter()
             .map(|(name, _)| name)
