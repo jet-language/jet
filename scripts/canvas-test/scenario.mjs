@@ -1875,14 +1875,21 @@ fn run() {
   "fallible-context": async (ctx) => {
     await ctx.openCanvas();
     await ctx.switchGraph("scratch");
-    await ctx.driver.evaluate(`window.__jetCanvasTest.openGraphActionPalette("Fallible")`);
-    await ctx.expectMenu("Fallible");
-    const row = await ctx.driver.evaluate(`(() => {
-      const buttons = Array.from(document.querySelectorAll("#context-menu [data-menu-action]"));
-      const button = buttons.find((b) => b.textContent.includes("Fallible"));
+    // The structural row ships as "Failure rail" (query_actions.rs
+    // `canvas_structural_action_jsons`); it was renamed from "Fallible" when the
+    // declared error rail was unified. The palette head echoes the query back
+    // into `<input value="…">`, so `expectMenu` matches that echo even when no
+    // row is rendered yet — wait for the row itself, which is what we assert on.
+    await ctx.driver.evaluate(`window.__jetCanvasTest.openGraphActionPalette("Failure rail")`);
+    const readFallibleRow = () => ctx.driver.evaluate(`(() => {
+      const menu = document.getElementById("context-menu");
+      if (!menu || !menu.classList.contains("is-open")) return null;
+      const button = Array.from(menu.querySelectorAll("[data-menu-action]")).find((b) => b.textContent.includes("Failure rail"));
       if (!button) return null;
       return { available: button.dataset.available, code: button.dataset.unavailableReasonCode, title: button.getAttribute("title"), text: button.textContent };
     })()`);
+    await ctx.waitFor(async () => !!(await readFallibleRow()), "Failure rail palette row");
+    const row = await readFallibleRow();
     if (!row || row.available !== "false" || row.code !== "needs_fallible_function" || !row.title.includes("fallible function")) {
       throw new Error(`fallible row not excluded with reason: ${JSON.stringify(row)}`);
     }
@@ -1987,10 +1994,20 @@ fn run() {
     await ctx.pickEntry("abs");
     await ctx.expectSourceContains("math.abs");
     await ctx.driver.shortcut(["Control", "z"]);
+    // `main.jet` flips the moment the undo transaction commits on the server,
+    // but the toast and the `lastToast` snapshot only exist once the client's
+    // own response handling redraws the graph (transactions-catalog.js
+    // `restoreSource` toasts, then `loadGraph()` draws). Waiting on the restored
+    // bytes alone read the previous "Source updated" toast whenever the machine
+    // is busy enough to slow that redraw — 6/6 Firefox and 3/3 Chromium
+    // failures under a saturated CPU, which is how verify-full runs. Wait for
+    // both observables.
     await ctx.waitFor(async () => {
       const source = await ctx.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
-      return source === before;
-    }, "source restored by undo");
+      if (source !== before) return false;
+      const pending = await ctx.driver.evaluate(`window.__jetCanvasTest.lastToast || ""`);
+      return pending.includes("Undo: insert abs");
+    }, "source restored by undo and named in the toast");
     const toast = await ctx.driver.evaluate(`window.__jetCanvasTest.lastToast || ""`);
     if (!toast.includes("Undo: insert abs")) throw new Error(`undo toast did not name operation: ${toast}`);
   },
