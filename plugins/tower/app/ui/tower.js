@@ -472,7 +472,7 @@ function dutyDecision(d) {
 function acceptanceContent(card, ballot) {
   const ci = ballot?.checkInstructions;
   if (ci && (Array.isArray(ci.proof) || 'visualCheck' in ci))
-    return { proof: ci.proof || [], visualCheck: ci.visualCheck || null };
+    return { proof: ci.proof || [], visualCheck: ci.visualCheck || null, steps: ci.steps || null };
   if (ci && ((ci.toCheck || []).length || (ci.confirms || []).length))
     return { proof: (ci.confirms || []).length ? ci.confirms : ci.toCheck, visualCheck: null };
   const items = (card?.criteria || []);
@@ -511,8 +511,10 @@ function dutyVerify(card, ballot) {
         <div class="verifyblock__h">What agents already proved</div>
         <ul class="verifyblock__list">${inline.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
         ${rest.length ? `<details class="verifyblock__more"><summary>+${rest.length} more</summary><ul class="verifyblock__list">${rest.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
-        <div class="verifyblock__h">Your eyes only</div>
-        <p class="verifyblock__visual">${esc(yourCheck)}</p>
+        <div class="verifyblock__h">${content.steps ? 'How to see it' : 'Your eyes only'}</div>
+        ${content.steps
+          ? `<pre class="verifyblock__steps">${esc(content.steps)}</pre>`
+          : `<p class="verifyblock__visual">${esc(yourCheck)}</p>`}
       </div>
       <div class="duty__actions">
         <button class="btn btn--red btn--sm" data-accept ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : 'Accept — looks right'}</button>

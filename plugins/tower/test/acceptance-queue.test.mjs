@@ -27,18 +27,51 @@ const fresh = () => {
 // ---- store: checkInstructions assembly --------------------------------------
 
 // #515 pass 2 (2026-07-12): short, phone-first shape — one line per
-// non-open criterion (machine evidence already on file), plus AT MOST one
-// visual-check line, only when a ref points at something visual.
-test('acceptanceCheckInstructions: proof is one line per non-open criterion (open criteria stay out)', () => {
+// criterion, plus AT MOST one visual-check line. An open row is named as
+// STILL OPEN rather than hidden: a request that drops its open rows reads as
+// a finished card, which is how an owner ends up accepting unfinished work.
+test('acceptanceCheckInstructions: one line per criterion, open rows named', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', refs: ['tests/foo.rs'] }, cfg));
   st.mutate((s) => db.addCriterion(s, '#1', 'section renders on Now', 'builder'));
-  st.mutate((s) => db.addCriterion(s, '#1', 'accept closes the card', 'builder')); // stays open — no line
+  st.mutate((s) => db.addCriterion(s, '#1', 'accept closes the card', 'builder'));
   st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'curl showed the section', by: 'builder' }));
   const c = st.load().cards[0];
   const ci = acceptanceCheckInstructions(c);
-  assert.deepEqual(ci.proof, ['section renders on Now — met (curl showed the section)']);
+  assert.deepEqual(ci.proof, [
+    'section renders on Now — met (curl showed the section)',
+    'STILL OPEN — accept closes the card',
+  ]);
   assert.equal(ci.visualCheck, null, 'tests/foo.rs is not a visual ref');
+});
+
+// The owner asked for the one thing the request never carried: how to see it.
+// Authored steps beat the ref heuristic and travel as their own block.
+test('acceptanceCheckInstructions: authored check steps become the how-to block', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'A',
+    refs: ['plugins/tower/app/ui/tower.js'],
+    checkSteps: 'Run `jet run examples/x.jet`.\nGood looks like: the cause on line one.',
+  }, cfg));
+  const c = st.load().cards[0];
+  const ci = acceptanceCheckInstructions(c);
+  assert.match(ci.steps, /^Run `jet run examples\/x\.jet`\./);
+  assert.equal(ci.visualCheck, ci.steps, 'the authored block is what the owner reads');
+});
+
+// A criterion that says "owner visual acceptance" can only be met BY the
+// owner, so the request must appear while it is still open — otherwise the
+// owner is never asked and the card waits forever.
+test('a card in verify with authored steps mints its acceptance request', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true, checkSteps: 'Look at the report.' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'owner visual acceptance', 'builder'));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'verify', by: 'builder' }, cfg));
+  const ballot = st.load().decisions.find((d) => d.id === 'D-ACCEPT-1');
+  assert.ok(ballot, 'the owner must be asked while the owner-only criterion is open');
+  assert.equal(ballot.status, 'open');
+  assert.equal(ballot.checkInstructions.steps, 'Look at the report.');
 });
 
 test('acceptanceCheckInstructions: visualCheck is one line, only for a ref that touches app/ui', () => {

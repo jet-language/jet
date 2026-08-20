@@ -345,7 +345,10 @@ test('cli: tower lint exits 1 and reports a finding once one exists', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-lint-cli-'));
   run(cwd, ['init', '--name', 'Lint Test']);
   run(cwd, ['card', 'add', '--title', 'A', '--json']);
-  run(cwd, ['card', 'update', '#1', '--phase', 'done', '--by', 'agent-1']);
+  // An agent cannot close a card with no criteria (E_CRITERIA), so the
+  // done-without-evidence board state this rule reports is one only the owner
+  // can create.
+  run(cwd, ['card', 'update', '#1', '--phase', 'done', '--by', 'owner']);
   const r = run(cwd, ['lint'], false);
   assert.equal(r.code, 1);
   assert.match(r.out, /done-without-evidence\s+#1/);

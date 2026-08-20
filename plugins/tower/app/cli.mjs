@@ -58,9 +58,9 @@ const COMMAND_FLAGS = {
     list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent'],
     show: [],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force'),
+      'checkSteps', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force'),
     update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev'),
+      'checkSteps', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev'),
     claim: by(),
     release: by('handoff'),
     delete: by(),
@@ -167,7 +167,7 @@ const FLAG_VALUE = {
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
   id: 'ID', card: 'REF', decision: 'ID', epoch: 'E', milestone: 'M',
-  phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', lane: 'L',
+  phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', checkSteps: '"…"', lane: 'L',
   tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', parent: 'REF', blockedBy: 'REF',
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
   expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"',
@@ -409,6 +409,7 @@ function cmdCard(store, { pos, flags }) {
         title, body, kind: flags.kind ?? p.kind,
         track: flags.track ?? p.track, epoch: flags.epoch ?? p.epoch, milestoneId: flags.milestone ?? p.milestoneId,
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
+        checkSteps: flags.checkSteps ?? p.checkSteps,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
         criteria: p.criteria,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
@@ -424,6 +425,7 @@ function cmdCard(store, { pos, flags }) {
       const patch = { ...p, by };
       for (const [f, k] of [['title', 'title'], ['body', 'body'], ['kind', 'kind'], ['track', 'track'], ['epoch', 'epoch'],
         ['milestone', 'milestoneId'], ['phase', 'phase'], ['priority', 'priority'], ['plan', 'plan'],
+        ['checkSteps', 'checkSteps'],
         ['workOrder', 'workOrder'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');

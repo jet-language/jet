@@ -890,6 +890,7 @@ export function addCard(s, p, config) {
     phase: p.phase || 'planning',
     priority: p.priority || config.priorities[2] || config.priorities.at(-1),
     plan: p.plan || null,
+    checkSteps: p.checkSteps || null,
     blockedBy,
     workOrder: p.workOrder != null ? Number(p.workOrder) : undefined,
     assignee: p.assignee || null,
@@ -907,7 +908,7 @@ export function addCard(s, p, config) {
   return card;
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
 // nonempty checklist with every row met or verified. Owner writes keep the
@@ -937,10 +938,18 @@ function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAccept
 // same owner handoff as asking for done — without this the owner's Accept
 // button stays disabled forever, because the ballot only minted on a `--phase
 // done` attempt and agents park in verify directly.
+//
+// Authored check steps are the second way in. A criterion that says "owner
+// visual acceptance" can only be met BY the owner, so waiting for every
+// criterion first meant the request never appeared and the owner was never
+// asked. Writing the steps is the agent stating the handoff explicitly; the
+// ballot's proof list still shows which criteria remain open.
 function maybeMintAcceptance(s, c) {
   const items = c.criteria || [];
-  if (c.needsAcceptance && c.phase === 'verify' && items.length && items.every(i => ['met', 'verified'].includes(i.status)))
-    mintAcceptance(s, c);
+  if (!c.needsAcceptance || c.phase !== 'verify' || !items.length) return;
+  const settled = items.every(i => ['met', 'verified'].includes(i.status));
+  const authored = typeof c.checkSteps === 'string' && c.checkSteps.trim().length > 0;
+  if (settled || authored) mintAcceptance(s, c);
 }
 
 // #515 pass 2 (2026-07-12, owner directive): acceptance entries were too
@@ -958,12 +967,21 @@ const VISUAL_REF_RE = /Tower\/app\/ui\/|\.(png|jpe?g|gif|svg)$|canvas|screenshot
 export function acceptanceCheckInstructions(c) {
   const items = c.criteria || [];
   const refs = c.refs || [];
-  const proof = items
-    .filter(i => i.status !== 'open')
-    .map(i => shorten(`${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}`));
+  // Every criterion, including the ones still open: a request that hides its
+  // open rows tells the owner the card is finished when it is not.
+  const proof = items.map(i => shorten(
+    i.status === 'open'
+      ? `STILL OPEN — ${i.text}`
+      : `${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}`,
+  ));
+  // An owner-authored `checkSteps` block is the card's answer to "how do I
+  // see this?" It wins over the ref heuristic, because a guess about a path
+  // never tells the owner what to run or what good looks like.
   const visualRef = refs.find(r => VISUAL_REF_RE.test(r));
-  const visualCheck = visualRef ? `Open ${visualRef} — glance, confirm it looks right.` : null;
-  return (proof.length || visualCheck) ? { proof, visualCheck } : null;
+  const authored = typeof c.checkSteps === 'string' && c.checkSteps.trim() ? c.checkSteps.trim() : null;
+  const visualCheck = authored
+    || (visualRef ? `Open ${visualRef} — glance, confirm it looks right.` : null);
+  return (proof.length || visualCheck) ? { proof, visualCheck, steps: authored } : null;
 }
 
 function mintAcceptance(s, c) {
@@ -1077,6 +1095,13 @@ export function updateCard(s, ref, patch, config) {
     }
   }
   if (oldPhase !== 'verify' && c.phase === 'verify') maybeMintAcceptance(s, c);
+  // The owner reads the acceptance request, not the card's history. New check
+  // steps on a card that is already waiting must reach that request, or the
+  // owner is told to verify something with no way to see it.
+  if ('checkSteps' in patch) {
+    const waiting = s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
+    if (waiting) waiting.checkInstructions = acceptanceCheckInstructions(c);
+  }
   if (c.assignee && c.assignee === patch.by) c.claimedAt = now();
   if (c.phase === 'done' || c.phase === 'frozen') {
     c.assignee = null;
