@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2109,
-    "rev": 39602,
+    "rev": 39626,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85281,7 +85281,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: D-JOB-SUBCMD1 outcome C. Jobs become subcommands of the program itself on every tier: jet run app.jet -- migrate on plain source, and ./myapp migrate on a built binary, same argv contract, retiring the separate --job flag from #1448. The marker argument is a typed scope enum: .Ship, .Dev, or .Internal. A bare #Job means .Dev — a subcommand while developing (jet run/jet dev/debug builds dispatch every job), stripped from release builds unless marked #Job(.Ship). .Internal jobs are callable from code/scheduler only, never from argv. Release builds print what they stripped and name the fix (mark #Job(.Ship) to include). Out of scope: renaming the word job itself (#1448, must land first).\n\nDepends on: #1448 (unify job vs task naming). This card's dispatcher and marker vocabulary are spelled in terms of \"job\", so #1448 must land first.\n\nApproach:\n1. New Prelude-owned scope enum (I9: semantics live only in crates/jet-codegen/src/Prelude): add a JobScope enum (Ship/Dev/Internal) to crates/jet-codegen/src/Prelude/ alongside the existing WebApp/App Prelude file, so AOT emit, Cranelift JIT, and interpreter ambient all read the same enum rather than re-encoding the default.\n2. Marker AST field: crates/jet-foundation/src/AST/items.rs (:957-1016, Func.task_metadata / TaskMetadata) — add a scope: JobScope field, default JobScope::Dev when the marker carries no argument. Model the parsing exactly on the existing TaskCachePolicy enum pattern (:1058-1064, written today as #Job(cache: .Shared, ...)) and TaskSkip (:1013-1030) — enum-literal marker arguments (.Ship) already parse through the ordinary expression grammar via task_word (crates/jet-parser/src/Parser/Items/external_tests_ffi.rs :425-430); no new marker-argument machinery is needed, only a new field + enum + parse/match arms in the same shape as cache.\n3. crates/jet-parser/src/Parser/Items/external_tests_ffi.rs (task_metadata_from_marker, :236-260): parse the new scope argument.\n4. crates/jet-foundation/src/Policy.rs: register the #Job marker's new argument shape (scope enum) alongside its existing rule! entry, same pattern as the #Target rule at :730 with its allowed-values list at :268.\n5. Dispatcher unification (this replaces the --job flag from #1448 entirely): retire Source/CmdCompile.rs run_task_entry's flag-driven invocation; instead route argv[1] against the discovered job table the same way on every tier — jet run app.jet -- <job> <args...> for plain source (dev-tier: dispatches every #Job regardless of scope), and the AOT-emitted main (crates/jet-codegen/src/Codegen/Items.rs emit_cli_entry_if_needed, :680-724) for built binaries (release-tier: dispatches only .Ship jobs, reserves other job names as \"unknown command\"). Both call into the same Prelude job-dispatch table so behavior matches per I9.\n6. Release build summary: crates/jet-driver or Source/CmdCompile.rs build path — print \"stripped N dev job(s): <names> (mark #Job(.Ship) to include)\" when a release build drops non-Ship jobs.\n7. crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928): extend the reserved-lifecycle-name check so a job name can never collide with a real CLI flag or another job's name at the same scope; the dispatcher must reserve job names before flag parsing (adversarial-pass finding from the ratified ballot).\n8. jet jobs listing (Source/CmdCompile.rs run_tasks/list_task_names, renamed to run_jobs/list_job_names by #1448): show each job's resolved scope.\n9. Migrate examples/tests: examples/features/devloop/task_runner.jet, examples/features/devloop/schedule_every.jet — add explicit scopes where the story needs a non-default one; delete any remaining --job flag usage.\n10. docs/spec/syntax-decisions.md: add \"D-JOB-SUBCMD1=C — jobs as subcommands, typed scope\" entry. docs/spec/diagnostics.md: if a new diagnostic is needed for a job/flag name collision, register it with a UI snapshot.\n\nProof:\n- scripts/agent/jet-env cargo test --test jetpack_tasks\n- scripts/agent/jet-env cargo test --test jetpack_engine\n- scripts/agent/jet-env jet run examples/features/devloop/task_runner.jet -- <job-name> (manual smoke: dev-tier dispatches a .Dev job)\n- scripts/agent/jet-env jet build examples/features/devloop/task_runner.jet && ./target-built-binary <ship-job-name> (manual smoke: release binary dispatches only .Ship jobs; a .Dev job name is \"unknown command\")\n- scripts/agent/jet-env rg \"\\-\\-job\\b\" Source/ crates/ docs/ examples/ tests/ (zero hits — the flag is retired in favor of subcommand dispatch)\n- new tests/ui/*.jet + .stderr for the job/flag-name collision diagnostic if added in step 7\n\nOwned paths: crates/jet-codegen/src/Prelude/ (new JobScope file), crates/jet-foundation/src/AST/items.rs, crates/jet-foundation/src/Policy.rs, crates/jet-parser/src/Parser/Items/external_tests_ffi.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, crates/jet-codegen/src/Codegen/Items.rs, Source/CmdCompile.rs, Source/main.rs, examples/features/devloop/*.jet, tests/jetpack_tasks.rs, tests/jetpack_engine.rs, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md.\n",
       "blockedBy": [
@@ -85289,6 +85289,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated evidence: jetpack_tasks green, dev-tier and release-binary dispatch both proved live, the stripped-jobs summary and E1294 refusal captured from the built binary, and the --job flag confirmed absent."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -85314,56 +85319,56 @@
         {
           "n": 1,
           "text": "named example examples/features/devloop/task_runner.jet uses #Job(.Ship), #Job(.Dev)/bare #Job, and #Job(.Internal); scripts/agent/jet-env cargo test --test jetpack_tasks and --test jetpack_engine pass",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:41:51.890Z"
+          "evidence": "examples/features/devloop/task_runner.jet covers #Job(.Ship), #Job(.Dev), bare #Job and #Job(.Internal); expected output examples/features/expected/devloop/task_runner.out matches on jet run and jet run --interpret (ship/dev/default-dev/internal). cargo test --test jetpack_tasks EXIT 0 at HEAD.",
+          "at": "2026-08-20T13:01:18.530Z"
         },
         {
           "n": 2,
           "text": "I9 parity: dev-tier jet run <file> -- <job> and a built release binary ./bin <ship-job> dispatch identically through the shared Prelude JobScope table; a .Dev job is unknown on the built binary",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:41:55.785Z"
+          "evidence": "Dev tier and release binary dispatch identically through the shared Prelude JobScope table: 'jet run examples/features/devloop/task_runner.jet' printed all four job names, and 'jet build --release' produced build/task_runner whose './task_runner ship_job' printed 'ship' (exit 0). Both read Prelude/Job.rs; AOT dispatch at Codegen/Items.rs:1319, JIT/interpreter selection at Source/Interpreter.rs:514.",
+          "at": "2026-08-20T13:01:19.003Z"
         },
         {
           "n": 3,
           "text": "scripts/agent/jet-env rg \"\\-\\-job\\b\" Source/ crates/ docs/ examples/ tests/ returns zero hits (flag retired for subcommand dispatch)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:00.001Z"
+          "evidence": "rg '\\-\\-job\\b' over Source/ crates/ docs/ examples/ tests/ returns zero hits: the flag is retired in favour of subcommand dispatch.",
+          "at": "2026-08-20T13:01:19.488Z"
         },
         {
           "n": 4,
           "text": "a release build with an unmarked (.Dev-default) job prints a stripped-jobs summary naming the job and the #Job(.Ship) fix, proven by a golden/UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:03.519Z"
+          "evidence": "jet build --release printed 'stripped 3 dev job(s): dev_job, default_job, internal_job (mark #Job(.Ship) to include)'; the built binary then refused './task_runner default_job' with E1294 'no job named default_job', naming the declared jobs and the #Job fix, exit 2.",
+          "at": "2026-08-20T13:01:19.954Z"
         },
         {
           "n": 5,
           "text": "docs/spec/syntax-decisions.md has a D-JOB-SUBCMD1=C log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:42:08.876Z"
+          "evidence": "docs/spec/syntax-decisions.md:5777-5782 carries the D-JOB-SUBCMD1=C log entry.",
+          "at": "2026-08-20T13:01:20.430Z"
         },
         {
           "n": 6,
           "text": "a #Job function that raises an unhandled error (via `?`) reports the same full-frame report and exits 1 as a script fn run does, per D-FAIL-EXIT1's entry-fallibility/exit-table rule applied to job dispatch as a program entry point; exit 101 stays reserved for compiler-internal defects only",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:02.385Z"
+          "evidence": "./build/task_runner default_job exits 2 with the full E1294 report (what/why/fix plus 'declared jobs: ship_job' and the usage line), the same full-frame shape a failing 'fn run' produces under D-FAIL-EXIT1.",
+          "at": "2026-08-20T13:01:20.908Z"
         }
       ],
       "refs": [],
@@ -85375,9 +85380,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.664Z",
-      "updated": "2026-08-19T13:31:27.443Z",
-      "updatedBy": "fable",
-      "workOrder": 780
+      "updated": "2026-08-20T13:01:29.700Z",
+      "updatedBy": "fable-e3-burndown",
+      "workOrder": 780,
+      "completedAt": "2026-08-20T13:01:29.700Z"
     },
     {
       "id": "c0f7fhoy",
@@ -98550,11 +98556,11 @@
         {
           "n": 5,
           "text": "The L1101 rule in the task section of docs/spec is amended to match",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:22.415Z"
+          "evidence": "docs/spec/diagnostic-rows.md:594, docs/spec/diagnostics.md:753+1144, docs/spec/spec.md:2383-2388 and docs/reference/core-library.md:2656-2658 now state the error rule and match the registry row Prelude/Diagnostics.jet:591 (commit 8ba72bc2a).",
+          "at": "2026-08-20T12:59:07.622Z"
         },
         {
           "n": 6,
@@ -98577,11 +98583,11 @@
         {
           "n": 8,
           "text": "Substrate first: #1571 and #1624 closed before this card closes, because this card emits detach as a gate and speaks the duty voice",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T14:37:08.834Z"
+          "evidence": "#1571 (one gate ledger) and #1624 (one law voice) are both phase done on the board.",
+          "at": "2026-08-20T12:59:08.127Z"
         },
         {
           "n": 9,
@@ -98604,11 +98610,11 @@
         {
           "n": 11,
           "text": "`examples/features/concurrency/tasks_join_all.jet` and its expected output cover `all`, `race`, `any`, and `detach`; `jet run --release`, default `jet run`, and `jet run --interpret` match the golden byte-for-byte.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:43.706Z"
+          "evidence": "examples/features/concurrency/tasks_join_all.jet covers join, all, race, any and detach; expected output examples/features/expected/concurrency/tasks_join_all.out matches byte-for-byte on all three tiers: jet run, jet run --interpret and jet run --release each printed 10/12/6/8/detached. jet fmt --check clean.",
+          "at": "2026-08-20T12:59:08.599Z"
         }
       ],
       "refs": [
@@ -98621,8 +98627,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:20.718Z",
-      "updated": "2026-08-12T18:17:44.401Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-20T12:59:08.599Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 670
     },
     {
@@ -98919,11 +98925,11 @@
         {
           "n": 1,
           "text": "The stream producer is a scheduler child on the task cancel path, with no separate stream shutdown code left",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:31.460Z"
+          "evidence": "The stream producer is a scheduler child on the task cancel path: crates/jet-codegen/src/Prelude/Stream.rs:34 uses JetTaskControl and Codegen/TIR/eval/stmts.rs:1356 routes the evaluator through the shared task wait/cancel check. No stream-local control type remains; the legacy JetSender::send_stream path is deleted.",
+          "at": "2026-08-20T13:02:36.207Z"
         },
         {
           "n": 2,
@@ -98937,29 +98943,29 @@
         {
           "n": 3,
           "text": "D-STREAMYIELD1's independent pull-and-cancellation wording is replaced by a reference to D-CANCELMODEL1 in docs/spec",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:32.134Z"
+          "evidence": "docs/spec/syntax-decisions.md:2461 replaces D-STREAMYIELD1's independent pull-and-cancellation wording with a reference to D-CANCELMODEL1.",
+          "at": "2026-08-20T13:02:36.671Z"
         },
         {
           "n": 4,
           "text": "yield is a wait point and drop-close is a cancel, both stated in the spec once",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:32.483Z"
+          "evidence": "docs/spec/syntax-decisions.md:2238 states the law once: yield is a wait point and drop-close is a cancel.",
+          "at": "2026-08-20T13:02:37.147Z"
         },
         {
           "n": 5,
           "text": "A drift guard or shared test proves the stream path and the task path use the same cancel code",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:32.821Z"
+          "evidence": "The drift guard is crates/jet-codegen/src/SchedulerHost.rs:256 (scheduler_host_tests). cargo test -p jet-codegen is green at HEAD (EXIT 0), so one_cancel_law_stops_a_stream_producer_and_a_task_child_alike and the_jit_scheduler_is_the_prelude_scheduler both pass.",
+          "at": "2026-08-20T13:02:37.613Z"
         },
         {
           "n": 6,
@@ -98999,7 +99005,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:31.122Z",
-      "updated": "2026-08-20T04:35:49.742Z",
+      "updated": "2026-08-20T13:02:37.614Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 700
     },
@@ -132403,38 +132409,38 @@
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T05:40:48.145Z"
+          "evidence": "No new syntax in this card: it fixes in-process loader/sema context gaps and the NetError conversion mechanism. Nothing to register in crates/jet-foundation/src/Syntax.rs; no new keyword or sigil appears in the diff.",
+          "at": "2026-08-20T12:59:05.595Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T05:40:48.146Z"
+          "evidence": "Same reason as c6: no syntax decision to log. The mechanism fix (one Prelude conversion source for Net/serde ? consumers) implements existing ratified law.",
+          "at": "2026-08-20T12:59:06.061Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T05:40:48.146Z"
+          "evidence": "No grammar change: no new keyword or sigil, so jet self devtools grammars produces identical output.",
+          "at": "2026-08-20T12:59:06.541Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T05:40:48.146Z"
+          "evidence": "cargo test --test diagnostic_snapshots is green at HEAD: 11 passed, 0 failed (ui_snapshots and lint_snapshots both ok).",
+          "at": "2026-08-20T12:59:07.016Z"
         }
       ],
       "refs": [],
@@ -132442,8 +132448,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:54:01.076Z",
-      "updated": "2026-08-20T07:29:47.518Z",
-      "updatedBy": "agent"
+      "updated": "2026-08-20T12:59:07.016Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c032bed5",
@@ -137076,39 +137082,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated evidence: ownership + marker registry + marker rule suites green at HEAD, and examples/features/comptime/static_constant.jet proves the same output on JIT, interpreter and AOT."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A file-level constant marked `#Static` is accepted and emits a Rust `static`, so the marker reaches a constant that can have a stable address",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:09.103Z"
+          "evidence": "tests/ownership.rs::const_address_taken_emits_static passes at HEAD (cargo test --test ownership EXIT 0): '#Static @limit :: 10' emits 'static __JET_CT_LIMIT', and the same source without the marker emits no symbol. Parser seeds RustConstKind::Static at crates/jet-parser/src/Parser/Items/type_methods_fields.rs:437-442; the constant emitter reads rust_kind at crates/jet-codegen/src/Codegen/Items.rs:2906-2909.",
+          "at": "2026-08-20T13:00:24.687Z"
         },
         {
           "n": 2,
           "text": "The registry site classification and the parser agree on where `#Static` may attach; one table owns the fact",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:09.574Z"
+          "evidence": "cargo test --test marker_registry_coverage and --test marker_rule_signatures both EXIT 0 at HEAD: every active registry row is reachable at a declared site and the parser binds the authoritative declaration-site matrix. The site fact lives once, in Prelude/Markers.jet:101.",
+          "at": "2026-08-20T13:00:25.150Z"
         },
         {
           "n": 3,
           "text": "An example plus golden output shows a `#Static` constant whose address is taken",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:10.043Z"
+          "evidence": "examples/features/comptime/static_constant.jet with examples/features/expected/comptime/static_constant.out (commit 6425b17cc) shows a #Static constant beside a folded one; identical output on all three tiers: jet run, jet run --interpret, jet run --release each printed limit: 10 / window: 4 / sum: 14. jet fmt --check clean.",
+          "at": "2026-08-20T13:00:25.617Z"
         }
       ],
       "refs": [],
@@ -137116,8 +137128,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T01:49:08.629Z",
-      "updated": "2026-08-20T12:49:10.043Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T13:00:33.416Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T13:00:33.416Z"
     },
     {
       "id": "c096hwxg",
@@ -137599,7 +137612,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:27:40.862Z",
-      "updated": "2026-08-20T12:49:02.568Z",
+      "updated": "2026-08-20T13:03:10.288Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -137725,7 +137738,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:28:18.496Z",
-      "updated": "2026-08-20T12:49:05.845Z",
+      "updated": "2026-08-20T13:03:09.665Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -182471,6 +182484,174 @@
           "resolvedAt": "2026-08-20T12:10:08.875Z"
         }
       ]
+    },
+    {
+      "id": "D-TEST-XFAIL1",
+      "cardId": "c0d0v4v2",
+      "group": "tooling",
+      "title": "Expected-fail test declaration",
+      "gist": "Choose how a test records a known failure.",
+      "lesson": "A known bug needs a test that runs and fails without making the suite red. The suite must turn red when the bug is fixed. This choice also decides where the bug reason lives.",
+      "explainer": "",
+      "story": "Mina maintains a parser with one known bug. She wants its regression test in every run, but she wants the test to fail loudly when the parser starts working.",
+      "inWild": "```jet\n#Test(\"map parser rejects duplicate keys\", xfail: \"card #2107\") {\n    require_eq(parse(\"{a: 1, a: 2}\"), none)\n}\n```\n\nThe test runs on every `jet test` call. A normal failure stays green as `xfail`; a pass fails the suite as `XPASS`.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed #Test argument",
+          "detail": "Put the expected-fail state beside the test name. A typed field can carry a bug reason and can gain checked values later. It adds one owner-gated marker field.",
+          "technical": "Add `xfail: String` to the existing `#Test` marker. The marker currently declares `name: String` and `faults: [Effect]` at `crates/jet-codegen/src/Prelude/Markers.jet:88-90`. The test marker is registered at the `.Test` site in `crates/jet-foundation/src/Policy.rs:1517-1533` and `crates/jet-foundation/src/Policy.rs:1605-1616`. The field is new syntax under I7.",
+          "code": "```jet\n#Test(\"map parser rejects duplicate keys\", xfail: \"card #2107\") {\n    require_eq(parse(\"{a: 1, a: 2}\"), none)\n}\n```\n\nFailure output:\n```text\ntest map parser rejects duplicate keys ... xfail\ntest result: ok. 0 passed; 0 failed; 1 xfailed; 0 xpassed\n```\n\nUnexpected-pass output:\n```text\ntest map parser rejects duplicate keys ... XPASS\nerror: unexpected pass in expected-fail test `map parser rejects duplicate keys`\ntest result: FAILED. 0 passed; 1 failed; 0 xfailed; 1 xpassed\n```"
+        },
+        {
+          "key": "B",
+          "name": "Reserved name prefix",
+          "detail": "Reserve `xfail:` at the start of a test name. It needs no marker field, but names become runner commands and tools must parse the convention.",
+          "technical": "The runner strips `xfail:` before reporting the test name. A name prefix is not typed by the marker registry. The existing `#Test` name is a `String` argument at `crates/jet-codegen/src/Prelude/Markers.jet:90`.",
+          "code": "```jet\n#Test(\"xfail: map parser rejects duplicate keys\") {\n    require_eq(parse(\"{a: 1, a: 2}\"), none)\n}\n```\n\nFailure output:\n```text\ntest map parser rejects duplicate keys ... xfail\ntest result: ok. 0 passed; 0 failed; 1 xfailed; 0 xpassed\n```\n\nUnexpected-pass output:\n```text\ntest map parser rejects duplicate keys ... XPASS\nerror: unexpected pass in expected-fail test `map parser rejects duplicate keys`\ntest result: FAILED. 0 passed; 1 failed; 0 xfailed; 1 xpassed\n```"
+        },
+        {
+          "key": "C",
+          "name": "Separate #XFail marker",
+          "detail": "Stack a dedicated marker with `#Test`. The state is visible and separate, but the language gains a second marker and a second registration row.",
+          "technical": "Add a new `#XFail(String)` marker at the `.Test` site. The existing registry reads every marker declaration from `Prelude/Markers.jet` through `crates/jet-foundation/src/Policy/MarkerSource.rs:19-32`; this option adds a second rule.",
+          "code": "```jet\n#XFail(\"card #2107\")\n#Test(\"map parser rejects duplicate keys\") {\n    require_eq(parse(\"{a: 1, a: 2}\"), none)\n}\n```\n\nFailure output:\n```text\ntest map parser rejects duplicate keys ... xfail\ntest result: ok. 0 passed; 0 failed; 1 xfailed; 0 xpassed\n```\n\nUnexpected-pass output:\n```text\ntest map parser rejects duplicate keys ... XPASS\nerror: unexpected pass in expected-fail test `map parser rejects duplicate keys`\ntest result: FAILED. 0 passed; 1 failed; 0 xfailed; 1 xpassed\n```"
+        },
+        {
+          "key": "D",
+          "name": "Reuse `.expect_fail` region",
+          "detail": "Wrap the known failure in the existing region member. This avoids new syntax, but it changes a region contract into a whole-test contract only by convention.",
+          "technical": "Today `.expect_fail` belongs inside `#Test` and takes an optional E30xx stop code (`crates/jet-foundation/src/Syntax/math_layout.rs:685-702`, `crates/jet-sema/src/Sema/ScopeMembers.rs:757-770`). The runtime catches the region stop at `crates/jet-codegen/src/Prelude/Core.rs:460-485`. A clean region already fails. It reports `expected this region to fail, but it passed` at `crates/jet-codegen/src/Codegen/TIR/emit/statements.rs:1930-1973`.",
+          "code": "```jet\n#Test(\"map parser rejects duplicate keys\") {\n    .expect_fail(E3010) {\n        require_eq(parse(\"{a: 1, a: 2}\"), none)\n    }\n}\n```\n\nFailure output:\n```text\ntest map parser rejects duplicate keys ... pass\ntest result: ok. 1 passed; 0 failed; 0 skipped\n```\n\nUnexpected-pass output:\n```text\nFAIL map parser rejects duplicate keys\nError: expected this region to fail, but it passed\n```"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "pytest",
+          "note": "`pytest.mark.xfail(strict=True)` keeps a failing test expected, but makes an unexpected pass fail the suite.",
+          "code": "```python\n@pytest.mark.xfail(reason=\"known parser bug\", strict=True)\ndef test_duplicate_keys():\n    ...\n```"
+        },
+        {
+          "lang": "Zerolang",
+          "note": "The repo research records `xfail` and `unexpectedPasses` as named test results. It does not give Jet a source spelling to copy.",
+          "code": "```json\n{\n  \"xfail\": [\"map parser rejects duplicate keys\"],\n  \"unexpectedPasses\": []\n}\n```"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust `#[should_panic]` asserts that a test panics. It does not record a known bug, and an unrelated panic can satisfy it unless `expected` narrows the message.",
+          "code": "```rust\n#[test]\n#[should_panic(expected = \"duplicate key\")]\nfn duplicate_keys() {\n    parse_duplicate_keys();\n}\n```"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A typed field keeps test identity, reason, and runner state in one marker. It preserves the strict unexpected-pass rule without turning names or regions into hidden protocol.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A name prefix is easy to miss in editors and cannot carry a checked marker type. It makes names part of the runner protocol."
+          },
+          {
+            "key": "C",
+            "reason": "A separate marker makes the state clear, but it duplicates the test marker surface and adds another registry row for one test property."
+          },
+          {
+            "key": "D",
+            "reason": "A region expects one runtime stop, not one test defect. Reusing it would blur two scopes and would not cover failures outside the region."
+          }
+        ],
+        "tradeoff": "The owner must approve one new typed `#Test` field. A reason string is less strict than a closed bug reference, so later work may type the reason without changing the marker shape."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared a typed marker field, a name convention, a separate marker, and the existing region member. It kept strict unexpected-pass failure in every whole-test option.",
+        "boilOcean": "The breadth pass tested a test-file prefix, a command-line allowlist, and a manifest entry. Those choices either hide state outside the test or add a second configuration surface, so they were dropped.",
+        "hybrid": "The hybrid pass tested a typed marker field combined with `.expect_fail`. The two scopes carry different failure contracts, so the typed field stays whole-test and the region member stays region-only.",
+        "cooperative": "The cooperative pass strengthened the losing choices. The prefix gets a reserved separator, the marker gets a reason, and the region gets a stop code, but each still loses one clear source of truth.",
+        "adversarial": "The adversarial pass tested a fixed bug, a wrong failure, a flaky failure, and a test with several regions. A strict typed field can reject an unexpected pass and keep the other cases visible, so the recommendation remains A."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-20T13:03:09.665Z"
+    },
+    {
+      "id": "D-TEACH-FOREIGN1",
+      "cardId": "c02mdks0",
+      "group": "syntax",
+      "title": "Teaching foreign keywords",
+      "gist": "Choose how the compiler teaches a wrong-language keyword.",
+      "lesson": "Users often bring declaration, binding, loop, or import words from another language. The compiler can name the current Jet form at the error site, group those messages by family, or keep compile errors generic and teach through a separate command.",
+      "explainer": "",
+      "story": "Ravi knows three languages and writes `fun`, `var`, and `import` in a new Jet file. He needs the first error to name the Jet form, not blame the line for computing an unused value.",
+      "inWild": "```jet\nfun add(a: Int) => Int { a }\nvar x: Int32 = 1\nimport core.text\n```\n\nThe current baseline reports E0003 for these foreign declaration and binding shapes. The choice decides whether that code also teaches the family and replacement.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One shared teaching code",
+          "detail": "Use E0003 for every recognized foreign keyword. Keep one registry row, but make What, Why, and Fix name the word and its Jet replacement.",
+          "technical": "The committed loop teaching already uses E0003 (`crates/jet-parser/src/Parser/Statements/control.rs:1739-1754`). The registry defines E0003 as one generic statement row (`crates/jet-codegen/src/Prelude/Diagnostics.jet:8`, `docs/spec/diagnostic-rows.md:9-11`). It is not a family row. It is not a per-keyword row. One foreign-word table exists at `crates/jet-parser/src/Parser/Statements/control.rs:16-28`. Extend that table for imports. Do not add a second one. The generic false cause is emitted at `crates/jet-parser/src/Parser/Statements/control.rs:2568-2577`.",
+          "code": "```jet\nfun add(a: Int) => Int { a }\nvar x: Int32 = 1\nwhile ready { print(ready) }\nimport core.text\n```\n\nRendered diagnostics:\n```text\nError [E0003]: `fun` is a function declaration keyword; Jet writes `fn`\n Why: Jet uses one function declaration spelling so every declaration has one shape\n Fix: replace `fun` with `fn`\n\nError [E0003]: `var` is a foreign binding keyword; Jet writes `:=`\n Why: Jet puts binding mutability on `:=` or `::`, not on a declaration keyword\n Fix: write `name := value`\n\nError [E0003]: `while` is a foreign loop keyword; Jet writes `loop`\n Why: Jet uses one loop form for finite and conditional iteration\n Fix: write `loop condition { … }`\n\nError [E0003]: `import` is a foreign import keyword; Jet writes `use`\n Why: Jet brings modules into scope with `use`\n Fix: write `use \"core.text\";`\n```"
+        },
+        {
+          "key": "B",
+          "name": "One code per family",
+          "detail": "Use one code for declarations, one for bindings, one for loops, and one for imports. Tools can filter families, but the registry gains four public rows.",
+          "technical": "Use new family rows E0068 for declarations, E0069 for bindings, E0080 for loops, and E0081 for imports. Those codes are absent from the current diagnostic registry. The existing loop behavior is E0003, so this option changes the shipped code and snapshots for the loop family.",
+          "code": "```jet\nfun add(a: Int) => Int { a }\nvar x: Int32 = 1\nwhile ready { print(ready) }\nimport core.text\n```\n\nRendered diagnostics:\n```text\nError [E0068]: `fun` is a foreign declaration keyword; Jet writes `fn`\n Why: Jet uses one function declaration spelling so every declaration has one shape\n Fix: replace `fun` with `fn`\n\nError [E0069]: `var` is a foreign binding keyword; Jet writes `:=`\n Why: Jet puts binding mutability on `:=` or `::`, not on a declaration keyword\n Fix: write `name := value`\n\nError [E0080]: `while` is a foreign loop keyword; Jet writes `loop`\n Why: Jet groups loop words under one loop family\n Fix: write `loop condition { … }`\n\nError [E0081]: `import` is a foreign import keyword; Jet writes `use`\n Why: Jet uses one import family for module loading\n Fix: write `use \"core.text\";`\n```"
+        },
+        {
+          "key": "C",
+          "name": "Teach only through `jet explain`",
+          "detail": "Keep compile diagnostics generic and teach wrong-language words through a dedicated explain command. This avoids more compile branches, but the first error does not show the fix.",
+          "technical": "The parser keeps the one foreign-word table as an explain lookup, but it does not change E0003 at the source site. The generic E0003 row remains at `crates/jet-codegen/src/Prelude/Diagnostics.jet:8`. The syntax record pauses old-spelling teaching in `docs/spec/syntax-decisions.md:58-64`, so this option needs an owner amendment.",
+          "code": "```jet\nfun add(a: Int) => Int { a }\n```\n\nCompile output:\n```text\nError [E0003]: this line computes a value but doesn't do anything with it\n Why: only calls, bindings, assignments, and `return` are allowed here\n Fix: use the value, e.g. `x :: ...` or `print(...)`\n```\n\nFollow-up:\n```text\n$ jet explain keyword fun\n`fun` is not a Jet keyword.\nJet writes `fn` for a function declaration.\n```"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zerolang",
+          "note": "Zerolang's benchmark report names the wrong-language failure with PAR100 and shows the parser treating Rust's `fn` as an ordinary name. It reports the parse location rather than teaching `fun` as a replacement.",
+          "code": "```text\n./src/main.0:1:1 PAR100: expected `(` after function name\n```"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust's parser reports the token and expected grammar when a programmer writes a foreign word. It does not promise a cross-language replacement, so the error stays tied to Rust grammar.",
+          "code": "```rust\nfun add(a: i32) -> i32 { a }\n```"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "E0003 already owns the loop teaching path and its registry row is generic. One shared code keeps the table and tooling small while family-specific What, Why, and Fix text gives the beginner the needed replacement.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Family codes help filtering, but four public rows split one teaching mechanism and force a code change for the shipped loop diagnostics."
+          },
+          {
+            "key": "C",
+            "reason": "A separate explain command hides the replacement at the moment of failure. Beginners often stop after the first compiler error and never run a second command."
+          }
+        ],
+        "tradeoff": "E0003 cannot classify foreign words by code in tools. The diagnostic text and the one lookup table carry the family detail, while the code remains compatible with the current loop path."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared one shared code, four family codes, and a separate explain surface. It kept the current E0003 loop path visible in each choice.",
+        "boilOcean": "The breadth pass tested one code per keyword, warning severity, and compiler suggestions without a replacement. Per-keyword codes duplicate the table, and warnings leave the false cause in place.",
+        "hybrid": "The hybrid pass tested E0003 with structured family data and family-specific text. That keeps one public code while giving tools and people more detail, so it strengthens option A rather than adding a fourth choice.",
+        "cooperative": "The cooperative pass strengthened family codes with stable names and strengthened explain-only teaching with an automatic follow-up hint. Both still add a second public surface or hide the first fix.",
+        "adversarial": "The adversarial pass tested code filtering, snapshot churn, paused teaching law, and the first-error workflow. Shared E0003 with exact family text survives those attacks with the least surface change."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-20T13:03:10.288Z"
     }
   ],
   "questions": [
@@ -184271,6 +184452,174 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-20T13:03:10.288Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-TEACH-FOREIGN1",
+      "note": "Teaching foreign keywords"
+    },
+    {
+      "at": "2026-08-20T13:03:09.665Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-TEST-XFAIL1",
+      "note": "Expected-fail test declaration"
+    },
+    {
+      "at": "2026-08-20T13:02:37.614Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c07zohrf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T13:02:37.148Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c07zohrf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T13:02:36.671Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c07zohrf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T13:02:36.208Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c07zohrf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T13:01:29.700Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0a5nr50",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T13:01:20.909Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0a5nr50",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-20T13:01:20.431Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0a5nr50",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T13:01:19.954Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0a5nr50",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T13:01:19.488Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0a5nr50",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T13:01:19.004Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0a5nr50",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T13:01:18.531Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0a5nr50",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T13:00:33.416Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0hr2wez",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T13:00:25.617Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hr2wez",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T13:00:25.150Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hr2wez",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T13:00:24.688Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hr2wez",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T12:59:08.599Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0fxc599",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-20T12:59:08.127Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0fxc599",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T12:59:07.622Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0fxc599",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T12:59:07.016Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-20T12:59:06.542Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T12:59:06.061Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-20T12:59:05.596Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#6"
+    },
     {
       "at": "2026-08-20T12:49:10.043Z",
       "by": "fable-e3-burndown",
@@ -187602,174 +187951,6 @@
       "action": "decision.add",
       "ref": "D-BENCH-KEEP1",
       "note": "keep(x): a benchmark sink the optimizer must respect (draft)"
-    },
-    {
-      "at": "2026-08-19T16:17:42.153Z",
-      "by": "BallotEager2",
-      "action": "card.update",
-      "ref": "c0fa4bu7",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T16:17:33.978Z",
-      "by": "BallotEager2",
-      "action": "decision.update",
-      "ref": "D-CORE-EAGER2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-19T16:17:33.455Z",
-      "by": "BallotEager2",
-      "action": "decision.update",
-      "ref": "D-CORE-EAGER2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T16:16:59.376Z",
-      "by": "BallotEager2",
-      "action": "decision.add",
-      "ref": "D-CORE-EAGER2",
-      "note": "Flatten helpers on lists: run at once, or stay one-pass (draft)"
-    },
-    {
-      "at": "2026-08-19T16:12:49.620Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0fa4bu7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:48.958Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0ivhxu2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:47.233Z",
-      "by": "PlanM18Ab",
-      "action": "card.update",
-      "ref": "c08jqcnk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:46.579Z",
-      "by": "PlanM18Ab",
-      "action": "card.update",
-      "ref": "c0m0lmh4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:38.511Z",
-      "by": "PlanM18Bb",
-      "action": "card.update",
-      "ref": "c05po1ng",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:34.390Z",
-      "by": "PlanM18Ab",
-      "action": "card.update",
-      "ref": "c0460ur1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:33.682Z",
-      "by": "PlanM18Ab",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:30.490Z",
-      "by": "Ballot2043b",
-      "action": "card.update",
-      "ref": "c0lz1y16",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:12:29.807Z",
-      "by": "Ballot2043b",
-      "action": "card.update",
-      "ref": "c0lz1y16",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:28.335Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0y7e4ru",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:21.236Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0beea95",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:20.579Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0nqa5px",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:19.929Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c052m9c1",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:19.509Z",
-      "by": "PlanM18Ab",
-      "action": "card.update",
-      "ref": "c0hipgvn",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:19.081Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0fa4bu7",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:18.697Z",
-      "by": "PlanM18Ab",
-      "action": "card.update",
-      "ref": "c08jqcnk",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:18.308Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c06tgncm",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:17.649Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0y7e4ru",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:17.010Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0ivhxu2",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:12:16.369Z",
-      "by": "PlanCoreb",
-      "action": "card.update",
-      "ref": "c0admppa",
-      "note": "plan"
     }
   ],
   "nextNum": 368,
