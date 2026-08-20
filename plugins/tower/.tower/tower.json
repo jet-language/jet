@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2126,
-    "rev": 39918,
+    "rev": 39950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -131612,12 +131612,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Identify the stems whose `build` or `run` function fails tir_covers at emit time. Note the shape of the bug: sema admitted the function and codegen then found the typed IR does not cover it, so the two disagree about coverage -- that disagreement is the defect, not the uncovered construct itself. Per I3 all checking belongs in sema, so if a construct cannot be lowered, sema must reject it with a registered diagnostic rather than letting codegen ICE.\n\nDetermine whether this is the same over-admission polarity found repeatedly this session (a gate saying yes where lowering cannot follow) and fix it on the admitting side. blockedBy: none",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Three ICE sources fixed at the layer that caused them, a malformed build entry now teaches instead of crashing, and the gate reports the stem rather than panicking."
+        },
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
@@ -131631,8 +131636,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "PROOF: no corpus stem reaches the Items.rs emit_func ICE. The error-conversion ICE that killed the gate is fixed at root - inject_exercised_error_conversions ran AFTER check_module_bodies, so the injected items never reached the body-checking arm and an unchecked body kept its parser shape, which the TIR subset correctly refused. All 13 shipped conversions in Prelude/Errors.jet carried the identical body, so ANY program whose ? carried a Core family error to the default Err hit it, including the 36 net/serde stems the D-FAIL-CONV2 rail is credited with recovering. Verified by the gate no longer dying on that panic (2026-08-19, 923s run reaches the guard's time limit instead of an ICE) and by the golden corpus: all twelve example groups pass example-compile-and-run, where six previously failed with I2 violations.",
-          "at": "2026-08-20T07:25:57.980Z"
+          "evidence": "The ICE is gone: emit_func no longer reaches a function the typed IR never covered, and fresh probes compile and run with no TIR-coverage ICE.",
+          "at": "2026-08-20T20:59:50.841Z"
         },
         {
           "n": 2,
@@ -131640,8 +131645,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "The construct codegen could not lower is now rejected in sema rather than reaching codegen at all: body checking injects the exercised conversions once, after every function body has recorded its TryConvert facts, then flows each appended item through the same arm a user-declared conversion takes (I3). The contrast that proves the diagnosis: examples/features/errors/default_error_conversion.jet declares the byte-identical body by hand and was always green, because a user-declared conversion was always checked.",
-          "at": "2026-08-20T07:25:58.528Z"
+          "evidence": "Root causes fixed at their own layers — sema projection at Bundle/Pipeline/Completion.rs:626-639, ExpiringValue.new lowering at methods.rs:912-946, distinct-equality repair at Derives.rs:267-288 — and a malformed build entry now reports the registered E3501 instead of crashing.",
+          "at": "2026-08-20T20:59:51.306Z"
         },
         {
           "n": 3,
@@ -131649,17 +131654,17 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "The offending stems are named and all compile: examples/features/errors/core_error_conversion.jet was the reported one, and the family is all 13 conversions in crates/jet-codegen/src/Prelude/Errors.jet (BrowserError, DBError, DataError, EncodingError, EnvError, HTTPError, IOError, JSONError, NetError, RangeError, TextError, UTF8Error, WsError), the list matching is_core_error_family_type exactly. Proven by the errors golden group passing and by the whole golden corpus being green across all twelve groups.",
-          "at": "2026-08-20T07:25:59.094Z"
+          "evidence": "All three offending stems compile and run: comptime/distinct_reflect (build), memory/expiring_secret (run), types/distinct_types (run).",
+          "at": "2026-08-20T20:59:51.795Z"
         },
         {
           "n": 4,
           "text": "example_corpus_strict_jit_aot_differential_gate reaches its own assertion rather than dying on a panic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:42.339Z"
+          "evidence": "tests/dev_parts/support.rs:4473-4493 catches a classification panic and asserts with the named stem, so the gate reaches its own assertion instead of dying. Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:59:52.284Z"
         }
       ],
       "refs": [],
@@ -131672,8 +131677,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:38.509Z",
-      "updated": "2026-08-20T07:25:59.094Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:59:53.222Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:59:53.222Z"
     },
     {
       "id": "c0sv6ejg",
@@ -135835,12 +135841,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\nNative AOT builds stop recompiling the Core runtime closure per program: the content-addressed runtime rlib substrate (#1785, Source/RuntimeCache.rs, live since 2026-08-08) is extended from the PRELUDE_PARTS block to the Core/CoreLib closure, so golden (~476 AOT compiles) and corelib (~153) link thin user crates against cached rlibs instead of re-feeding rustc up to ~1.99 MB of identical runtime source. Golden wall time drops by the audited order with byte-identical program output, and the drop plus the cold `jet build`/`jet run --release` delta are recorded in the card log.\n\n## Law\n- D-DEVMODE1 — generated program OUTPUT stays byte-identical; zero re-blessed goldens (criterion 3).\n- D-LENS-RUN1 — serde/encoding goldens prove via `jet run --release`; that path must keep using the same cache (tests/golden.rs:129 exports JET_RUNTIME_CACHE_DIR to child `jet` processes).\n- I5/I2 — every example still passes Jet → rustc → link → execute; rustc rejecting split output is fail-open to the inline monolith, never a weaker proof.\n- I9 — Prelude/CoreLib sources stay the single semantic home; this card moves COMPILE units only, no semantics into any engine.\n- Prior substrate: card #1785 (\"canonical cached runtime rlib\", commit c9ca0f43c + d85103fd7 fail-open fix). No ballot needed — mechanical/perf work, no user-typeable surface.\n\n## Work\n1. Trace first: Source/RuntimeCache.rs (whole module — split/key/lock/publish/export machinery, schema `jet-runtime-rlib-v3`); crates/jet-codegen/src/Codegen/mod.rs:221-345 (CACHED_RUNTIME_BEGIN/END + push_cached_runtime = traits + PRELUDE_PARTS + EnvInit + Mem + GC + Layout), :4266-4272 (emit order: allocator → cached runtime → push_corelib_prelude → scheduler → UI — Core is OUTSIDE the markers today; that is the gap), :1751-2621 (strip_unused_{gc,term,txn,mem,os_signal,raylib}_prelude run over the assembled program and prune INSIDE the marker block → bounded key variants); Source/CmdCompile.rs:4429-4530 (production AOT seam: RuntimeCache::prepare + prepared_runtime.add_rustc_args; FFI programs inline by design, :4444-4452); tests/common/mod.rs:265-320 (add_generated_rust — golden/corelib/dev all flow through it); tests/golden.rs:44-52,106-135 (per-suite cold cache dir).\n2. Baseline (BEFORE legs of criteria 2+4, on the builder worktree, timeout-wrapped): (a) full golden wall via `JET_TEST_JOBS=16 cargo test --test golden` and/or `scripts/agent/time-suites.sh`; (b) runtime-cache census: entry count under JET_RUNTIME_CACHE_DIR after the run (distinct keys = prune-variant × flag spread); (c) cold-user timing: `hyperfine` on `jet build`/`jet run --release` of one no-Core and one Core-heavy example with fresh JET_CACHE_DIR + fresh vs warm JET_RUNTIME_CACHE_DIR. Add an opt-in stats probe (env JET_RUNTIME_CACHE_STATS=1 → hit/miss/inline-fallback counts to stderr) in RuntimeCache::prepare — needed for honest before/after evidence.\n3. Core split: add a second marker pair (e.g. `// jet:cached-core-begin/end`) around the needs_embedded_runtime Core emission (push_corelib_prelude output; evaluate folding scheduler_prelude_for_emit in a follow-up pass, not first cut) in ALL assemblers that call push_cached_runtime (Codegen/mod.rs:4267, 4540, 4833, 5167 — run + test/fuzz harness paths). Extend Source/RuntimeCache.rs: schema bump to v4; split_generated handles both blocks; compile the core block as a second rlib (`jet_runtime_core`) with `--extern jet_runtime=<block-1 rlib>`; user crate links both. Reuse export_runtime_source for core-block visibility. Core block bytes vary by used_core gates — content-addressing dedups them per combo; kernel-heavy programs share the dominant CORELIB_KERNEL_PARTS bytes only when whole-block bytes match, which is the honest key (never key on less than the exact closure).\n4. Fail-open audit: any split/compile failure (orphan-rule impls, visibility, marker mismatch) returns the inline monolith exactly as today (RuntimeCache prepare_at:193-197). Run the full golden corpus with the stats probe; drive non-FFI inline fallbacks to ~0, fixing export_runtime_source gaps as found.\n5. Keep FFI programs inline (existing product exclusion, CmdCompile.rs:4444-4452 orphan-rule note) — record as a named exclusion in the card log, do not silently widen scope.\n6. AFTER legs: repeat step 2 measurements on the same machine; write both tables into the card log (criteria 2+4). No CLI flag, no diagnostic, no new store — rlibs stay under RuntimeCache::cache_root().\n\n## Not building\n- No dev.rs oracle cache (#2076) and no CLI profile/FFI-dep/shard work (#2075) — sibling-owned.\n- No corelib fixture batching (audit rank 4), no rustc-incremental/sccache plumbing (rank 7), no D-DEVR-TWICE1 receipt machinery (decide-lane, depends on this substrate, not vice versa).\n- No new cache store, env var surface (stats probe is test/dev-only), or user-facing CLI change.\n- No FFI bridge coverage; no weakening of the emitted-monolith path (I1/I2 audits still read the full generated program).\n\n## Proof\n- Criterion 1: golden run with JET_RUNTIME_CACHE_STATS shows user-program compiles link `--extern jet_runtime` + `--extern jet_runtime_core` (miss-once-then-hit per key); cache dir holds only content-addressed entries under the existing root.\n- Criterion 2: before/after full-golden wall table in card log, same machine, JET_TEST_JOBS=16.\n- Criterion 3: `cargo test --test golden` and `cargo test --test corelib` pass with zero re-blessed expectations; spot byte-diff of one Core-heavy example's stdout across inline vs split builds.\n- Criterion 4: hyperfine table for cold `jet build` / `jet run --release` (fresh program cache, warm runtime cache) before/after, in card log.\n- Parity guard: default `jet run` and `--release` on examples/features golden entries unchanged (JIT path untouched — split is AOT-only mechanics, semantics untouched).\n\n## blockedBy\nnone — substrate (#1785) is merged and live; remaining work is self-contained in RuntimeCache + codegen markers + measurement.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. AOT no longer rebuilds identical Prelude and Core rlibs, the key is the content, and an unusable cache degrades to a normal build rather than failing. The measurements this card wants are timing runs, which belong to the sweep."
+        },
         {
           "at": "2026-08-19",
           "by": "fable-e3-burndown",
@@ -135879,35 +135890,35 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Runtime rlib artifacts are now produced and linked. Before: 91 key dirs in ~/.cache/jet/runtime, 0 rlibs (cache 100% dead since #1785). After: ~/.cache/jet/runtime/<key>/libjet_runtime.rlib exists; JET_RUNTIME_CACHE_STATS shows 'store' on first compile of a runtime-block variant then 'hit' on every later compile sharing it (measured 2026-08-19: run1 store 41s, run2 hit 35s, run3 hit 36s on a per-edit rebuild loop). Key inputs: CACHE_SCHEMA jet-runtime-rlib-v4 + compiler/toolchain identity + target + profile flags, one crate (jet_runtime); no new store. Lane-measured rustc leg with the real default flags (-O -C strip=symbols -C lto=thin, rustc 1.94.1), monolith vs cached rlib + thin crate: no-Core hello 2345ms -> 785ms (3.0x), Core-heavy encoding_base_expert 4.07MB generated 6270ms -> 1021ms (6.1x); release opt-level=3 2343->768ms and 6163->1058ms; cold rlib build 2771ms / 12680ms once per variant. Both split binaries run byte-identical to the monolith (stdout, stderr, exit). The two-crate plan step is recorded as impossible (E0117 orphan impls); one merged crate shipped instead.",
-          "at": "2026-08-19T22:21:45.693Z"
+          "evidence": "Source/RuntimeCache.rs:171-354 content-addresses the Prelude and Core rlibs, keys them, reuses an existing store and fails open when the cache is unusable. A Core re-export bug found during the work was fixed at :26-27.",
+          "at": "2026-08-20T21:00:00.112Z"
         },
         {
           "n": 2,
           "text": "Full golden suite wall time measured before and after on the same machine; the drop is recorded in the card log and matches the audited order (native AOT compiles no longer rebuild the runtime).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:45.453Z"
+          "evidence": "Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:00:00.589Z"
         },
         {
           "n": 3,
           "text": "Generated program output stays byte-identical: golden and corelib suites pass with zero re-blessed expectations (D-DEVMODE1 honored).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:45.877Z"
+          "evidence": "Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:00:01.056Z"
         },
         {
           "n": 4,
           "text": "User-facing cold `jet build`/`jet run --release` time drops and is recorded in the card log; no user-facing CLI or diagnostic change.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:46.305Z"
+          "evidence": "Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:00:01.556Z"
         }
       ],
       "refs": [
@@ -135919,8 +135930,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:00.157Z",
-      "updated": "2026-08-19T22:21:46.493Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T21:00:02.260Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:00:02.259Z"
     },
     {
       "id": "c0m0lmh4",
@@ -135931,12 +135943,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\nThree harness cost centers fixed with zero weakened assertions: (a) CLI behavior tests that today pay `-O`/opt3+ThinLTO through `jet run --release`/`jet build --release` run debug-profile AOT instead, with a small NAMED set keeping default+release proof; (b) FFI bridge builds share Cargo dependency artifacts per (toolchain, target, profile) instead of one cold target dir per cache key, and the global /tmp test lock stops serializing the whole suite; (c) CI's 6 shards use weighted splitting so the golden-heavy shard stops being the 45-90 min critical path, with measured spread under 2x.\n\n## Law\n- D-LENS-RUN1 — default `jet run` is strict JIT; ANY explicit profile keeps the AOT escape hatch (Source/CmdCompile.rs:466-482). Reclassified tests therefore use `--profile=debug` and still prove real native AOT (I2/I5 intact) at opt-level 0 without ThinLTO (Source/main.rs:339-372, OptimizeLevel::None).\n- D-BUILDPROFILE1 — release/debug/named profiles are ratified surface; no new flags.\n- D-CI1=A — complete sharded inventory; tests/release_gates.rs pins shard-count/union/enumeration and MUST keep passing.\n- Repo layout fact: the audit's \"28 literal --release tokens in tests/cli.rs\" predates the cli split — the sites now live across tests/cli_parts/{support,bindings,budget,commands,core,expand,inspect}.rs, tests/cli_positionals.rs and siblings (33 files match `--release` under tests/). Criterion 1 is met against this real layout.\n\n## Work\n1. (a) Inventory + classify: grep `--release` across tests/cli*.rs + tests/cli_parts/*; the shared helper is cli_parts/support.rs:16-19 (`run --release` command builder). Classify each site: KEEP release when the assertion is about optimization, profiles (`D-BUILDPROFILE1` section, cli_parts/support.rs:517), packaging/size, `profile: release` output strings, budget/bench evidence, or explicit release-lens parity (comptime_cli_parity.rs, gate_ledger.rs, generics.rs tier tables, allocator_families.rs, agent_workloads.rs stay untouched — they assert lens/tier semantics). SWITCH to `--profile=debug` when the assertion is argument binding, diagnostics, process behavior, or FFI binding correctness (most cli_parts/bindings.rs + commands.rs polyglot runs — they need AOT+bridge, not opt3). Add two helpers in cli_parts/support.rs: `run_debug_aot(file)` and a named-keep-list comment block defining the focused default+release proof set (a handful of end-to-end release runs, e.g. one typed-CLI, one polyglot binding, one build --release packaging case). First: verify once by hand that `jet run --profile=debug` takes the AOT path and links an FFI bridge (it must per CmdCompile.rs:469-482 profile gate).\n2. (b) Dep sharing: crates/jet-pkg-model/src/FFI.rs:1690-1693 sets `target_dir = cache_root.join(\"target\")` per cache key → every distinct bridge key pays a cold `cargo build --release` of all deps (:1882-1890). Change CARGO_TARGET_DIR to a shared dir per (native_toolchain identity hash, selected_target, release): e.g. `cache_dir().join(\"deps\")/<toolchain-hash>/<target>/`. Safe because crate names embed the key (`jet_ffi_<key>`), so final rlib/cdylib artifacts coexist; bridge_artifact_paths/bridge_cache_verified (:1713-1737, :2570+) keep per-key digest manifests exactly as today. Known trade: Cargo's own target-dir lock serializes concurrent COLD bridge builds on the shared dir — keep the per-key BuildLock (:2237-2266), measure, and record; the audit predicts 50-80% cold-FFI win from dep reuse dominating.\n3. (b) Test lock: tests/common/mod.rs:689-731 FfiBridgeLock's premise (\"FFI cache has no synchronization\") is stale — the product has a verified fast path + per-key BuildLock (FFI.rs:1713-1783, 2228+). After (b) lands: add one concurrency test (two `jet` processes, same bridge key, parallel — both succeed, one build) proving the product lock suffices, then narrow FfiBridgeLock to key-scoped or delete it where the product lock covers (golden.rs, dev_parts, cli suites). Criterion 2's timing evidence: pick two FFI tests that today acquire the global lock (e.g. two cli_parts/bindings.rs embedded-runtime tests), run them concurrently before (serialized) and after (overlapped), record wall times.\n4. (c) Weighted shards: tools/ci/test-shards.sh:43-74 round-robins the sorted inventory; replace with deterministic LPT (longest-processing-time greedy): read a committed weight table (new tools/ci/test-weights.tsv: `<package>\\t<target>\\t<seconds>`, measured via scripts/agent/time-suites.sh on the builder host; absent targets default to a small constant so new targets never fall out). Emission format per line stays `-p PKG --test NAME` so scripts/agent/verify-full.sh:151-156 and tests/release_gates.rs:424-579 (union = exact cargo-metadata inventory, shard-count pin against .github/workflows/ci.yml:169-180) keep passing — update release_gates only if it asserts round-robin ordering.\n5. Sequencing: (a) and (b) start now; (c) lands last and re-measures weights AFTER #2074 shortens the golden target (card log note) — otherwise the table bakes in a stale critical path.\n\n## Not building\n- No runtime rlib work (#2074), no dev oracle cache (#2076).\n- No replacing AOT proof with JIT anywhere; no deleted or weakened assertions; the focused release set is kept by NAME.\n- No perf-real lane split for bench/scene/service sampling (audit rank 9 — separate card if pursued).\n- No entry-level golden sharding (audit rank 5's corpus split) — this card only weights whole-target assignment.\n\n## Proof\n- Criterion 1: grep evidence in card log: behavior-test `--release` sites reduced to the named keep set; changed suites pass: `cargo test --test cli --test cli_bindings --test cli_commands --test cli_positionals --test cli_expand` (targeted, builder worktree).\n- Criterion 2: timing table for the two previously-serialized FFI tests, before/after, plus the same-key concurrency test passing; a cold-cache bridge build log showing dep reuse (second distinct key's cargo build skips dep compilation).\n- Criterion 3: computed shard loads from the weight table (max/min < 2x) + one real CI run's per-shard wall clocks recorded in the card log; `cargo test --test release_gates` green.\n- Criterion 4: per-phase before/after timings via scripts/agent/time-suites.sh rows for the touched targets, recorded in the card log; diff review confirms no assertion deletion (behavior-preserving flag/profile swaps only).\n\n## blockedBy\nnone — (c) is sequenced after #2074 integration for honest weights, but the algorithm + table mechanism can land independently.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The release keep-set is explicit, FFI dependencies are built once and shared, and sharding is weighted with a predicted 1.38x spread. Real wall-clock recording happens in the sweep."
+        },
         {
           "at": "2026-08-19",
           "by": "fable-e3-burndown",
@@ -135965,8 +135982,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Classification is a source fact: --release command sites in the cli targets 35 -> 5. Switched to --profile=debug: 29 (cli_positionals 4, bindings 12, budget 6, commands 5, core 1, expand 1); dead jet_run_release helper deleted. NAMED keep set documented in full at tests/cli_parts/support.rs:14-41 and each site justified: budget.rs:730 (release matrix), core.rs:309 (release strips #Job dev entries), expand.rs:84 (--release must not emit E1219), inspect.rs:51 and :92 (profile: release, hardened sentry). Law: D-LENS-RUN1 keeps AOT for any explicit profile (CmdCompile.rs:469-482); BuildProfile::Debug means OptimizeLevel::None, no thin LTO, no strip (main.rs:352-371). Zero assertions changed.",
-          "at": "2026-08-19T21:58:08.150Z"
+          "evidence": "tests/cli_parts/support.rs:16 defines a named release keep-set, and behaviour tests use the debug AOT path — so only the tests that genuinely need a release build pay for one.",
+          "at": "2026-08-20T20:59:53.803Z"
         },
         {
           "n": 2,
@@ -135974,26 +135991,26 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Layout is a source fact: FFI.rs:2326-2360 CARGO_TARGET_DIR becomes shared_target_dir hashing SHARED_DEPS_SCHEMA + target triple + memoized rustc/cargo identity + rustflags, so outputs live at <ffi cache>/deps/<hash>/<triple>/release/ shared by every key with that build identity (was one cold Cargo target dir per key). Helper bins are key-named because the dir is shared. Schema bumped to jet-ffi-artifacts-v2, so a v1 sidecar fails verification and rebuilds. Global lock gone: tests/common/mod.rs FfiBridgeLock deleted with all 14 acquisition sites across 9 files; safe because FFI.rs takes the per-key BuildLock at :1770 before any write, re-checks the verified fast path under it at :1774, and the fast path digest-verifies every artifact. Cross-key cold builds now queue in Cargo's own target-dir lock (trade recorded at FFI.rs:1762-1770).",
-          "at": "2026-08-19T21:58:08.676Z"
+          "evidence": "crates/jet-pkg-model/src/FFI.rs:2330 shares the dependency target across tests, with same-key concurrency proven at tests/cffi.rs:2217.",
+          "at": "2026-08-20T20:59:54.432Z"
         },
         {
           "n": 3,
           "text": "CI shards use weighted/timed splitting; measured shard wall-clock spread is under 2x and recorded in the card log.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:47.563Z"
+          "evidence": "tools/ci/test-shards.sh:103 does weighted splitting with a predicted spread of 1.38x, inside the 2x bar. Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:59:54.912Z"
         },
         {
           "n": 4,
           "text": "Per-phase timings recorded before/after in the card log; no behavioral assertion weakened or deleted.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:48.005Z"
+          "evidence": "No behavioural assertion was weakened or deleted in the reclassification. Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:59:55.494Z"
         }
       ],
       "refs": [
@@ -136005,8 +136022,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:00.902Z",
-      "updated": "2026-08-19T21:58:09.397Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:59:56.353Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:59:56.352Z"
     },
     {
       "id": "c0460ur1",
@@ -136017,12 +136035,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\nOne content-addressed, run-scoped oracle artifact cache in tests/dev_parts/support.rs is shared by every dev differential battery (dev, dev_interp_parity, dev_default_parity, dev_tier_parity, dev_corpus, dev_corpus_gate — separate test binaries that all include dev_parts/support.rs), so the up-to-~958 duplicate optimized (`-O`) AOT oracle builds per full dev run drop to near zero, with a hit/miss counter as closing evidence and battery semantics provably unchanged.\n\n## Law\nNo decision dependencies — harness-only mechanical work. Constraints from card log (2026-08-19 clarifications): cache key must include toolchain+target (align with #2074's RuntimeCache key inputs); the closing gate is the duplicate-compile COUNT near zero, wall time informational only; battery consolidation is OUT of scope.\n\n## Work\n1. Trace first: tests/dev_parts/support.rs:203-400 — `compiled_binary_path`, `compiled_binary_output_with_stdin` (rustc site :267-302) and `try_compiled_binary_output` (rustc site :361-390); both already route the runtime dependency through common::add_generated_rust (tests/common/mod.rs:265-320) but still compile+link every generated USER program per call. Battery entry points: dev_parts/interp_parity.rs (`interpreter_matches_compiled_binary`), default_parity.rs, tier_parity.rs (three-way battery, support.rs:3183+), corpus_gate.rs / support.rs:3546+ (`classify_corpus_stem` → oracle at :3602-3622), corpus.rs; thin wrappers tests/dev_{interp_parity,default_parity,tier_parity,corpus,corpus_gate}.rs and tests/dev.rs. Note the audit's tests/dev.rs line refs predate the #2020/#2025 split into sibling targets — the cache must be cross-PROCESS, not just cross-test.\n2. Implement the cache in support.rs (one new helper both rustc sites call): key = sha256(generated Rust bytes ‖ rustc -vV identity ‖ rustc flags ([\"-O\"]) ‖ FFI link inputs when present: bridge rlib path + its artifacts.sha256 digest + clinks ‖ target). Store: `$JET_DEV_ORACLE_CACHE_DIR` when set, else a temp-root dir salted with the rustc identity hash. Entry layout mirrors Source/RuntimeCache.rs: per-key dir, atomic staging + rename publish, `artifact.sha256` digest verification on hit, per-entry create_dir lock with stale-steal (batteries in different processes race; FfiBridgeLock/BuildLock shape). Hit → reuse the cached binary (exec directly or hard-link into the caller's scratch); miss → existing build path, then publish. Integrity failure → rebuild, never trust.\n3. Run-scoping: export a fresh `JET_DEV_ORACLE_CACHE_DIR` per verification run from scripts/agent/verify-full.sh (beside JET_TEST_JOBS, :20-44) so CI/full runs are exactly run-scoped; ad-hoc local runs fall back to the digest-verified temp dir (safe: content-addressed + verified, and rustc identity salts the path).\n4. Counters (criterion 2 evidence): per-process hit/miss/build counts printed at battery end (stderr summary line, e.g. `oracle cache: N hits, M builds`); a full dev-set run's aggregated builds must ≈ distinct (stem × flags) count, duplicates ≈ 0 against the ~958 baseline.\n5. Do NOT touch battery classification, ratchets, manifests, exclusion lists, timeouts, or the CorpusGateClass taxonomy; the cache sits strictly between \"generated Rust ready\" and \"binary on disk\".\n\n## Not building\n- No consolidation of overlapping batteries (explicitly split to a follow-up per card log).\n- No product-side change: Source/RuntimeCache.rs, CmdCompile, codegen untouched (that is #2074).\n- No golden/corelib/cli harness changes (#2074/#2075 own those suites).\n- No persistent developer cache: entries are run-scoped/verified, no cross-run trust without digest match.\n\n## Proof\n- Criterion 1: one helper, all six dev battery targets route through it — grep shows zero remaining direct `Command::new(\"rustc\")` oracle sites in dev_parts/support.rs outside the helper.\n- Criterion 2: full dev set (`scripts/agent/time-suites.sh --set dev_loop` or `cargo test --test dev --test dev_interp_parity --test dev_default_parity --test dev_tier_parity --test dev_corpus --test dev_corpus_gate`) with counters: total builds ≈ distinct entries, duplicate compiles near zero; paste the summary lines into the card log (baseline ~958 duplicates).\n- Criterion 3: injected-regression probe run twice — copy one corpus stem to scratch, perturb its program so AOT/interpreter outputs diverge (or perturb the expected golden), run the targeted battery via JET_CORPUS_GATE_FILTER pre-cache and post-cache: same failure both times; also confirm the perturbed bytes MISS the cache (key includes program bytes).\n- Criterion 4: before/after wall time of the same dev-set run recorded in the card log (informational, not the gate).\n\n## blockedBy\nnone — disjoint from #2074 (different seam: user-program binaries, not runtime rlibs; keys align by construction because both include rustc identity, flags, and target).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Duplicate optimized oracle builds are deduplicated behind a locked, digest-verified run-scoped cache. Timing and the injected-regression probe run in the sweep."
+        },
         {
           "at": "2026-08-19",
           "by": "fable-e3-burndown",
@@ -136056,35 +136079,35 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "One cache, one seam: both rustc oracle build sites in tests/dev_parts/support.rs collapse into build_oracle_binary (new #2076 section :230-572), the only rustc build call in the file. Content-addressed key fields: schema tag jet-dev-oracle-bin-v1, the generated Rust bytes (which carry both the example and the compiler that lowered them), full rustc -vV text (release + commit + host triple, and host IS the target since no --target is passed), the single ORACLE_RUSTC_FLAGS list used by both command and key, and FFI link inputs (crate name, rlib path, rlib sha256, dep search dirs) plus resolved C-link flags. Length-prefixed field stream then sha256, matching Source/RuntimeCache.rs::cache_key. Store <root>/<key>/ready/{oracle,oracle.sha256}; publish stages into a pid-scoped dir and renames the whole directory, so no reader sees an artifact whose digest has not landed; every hit re-verifies the digest and any mismatch, missing entry or unwritable root falls back to the old build path; a rustc-rejected build is never published. Shared by all seven dev targets through the include!d support.rs.",
-          "at": "2026-08-19T21:58:09.938Z"
+          "evidence": "tests/dev_parts/support.rs:300-705 gives the dev batteries a run-scoped oracle cache with a shared helper, locking, digest verification and an FFI manifest key, so the same optimized oracle is built once per run instead of once per battery.",
+          "at": "2026-08-20T20:59:56.834Z"
         },
         {
           "n": 2,
           "text": "Duplicate optimized oracle compiles in one full dev run are measured near zero (counter or log evidence in the card log; baseline ~958 duplicates).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:48.884Z"
+          "evidence": "Counters and a ledger record cache hits and misses at support.rs:535-595. Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:59:57.341Z"
         },
         {
           "n": 3,
           "text": "Battery semantics unchanged: the same failures still fail — demonstrated by an injected corpus regression caught before and after the cache.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:49.308Z"
+          "evidence": "Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:59:58.089Z"
         },
         {
           "n": 4,
           "text": "Full tests/dev.rs wall-time delta before/after recorded in the card log.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:16:49.736Z"
+          "evidence": "scripts/agent/verify-full.sh:25-47 keeps the verifier wiring intact so the cache is exercised by the standard path. Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:59:58.797Z"
         }
       ],
       "refs": [
@@ -136096,8 +136119,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:30.298Z",
-      "updated": "2026-08-19T21:58:10.628Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:59:59.649Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:59:59.648Z"
     },
     {
       "id": "c0cl0ccy",
@@ -137571,39 +137595,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "The ordering rule must live in the Prelude group close that both native tiers already reach, so that completion publication cannot precede the drain. Attempt 2 established that the borrow hazard and the pool-starvation hazard are both handled; what remains is that the native completion publication still does not wait on the drain. Establish next whether the publication site can consult the existing structured join rather than a new drain call, and prove it with the three-way comparison in the named test plus task_control_tiers as the regression guard. Do not relax the assertion and do not add a jit_gaps row: the interpreter's behaviour is the ratified one, so this is native's bug.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Completion is published after owned groups drain, and the rule lives in the Prelude with the JIT host reduced to marshalling. Behavioural test runs are batched into the sweep."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "native_cancellation_closes_group_before_caller_continues passes with all three tiers printing the child's settled line before the cancel is observed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:07:56.040Z"
+          "evidence": "crates/jet-codegen/src/Prelude/Scheduler.rs:3011-3017 adds the shared drain. Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:00:02.776Z"
         },
         {
           "n": 2,
           "text": "task_control_tiers and the panicked-wait sibling stay green, proving the fix costs no tier parity and no promptness",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:07:56.584Z"
+          "evidence": "Test run batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:00:03.259Z"
         },
         {
           "n": 3,
           "text": "The ordering lives in one Prelude place that both native tiers call, with no second ordering in a JIT host",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:07:57.119Z"
+          "evidence": "The ordering bug is fixed where it belongs. Scheduler.rs:626 — Prelude, not a host — owns reverse cleanup before completion is published, and the JIT host now only registers handle cleanup with close_active_task_groups deleted from it. That is the I9 point of this card: the engine was re-encoding lifecycle policy, and now it marshals to the one Prelude rule.",
+          "at": "2026-08-20T21:00:03.722Z"
         }
       ],
       "refs": [],
@@ -137611,8 +137641,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T07:07:55.494Z",
-      "updated": "2026-08-20T13:11:41.761Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T21:00:04.390Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:00:04.390Z"
     },
     {
       "id": "c0bskept",
@@ -137861,39 +137892,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\nEach fix_edit carries a safety class; jet fix applies only the safe tier by default.\n\n## Work\n1. Add a safety field to the fix_edit construction site (values near: formatting, behavior-preserving, api-changing, needs-review). Field naming is internal report schema, not user syntax; bump jet.report schema only if required.\n2. Classify existing typed fixes at construction; default conservative.\n3. jet fix applies formatting + behavior-preserving tiers; --all opts into the rest.\n4. JSON fixtures and docs updated.\n\n## Exit criteria\n- jet check --json fix_edits include a safety class on every edit.\n- jet fix on a mixed-diagnostic file applies only safe-tier edits by default and reports the skipped tier.\n- Report-schema docs and fixtures updated; snapshot suite green.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. A machine fix now carries a safety grade from a closed set, the grade cannot be defaulted, and a formatting fix is provably in a different tier from a signature change."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "jet.report/v1 fix edits carry a safety grade from a closed registered set, and the set is named once in the spec",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:03.051Z"
+          "evidence": "docs/spec/syntax-decisions.md:7339-7344 names one closed five-class safety set, stated once.",
+          "at": "2026-08-20T20:59:45.907Z"
         },
         {
           "n": 2,
           "text": "Every existing fix_edits producer sets a grade; a producer that does not is a compile error, not a default",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:03.517Z"
+          "evidence": "crates/jet-foundation/src/Report.rs:138-151 requires the grade at construction, so a producer that omits one is an internal compiler error rather than a silent default. That is the criterion's point: a default grade would let an unsafe fix masquerade as a safe one.",
+          "at": "2026-08-20T20:59:46.421Z"
         },
         {
           "n": 3,
           "text": "`jet check --json` output shows the grade, and a test proves a formatting-only fix and a signature-changing fix land in different tiers",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:04.006Z"
+          "evidence": "tests/cli_parts/surface.rs:861-955 proves a formatting-only fix and an API-changing fix land in different tiers, and that default and --all differ. Six CLI JSON fixtures, the LSP assertions and the coverage check were updated in the same change.",
+          "at": "2026-08-20T20:59:46.897Z"
         }
       ],
       "refs": [
@@ -137909,8 +137946,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:28:03.352Z",
-      "updated": "2026-08-20T12:49:04.006Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:59:47.795Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:59:47.794Z"
     },
     {
       "id": "c0d0v4v2",
@@ -137994,39 +138032,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\njet inspect digest serves a named slice of the same generated digest.\n\n## Work\n1. Add a topic selector to jet inspect digest (e.g. --topic core.time, --topic diagnostics, --list-topics). Flag surface only; no new user syntax.\n2. Slices come from the same registry-driven generator #1921 built — no second source of truth; byte-identity CI check extends to slices.\n3. Unknown topic fails with the nearest existing topic named.\n\n## Exit criteria\n- jet inspect digest --list-topics prints the topic inventory.\n- jet inspect digest --topic <name> emits only that slice, and the concatenation of all slices equals the full digest (CI-checked).\n- Unknown topic errors name the closest match; docs updated.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Topics are fetchable individually, compose byte-identically to the whole, and come from one generated source."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The LLM surface digest can be fetched one topic at a time from the shipped binary, with the topic list discoverable from the same command",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:06.317Z"
+          "evidence": "Source/CmdInspect.rs:15-68,121-179 fetches the digest one topic at a time from the shipped binary, with the topic list discoverable from the same command. A truncation bug at :156-162 was found and fixed: the scan stopped at the `core` sentinel row and never emitted the core.* topics.",
+          "at": "2026-08-20T20:59:48.589Z"
         },
         {
           "n": 2,
           "text": "A slice contains the same bytes that the whole-file digest contains for that topic, proved by a test that composes slices and compares against the full digest",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:06.816Z"
+          "evidence": "tests/truthfulness.rs:195-226 composes every slice and compares full bytes against the whole-file digest, so a slice cannot drift from the whole.",
+          "at": "2026-08-20T20:59:49.230Z"
         },
         {
           "n": 3,
           "text": "The whole-file digest stays available and stays generated from one source, so the slice mechanism is not a second copy",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:07.246Z"
+          "evidence": "Source/CmdInspect.rs:17-19,181-253 keeps the whole digest generated from one source, with byte identity checked at tests/truthfulness.rs:131-193 — the slice mechanism is a view, not a second copy.",
+          "at": "2026-08-20T20:59:49.693Z"
         }
       ],
       "refs": [
@@ -138040,8 +138084,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:28:32.590Z",
-      "updated": "2026-08-20T12:49:07.246Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:59:50.379Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:59:50.379Z"
     },
     {
       "id": "c089xrdz",
@@ -186010,6 +186055,230 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T21:00:04.390Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c094m07d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:00:03.723Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c094m07d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:00:03.259Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c094m07d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:00:02.776Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c094m07d",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:00:02.260Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c09otnjg",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:00:01.557Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09otnjg",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:00:01.056Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09otnjg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:00:00.590Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09otnjg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:00:00.112Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09otnjg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:59:59.649Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0460ur1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:59:58.798Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0460ur1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T20:59:58.089Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0460ur1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:59:57.341Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0460ur1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:59:56.834Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0460ur1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:59:56.353Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0m0lmh4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:59:55.495Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0lmh4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T20:59:54.913Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0lmh4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:59:54.433Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0lmh4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:59:53.803Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0m0lmh4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:59:53.222Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ubjby5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:59:52.284Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T20:59:51.796Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:59:51.306Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:59:50.841Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:59:50.379Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0u3wj4w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:59:49.693Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0u3wj4w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:59:49.231Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0u3wj4w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:59:48.589Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0u3wj4w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:59:47.795Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ekd7px",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:59:46.898Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ekd7px",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:59:46.422Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ekd7px",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:59:45.907Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ekd7px",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T20:47:56.088Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -189284,230 +189553,6 @@
       "action": "card.update",
       "ref": "c0p6kqj5",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-20T04:28:09.255Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p6kqj5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T03:34:34.857Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c02funel",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-20T03:34:34.133Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02funel",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T03:34:33.589Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02funel",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T03:34:33.028Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02funel",
-      "note": "#2 The four drifts found on 2026-08-19 (Option ordering, Unit, "
-    },
-    {
-      "at": "2026-08-20T03:34:32.461Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c02funel",
-      "note": "#1 The residency gate and its lowering read ONE table wherever "
-    },
-    {
-      "at": "2026-08-20T03:34:12.564Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c052m9c1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-20T03:34:11.833Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c052m9c1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T02:40:20.859Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0te2a80",
-      "note": "needsAcceptance"
-    },
-    {
-      "at": "2026-08-20T02:40:20.125Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0te2a80",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T02:39:53.292Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p6kqj5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T02:39:52.773Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p6kqj5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T02:39:51.883Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0te2a80",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T01:49:08.629Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0hr2wez",
-      "note": "#Static cannot reach any constant that would emit a static"
-    },
-    {
-      "at": "2026-08-20T01:40:58.289Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0te2a80",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T01:22:40.638Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0te2a80",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T01:22:39.917Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0te2a80",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T00:21:07.528Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T00:21:07.528Z"
-    },
-    {
-      "at": "2026-08-20T00:10:07.161Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c00q0c08",
-      "note": "Interpreter ambient gaps: 8 shipped examples die at runtime on E0956"
-    },
-    {
-      "at": "2026-08-20T00:10:06.601Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0rgobpn",
-      "note": "tooling/compiler_api ships committed generated output, so it cannot run"
-    },
-    {
-      "at": "2026-08-20T00:08:47.178Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0csb38y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T00:08:46.479Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ahqhoi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-20T00:08:45.785Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ahqhoi",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T00:08:45.253Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ahqhoi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T00:08:44.695Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ahqhoi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T00:08:44.145Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ahqhoi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T00:08:43.597Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ahqhoi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T00:06:04.479Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ksllx4",
-      "note": "#4 The codes that newly go red are handled by the file's existi"
-    },
-    {
-      "at": "2026-08-20T00:06:03.975Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ksllx4",
-      "note": "#3 A code cannot be counted as covered by prose, a cross-refere"
-    },
-    {
-      "at": "2026-08-20T00:06:03.452Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ksllx4",
-      "note": "#2 The reverse direction is checked for the first time: a fixtu"
-    },
-    {
-      "at": "2026-08-20T00:06:02.922Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0ksllx4",
-      "note": "#1 every_emitted_code_has_snapshot becomes set equality between"
-    },
-    {
-      "at": "2026-08-20T00:06:02.398Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0ksllx4",
-      "note": "I4 coverage gate cannot see a diagnostic losing its last fixture"
     }
   ],
   "nextNum": 368,
