@@ -637,6 +637,206 @@ mod gate_follows_lowering {
              must admit it"
         );
     }
+
+    fn int_local(name: &str) -> TExpr {
+        TExpr {
+            ty: Type::Int,
+            kind: TExprKind::Local(TIR::TLocal::user(name)),
+        }
+    }
+
+    fn ptr_ty(inner: Type) -> Type {
+        Type::Apply {
+            name: jet_foundation::Syntax::TYPE_PTR.to_string(),
+            args: vec![inner],
+        }
+    }
+
+    /// Every `*x` operand shape the corpus writes inside `#Unsafe`, plus the
+    /// ones the lowering has to decline.
+    fn candidate_raw_operands() -> Vec<TExpr> {
+        let inner_raw_of = TExpr {
+            ty: ptr_ty(Type::Int),
+            kind: TExprKind::RawOf(Box::new(int_local("cell"))),
+        };
+        vec![
+            // `*cell` on a live local — `examples/features/memory/rawptr.jet`.
+            int_local("cell"),
+            // The `*Int.{*cell}` outer cast, whose operand is already a pointer.
+            inner_raw_of,
+            // A borrow of a local is still that local's place.
+            TExpr {
+                ty: Type::Int,
+                kind: TExprKind::Borrow {
+                    place: Box::new(int_local("cell")),
+                    mutable: false,
+                },
+            },
+            // Not a place at all: `*arena.alloc(7)`
+            // (`examples/features/memory/unsafe_sentries.jet`) reduced to the
+            // one fact that decides it.
+            TExpr {
+                ty: Type::Int,
+                kind: TExprKind::Call {
+                    name: "alloc".to_string(),
+                    args: Vec::new(),
+                    type_args: Vec::new(),
+                },
+            },
+            // A place whose payload has no machine slot.
+            TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Local(TIR::TLocal::user("nothing")),
+            },
+        ]
+    }
+
+    /// D-CAP9 / D-MEM-SENTRY1: the gate admits a raw pointer exactly when
+    /// `LowerCtx`'s `TExprKind::RawOf` arm can mint one — a `Ptr<_>` operand it
+    /// passes through, or a bare local place with a machine-sized payload. The
+    /// arm answered a flat `false` for every operand while the lowering had
+    /// covered the bare-local slot all along, and the non-place branch minted a
+    /// pointer to a COPY, which is the shape that would answer 7 instead of
+    /// R0802 for `*arena.alloc(7)` after `arena.reset()`.
+    #[test]
+    fn raw_of_admits_exactly_the_operands_the_lowering_can_mint() {
+        // Transcribed from `LowerCtx`'s `TExprKind::RawOf` arm, in its order:
+        // the `Ptr<_>` passthrough, a bare-local place with a machine payload,
+        // then decline. A fixed verdict per shape, so widening either side has
+        // to come here and say so.
+        let expected = [true, true, true, false, false];
+        let operands = candidate_raw_operands();
+        assert_eq!(operands.len(), expected.len());
+        for (operand, want) in operands.iter().zip(expected) {
+            let admitted = resident_safe_raw_of(operand);
+            assert_eq!(
+                admitted,
+                want,
+                "`*<{}>` of type {:?}: expected the residency gate to answer \
+                 {want}, matching LowerCtx's RawOf arm",
+                expr_kind_tag(operand),
+                operand.ty
+            );
+            if admitted {
+                let passthrough = matches!(&operand.ty, Type::Apply { name, args }
+                    if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1);
+                assert!(
+                    passthrough
+                        || crate::lower_ctx::LowerCtx::raw_place_local(operand).is_some(),
+                    "the gate admitted `*<{}>`, which has no storage of its own. \
+                     LowerCtx's RawOf arm declines it, so this is a hard failure \
+                     in the strict tier — and a pointer to a COPY if that branch \
+                     is ever restored",
+                    expr_kind_tag(operand)
+                );
+            }
+        }
+    }
+
+    /// The pointee ABI is the whole `p.*` question: `LowerCtx`'s
+    /// `TExprKind::Deref` arm loads `meta.clif_ty(&expr.ty)`, so a result with no
+    /// machine slot has nothing to load into.
+    #[test]
+    fn deref_admits_exactly_the_results_with_a_machine_slot() {
+        for (ty, want) in [
+            (Type::Int, true),
+            (Type::Bool, true),
+            (Type::Float, true),
+            (Type::Named("Unit".to_string()), false),
+        ] {
+            assert_eq!(
+                resident_safe_raw_deref(&ty),
+                want,
+                "`p.*` into {ty:?}: expected the residency gate to answer {want}"
+            );
+        }
+    }
+
+    fn trait_arg(ty: Type) -> TCallArg {
+        TCallArg {
+            value: TExpr {
+                ty,
+                kind: TExprKind::Local(TIR::TLocal::user("one")),
+            },
+            template_items: None,
+            borrow: false,
+            mut_borrow: false,
+            clone: false,
+            arc_clone: false,
+            fn_coerce: None,
+            widen_to_vec: false,
+            widen_to_union: None,
+            box_as_trait: Some("Shape".to_string()),
+        }
+    }
+
+    /// S48: a concrete entering a trait value slot is boxed by
+    /// `LowerCtx::lower_trait_object_box`, whose type id is
+    /// `JitMeta::struct_type_id` — a position in the `struct_fields` table. A
+    /// nominal name can have one; a tuple never does. The gate refused ALL of
+    /// them, so `print_area(one)` deopted `examples/features/types/traits.jet`.
+    #[test]
+    fn a_trait_slot_admits_the_nominal_concretes_the_box_can_identify() {
+        assert!(resident_safe_trait_arg(&trait_arg(Type::Named(
+            "Circle".to_string()
+        ))));
+        assert!(!resident_safe_trait_arg(&trait_arg(Type::Tuple(Vec::new()))));
+        assert!(!resident_safe_trait_arg(&trait_arg(Type::Int)));
+    }
+
+    /// I8: the crypto pair table lives in `LowerCtx::crypto_core_arity` and the
+    /// gate reads it, so these rows cannot drift apart again. They are the eight
+    /// the deleted hand-copy was missing —
+    /// `examples/features/crypto/random_api_split.jet` used two of them.
+    #[test]
+    fn the_crypto_gate_admits_every_pair_the_lowering_has_a_host_for() {
+        for (module, method, arity) in [
+            ("core.crypto", "hkdf_sha256", 4usize),
+            ("core.crypto", "constant_time_equal", 2),
+            ("core.crypto", "constant_time_equal_bytes", 2),
+            ("core.crypto", "__secret_from_bytes", 1),
+            ("core.crypto", "__password_text", 1),
+            ("core.crypto", "x25519_public", 1),
+            ("core.crypto", "x25519_shared", 2),
+            ("core.crypto", "file_seal", 3),
+            ("core.crypto.expert", "hkdf_sha256_raw", 4),
+        ] {
+            assert_eq!(
+                crate::lower_ctx::LowerCtx::crypto_core_arity(module, method),
+                Some(arity),
+                "{module}.{method} has a resident host row, so the one arity \
+                 table must name it"
+            );
+        }
+        assert_eq!(
+            crate::lower_ctx::LowerCtx::crypto_core_arity("core.crypto", "nope"),
+            None
+        );
+    }
+
+    /// A spawn site TIR already assigned is read off the node, so two
+    /// references to one index are ONE table entry. The fenced-name fan
+    /// `@[ t1..t8 ]@ :: task transfer(…)` in
+    /// `examples/features/memory/shared_transact.jet` is eight such references
+    /// to entry 0, and comparing a raw expression count against the table size
+    /// reported `spawn site count 8 != lambda count 1`.
+    #[test]
+    fn repeated_references_to_one_spawn_site_are_one_table_entry() {
+        let mut tally = SpawnSiteTally::default();
+        for _ in 0..8 {
+            tally.assigned_site(0);
+        }
+        assert_eq!(tally.total(), 1);
+        tally.assigned_site(1);
+        assert_eq!(tally.total(), 2);
+        tally.cursor_slot();
+        tally.cursor_slot();
+        assert_eq!(
+            tally.total(),
+            4,
+            "a cursor-derived callback consumes a fresh slot per occurrence"
+        );
+    }
 }
 
 /// `Signal/Derived/Computed.get()` — TIR often erases the Apply payload to
@@ -1562,29 +1762,34 @@ fn resident_safe_crypto_work_item<'a>(
     ))
 }
 
+/// S48: the concrete argument shapes that may enter a trait value slot.
+///
+/// `LowerCtx::lower_call_arg` boxes such an argument into the two-slot
+/// `{type_id, concrete}` record `lower_trait_object_method` dispatches on, and
+/// `LowerCtx::lower_trait_object_box` is the one writer of that shape (shared
+/// with the literal-in-a-trait-slot arm). Both slots are I64 cells, so the
+/// concrete has to BE an I64 record handle.
+///
+/// Deliberately meta-free and NARROWER than `record_type_key`: that key also
+/// answers for `Type::Tuple`, which has no `struct_type_id` position at all,
+/// and for a `Type::Apply` instantiation whose id is keyed by a mangled name
+/// this file cannot form. A plain nominal name is the shape whose id
+/// `struct_type_id` resolves. Anything this gate cannot resolve without meta is
+/// a DEOPT — the lowering refuses through `struct_type_id` — never an ICE, and
+/// never a bare concrete record handed to a trait parameter.
+///
+/// Refusing outright (card #2053) deopted every program with an S48 argument,
+/// `print_area(one)` in `examples/features/types/traits.jet` included.
+fn resident_safe_trait_arg(arg: &TCallArg) -> bool {
+    arg.box_as_trait.is_none()
+        || matches!(&arg.value.ty, Type::Named(name) if name != "Unit")
+}
+
 fn resident_safe_call_arg_gate(arg: &TCallArg) -> bool {
     if arg.arc_clone {
         return false;
     }
-    // S48 trait-value slot: the argument must arrive as the two-slot
-    // `{type_id, concrete}` trait record `lower_trait_object_method` reads.
-    // `LowerCtx::lower_call_arg` does not build that record yet, so decline
-    // rather than hand a concrete record to a trait-object parameter.
-    //
-    // When it does (card #2053), this gate and that lowering MUST answer from
-    // ONE meta-free predicate over the argument type — the
-    // `LowerCtx::unzip_column_kinds` shape (lower_ctx.rs:11502), read by this
-    // file and by lowering. Never `record_type_key(..).is_some()` here beside a
-    // fallible lowering: that key is WIDER than a record layout (it answers for
-    // `Type::Tuple` and for any user type name, including a `distinct Meters =
-    // Float`, whose id is absent because `struct_type_id` is a position in
-    // `struct_fields` — types_meta.rs:1066), so it would admit shapes the
-    // lowering must refuse, which is #2091's drift bug. The predicate screens
-    // on HAS A RECORD LAYOUT; a shape this gate cannot resolve without meta is
-    // a DEOPT, never an ICE. The slot ABI is part of that screen: the two-slot
-    // record stores its payload as an I64 cell, so a distinct-over-Float
-    // concrete (an F64 cell, types_meta.rs:343) is out of the admitted set.
-    if arg.box_as_trait.is_some() {
+    if !resident_safe_trait_arg(arg) {
         return false;
     }
     let ty = &arg.value.ty;
@@ -1882,7 +2087,19 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 // `examples/features/memory/unsafe_sentries_provenance.jet` and
                 // R0802 on `examples/features/memory/unsafe_sentries.jet`.
                 return match (method.as_str(), args.as_slice()) {
-                    ("address_of", [place]) => resident_safe_expr(place, callees),
+                    // Bare local only. That branch mints the local's own
+                    // Cranelift stack slot, which is a real machine address like
+                    // AOT's. The other branch mints the synthetic identity
+                    // `TIR::stable_place_address` gives a place with no stable
+                    // address — the interpreter agrees with it, AOT does not, so
+                    // admitting it would put an I9 divergence on this tier
+                    // instead of leaving it where it already is
+                    // (`examples/features/memory/pin.jet`, a field projection).
+                    ("address_of", [place]) => {
+                        crate::lower_ctx::LowerCtx::raw_place_local(place).is_some()
+                            && super::types_meta::clif_ty(&place.ty).is_some()
+                            && resident_safe_expr(place, callees)
+                    }
                     ("volatile_read", [pointer]) => {
                         super::types_meta::clif_ty(&expr.ty).is_some()
                             && resident_safe_expr(pointer, callees)
@@ -2366,7 +2583,15 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::Drop(inner) | TExprKind::MaterializeView(inner) => {
             resident_safe_expr(inner, callees)
         }
-        TExprKind::Deref(_) | TExprKind::RawOf(_) => false,
+        // Shadowed by `resident_safe_expr_work_item`; states the one law
+        // (`resident_safe_raw_of` / `resident_safe_raw_deref`) so the two copies
+        // cannot disagree. This arm answered a flat `false`, which refused every
+        // audited pointer in the corpus although the lowering had covered a bare
+        // local's own stack slot all along.
+        TExprKind::RawOf(arg) => resident_safe_raw_of(arg) && resident_safe_expr(arg, callees),
+        TExprKind::Deref(arg) => {
+            resident_safe_raw_deref(&expr.ty) && resident_safe_expr(arg, callees)
+        }
         TExprKind::EnumLit { payload, .. } => {
             jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
         }
@@ -2843,7 +3068,23 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             resident_safe_expr(base, callees) && resident_safe_expr(index, callees)
         }
         TExprKind::MathSwizzleRead { recv, .. } => resident_safe_expr(recv, callees),
-        TExprKind::PtrFromAddr { addr, .. } => resident_safe_expr(addr, callees),
+        // S58 / D-MEM-SENTRY1: `mem.Ptr<T>.from_addr(addr)` IS the address it is
+        // given. An integer literal is the one operand with no live allocation
+        // behind it — naming an address out of nothing is the whole point of
+        // `examples/features/memory/unsafe_sentries_provenance.jet`, and the
+        // shared Prelude sentry kernel owns its R0801. This tier pushes no
+        // `jet_sentry_scope` and so can report nothing, so the shape stays off
+        // it; `LowerCtx`'s `TExprKind::PtrFromAddr` arm still records the word as
+        // a real address, because that is what a whole-program compile needs and
+        // this refusal is what keeps any deref of it on the tier that answers.
+        //
+        // Every other operand keeps the provenance it already carried:
+        // `from_addr(mem.address_of(local))` is real because `address_of`
+        // recorded that very SSA value (`examples/features/lowlevel/mmio_board_write.jet`,
+        // `examples/features/lowlevel/pointer_cast_deref.jet`).
+        TExprKind::PtrFromAddr { addr, .. } => {
+            !matches!(&addr.kind, TExprKind::IntLit(..)) && resident_safe_expr(addr, callees)
+        }
         TExprKind::ExternCall { args, .. } => {
             args.iter().all(|a| resident_safe_expr(&a.value, callees))
         }
@@ -2903,8 +3144,8 @@ fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
     if arg.arc_clone {
         return false;
     }
-    // S48 trait-value slot — see `resident_safe_call_arg_gate`.
-    if arg.box_as_trait.is_some() {
+    // S48 trait-value slot — one law, see `resident_safe_trait_arg`.
+    if !resident_safe_trait_arg(arg) {
         return false;
     }
     let ty = &arg.value.ty;
@@ -5310,8 +5551,51 @@ pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
         .all(|lam| resident_safe_spawn_lambda(lam, &names))
 }
 
+/// The spawn-lambda table entries a program references.
+///
+/// Two kinds of reference, and they do not count the same way.
+///
+/// A site TIR already assigned (`Spawn`, the reactive closure kinds,
+/// `ui.button`, `watch`) carries its table index on the node, and the lowering
+/// READS that number (`LowerCtx::lower_spawn`), so N references to one index are
+/// still ONE entry. The fenced-name fan `@[ t1..t8 ]@ :: task f()` is exactly
+/// that shape: the token expansion copies one statement, every copy keeps the
+/// source span, and `jit_spawn_site_with` keys the table by `(fn, span)` — eight
+/// spawn expressions, one lambda, all eight running the same body.
+///
+/// A callback whose index still comes from the traversal cursor (`#Reactive`,
+/// `game on_frame`, `event on`/`once`/`on_priority`, the gtk `on_click`) consumes
+/// a fresh slot per occurrence, in this walk's order.
+#[derive(Default)]
+struct SpawnSiteTally {
+    assigned: HashSet<usize>,
+    cursor: usize,
+}
+
+impl SpawnSiteTally {
+    fn assigned_site(&mut self, site: usize) {
+        self.assigned.insert(site);
+    }
+
+    fn cursor_slot(&mut self) {
+        self.cursor += 1;
+    }
+
+    fn total(&self) -> usize {
+        self.assigned.len() + self.cursor
+    }
+}
+
+/// How many spawn-lambda table entries this program references.
+///
+/// The planner compares this against `spawn_lambdas.len()` to ask "is every
+/// entry referenced, and does every reference resolve". Comparing a raw
+/// EXPRESSION count against a TABLE SIZE answered no for any program that
+/// referenced one entry twice: `examples/features/memory/shared_transact.jet`
+/// was refused with `spawn site count 8 != lambda count 1` for a fan whose
+/// eight tasks correctly share one lambda.
 pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
-    let mut n = 0usize;
+    let mut n = SpawnSiteTally::default();
     for f in &program.funcs {
         count_spawn_sites_stmts(&f.body, &mut n);
     }
@@ -5333,10 +5617,10 @@ pub(crate) fn count_spawn_sites(program: &JitProgram) -> usize {
             }
         }
     }
-    n
+    n.total()
 }
 
-fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
+fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut SpawnSiteTally) {
     for s in stmts {
         match s {
             TStmt::Contract { contract } => {
@@ -5394,9 +5678,9 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             | TStmt::SentryPolicy { body, .. }
             | TStmt::Shield { body }
             | TStmt::DebugOnly(body) => count_spawn_sites_stmts(body, n),
-            TStmt::Reactive { .. } => {
-                *n += 1;
-            }
+            // `#Reactive` has no site on its TIR node, so its table index comes
+            // from the traversal cursor (`LowerCtx`'s `TStmt::Reactive` arm).
+            TStmt::Reactive { .. } => n.cursor_slot(),
             TStmt::Layout { body, .. } => count_spawn_sites_stmts(body, n),
             TStmt::ContextBlock { guards, body } => {
                 for (_, value) in guards {
@@ -5457,19 +5741,32 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
     }
 }
 
-fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
-    if matches!(
-        expr.kind,
-        TExprKind::CoreClosureCall {
-            kind: TCoreClosureKind::Spawn { .. }
-                | TCoreClosureKind::ReactiveDerived { .. }
-                | TCoreClosureKind::ReactiveEffect { .. }
-                | TCoreClosureKind::UiReactiveRender { .. }
-                | TCoreClosureKind::UiButtonOnClick { .. }
-        }
-    ) {
-        *n += 1;
+fn count_spawn_sites_expr(expr: &TExpr, n: &mut SpawnSiteTally) {
+    // TIR assigned these indices, and the lowering reads them off the node
+    // (`LowerCtx::lower_spawn`, `lower_spawn_site_cb_at`), so the SAME index
+    // referenced twice is still one table entry.
+    if let TExprKind::CoreClosureCall {
+        kind: TCoreClosureKind::Spawn { site, .. }
+            | TCoreClosureKind::ReactiveDerived { site, .. }
+            | TCoreClosureKind::ReactiveEffect { site, .. }
+            | TCoreClosureKind::UiReactiveRender { site, .. }
+            | TCoreClosureKind::UiButtonOnClick { site, .. },
+    } = &expr.kind
+    {
+        n.assigned_site(*site);
     }
+    if let TExprKind::HandleMethod {
+        op: THandleOp::WatchMethod {
+            callback_index: Some(site),
+            ..
+        },
+        ..
+    } = &expr.kind
+    {
+        n.assigned_site(*site);
+    }
+    // The rest have no site on their TIR node yet, so each occurrence takes the
+    // next cursor slot (`LowerCtx::lower_spawn_site_cb`).
     if matches!(
         &expr.kind,
         TExprKind::HandleMethod {
@@ -5477,17 +5774,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
             ..
         }
     ) {
-        *n += 1;
-    }
-    if let TExprKind::HandleMethod {
-        op: THandleOp::WatchMethod {
-            callback_index: Some(_),
-            ..
-        },
-        ..
-    } = &expr.kind
-    {
-        *n += 1;
+        n.cursor_slot();
     }
     if let TExprKind::HandleMethod {
         op: THandleOp::EventMethod { method },
@@ -5495,7 +5782,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
     } = &expr.kind
     {
         if matches!(method.as_str(), "on" | "once" | "on_priority") {
-            *n += 1;
+            n.cursor_slot();
         }
     }
     if let TExprKind::HandleMethod {
@@ -5504,7 +5791,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
     } = &expr.kind
     {
         if method == "on_click" {
-            *n += 1;
+            n.cursor_slot();
         }
     }
     match &expr.kind {
@@ -5667,7 +5954,7 @@ pub(crate) fn first_spawn_site(lambda: &TJitSpawnLambda) -> Option<usize> {
     }
 }
 
-fn count_spawn_sites_if_cond(cond: &TIfCond, n: &mut usize) {
+fn count_spawn_sites_if_cond(cond: &TIfCond, n: &mut SpawnSiteTally) {
     match cond {
         TIfCond::Plain(expr) => count_spawn_sites_expr(expr, n),
         TIfCond::And { left, right } => {

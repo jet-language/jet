@@ -754,6 +754,9 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
     include_str!("../Prelude/CommandSuite.rs"),
+    // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
+    // below and `Top/Sync.rs` both read it instead of re-deriving the rule (I9).
+    include_str!("../Prelude/CoreLib/JetStd/RowPolicy.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
@@ -1162,7 +1165,10 @@ fn push_corelib_prelude_body(
             fn jet_debug(&self) -> String { self.jet_show() }\n\
         }\n",
     );
-    out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
+    // D-CONC-FAIL1=A: the one typed failure rail. Optional flat fragments
+    // outside `mod jet_std` (Services.rs) name it unqualified, so it is
+    // re-exported here rather than restated as a slice-local outcome enum.
+    out.push_str("\npub use crate::jet_std::{JetTaskFailure, JetTaskGroupRuntime};\n");
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by
     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.

@@ -10212,25 +10212,6 @@ impl LowerCtx<'_, '_> {
         } else {
             self.lower_expr(&arg.value)?
         };
-        // S48: a concrete value entering a single-trait value slot boxes
-        // invisibly. TIR decides that at the one place that knows both the
-        // argument and the parameter type (`lower_one_call_arg`'s
-        // `box_as_trait`), and this builds the record that decision names — the
-        // same box a literal in the same slot already got from
-        // `lower_struct_lit`'s `as_trait` arm. Handing the bare concrete record
-        // to a trait parameter would make `lower_trait_object_method` read a
-        // field as a type id, so this was refused outright until now, which
-        // deopted every program with an S48 argument
-        // (`print_area(one)` in `examples/features/types/traits.jet`).
-        //
-        // The box goes on before the borrow wrapper, matching AOT
-        // (`emit/helpers.rs`) — in this tier a borrow IS the same handle, so
-        // there is nothing left to apply after it.
-        if arg.box_as_trait.is_some() {
-            let concrete_name = user_type_name(ty)
-                .ok_or_else(|| format!("jit trait arg concrete type: {ty:?}"))?;
-            return self.lower_trait_object_box(val, concrete_name);
-        }
         if let Some(Type::Union(members)) = &arg.widen_to_union {
             let enum_name = jet_codegen::AST::union_enum_name(members);
             let variant = jet_codegen::AST::union_member_tag(ty);
@@ -10242,6 +10223,34 @@ impl LowerCtx<'_, '_> {
         }
         if arg.widen_to_vec {
             return Ok(self.call_host(self.host.coll.list_clone, &[val]));
+        }
+        // S48: a concrete value entering a single-trait value slot boxes
+        // invisibly. TIR decides that at the one place that knows both the
+        // argument and the parameter type (`lower_one_call_arg`'s
+        // `box_as_trait`), and this builds the record that decision names — the
+        // same box a literal in the same slot already got from
+        // `lower_struct_lit`'s `as_trait` arm. Handing the bare concrete record
+        // to a trait parameter would make `lower_trait_object_method` read a
+        // field as a type id, so this was refused outright until now, which
+        // deopted every program with an S48 argument
+        // (`print_area(one)` in `examples/features/types/traits.jet`).
+        //
+        // Wrapper order follows AOT exactly (`TIR/emit/helpers.rs`
+        // `emit_tir_call_args`): clone, widen, box, then borrow. In this tier a
+        // borrow IS the same handle, so the box is the last thing applied.
+        //
+        // A concrete whose record id `struct_type_id` cannot resolve (a tuple, a
+        // generic instantiation keyed by a mangled name, a distinct over a
+        // scalar) is DECLINED, not passed through: handing the bare value to a
+        // trait parameter makes `lower_trait_object_method` read it as a
+        // `{type_id, concrete}` record, which is a wrong answer rather than a
+        // stop. `resident_safe_trait_arg` screens on the nominal shape without
+        // meta, so this is the narrower half of the pair — a deopt, never an ICE
+        // (the #2091 drift class).
+        if arg.box_as_trait.is_some() {
+            let concrete_name = user_type_name(ty)
+                .ok_or_else(|| format!("jit trait arg concrete type: {ty:?}"))?;
+            return self.lower_trait_object_box(val, concrete_name);
         }
         Ok(val)
     }
@@ -19180,30 +19189,44 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::PtrFromAddr { addr, .. } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    // S58 says the pointer *is* the supplied address
-                    // (`addr as usize as *mut T`), so this arm hands the address
-                    // word straight back. What it must NOT do is call that word
-                    // a REAL address: `real_address_values` is the set the
-                    // trusted load, the raw store and the volatile pair read,
-                    // and membership means "this tier minted this address from a
-                    // live machine slot it owns".
+                    // Card #1985, second half. S58 says the pointer *is* the
+                    // supplied address (`addr as usize as *mut T`), so it is a
+                    // real machine address exactly when the operand is one, and
+                    // an address the program wrote as an integer literal is
+                    // provably that. `mem.Ptr<Int>.from_addr(1)` names address
+                    // 1; naming an address with no allocation behind it is the
+                    // whole point of the stem, and the shared Prelude sentry
+                    // kernel is what reports R0801 for it (D-MEM-SENTRY1). This
+                    // tier only has to stop reporting a pointer it lowered
+                    // itself as an unsupported construct, so the word is
+                    // recorded and the whole-program compile keeps succeeding
+                    // (`ensure_resident_module` compiles every function, tier
+                    // plan or not).
                     //
-                    // `mem.Ptr<Int>.from_addr(1)` names address 1 and the shared
-                    // Prelude sentry kernel is what reports R0801 for reading it
-                    // (D-MEM-SENTRY1,
-                    // `examples/features/memory/unsafe_sentries_provenance.jet`).
-                    // Card #1985 recorded an integer-literal operand as real on
-                    // the reasoning that no admitted expression could then use
-                    // it, because every `core.mem` call was refused. That is no
-                    // longer true — `Deref` and the volatile pair are resident
-                    // now — so recording it would turn an R0801 report into a
-                    // load from address 1. The literal case therefore stays
-                    // OUT: an address the program named out of nothing deopts to
-                    // the tier that owns sentry policy, and every other operand
-                    // keeps whatever provenance it already carried
-                    // (`mem.Ptr<T>.from_addr(mem.address_of(local))` is real
-                    // because `address_of` recorded that very SSA value).
-                    self.lower_expr(addr)
+                    // Keeping that shape OFF this tier is the residency gate's
+                    // job, not this arm's: `resident_safe_expr` refuses a
+                    // `PtrFromAddr` whose address is an integer literal, because
+                    // that is the one operand no live allocation stands behind
+                    // and the sentry kernel owns its answer. Without that
+                    // refusal, admitting `Deref` would turn an R0801 report into
+                    // a load from address 1.
+                    //
+                    // The literal has to survive lowering as its own word: an
+                    // `Int` past the inline range becomes a tagged arena handle
+                    // (`IntLit` above), and a tag is not an address. Asking
+                    // `int_from_i64` is asking the one rule that decides it
+                    // rather than restating its range here.
+                    let literal_address = match &addr.kind {
+                        TExprKind::IntLit(value, _) => {
+                            self.runtime.heap.int_from_i64(*value) == *value
+                        }
+                        _ => false,
+                    };
+                    let pointer = self.lower_expr(addr)?;
+                    if literal_address {
+                        self.real_address_values.insert(pointer);
+                    }
+                    Ok(pointer)
                 })
             }
             TExprKind::RawOf(inner) => {
@@ -19255,18 +19278,39 @@ impl LowerCtx<'_, '_> {
                         return Ok(pointer);
                     }
                     // The operand is not a place, so it has no storage of its
-                    // own for a pointer to name. Copying the value into a fresh
-                    // stack slot and handing out THAT address is a pointer to a
-                    // COPY: `*arena.alloc(7)` would then survive `arena.reset()`
-                    // and read 7 back, where the shared Prelude sentry kernel
-                    // reports R0802 for it
-                    // (`examples/features/memory/unsafe_sentries.jet`, and I9 —
-                    // the interpreter and AOT both take the address of the real
-                    // allocation). Card #1985 added that copy so `Deref` would
-                    // stop refusing a pointer this tier had minted itself; the
-                    // pointer was wrong, not the refusal. Decline, and let the
-                    // tier that owns provenance answer.
-                    Err("jit raw pointer of a non-place operand".to_string())
+                    // own for a pointer to name, and this branch hands out the
+                    // address of a COPY. It stays because `ensure_resident_module`
+                    // compiles every function whether or not the tier plan
+                    // selected it, so refusing here would take a currently
+                    // compile-covered stem out of the ledger without changing any
+                    // program's meaning.
+                    //
+                    // Keeping that shape OFF this tier is the residency gate's
+                    // job: `resident_safe_raw_of` admits only a bare local place
+                    // (or the `Ptr<_>` cast around one), which is what keeps
+                    // `*arena.alloc(7)` on the tier whose Prelude sentry kernel
+                    // reports R0802 after `arena.reset()`
+                    // (`examples/features/memory/unsafe_sentries.jet`). Reading a
+                    // copy would answer 7 instead.
+                    let value = self.lower_expr(inner)?;
+                    let clif = self
+                        .meta
+                        .clif_ty(&inner.ty)
+                        .ok_or_else(|| format!("jit raw pointer payload unsupported: {:?}", inner.ty))?;
+                    let size = u32::from(clif.bytes());
+                    let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        size,
+                        0,
+                    ));
+                    self.b.ins().stack_store(value, slot, 0);
+                    let pointer = self.b.ins().stack_addr(
+                        self.module.target_config().pointer_type(),
+                        slot,
+                        0,
+                    );
+                    self.real_address_values.insert(pointer);
+                    Ok(pointer)
                 })
             }
             TExprKind::Deref(inner) => {
@@ -22495,6 +22539,7 @@ impl LowerCtx<'_, '_> {
                     | "ServiceStateAuthority"
                     | "ServiceUpgradeReceipt"
                     | "ServiceGroup"
+                    | "ServiceRestartBudget"
                     | "ServiceDirectoryEntry"
                     | "ServiceIdempotencyEntry"
                     | "ServiceWorkflow"
@@ -22550,7 +22595,8 @@ impl LowerCtx<'_, '_> {
             // a record, so its absence IS the answer; every user struct in the
             // bundle has one, because `lower_jit_program` registers every
             // `Item::Struct` (`Codegen/TIR/mod.rs`).
-            if self.meta.struct_layout(name).is_none() {
+            let has_record_layout = self.meta.struct_layout(name).is_some();
+            if !has_record_layout {
                 return self.lower_expr(inner);
             }
             return self.lower_clone_struct(inner);

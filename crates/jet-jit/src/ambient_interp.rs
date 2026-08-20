@@ -38,6 +38,9 @@ type JetMap<K, V> = BTreeMap<K, V>;
 mod wire {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    // D-DBPOLICY1=A: the one closed row-policy language, included beside the
+    // wire fragment exactly as AOT and the Cranelift host do (I9).
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 
@@ -3173,10 +3176,12 @@ pub fn ambient_core_call(
             else {
                 return Some(Err(unsupported("core.db.policy arguments", span)));
             };
-            Some(Ok(match wire::jet_db_policy_validate(table, expression) {
-                Ok(()) => CtValue::Present(Box::new(db_policy_value(
-                    table.clone(),
-                    expression.clone(),
+            // Carry the COMPILED policy forward, not the caller's raw text, so a
+            // later scope operation reads exactly what AOT would have stored.
+            Some(Ok(match wire::jet_db_policy_compile(table, expression) {
+                Ok((table, compiled)) => CtValue::Present(Box::new(db_policy_value(
+                    table,
+                    compiled.canonical().to_string(),
                 ))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
@@ -4087,8 +4092,13 @@ pub fn ambient_handle(
         let (Some(table), Some(expression)) = (table, expression) else {
             return Some(Err(unsupported("DBConnection.with_policy policy", span)));
         };
-        return Some(match wire::jet_db_policy_validate(&table, &expression) {
-            Ok(()) => Ok(db_scope_value(handle, table, expression, user.clone())),
+        return Some(match wire::jet_db_policy_compile(&table, &expression) {
+            Ok((table, compiled)) => Ok(db_scope_value(
+                handle,
+                table,
+                compiled.canonical().to_string(),
+                user.clone(),
+            )),
             Err(error) => Err(unsupported(&format!("row policy: {error}"), span)),
         });
     }

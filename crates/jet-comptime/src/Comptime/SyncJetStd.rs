@@ -1,5 +1,9 @@
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+// D-DBPOLICY1=A: the one closed row-policy language. `Top/Sync.rs` reaches it
+// through `jet_std::jet_db_policy_compile` on this tier exactly as it does in
+// the AOT Prelude, so comptime cannot accept a policy AOT rejects (I9).
+include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
 // The one FieldError projection (I9): `DataTree.rs`'s `JetShow`/`JetDisplay`

@@ -127,7 +127,7 @@ The one new spelling is the marker every library author needs and no Jet user ha
 ```jet
 // proposed: any package, any pub item — same machinery Core uses
 #Deprecated(since: "1.2", use: "parse")
-pub fn decode(bytes: [Byte]) => Config ? DecodeError { ... }
+pub fn decode(bytes: [Byte]) => Config ? [FieldError] { ... }
 ```
 
 A consumer calling `decode` gets one warning carrying the replacement — a typed edit, not archaeology. `jet fix` can apply it when the replacement is a plain rename. The mechanism is not new: the marker registry is one Jet file the compiler reads (Prelude/Markers.jet, "law zero"), and the L2001/E2002 warning path is live today — it fires for `cbor.encode`/`cbor.decode` from a hardcoded table that exists **twice** (canonical in jet-pkg-model Manifest.rs:110-141, mirrored in Sema/Edition.rs:34 with a "keep in sync" comment). What gets **deleted**: both copies, in one change, per the greenfield law — Core's two rows become ordinary `#Deprecated` markers, eating the compiler's own dogfood. ApiFreeze stays as the enforcement half: removing the item later is the same named-delta error it is today.
@@ -258,9 +258,9 @@ policy: .{ lints: .{ deny: [unused_import] } }        // team wall: dead imports
 ```jet
 // app/store.jet — the library retires an API the way Core retires cbor.encode
 #Deprecated(since: "1.2", use: "parse")
-pub fn decode(bytes: [Byte]) => Config ? DecodeError { ... }
+pub fn decode(bytes: [Byte]) => Config ? [FieldError] { ... }
 
-pub fn parse(bytes: [Byte]) => Config ? DecodeError { ... }
+pub fn parse(bytes: [Byte]) => Config ? [FieldError] { ... }
 ```
 
 ```jet

@@ -124,6 +124,14 @@ fn jet_auth_opaque_token(prefix: &str) -> Result<String, String> {
     Ok(token)
 }
 
+/// D-AUTH1=A: the session cookie's `HttpOnly`/`Secure`/`SameSite`/`Path`
+/// defaults are ONE fact. Password login, magic-link consume, and OAuth finish
+/// all mint a session cookie; spelling the flags at each site meant a hardening
+/// change could reach two of the three.
+fn jet_auth_session_cookie(id: &str) -> String {
+    format!("jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/")
+}
+
 fn jet_auth_session_value(
     user_id: String,
     now_ms: i64,
@@ -131,9 +139,7 @@ fn jet_auth_session_value(
 ) -> Result<JetAuthSession, String> {
     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
     let id = jet_auth_opaque_token("sess")?;
-    let cookie = format!(
-        "jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/"
-    );
+    let cookie = jet_auth_session_cookie(&id);
     Ok(JetAuthSession {
         id,
         user_id,
@@ -286,9 +292,7 @@ fn jet_auth_magic_link_consume(
         id: id.clone(),
         user_id: entry.user_id,
         expires_at,
-        cookie: format!(
-            "jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/"
-        ),
+        cookie: jet_auth_session_cookie(&id),
     };
     store.sessions.push(session.clone());
     Ok(session)
@@ -344,9 +348,7 @@ fn jet_auth_oauth_finish(
         id: id.clone(),
         user_id,
         expires_at,
-        cookie: format!(
-            "jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/"
-        ),
+        cookie: jet_auth_session_cookie(&id),
     };
     store.sessions.push(session.clone());
     Ok(session)

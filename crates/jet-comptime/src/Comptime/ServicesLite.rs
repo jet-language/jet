@@ -61,6 +61,43 @@ fn ct_to_restart(v: &CtValue, span: Span) -> Result<JetServiceRestart, Diagnosti
     }
 }
 
+/// D-SERVICE1=D: the restart budget crosses the tier boundary as data through
+/// this one pair, so a group's policy row cannot mean one thing in an AOT local
+/// and another in a `CtValue`. `is_valid` is the Prelude's own range check.
+fn restart_budget_to_ct(b: &JetServiceRestartBudget) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceRestartBudget".to_string(),
+        fields: vec![
+            ("max".to_string(), CtValue::Int(b.max)),
+            ("per_ms".to_string(), CtValue::Int(b.per_ms)),
+        ],
+    }
+}
+
+fn ct_to_restart_budget(
+    v: &CtValue,
+    span: Span,
+) -> Result<JetServiceRestartBudget, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = v else {
+        return Err(unsupported("ServiceRestartBudget", span));
+    };
+    if type_name != "ServiceRestartBudget" {
+        return Err(unsupported("ServiceRestartBudget", span));
+    }
+    let int = |name: &str| match fields.iter().find(|(n, _)| n == name).map(|(_, v)| v) {
+        Some(CtValue::Int(n)) => Ok(*n),
+        _ => Err(unsupported("restart budget field", span)),
+    };
+    let budget = JetServiceRestartBudget {
+        max: int("max")?,
+        per_ms: int("per_ms")?,
+    };
+    if !budget.is_valid() {
+        return Err(unsupported("restart budget range", span));
+    }
+    Ok(budget)
+}
+
 fn delivery_to_ct(d: JetServiceDelivery) -> CtValue {
     CtValue::Enum {
         type_name: "ServiceDelivery".to_string(),
@@ -253,7 +290,10 @@ fn worker_to_ct(w: &JetServiceWorker) -> CtValue {
             ("name".to_string(), CtValue::Str(w.name.clone())),
             ("endpoint".to_string(), endpoint_to_ct(&w.endpoint)),
             ("mailbox".to_string(), mailbox_to_ct(&w.mailbox)),
-            ("restarts".to_string(), CtValue::Int(w.restarts)),
+            (
+                "restarts".to_string(),
+                CtValue::List(w.restarts.iter().copied().map(CtValue::Int).collect()),
+            ),
             ("running".to_string(), CtValue::Bool(w.running)),
         ],
     }
@@ -282,7 +322,17 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
         endpoint: ct_to_endpoint(field("endpoint")?, span)?,
         mailbox: ct_to_mailbox(field("mailbox")?, span)?,
         restarts: match field("restarts")? {
-            CtValue::Int(n) => *n,
+            CtValue::List(xs) => {
+                if xs.len() as i64 > MAX_SERVICE_RESTART_BUDGET {
+                    return Err(unsupported("worker restart budget", span));
+                }
+                xs.iter()
+                    .map(|x| match x {
+                        CtValue::Int(at) if *at >= 0 => Ok(*at),
+                        _ => Err(unsupported("worker restart instant", span)),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
             _ => return Err(unsupported("worker restarts", span)),
         },
         running,
@@ -523,6 +573,10 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
             ("delivery".to_string(), delivery_to_ct(tree.delivery.clone())),
             ("restart".to_string(), restart_to_ct(tree.restart.clone())),
             (
+                "restart_budget".to_string(),
+                restart_budget_to_ct(&tree.restart_budget),
+            ),
+            (
                 "workers".to_string(),
                 CtValue::List(tree.workers.iter().map(worker_to_ct).collect()),
             ),
@@ -537,6 +591,10 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                                 fields: vec![
                                     ("name".to_string(), CtValue::Str(g.name.clone())),
                                     ("restart".to_string(), restart_to_ct(g.restart.clone())),
+                                    (
+                                        "budget".to_string(),
+                                        restart_budget_to_ct(&g.budget),
+                                    ),
                                     (
                                         "workers".to_string(),
                                         CtValue::List(
@@ -707,6 +765,11 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
                     .find(|(n, _)| n == "restart")
                     .map(|(_, v)| ct_to_restart(v, span))
                     .ok_or_else(|| unsupported("group restart", span))??;
+                let budget = fields
+                    .iter()
+                    .find(|(n, _)| n == "budget")
+                    .map(|(_, v)| ct_to_restart_budget(v, span))
+                    .ok_or_else(|| unsupported("group restart budget", span))??;
                 let workers = match fields.iter().find(|(n, _)| n == "workers") {
                     Some((_, CtValue::List(xs))) => {
                         if xs.len() > MAX_SERVICE_WORKERS {
@@ -729,6 +792,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
                 Ok(JetServiceGroup {
                     name,
                     restart,
+                    budget,
                     workers,
                 })
                 })
@@ -860,6 +924,7 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         },
         delivery: ct_to_delivery(field("delivery")?, span)?,
         restart: ct_to_restart(field("restart")?, span)?,
+        restart_budget: ct_to_restart_budget(field("restart_budget")?, span)?,
         workers,
         groups,
         started: match field("started")? {

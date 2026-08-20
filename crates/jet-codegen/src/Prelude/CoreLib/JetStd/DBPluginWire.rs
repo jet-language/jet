@@ -129,32 +129,10 @@
         }
     }
 
-    /// Validate the small, closed policy language before a scope is created.
-    /// Keeping this check next to the SQL transformer lets the JIT and AOT
-    /// adapters call the same policy semantics.
-    pub fn jet_db_policy_validate(table: &str, expression: &str) -> Result<(), String> {
-        if table.trim().is_empty()
-            || expression.trim().is_empty()
-            || table.len() > 1024 * 1024
-            || expression.len() > 1024 * 1024
-            || table.chars().any(char::is_control)
-            || expression.chars().any(char::is_control)
-        {
-            return Err("row policy needs a table and expression".to_string());
-        }
-        if !table
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err("row policy table must be a simple identifier".to_string());
-        }
-        match expression.trim() {
-            "true" | "owner == user" => Ok(()),
-            other => Err(format!(
-                "unsupported row policy expression `{other}`; supported forms are `true` and `owner == user`"
-            )),
-        }
-    }
+    // The closed policy language lives in `RowPolicy.rs`, included beside this
+    // fragment on every tier. `jet_db_apply_policy_inner` below compiles through
+    // it once per operation, so the SQL transformer and the policy constructor
+    // can never accept different policies.
 
     fn db_sql_tokens(sql: &str) -> Vec<(usize, usize, String)> {
         let bytes = sql.as_bytes();
@@ -422,7 +400,8 @@
         user: &str,
         allow_schema: bool,
     ) -> Result<(String, Vec<DBValue>), DBError> {
-        jet_db_policy_validate(table, expression).map_err(|message| DBError { message })?;
+        let (policy_table, compiled) = jet_db_policy_compile(table, expression)
+            .map_err(|message| DBError { message })?;
         if sql.len() > 1024 * 1024
             || sql
                 .chars()
@@ -469,10 +448,10 @@
                 message: "row policy supports SELECT, INSERT, UPDATE, and DELETE only".to_string(),
             });
         }
-        let expected_table = table.to_ascii_lowercase();
+        let expected_table = policy_table.to_ascii_lowercase();
         if db_sql_target_table(&tokens, kind).as_deref() != Some(expected_table.as_str()) {
             return Err(DBError {
-                message: format!("policy scope targets table `{table}`"),
+                message: format!("policy scope targets table `{policy_table}`"),
             });
         }
         if !db_sql_simple_target(sql, &tokens, kind) {
@@ -480,7 +459,7 @@
                 message: "policy-scoped SQL must name one simple target table without joins or subqueries".to_string(),
             });
         }
-        if expression.trim() == "true" {
+        if compiled == JetRowPolicyExpr::AllowAll {
             return Ok((sql.to_string(), params.clone()));
         }
         if kind == "insert" {

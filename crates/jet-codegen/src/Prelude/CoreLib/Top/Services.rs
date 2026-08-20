@@ -2,6 +2,14 @@
 // Beginner topology: named tree → workers with typed mailboxes → OneForOne
 // restart policy. Delivery is at-most-once with Full under capacity (D-SERVICE-
 // DELIVERY1). Engines marshal into these Prelude symbols only (I9).
+//
+// Supervision reuses the ratified concurrency substrate rather than restating
+// it: a supervisor is a task that owns a `JetTaskGroupRuntime` child group
+// (D-CONC-GROUP1/D-CONC-SCHED1), a restart rule is data on that group, and a
+// failure is the one `JetTaskFailure` rail from Prelude/TaskGroup.rs
+// (D-CONC-FAIL1=A, which retired D-CONC-OUTCOME1's separate TaskOutcome /
+// TaskStatus surface). No slice-local outcome enum, no outcome strings, and no
+// second restart-tracking mechanism.
 
 const MAX_SERVICE_NAME: usize = 256;
 const MAX_SERVICE_MESSAGE: usize = 1024 * 1024;
@@ -16,7 +24,16 @@ const MAX_SERVICE_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_SERVICE_WORKFLOW_STEPS: usize = 100_000;
 const MAX_SERVICE_ACTIVITY_ATTEMPTS: i64 = 1_000;
 const MAX_SERVICE_MESSAGES: usize = 100_000;
-const MAX_SERVICE_RESTARTS: i64 = 5;
+/// D-SERVICE1=D's ratified default restart policy: `OneForOne` with a bounded
+/// budget of five restarts per minute, escalating to the parent group when the
+/// budget is spent. These are the *default* values of a policy row a group
+/// carries as data (D-CONC-SCHED1: "a restart rule is data on that group, no
+/// new mechanism") — not a global ceiling read at the one failure site.
+const SERVICE_RESTART_MAX: i64 = 5;
+const SERVICE_RESTART_WINDOW_MS: i64 = 60_000;
+/// The largest restart budget a group may declare. It bounds the retained
+/// restart-instant window, so supervision cannot grow unbounded state.
+const MAX_SERVICE_RESTART_BUDGET: i64 = 1_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetServiceRestart {
@@ -25,12 +42,62 @@ enum JetServiceRestart {
     RestForOne,
 }
 
+/// D-SERVICE1=D: the restart budget is typed data carried by the group that
+/// supervises a worker, so the supervisor decides from its own policy row
+/// instead of a global ceiling. `max` restarts are allowed inside a `per_ms`
+/// window; spending the budget escalates to the parent group.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetServiceRestartBudget {
+    max: i64,
+    per_ms: i64,
+}
+
+impl JetServiceRestartBudget {
+    /// The ratified default: `.OneForOne(max: 5, per: time.minutes(1))`.
+    fn ratified_default() -> Self {
+        Self {
+            max: SERVICE_RESTART_MAX,
+            per_ms: SERVICE_RESTART_WINDOW_MS,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.max >= 1 && self.max <= MAX_SERVICE_RESTART_BUDGET && self.per_ms >= 1
+    }
+
+    /// The one place the window boundary is computed. `spent` and `prune` both
+    /// read it, so the number the supervisor checks and the number it keeps
+    /// cannot disagree.
+    fn window_start(&self, now: i64) -> i64 {
+        now.saturating_sub(self.per_ms)
+    }
+
+    /// How much of the budget is spent at `now`. A restart older than the
+    /// window no longer spends budget, which is what "bounded restart budget
+    /// per window" means.
+    fn spent(&self, restarts: &[i64], now: i64) -> i64 {
+        let start = self.window_start(now);
+        restarts.iter().filter(|at| **at > start).count() as i64
+    }
+
+    /// Drop the instants the window no longer counts, so the list length is
+    /// always the spent budget.
+    fn prune(&self, restarts: &mut Vec<i64>, now: i64) {
+        let start = self.window_start(now);
+        restarts.retain(|at| *at > start);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetServiceDelivery {
     AtMostOnce,
     DurableAtLeastOnce,
 }
 
+/// D-CONC-UNIT1=A: the supervised unit's lifecycle row. `Escalated` is the
+/// supervisor-level terminal state that D-SERVICE1=D's "escalation to the
+/// parent group on exhaustion" names; every other row is the ordinary task
+/// lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JetServiceSupervisorStatus {
     Starting,
@@ -43,18 +110,14 @@ enum JetServiceSupervisorStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum JetServiceSupervisorOutcome {
-    Completed,
-    Cancelled,
-    DeadlineBlown,
-    Panicked(String),
-    Escalated(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 struct JetServiceSupervisorState {
     status: JetServiceSupervisorStatus,
-    outcome: Option<JetServiceSupervisorOutcome>,
+    /// D-CONC-FAIL1=A: the one typed failure rail, owned by
+    /// `Prelude/TaskGroup.rs`. `None` is a clean finish; a failure is
+    /// `.Cancelled`, `.DeadlineBlown`, or `.Panicked(reason)`. The retired
+    /// D-CONC-OUTCOME1 `TaskOutcome`/`TaskStatus` surface has no rows, and a
+    /// supervisor never reads a `trace()`/`exception()` string.
+    failure: Option<JetTaskFailure>,
     joined: bool,
 }
 
@@ -70,7 +133,7 @@ impl JetServiceSupervisorState {
     fn new(status: JetServiceSupervisorStatus) -> Self {
         Self {
             status,
-            outcome: None,
+            failure: None,
             joined: false,
         }
     }
@@ -83,7 +146,7 @@ fn jet_services_task_start(
         .lock()
         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
     state.status = JetServiceSupervisorStatus::Running;
-    state.outcome = None;
+    state.failure = None;
     state.joined = false;
     Ok(())
 }
@@ -96,7 +159,7 @@ fn jet_services_task_fail(
         .lock()
         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
     state.status = JetServiceSupervisorStatus::Failed;
-    state.outcome = Some(JetServiceSupervisorOutcome::Panicked(reason));
+    state.failure = Some(JetTaskFailure::Panicked(reason));
     Ok(())
 }
 
@@ -107,7 +170,7 @@ fn jet_services_task_restart(
         .lock()
         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
     state.status = JetServiceSupervisorStatus::Running;
-    state.outcome = None;
+    state.failure = None;
     state.joined = false;
     Ok(())
 }
@@ -119,8 +182,11 @@ fn jet_services_task_escalate(
     let mut state = task
         .lock()
         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    // Escalation is a supervisor failure on the one rail: the supervisor task
+    // itself fails so the parent group observes it, and `Escalated` records
+    // that the failure came from a spent restart budget rather than a child.
     state.status = JetServiceSupervisorStatus::Escalated;
-    state.outcome = Some(JetServiceSupervisorOutcome::Escalated(reason));
+    state.failure = Some(JetTaskFailure::Panicked(reason));
     Ok(())
 }
 
@@ -128,7 +194,7 @@ fn jet_services_cancel_task(task: &std::sync::Arc<std::sync::Mutex<JetServiceSup
     if let Ok(mut state) = task.lock() {
         if !state.joined && state.status != JetServiceSupervisorStatus::Escalated {
             state.status = JetServiceSupervisorStatus::Cancelling;
-            state.outcome = Some(JetServiceSupervisorOutcome::Cancelled);
+            state.failure = Some(JetTaskFailure::Cancelled);
         }
     }
 }
@@ -137,9 +203,7 @@ fn jet_services_join_task(task: std::sync::Arc<std::sync::Mutex<JetServiceSuperv
     if let Ok(mut state) = task.lock() {
         if state.status != JetServiceSupervisorStatus::Escalated {
             state.status = JetServiceSupervisorStatus::Stopped;
-            if state.outcome.is_none() {
-                state.outcome = Some(JetServiceSupervisorOutcome::Completed);
-            }
+            // A clean finish carries no failure; `None` is the completed row.
         }
         state.joined = true;
     }
@@ -162,7 +226,18 @@ enum JetServiceChannelError<T> {
 }
 
 /// One bounded mailbox queue. The queue is the channel state; no second Vec
-/// mirrors it. `snapshot` exists only at the CtValue marshalling boundary.
+/// mirrors it. `snapshot` exists only at the CtValue marshalling boundary, and
+/// `try_send` is the one place that compares depth to capacity.
+///
+/// This is deliberately not `JetSchedulerChannel` (Prelude/Scheduler.rs), and a
+/// future pass must not "unify" them without moving one of them first. The
+/// scheduler channel parks a task on `ParkSlot` and lives in `jet-codegen`;
+/// `Comptime/ServicesLite.rs` — the ambient/JIT/TIR tier that `include!`s this
+/// file — is in `jet-comptime`, which does not depend on `jet-codegen`. A
+/// mailbox also has no task parked on it on those tiers: it is part of a
+/// `ServiceTree` value that crosses the tier boundary. The shared, tier-portable
+/// concurrency Prelude is `Prelude/TaskGroup.rs`; if a second Prelude value ever
+/// needs a bounded queue, move this type there rather than writing a third one.
 struct JetServiceChannel<T> {
     capacity: usize,
     values: std::sync::Mutex<std::collections::VecDeque<T>>,
@@ -296,7 +371,12 @@ struct JetServiceWorker {
     name: String,
     endpoint: JetServiceEndpoint,
     mailbox: JetServiceMailbox,
-    restarts: i64,
+    /// The restart instants this worker has spent, oldest first. This list is
+    /// the one restart fact: `services.restarts` and the supervisor's escalation
+    /// check both read it through `JetServiceRestartBudget::spent`, and a restart
+    /// prunes it through `prune`, so no separate counter can drift from the
+    /// policy window.
+    restarts: Vec<i64>,
     running: bool,
     task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
 }
@@ -305,6 +385,8 @@ struct JetServiceWorker {
 struct JetServiceGroup {
     name: String,
     restart: JetServiceRestart,
+    /// D-CONC-SCHED1=A: the restart rule is data on the group.
+    budget: JetServiceRestartBudget,
     workers: Vec<String>,
 }
 
@@ -362,6 +444,9 @@ struct JetServiceTree {
     generation: i64,
     delivery: JetServiceDelivery,
     restart: JetServiceRestart,
+    /// The root default a declared group inherits, in the same shape as
+    /// `restart` above: one root policy row, copied onto each group.
+    restart_budget: JetServiceRestartBudget,
     workers: Vec<JetServiceWorker>,
     groups: Vec<JetServiceGroup>,
     started: bool,
@@ -503,11 +588,13 @@ impl JetShow for JetServiceError {
 impl JetShow for JetServiceTree {
     fn jet_show(&self) -> String {
         format!(
-            "ServiceTree(name={}, workers={}, started={}, restart={}, delivery={})",
+            "ServiceTree(name={}, workers={}, started={}, restart={}, budget={}/{}ms, delivery={})",
             self.name,
             self.workers.len(),
             self.started,
             self.restart.jet_show(),
+            self.restart_budget.max,
+            self.restart_budget.per_ms,
             self.delivery.jet_show()
         )
     }
@@ -529,6 +616,7 @@ fn jet_services_tree(name: String) -> JetServiceTree {
         generation: 1,
         delivery: JetServiceDelivery::AtMostOnce,
         restart: JetServiceRestart::OneForOne,
+        restart_budget: JetServiceRestartBudget::ratified_default(),
         workers: Vec::new(),
         groups: Vec::new(),
         started: false,
@@ -740,7 +828,7 @@ fn jet_services_worker(
         name,
         endpoint: endpoint.clone(),
         mailbox,
-        restarts: 0,
+        restarts: Vec::new(),
         running: false,
         task: std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
             JetServiceSupervisorStatus::Stopped,
@@ -802,6 +890,7 @@ fn jet_services_group(
     tree.groups.push(JetServiceGroup {
         name,
         restart: tree.restart.clone(),
+        budget: tree.restart_budget.clone(),
         workers,
     });
     Ok(())
@@ -978,7 +1067,7 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
         if !running {
             if let Ok(mut state) = tree.workers[index].task.lock() {
                 state.status = JetServiceSupervisorStatus::Partitioned;
-                state.outcome = Some(JetServiceSupervisorOutcome::Cancelled);
+                state.failure = Some(JetTaskFailure::Cancelled);
             }
         }
         let endpoint = tree.workers[index].endpoint.clone();
@@ -1073,8 +1162,17 @@ fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
     }
 }
 
-fn jet_services_restart_worker(worker: &mut JetServiceWorker, preserve_mailbox: bool) {
-    worker.restarts = worker.restarts.saturating_add(1);
+fn jet_services_restart_worker(
+    worker: &mut JetServiceWorker,
+    budget: &JetServiceRestartBudget,
+    at: i64,
+    preserve_mailbox: bool,
+) {
+    // Record the restart, then keep only the instants the budget still counts.
+    // Pruning here is what bounds the list, so no separate counter exists to
+    // disagree with the window.
+    worker.restarts.push(at);
+    budget.prune(&mut worker.restarts, at);
     worker.running = true;
     let messages = if preserve_mailbox {
         worker.mailbox.channel.snapshot()
@@ -1154,6 +1252,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
         || tree.event_log.len() > MAX_SERVICE_STATE_RECORDS
         || tree.partitioned.len() > MAX_SERVICE_WORKERS
         || tree.workflows.len() > MAX_SERVICE_WORKFLOW_STEPS
+        || !tree.restart_budget.is_valid()
     {
         return Err(JetServiceError::Policy(
             "service tree metadata is invalid or exceeds its limit".to_string(),
@@ -1186,7 +1285,12 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
             || worker.endpoint.worker != worker.name
             || worker.endpoint.authority != tree.authority
             || !jet_services_worker_generation_allowed(tree, worker)
-            || worker.restarts < 0
+            || worker.restarts.iter().any(|at| *at < 0)
+            || worker.restarts.len() as i64 > MAX_SERVICE_RESTART_BUDGET
+            || worker
+                .restarts
+                .windows(2)
+                .any(|pair| pair[0] > pair[1])
             || (tree.partitioned.iter().any(|name| name == &worker.name) && worker.running)
             || worker.mailbox.endpoint != worker.endpoint
             || worker.mailbox.capacity <= 0
@@ -1230,6 +1334,7 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
             || group.name.len() > MAX_SERVICE_NAME
             || group.workers.is_empty()
             || group.workers.len() > MAX_SERVICE_WORKERS
+            || !group.budget.is_valid()
             || group
                 .workers
                 .iter()
@@ -1482,14 +1587,9 @@ fn jet_services_send(
             worker.name
         )));
     }
-    if worker.mailbox.capacity > 0
-        && worker.mailbox.channel.depth() as i64 >= worker.mailbox.capacity
-    {
-        return Err(JetServiceError::Full(format!(
-            "mailbox for `{}` is full (capacity {})",
-            worker.name, worker.mailbox.capacity
-        )));
-    }
+    // The bounded channel is the one decider of `Full`: it compares depth to
+    // capacity under the queue lock. A second `depth >= capacity` gate here
+    // read the same fact outside that lock and could disagree with it.
     match worker.mailbox.channel.try_send(message) {
         Ok(()) => {}
         Err(JetServiceChannelError::Full(_)) => {
@@ -1756,6 +1856,21 @@ fn jet_services_local_delivery_ids(
         .collect()
 }
 
+/// The policy row that supervises `worker`: its declared group's, or the tree
+/// root's when the worker is ungrouped. Every reader of restart strategy or
+/// restart budget goes through here, so the number `services.restarts` reports
+/// is the same number the supervisor's escalation check reads.
+fn jet_services_supervising_policy(
+    tree: &JetServiceTree,
+    worker: &str,
+) -> (JetServiceRestart, JetServiceRestartBudget) {
+    tree.groups
+        .iter()
+        .find(|group| group.workers.iter().any(|name| name == worker))
+        .map(|group| (group.restart.clone(), group.budget.clone()))
+        .unwrap_or_else(|| (tree.restart.clone(), tree.restart_budget.clone()))
+}
+
 fn jet_services_fail_worker(
     tree: &mut JetServiceTree,
     endpoint: &JetServiceEndpoint,
@@ -1766,12 +1881,11 @@ fn jet_services_fail_worker(
         ));
     }
     jet_services_validate_endpoint(tree, endpoint)?;
-    let restart = tree
-        .groups
-        .iter()
-        .find(|group| group.workers.iter().any(|name| name == &endpoint.worker))
-        .map(|group| group.restart.clone())
-        .unwrap_or_else(|| tree.restart.clone());
+    // One policy lookup. The supervising group's row carries both the restart
+    // strategy and the budget that decides escalation, so a supervisor cannot
+    // restart under one policy and escalate under another.
+    let (restart, budget) = jet_services_supervising_policy(tree, &endpoint.worker);
+    let now = service_authority_now();
     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
     let worker_name = endpoint.worker.clone();
     let start = tree
@@ -1823,10 +1937,10 @@ fn jet_services_fail_worker(
     }
     for index in &target_indices {
         let worker = &tree.workers[*index];
-        if worker.restarts >= MAX_SERVICE_RESTARTS {
+        if budget.spent(&worker.restarts, now) >= budget.max {
             let reason = format!(
-                "worker `{}` exceeded the restart budget of {}",
-                worker.name, MAX_SERVICE_RESTARTS
+                "worker `{}` spent its restart budget of {} per {}ms; the supervisor escalates to its parent group",
+                worker.name, budget.max, budget.per_ms
             );
             for worker in &tree.workers {
                 let _ = jet_services_task_escalate(&worker.task, reason.clone());
@@ -1890,7 +2004,12 @@ fn jet_services_fail_worker(
         );
     }
     for index in target_indices {
-        jet_services_restart_worker(&mut tree.workers[index], preserve_mailboxes);
+        jet_services_restart_worker(
+            &mut tree.workers[index],
+            &budget,
+            now,
+            preserve_mailboxes,
+        );
     }
     if let Some(supervisor) = tree.supervisor_tasks.get(supervisor_index) {
         let _ = jet_services_task_restart(supervisor);
@@ -1903,7 +2022,7 @@ fn jet_services_fail_worker(
             worker.running = false;
             if let Ok(mut state) = worker.task.lock() {
                 state.status = JetServiceSupervisorStatus::Partitioned;
-                state.outcome = Some(JetServiceSupervisorOutcome::Cancelled);
+                state.failure = Some(JetTaskFailure::Cancelled);
             }
         }
     }
@@ -1915,10 +2034,15 @@ fn jet_services_restarts(
     endpoint: &JetServiceEndpoint,
 ) -> Result<i64, JetServiceError> {
     jet_services_validate_endpoint(tree, endpoint)?;
+    // The observable count is the spent budget, read through the same policy
+    // row and the same `spent` rule the supervisor's escalation check uses. A
+    // separate lifetime counter here would be a second restart fact.
+    let (_, budget) = jet_services_supervising_policy(tree, &endpoint.worker);
+    let now = service_authority_now();
     tree.workers
         .iter()
         .find(|w| w.name == endpoint.worker && w.endpoint.tree == endpoint.tree)
-        .map(|w| w.restarts)
+        .map(|w| budget.spent(&w.restarts, now))
         .ok_or_else(|| {
             JetServiceError::Unknown(format!(
                 "endpoint {}/{} is not in this tree",

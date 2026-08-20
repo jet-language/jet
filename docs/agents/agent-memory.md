@@ -1214,16 +1214,20 @@ Related: [[ballot-first-always]], [[never-skip-to-next-card]], [[cards-are-hando
 
 ### codable-derive-module-gap
 
-*#[Codable] derive emits unqualified jet_std/user_Decode paths — breaks in imported module files (only works in the main/entry file)*
+*#[Codable] derive emits unqualified jet_std/__jet_Decode paths — breaks in imported module files (only works in the main/entry file)*
 
 The built-in `#[Codable]`/`#[Encode]`/`#[Decode]` derive (D-ENC1/D-SERDE) generates
-`impl user_Encode/user_Decode` bodies that reference `jet_std::datatree_get`,
-`jet_std::DecodeError`, and the `user_Decode` trait by **unqualified** name. That
+`impl __jet_Encode/__jet_Decode` bodies that reference `jet_std::datatree_get`,
+`jet_std::FieldError`, and the `__jet_Decode` trait by **unqualified** name. That
 resolves fine when the struct is in the program's main/entry file, but a
 `#[Codable]` struct defined in an **imported module file** (e.g. a `pub struct` in
 its own `*.jet` that another file `use`s) generates a derive `impl` placed in a
-module scope where `jet_std`/`user_Decode` aren't in scope → rustc `E0433`/`E0405`
-(`cannot find module jet_std` / trait `user_Decode`) → ICE (I2).
+module scope where `jet_std`/`__jet_Decode` aren't in scope → rustc `E0433`/`E0405`
+(`cannot find module jet_std` / trait `__jet_Decode`) → ICE (I2).
+**Contract note (D-VALIDATE-DECODE1=B):** the emitted decoder returns
+`Result<Self, Vec<jet_std::FieldError>>`. The `user_Encode`/`user_Decode` trait
+names and the single `jet_std::DecodeError` envelope this entry once cited are
+retired and have no alias; only the scoping hazard above is the live finding.
 **Why:** Hit during c152 when migrating `examples/capstone/logbook/config.jet` (a
 module) to `toml.decode<ConfigFile>`. Worked around by using the dynamic
 `toml.parse` → `Object(table)` pattern-match API instead of the derive.

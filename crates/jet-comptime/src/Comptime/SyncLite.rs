@@ -235,6 +235,18 @@ fn policy_to_ct(p: &JetRowPolicy) -> CtValue {
     }
 }
 
+/// D-SYNC1: one read of a carrier's validity for every `ct_to_*` parser.
+/// Absent or non-Bool means the value did not come from a Prelude carrier, so it
+/// is denied rather than assumed sound — the four parsers previously defaulted to
+/// `true` in four places, which let a malformed compatibility shape enter as
+/// valid. Every producer above emits this field.
+fn ct_carrier_valid(fields: &[(String, CtValue)]) -> bool {
+    matches!(
+        fields.iter().find(|(name, _)| name == "valid"),
+        Some((_, CtValue::Bool(true)))
+    )
+}
+
 fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
     match v {
         CtValue::Struct { type_name, fields }
@@ -243,14 +255,7 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
             let Some(value) = fields.iter().find(|(n, _)| n == "atoms").map(|(_, v)| v) else {
                 return Err(unsupported("SyncText atoms", span));
             };
-            let valid = fields
-                .iter()
-                .find(|(n, _)| n == "valid")
-                .and_then(|(_, value)| match value {
-                    CtValue::Bool(value) => Some(*value),
-                    _ => None,
-                })
-                .unwrap_or(true);
+            let valid = ct_carrier_valid(fields);
             let CtValue::List(entries) = value else {
                 return Err(unsupported("SyncText atoms", span));
             };
@@ -346,14 +351,7 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
         CtValue::Struct { type_name, fields }
             if type_name == "SyncCounter" || type_name == "JetSyncCounter" =>
         {
-            let valid = fields
-                .iter()
-                .find(|(n, _)| n == "valid")
-                .and_then(|(_, value)| match value {
-                    CtValue::Bool(value) => Some(*value),
-                    _ => None,
-                })
-                .unwrap_or(true);
+            let valid = ct_carrier_valid(fields);
             if let Some(value) = fields.iter().find(|(n, _)| n == "counts").map(|(_, v)| v) {
                 let CtValue::List(entries) = value else {
                     return Err(unsupported("SyncCounter counts", span));
@@ -468,14 +466,7 @@ fn ct_to_map(v: &CtValue, span: Span) -> Result<JetSyncMap, Diagnostic> {
         CtValue::Struct { type_name, fields }
             if type_name == "SyncMap" || type_name == "JetSyncMap" =>
         {
-            let valid = fields
-                .iter()
-                .find(|(n, _)| n == "valid")
-                .and_then(|(_, value)| match value {
-                    CtValue::Bool(value) => Some(*value),
-                    _ => None,
-                })
-                .unwrap_or(true);
+            let valid = ct_carrier_valid(fields);
             if let Some(value) = fields.iter().find(|(n, _)| n == "entries").map(|(_, v)| v) {
                 let CtValue::List(entries) = value else {
                     return Err(unsupported("SyncMap entries", span));
@@ -570,14 +561,7 @@ fn ct_to_list(v: &CtValue, span: Span) -> Result<JetSyncList, Diagnostic> {
         CtValue::Struct { type_name, fields }
             if type_name == "SyncList" || type_name == "JetSyncList" =>
         {
-            let valid = fields
-                .iter()
-                .find(|(n, _)| n == "valid")
-                .and_then(|(_, value)| match value {
-                    CtValue::Bool(value) => Some(*value),
-                    _ => None,
-                })
-                .unwrap_or(true);
+            let valid = ct_carrier_valid(fields);
             if let Some(items) = fields.iter().find(|(n, _)| n == "items").map(|(_, v)| v) {
                 let CtValue::List(items) = items else {
                     return Err(unsupported("SyncList items", span));

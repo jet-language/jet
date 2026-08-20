@@ -1,4 +1,9 @@
-//! D-AUTH1=A / I9: `core.auth` ambient includes Prelude `Auth.rs`.
+//! D-AUTH1=A / I9: `core.auth` ambient includes Prelude `AuthSession.rs` — the
+//! session, password, magic-link, OAuth-state, and `app.auth` mechanisms. It does
+//! NOT include `Auth.rs`, so `verify_jwt`/`verify_paseto` have no comptime
+//! implementation; `Comptime/Methods/core_calls.rs` routes them to the AOT/subset
+//! path instead. That is a named tier gap, not a second policy: no token rule is
+//! re-encoded here.
 
 use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};

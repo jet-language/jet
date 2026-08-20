@@ -105,8 +105,15 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 /// c727 C1–C4: discover every top-level example, classify it, and ratchet the
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
 /// with backend attribution — never silent fallback. Each AOT-oracle case
-/// compares pure-interpreter, default tiered, and optimized AOT
-/// stdout/stderr/exit byte-for-byte (D-ONECORE1=A). An AOT-green example whose
+/// compares default tiered against optimized AOT stdout/stderr/exit
+/// byte-for-byte, and compares the pure interpreter too WHEN the TIR evaluator
+/// runs the program. A pure-interpreter refusal carrying E2201/E0956 is accepted
+/// and does not change the class (`classify_corpus_stem`, support.rs:4080-4120),
+/// so a `resident_jit` row proves AOT==tiered-JIT plus resident Cranelift
+/// execution — it does NOT by itself prove the interpreter leg. Every accepted
+/// refusal is TIR coverage owed against D-ONECORE1=A/I9, not a settled boundary;
+/// do not cite `resident_jit` as three-tier parity for a stem the evaluator
+/// refuses. An AOT-green example whose
 /// default tiered run REFUSES to run it lands in `run_tier_broken`, which must
 /// hold exactly `RUN_TIER_BROKEN_HELD_OUT`; one that runs but disagrees with the
 /// oracle lands in `tier_divergent`, which must stay empty. Recording both facts

@@ -33,10 +33,13 @@ mod runtime {
     include!("../../jet-pkg-model/src/Prelude/DB.rs");
 }
 
-/// Canonical wire encode/decode (`jet_std` DBPluginWire fragment).
+/// Canonical wire encode/decode (`jet_std` DBPluginWire fragment) plus the one
+/// closed row-policy language (`RowPolicy.rs`) it compiles through — the same
+/// two fragments AOT splices into `mod jet_std` (I9).
 mod wire {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 
@@ -96,15 +99,21 @@ fn policy_record_parts(policy: i64) -> Option<(String, String)> {
 }
 
 fn new_scope(connection: u64, table: String, expression: String, user: String) -> i64 {
-    if connection == 0 || wire::jet_db_policy_validate(&table, &expression).is_err() {
+    if connection == 0 {
         return 0;
     }
+    // Park the COMPILED policy, never the caller's raw text: the normalized
+    // table and canonical expression are what every later SQL operation reads,
+    // so this tier accepts exactly the policies AOT accepts.
+    let Ok((table, compiled)) = wire::jet_db_policy_compile(&table, &expression) else {
+        return 0;
+    };
     let id = NEXT_DB_SCOPE.fetch_add(1, Ordering::Relaxed);
     let base = base_handle(connection);
     DB_SCOPES.with(|scopes| {
         scopes
             .borrow_mut()
-            .insert(id, (base, table, expression, user));
+            .insert(id, (base, table, compiled.canonical().to_string(), user));
     });
     id as i64
 }
@@ -170,8 +179,10 @@ fn values_from_list(list: i64) -> Vec<wire::DBValue> {
 fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
     let table = clone_string(table);
     let expression = clone_string(expression);
-    match wire::jet_db_policy_validate(&table, &expression) {
-        Ok(()) => result_ok(alloc_policy_record(&table, &expression) as u64),
+    match wire::jet_db_policy_compile(&table, &expression) {
+        Ok((table, compiled)) => {
+            result_ok(alloc_policy_record(&table, compiled.canonical()) as u64)
+        }
         Err(message) => result_err_msg(&message),
     }
 }

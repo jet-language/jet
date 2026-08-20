@@ -106,3 +106,61 @@ fn db_scope_enforces_policy_on_query_insert_and_live_default() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
 }
+
+/// D-DBPOLICY1=A + I9: the closed policy language is one fact
+/// (`Prelude/CoreLib/JetStd/RowPolicy.rs`), so a rejected policy is rejected on
+/// every tier and an accepted one normalizes identically. A leading-digit table
+/// and a padded table used to divide AOT from the JIT/ambient hosts, which each
+/// re-derived the rule.
+const INVALID_POLICY_SOURCE: &str = r#"
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    digit_table :: db.policy("9tasks", "true")
+    if digit_table == {
+        .Ok(_) -> { print("digit-table:accepted") }
+        .Err(_) -> { print("digit-table:rejected") }
+    }
+    spaced_table :: db.policy("two words", "true")
+    if spaced_table == {
+        .Ok(_) -> { print("spaced-table:accepted") }
+        .Err(_) -> { print("spaced-table:rejected") }
+    }
+    other_expr :: db.policy("tasks", "owner != user")
+    if other_expr == {
+        .Ok(_) -> { print("other-expr:accepted") }
+        .Err(_) -> { print("other-expr:rejected") }
+    }
+    padded :: db.policy("  tasks  ", "owner == user") ?? panic("padded policy")
+    scoped := conn.with_policy(padded, "alice")
+    _created :: db.migrate(scoped, "tasks-v1", ["CREATE TABLE tasks (owner TEXT, title TEXT)"]) ?? panic("create")
+    _one :: scoped.execute(
+        "INSERT INTO tasks (owner, title) VALUES (?, ?)",
+        [DBValue.Text("bob"), DBValue.Text("one")]
+    ) ?? panic("insert")
+    rows :: scoped.query("SELECT title FROM tasks", []) ?? panic("query")
+    print("padded-rows:{rows.len()}")
+    _closed :: scoped.close()
+}
+"#;
+
+const INVALID_POLICY_EXPECTED: &str = "digit-table:rejected\nspaced-table:rejected\nother-expr:rejected\npadded-rows:1\n";
+
+#[test]
+fn invalid_row_policy_is_denied_the_same_way_aot() {
+    let (code, stdout) = build_and_run("db_policy_invalid", INVALID_POLICY_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, INVALID_POLICY_EXPECTED);
+}
+
+#[test]
+fn invalid_row_policy_is_denied_the_same_way_default() {
+    let (code, stdout, stderr) = run_default_multi(
+        "db_policy_invalid_jit",
+        "main.jet",
+        &[("main.jet", INVALID_POLICY_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, INVALID_POLICY_EXPECTED);
+}

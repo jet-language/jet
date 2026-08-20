@@ -57,17 +57,15 @@ pub struct JetSyncMapGeneric<K, V> {
     pub(crate) valid: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum JetRowPolicyExpr {
-    AllowAll,
-    OwnerEqualsUser,
-}
-
+/// D-DBPOLICY1=A: the compiled form and the accepted language live in
+/// `jet_std` (`CoreLib/JetStd/RowPolicy.rs`), which every tier includes. This
+/// carrier only holds what the compiler produced, so `expression` is always
+/// the canonical spelling of `compiled`, never a caller's raw string.
 #[derive(Clone, Debug)]
 pub struct JetRowPolicy {
     pub table: String,
     pub expression: String,
-    compiled: JetRowPolicyExpr,
+    compiled: jet_std::JetRowPolicyExpr,
 }
 
 /// D-DBPOLICY-BIND1: policy authority is a distinct capability. Keeping the
@@ -540,7 +538,13 @@ pub(crate) fn jet_sync_map_set(map: JetSyncMap, key: String, value: String) -> J
     jet_sync_map_set_replica(map, "local".to_string(), key, value)
 }
 
+/// D-SYNC1: safe denial is part of the carrier. An invalid map shows nothing —
+/// `show`, `metadata`, and `encode` already deny, and a key read must not be the
+/// one path that answers from a denied replica set.
 pub(crate) fn jet_sync_map_get(map: &JetSyncMap, key: &String) -> Option<String> {
+    if !map.valid {
+        return None;
+    }
     map.entries
         .iter()
         .find(|(k, _, _, _)| k == key)
@@ -707,6 +711,10 @@ where
     K: __jet_Encode,
     V: Clone,
 {
+    // Same denial as the fixed carrier: an invalid map answers no key.
+    if !map.valid {
+        return None;
+    }
     let key_id = jet_sync_value_id(key);
     map.entries
         .iter()
@@ -810,37 +818,10 @@ where
 }
 
 pub(crate) fn jet_db_policy_new(table: String, expression: String) -> Result<JetRowPolicy, String> {
-    let table = table.trim().to_string();
-    let expression = expression.trim().to_string();
-    let valid_table = table
-        .chars()
-        .enumerate()
-        .all(|(index, ch)| {
-            (index == 0 && (ch.is_ascii_alphabetic() || ch == '_'))
-                || (index > 0 && (ch.is_ascii_alphanumeric() || ch == '_'))
-        });
-    if table.is_empty()
-        || !valid_table
-        || expression.is_empty()
-        || table.len() > MAX_SYNC_TEXT
-        || expression.len() > MAX_SYNC_TEXT
-        || table.chars().any(char::is_control)
-        || expression.chars().any(char::is_control)
-    {
-        return Err("row policy needs a table and expression".to_string());
-    }
-    let compiled = match expression.trim() {
-        "true" => JetRowPolicyExpr::AllowAll,
-        "owner == user" => JetRowPolicyExpr::OwnerEqualsUser,
-        other => {
-            return Err(format!(
-                "unsupported row policy expression `{other}`; supported forms are `true` and `owner == user`"
-            ));
-        }
-    };
+    let (table, compiled) = jet_std::jet_db_policy_compile(&table, &expression)?;
     Ok(JetRowPolicy {
         table,
-        expression,
+        expression: compiled.canonical().to_string(),
         compiled,
     })
 }
@@ -849,9 +830,9 @@ pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_own
     if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
         return false;
     }
-    match &policy.compiled {
-        JetRowPolicyExpr::OwnerEqualsUser => user == row_owner,
-        JetRowPolicyExpr::AllowAll => true,
+    match policy.compiled {
+        jet_std::JetRowPolicyExpr::OwnerEqualsUser => user == row_owner,
+        jet_std::JetRowPolicyExpr::AllowAll => true,
     }
 }
 
@@ -859,10 +840,7 @@ pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_own
 /// not re-read the public source spelling, so a scope cannot replace the
 /// compiled policy between validation and execution.
 pub(crate) fn jet_db_policy_expression(policy: &JetRowPolicy) -> &'static str {
-    match &policy.compiled {
-        JetRowPolicyExpr::OwnerEqualsUser => "owner == user",
-        JetRowPolicyExpr::AllowAll => "true",
-    }
+    policy.compiled.canonical()
 }
 
 pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
