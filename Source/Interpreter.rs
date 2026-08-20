@@ -358,7 +358,7 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
 /// a bad `#Every(…)` value (E0926) by the time a bundle reaches `jet dev`.
 /// Sema stores the checked schedule on the marker, so this path never
 /// re-parses a duration suffix.
-pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EverySchedule)> {
+pub fn scheduled_jobs(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EverySchedule)> {
     let Some(entry) = bundle.modules.get(bundle.entry) else {
         return Vec::new();
     };
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_tasks_filter_always_skipped_tasks() {
+    fn scheduled_jobs_filter_always_skipped_jobs() {
         let src = "#Job(.Dev, skip: \"disabled\") #Every(5min) fn skipped() {}\n#Job(.Dev, skip: .Unless(.Platform(.MacOS))) #Every(5min) fn mac_only() {}\n#Job #Every(5min) fn active() {}\nfn run() {}\n";
         let mut bundle = bundle_from(src, "scheduled_skip");
         // D-SCHEDULE1: sema resolves `#Every(…)` once and writes the schedule
@@ -990,7 +990,7 @@ mod tests {
         let _ = crate::run_compiler_work(|| {
             crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run)
         });
-        let mut names = scheduled_tasks(&bundle)
+        let mut names = scheduled_jobs(&bundle)
             .into_iter()
             .map(|(name, _)| name)
             .collect::<Vec<_>>();

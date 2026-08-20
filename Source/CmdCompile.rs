@@ -310,6 +310,7 @@ pub(crate) fn run_compile_cmd(
     output_name: Option<&str>,
     program_args: &[&String],
     mode: OutputMode,
+    record_name: Option<&str>,
 ) {
     // D-BUILDPROFILE1: profile selection. Precedence: --freestanding > --small >
     // --release/--profile=<name> > default. Named profiles are resolved against
@@ -331,6 +332,15 @@ pub(crate) fn run_compile_cmd(
             crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
             exit(ExitCodes::USER_ERROR);
         }
+    };
+
+    let record = if cmd == "run" {
+        record_name.map(|name| {
+            crate::ProveReplay::begin_named_capture(file, name, mode.json)
+                .unwrap_or_else(|status| exit(status))
+        })
+    } else {
+        None
     };
 
     if remote_builder.is_some() && cmd != "build" {
@@ -382,7 +392,7 @@ pub(crate) fn run_compile_cmd(
         let diag = jet::Diagnostics::Diagnostic::error(
             "E2102",
             "`--explain-partition` requires `--target=web`".to_string(),
-            "the partition report is only meaningful for the web backend (D-WASM1)".to_string(),
+            "the partition report is only meaningful for the web backend".to_string(),
             format!(
                 "run `jet build --target={} --explain-partition <file>`",
                 jet::Syntax::BUILD_TARGET_WEB
@@ -457,11 +467,19 @@ pub(crate) fn run_compile_cmd(
                 exit_code,
             } => {
                 emit_run_output(&stdout, &stderr);
+                if let Some(capture) = record.as_ref() {
+                    crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                        .unwrap_or_else(|status| exit(status));
+                }
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
                 exit_if_internal_fault(&diags);
                 report_problems(mode, file, &src, &diags);
+                if let Some(capture) = record.as_ref() {
+                    crate::ProveReplay::finish_named_capture(capture, ExitCodes::USER_ERROR, mode.json)
+                        .unwrap_or_else(|status| exit(status));
+                }
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -504,11 +522,19 @@ pub(crate) fn run_compile_cmd(
                 exit_code,
             } => {
                 emit_run_output(&stdout, &stderr);
+                if let Some(capture) = record.as_ref() {
+                    crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                        .unwrap_or_else(|status| exit(status));
+                }
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
                 exit_if_internal_fault(&diags);
                 report_problems(mode, file, &src, &diags);
+                if let Some(capture) = record.as_ref() {
+                    crate::ProveReplay::finish_named_capture(capture, ExitCodes::USER_ERROR, mode.json)
+                        .unwrap_or_else(|status| exit(status));
+                }
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -573,7 +599,12 @@ pub(crate) fn run_compile_cmd(
                 });
                 // A signal has no numeric exit code. Treat it as a failed
                 // child so a crashed program cannot make `jet run` green.
-                exit(child_exit_code(status));
+                let exit_code = child_exit_code(status);
+                if let Some(capture) = record.as_ref() {
+                    crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                        .unwrap_or_else(|status| exit(status));
+                }
+                exit(exit_code);
             }
         }
     }
@@ -1083,7 +1114,12 @@ pub(crate) fn run_compile_cmd(
             });
             // A signal has no numeric exit code. Treat it as a failed child
             // so a crashed program cannot make `jet run` green.
-            exit(child_exit_code(status));
+            let exit_code = child_exit_code(status);
+            if let Some(capture) = record.as_ref() {
+                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
+            exit(exit_code);
         }
         other => {
             crate::cli_error!("E2101", "`{}` isn't a {} command", other, jet::Syntax::BINARY_NAME);
@@ -1111,6 +1147,7 @@ pub(crate) fn run_dev_entry(
     file: &str,
     mode: OutputMode,
     setting_overrides: &BTreeMap<String, String>,
+    record_name: Option<&str>,
 ) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -1119,6 +1156,10 @@ pub(crate) fn run_dev_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let record = record_name.map(|name| {
+        crate::ProveReplay::begin_named_capture(file, name, mode.json)
+            .unwrap_or_else(|status| exit(status))
+    });
     let out = match jet::compile_with_entry_and_settings(file, "dev", setting_overrides) {
         Ok(out) => out,
         Err(diags) => {
@@ -1175,7 +1216,12 @@ pub(crate) fn run_dev_entry(
             crate::cli_error!("E2105", "couldn't run the built program: {}", e);
             exit(ExitCodes::USER_ERROR);
         });
-    exit(child_exit_code(status));
+    let exit_code = child_exit_code(status);
+    if let Some(capture) = record.as_ref() {
+        crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+            .unwrap_or_else(|status| exit(status));
+    }
+    exit(exit_code);
 }
 
 /// D-WEBAPP-SERVE1=D: `jet dev` serves an App returned by `fn run`
@@ -1183,9 +1229,10 @@ pub(crate) fn run_dev_entry(
 /// response flag. A user-authored `fn dev()` is selected before this helper.
 pub(crate) fn run_web_app_dev_entry(
     file: &str,
-    _mode: OutputMode,
+    mode: OutputMode,
     port: Option<u16>,
     setting_overrides: &BTreeMap<String, String>,
+    record_name: Option<&str>,
 ) {
     let _src = match fs::read_to_string(file) {
         Ok(source) => source,
@@ -1194,6 +1241,10 @@ pub(crate) fn run_web_app_dev_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let record = record_name.map(|name| {
+        crate::ProveReplay::begin_named_capture(file, name, mode.json)
+            .unwrap_or_else(|status| exit(status))
+    });
     let dev_file = fs::canonicalize(file)
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| file.to_string());
@@ -1215,7 +1266,12 @@ pub(crate) fn run_web_app_dev_entry(
         crate::cli_error!("E2105", "couldn't run the web app: {error}");
         exit(ExitCodes::USER_ERROR);
     });
-    exit(child_exit_code(status));
+    let exit_code = child_exit_code(status);
+    if let Some(capture) = record.as_ref() {
+        crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+            .unwrap_or_else(|status| exit(status));
+    }
+    exit(exit_code);
 }
 
 #[derive(Debug)]
@@ -1847,6 +1903,10 @@ pub(crate) struct TestRunOpts {
     pub(crate) shuffle_seed: Option<u64>,
     /// `--serial`: run one test at a time instead of the parallel default.
     pub(crate) serial: bool,
+    /// `--measure`: run only `.measure` claims through the measurement harness.
+    pub(crate) measure: bool,
+    /// `--record=NAME`: write the shared safe replay envelope for this target.
+    pub(crate) record: Option<String>,
 }
 
 /// `jet test [--release] [--trace-tiers] [--coverage] [--filter=<substr>]
@@ -2138,6 +2198,16 @@ fn run_test_target(
     if opts.trace_tiers {
         cmd.env("JET_TEST_TRACE_TIERS", "1");
     }
+    if opts.measure {
+        cmd.env("JET_TEST_MEASURE", "1");
+    }
+    if mode.json {
+        cmd.env("JET_TEST_JSON", "1");
+    }
+    let record = opts.record.as_deref().map(|name| {
+        crate::ProveReplay::begin_named_capture(&shown, name, mode.json)
+            .unwrap_or_else(|status| exit(status))
+    });
     let out = match cmd.output() {
         Ok(out) => out,
         Err(e) => {
@@ -2161,6 +2231,15 @@ fn run_test_target(
     }
     let _ = fs::remove_file(&bin);
     let ok = out.status.success() && doctests_ok;
+    if let Some(capture) = record.as_ref() {
+        let status = if ok {
+            ExitCodes::OK
+        } else {
+            child_exit_code(out.status)
+        };
+        crate::ProveReplay::finish_named_capture(capture, status, mode.json)
+            .unwrap_or_else(|status| exit(status));
+    }
     if override_entry {
         TestTargetOutcome::Override(ok)
     } else {

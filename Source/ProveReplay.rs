@@ -137,6 +137,218 @@ pub(crate) fn parse_replay_flag(arg: &str, next: Option<&str>) -> Option<Result<
     None
 }
 
+/// D-RUN-RECORD1=A: run/dev/test use a closed `--record=NAME` grammar. The
+/// name is deliberately not a path; the replay directory is the one artifact
+/// home and the extension is owned by the envelope.
+pub(crate) fn parse_record_flag(arg: &str) -> Option<Result<String, String>> {
+    let name = arg.strip_prefix("--record=")?;
+    Some(match replay_path_for_name(name) {
+        Ok(_) => Ok(name.to_string()),
+        Err(message) => Err(message),
+    })
+}
+
+/// D-RUN-RECORD1=A: debug consumes the same closed spelling. A bare name
+/// addresses the standard replay directory; an explicit `.jetproof-replay`
+/// path keeps the existing prove artifact reader useful for handoff scripts.
+pub(crate) fn parse_closed_replay_flag(arg: &str) -> Option<Result<String, String>> {
+    let value = arg.strip_prefix("--replay=")?;
+    if value.ends_with(".jetproof-replay") || value.contains('/') {
+        return Some(Ok(value.to_string()));
+    }
+    Some(replay_path_for_name(value))
+}
+
+fn replay_path_for_name(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(
+            "replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`"
+                .to_string(),
+        );
+    }
+    Ok(format!(".jet/replays/{name}.jetproof-replay"))
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NamedCapture {
+    identity: ReplayIdentity,
+    authority: CaptureAuthority,
+}
+
+/// Start the ordinary safe Time-only capture used by run/dev/test.
+pub(crate) fn begin_named_capture(
+    file: &str,
+    name: &str,
+    json_mode: bool,
+) -> Result<NamedCapture, i32> {
+    let path = match replay_path_for_name(name) {
+        Ok(path) => path,
+        Err(message) => {
+            emit_diag(
+                "E2104",
+                "invalid replay name",
+                &message,
+                "write `--record=NAME` with letters, digits, `-`, or `_`",
+                json_mode,
+            );
+            return Err(ExitCodes::USAGE);
+        }
+    };
+    let identity = match identity_for_file(file) {
+        Ok(identity) => identity,
+        Err(message) => {
+            emit_diag(
+                "E3629",
+                "replay artifact could not be prepared",
+                &message,
+                "record a readable project-relative `.jet` file",
+                json_mode,
+            );
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    let authority = match prepare_safe_capture(
+        &CaptureOpts {
+            path: Some(path),
+            sensitive: false,
+        },
+        json_mode,
+    ) {
+        Ok(authority) => authority,
+        Err(status) => return Err(status),
+    };
+    Ok(NamedCapture { identity, authority })
+}
+
+pub(crate) fn finish_named_capture(
+    capture: &NamedCapture,
+    exit_code: i32,
+    json_mode: bool,
+) -> Result<(), i32> {
+    finalize_safe_capture(&capture.identity, &capture.authority, exit_code, json_mode)
+}
+
+/// Open a named artifact for `jet debug`, install the shared Time adapter, and
+/// consume its bounded record before the debugger starts.
+pub(crate) fn open_named_replay(
+    file: &str,
+    value: &str,
+    json_mode: bool,
+) -> Result<ReplayAuthority, i32> {
+    let path = if value.ends_with(".jetproof-replay") || value.contains('/') {
+        value.to_string()
+    } else {
+        match replay_path_for_name(value) {
+            Ok(path) => path,
+            Err(message) => {
+                emit_diag(
+                    "E2104",
+                    "invalid replay name",
+                    &message,
+                    "write `--replay=NAME` with a valid replay name or artifact path",
+                    json_mode,
+                );
+                return Err(ExitCodes::USAGE);
+            }
+        }
+    };
+    let identity = match identity_for_file(file) {
+        Ok(identity) => identity,
+        Err(message) => {
+            emit_diag(
+                "E3621",
+                "replay semantic identity could not be established",
+                &message,
+                "replay the matching readable project file",
+                json_mode,
+            );
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    let mut authority = match prepare_replay(&identity, &path) {
+        Ok(authority) => authority,
+        Err((code, why)) => {
+            let (what, fix) = match code {
+                "E3621" => (
+                    "replay semantic identity does not match",
+                    "replay the exact source identity that produced the artifact",
+                ),
+                "E3628" => (
+                    "replay capture exceeded its artifact limit",
+                    "recapture a bounded artifact with a recorded Time authority",
+                ),
+                _ => ("replay artifact is corrupt or unavailable", "recapture the target and retry"),
+            };
+            emit_diag(code, what, &why, fix, json_mode);
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    let time_ms = match authority.consume_time() {
+        Ok(value) => value,
+        Err(why) => {
+            emit_diag(
+                "E3623",
+                "replay diverged from captured authority",
+                &why,
+                "recapture the target, then replay the matching artifact",
+                json_mode,
+            );
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    std::env::set_var("JET_PROVE_REPLAY_TIME_MS", time_ms.to_string());
+    if !json_mode {
+        eprintln!("ambient authority opened: Time; dev-tir-v1");
+    }
+    Ok(authority)
+}
+
+fn identity_for_file(file: &str) -> Result<ReplayIdentity, String> {
+    let source = fs::read(file).map_err(|error| format!("could not read `{file}`: {error}"))?;
+    let entry = project_relative_entry(file)?;
+    let source_digest = SHA256::sha256_hex(&source);
+    let build_digest = SHA256::sha256_hex(format!("jet-build:{source_digest}").as_bytes());
+    let lock_digest = SHA256::sha256_hex(b"jet-record-lock-v1");
+    let tir_hash = SHA256::sha256_hex(format!("jet-tir:{source_digest}").as_bytes());
+    let time_site_id = SHA256::sha256_hex(format!("jet-time:{entry}").as_bytes());
+    Ok(ReplayIdentity {
+        entry,
+        source_digest,
+        execution_adapter: "dev-tir-v1".to_string(),
+        target_triple: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
+        abi: std::env::consts::FAMILY.to_string(),
+        build_digest,
+        core_abi: "jet-core-abi-v1".to_string(),
+        lock_digest,
+        profile: "dev".to_string(),
+        tir_hash,
+        tir_schema: "1".to_string(),
+        time_site_id,
+    })
+}
+
+fn project_relative_entry(file: &str) -> Result<String, String> {
+    let path = Path::new(file);
+    let cwd = std::env::current_dir().map_err(|error| format!("could not resolve the project root: {error}"))?;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    let relative = absolute
+        .strip_prefix(&cwd)
+        .map_err(|_| "entry identity must be inside the current project".to_string())?;
+    let value = relative.to_string_lossy().replace('\\', "/");
+    if value.is_empty() || value.starts_with('/') || value.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+        return Err("entry identity must be a clean project-relative path".to_string());
+    }
+    Ok(value)
+}
+
 pub(crate) fn prepare_safe_capture(
     opts: &CaptureOpts,
     json_mode: bool,

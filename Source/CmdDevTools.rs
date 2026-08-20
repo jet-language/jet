@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+use std::sync::mpsc::{self, Receiver};
 
 use jet::Diagnostics::{json_str as json_string, ColorChoice};
 use jet::ExitCodes;
@@ -13,6 +14,100 @@ use jet::ExitCodes;
 use crate::CmdCompile::{build, collect_source_files_recursive, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
+
+#[derive(Clone, Copy)]
+enum DevSessionAction {
+    Rerun,
+    RestartFresh,
+    Tests,
+    FailedClaimsOnly,
+    Quit,
+}
+
+fn dev_session_action(byte: u8) -> Option<DevSessionAction> {
+    match byte as char {
+        c if c == jet::Syntax::SESSION_KEY_RERUN.chars().next().unwrap() => {
+            Some(DevSessionAction::Rerun)
+        }
+        c if c == jet::Syntax::SESSION_KEY_RESTART.chars().next().unwrap() => {
+            Some(DevSessionAction::RestartFresh)
+        }
+        c if c == jet::Syntax::SESSION_KEY_TESTS.chars().next().unwrap() => {
+            Some(DevSessionAction::Tests)
+        }
+        c if c == jet::Syntax::SESSION_KEY_FAILED_CLAIMS.chars().next().unwrap() => {
+            Some(DevSessionAction::FailedClaimsOnly)
+        }
+        c if c == jet::Syntax::SESSION_KEY_QUIT.chars().next().unwrap() => {
+            Some(DevSessionAction::Quit)
+        }
+        _ => None,
+    }
+}
+
+fn dev_session_label(action: DevSessionAction) -> &'static str {
+    match action {
+        DevSessionAction::Rerun => "Re-run",
+        DevSessionAction::RestartFresh => "Restart Fresh",
+        DevSessionAction::Tests => "Tests",
+        DevSessionAction::FailedClaimsOnly => "Failed Claims Only",
+        DevSessionAction::Quit => "Quit",
+    }
+}
+
+fn spawn_dev_session_input() -> Receiver<u8> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stdin = std::io::stdin();
+        let mut byte = [0u8; 1];
+        loop {
+            match stdin.read(&mut byte) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    if sender.send(byte[0]).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    receiver
+}
+
+fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
+    let executable = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[Tests] could not locate jet: {error}");
+            return Vec::new();
+        }
+    };
+    let mut command = Command::new(executable);
+    command.arg("test").arg(file);
+    if filters.len() == 1 {
+        command.arg(format!("--filter={}", filters[0]));
+    }
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("[Tests] could not start test runner: {error}");
+            return Vec::new();
+        }
+    };
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| {
+            let line = String::from_utf8_lossy(line);
+            let line = line.trim();
+            line.strip_suffix(": FAIL")
+                .or_else(|| line.strip_prefix("FAIL "))
+                .map(str::to_string)
+        })
+        .collect()
+}
 
 /// Preserve the Prelude's stream order when a run outcome crosses the CLI
 /// adapter as separate stdout/stderr buffers.
@@ -59,6 +154,7 @@ pub(crate) fn run_dev(
     use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    record_name: Option<&str>,
 ) {
     let path = Path::new(file);
     if !path.exists() {
@@ -72,6 +168,11 @@ pub(crate) fn run_dev(
     // in-process tiers held the bytes until the run ended.
     jet_jit::set_program_owns_streams();
 
+    let record = record_name.map(|name| {
+        crate::ProveReplay::begin_named_capture(file, name, mode.json)
+            .unwrap_or_else(|status| exit(status))
+    });
+
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
         let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
@@ -83,6 +184,14 @@ pub(crate) fn run_dev(
             setting_overrides,
         );
         render_dev_outcome(&outcome, file, mode);
+        let status = match &outcome {
+            jet::Interpreter::RunOutcome::Ran { exit_code, .. } => *exit_code,
+            jet::Interpreter::RunOutcome::Problems(_) => ExitCodes::USER_ERROR,
+        };
+        if let Some(capture) = record.as_ref() {
+            crate::ProveReplay::finish_named_capture(capture, status, mode.json)
+                .unwrap_or_else(|status| exit(status));
+        }
         exit_dev_outcome(outcome);
     }
 
@@ -114,16 +223,91 @@ pub(crate) fn run_dev(
     };
     // D-SCHEDULE1 (card #505): due `#Job #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
-    let mut clock = TaskClock::new();
+    let mut clock = JobClock::new();
     let mut persist = jet_devserver::PersistStore::new();
     let mut session = jet_devserver::SessionSnapshot {
         generation: 0,
         artifact_token: "gen-0".into(),
         persist: persist.clone(),
     };
+    let input = spawn_dev_session_input();
+    let mut failed_claims = Vec::new();
 
     loop {
         std::thread::sleep(std::time::Duration::from_millis(120));
+        while let Ok(byte) = input.try_recv() {
+            let Some(action) = dev_session_action(byte) else {
+                continue;
+            };
+            if !mode.quiet {
+                println!("Action: {}", dev_session_label(action));
+            }
+            match action {
+                DevSessionAction::Rerun => {
+                    prev_bundle = render_dev_iteration(
+                        file,
+                        try_anyway,
+                        gates,
+                        mode,
+                        use_interpreter,
+                        profile,
+                        setting_overrides,
+                    );
+                }
+                DevSessionAction::RestartFresh => {
+                    prev_bundle = None;
+                    session = jet_devserver::SessionSnapshot {
+                        generation: 0,
+                        artifact_token: "gen-0".into(),
+                        persist: persist.clone(),
+                    };
+                    watch = match jet_devserver::WatchSession::open(path) {
+                        Ok(watch) => watch,
+                        Err(diagnostic) => {
+                            eprint!(
+                                "{}",
+                                jet::render_all_colored(
+                                    file,
+                                    "",
+                                    &[diagnostic],
+                                    mode.color_stderr(),
+                                )
+                            );
+                            exit(ExitCodes::USER_ERROR);
+                        }
+                    };
+                    prev_bundle = render_dev_iteration(
+                        file,
+                        try_anyway,
+                        gates,
+                        mode,
+                        use_interpreter,
+                        profile,
+                        setting_overrides,
+                    );
+                }
+                DevSessionAction::Tests => {
+                    failed_claims = run_dev_tests(file, &[]);
+                }
+                DevSessionAction::FailedClaimsOnly => {
+                    if failed_claims.is_empty() {
+                        if !mode.quiet {
+                            println!("no failed claims recorded");
+                        }
+                    } else {
+                        let previous = failed_claims.clone();
+                        failed_claims = run_dev_tests(file, &previous);
+                    }
+                }
+                DevSessionAction::Quit => {
+                    if let Some(capture) = record.as_ref() {
+                        crate::ProveReplay::finish_named_capture(capture, ExitCodes::OK, mode.json)
+                            .unwrap_or_else(|status| exit(status));
+                    }
+                    exit(ExitCodes::OK);
+                }
+            }
+        }
         if let Some(bundle) = &prev_bundle {
             run_due_jobs(bundle, file, try_anyway, mode, &mut clock);
             sync_persist_bindings(bundle, &mut persist);
@@ -213,13 +397,13 @@ fn run_due_jobs(
     file: &str,
     try_anyway: bool,
     mode: OutputMode,
-    clock: &mut TaskClock,
+    clock: &mut JobClock,
 ) {
-    let tasks = jet::Interpreter::scheduled_tasks(bundle);
-    if tasks.is_empty() {
+    let jobs = jet::Interpreter::scheduled_jobs(bundle);
+    if jobs.is_empty() {
         return;
     }
-    for name in clock.due(&tasks) {
+    for name in clock.due(&jobs) {
         if !mode.quiet {
             println!("\n— due job `{}` —", name);
         }
@@ -243,21 +427,21 @@ fn run_due_jobs(
     }
 }
 
-/// D-SCHEDULE1: per-job last-run bookkeeping for the due-job tick. An
-/// `Interval` schedule tracks the `Instant` it last ran; a `DailyAt`
+/// D-SCHEDULE1: per-job last-run bookkeeping for the due-job tick. A
+/// `Duration` schedule tracks the `Instant` it last ran; a `WallClockTime`
 /// schedule tracks the UTC day index (days since the Unix epoch) it last
 /// ran, so it fires once inside its matching minute, not on every 120ms
 /// tick within that minute. UTC only — D-SCHEDULE1's own law text carves
 /// timezone-aware calendars out to "the runtime API or jetos timers"; this
 /// is the lightweight dev-loop convenience tier, not that.
-pub(crate) struct TaskClock {
+pub(crate) struct JobClock {
     last_interval_run: std::collections::HashMap<String, std::time::Instant>,
     last_daily_run_day: std::collections::HashMap<String, u64>,
 }
 
-impl TaskClock {
+impl JobClock {
     pub(crate) fn new() -> Self {
-        TaskClock {
+        JobClock {
             last_interval_run: std::collections::HashMap::new(),
             last_daily_run_day: std::collections::HashMap::new(),
         }
@@ -265,24 +449,24 @@ impl TaskClock {
 
     /// Which job names are due right now — records the firing so the same
     /// job doesn't fire again on the very next tick.
-    pub(crate) fn due(&mut self, tasks: &[(String, jet::AST::EverySchedule)]) -> Vec<String> {
+    pub(crate) fn due(&mut self, jobs: &[(String, jet::AST::EverySchedule)]) -> Vec<String> {
         let unix_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.due_at(tasks, unix_secs)
+        self.due_at(jobs, unix_secs)
     }
 
     /// The testable core of `due`: `unix_secs` is injected so the day/window
     /// arithmetic can be checked without racing real wall-clock time.
-    fn due_at(&mut self, tasks: &[(String, jet::AST::EverySchedule)], unix_secs: u64) -> Vec<String> {
+    fn due_at(&mut self, jobs: &[(String, jet::AST::EverySchedule)], unix_secs: u64) -> Vec<String> {
         let now = std::time::Instant::now();
         let day = unix_secs / 86_400;
         let secs_of_day = unix_secs % 86_400;
         let mut fired = Vec::new();
-        for (name, schedule) in tasks {
+        for (name, schedule) in jobs {
             match *schedule {
-                jet::AST::EverySchedule::Interval { nanos } => {
+                jet::AST::EverySchedule::Duration { nanos } => {
                     let due = match self.last_interval_run.get(name) {
                         None => true,
                         Some(last) => now.duration_since(*last).as_nanos() >= nanos as u128,
@@ -292,7 +476,7 @@ impl TaskClock {
                         fired.push(name.clone());
                     }
                 }
-                jet::AST::EverySchedule::DailyAt { hour, minute } => {
+                jet::AST::EverySchedule::WallClockTime { hour, minute } => {
                     let target_secs = hour as u64 * 3600 + minute as u64 * 60;
                     // Due once inside the matching minute — a 120ms poll tick
                     // easily lands inside a 60-second window.
@@ -3806,35 +3990,35 @@ fn decode_hex(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod schedule_tests {
-    use super::TaskClock;
+    use super::JobClock;
 
-    /// D-SCHEDULE1 (card #505): an interval task fires the first time it's
+    /// D-SCHEDULE1 (card #505): an interval job fires the first time it's
     /// checked (no prior run), then not again immediately after.
     #[test]
     fn interval_fires_once_then_waits() {
-        let mut clock = TaskClock::new();
-        let tasks = vec![(
+        let mut clock = JobClock::new();
+        let jobs = vec![(
             "prune".to_string(),
-            jet::AST::EverySchedule::Interval {
+            jet::AST::EverySchedule::Duration {
                 nanos: 60 * 1_000_000_000,
             },
         )];
-        assert_eq!(clock.due(&tasks), vec!["prune".to_string()]);
+        assert_eq!(clock.due(&jobs), vec!["prune".to_string()]);
         assert!(
-            clock.due(&tasks).is_empty(),
+            clock.due(&jobs).is_empty(),
             "must not re-fire on the very next tick"
         );
     }
 
-    /// A daily task fires when `unix_secs` lands inside its target minute,
+    /// A daily job fires when `unix_secs` lands inside its target minute,
     /// stays quiet outside that window, and does not re-fire later the same
     /// day even if checked again inside the window.
     #[test]
     fn daily_fires_in_window_then_dedupes_same_day() {
-        let mut clock = TaskClock::new();
-        let tasks = vec![(
+        let mut clock = JobClock::new();
+        let jobs = vec![(
             "nightly".to_string(),
-            jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
+            jet::AST::EverySchedule::WallClockTime { hour: 3, minute: 0 },
         )];
         let day0_before_window = 10 * 86_400 + 2 * 3600 + 59 * 60; // 02:59 on day 10
         let day0_in_window = 10 * 86_400 + 3 * 3600 + 0 * 60 + 30; // 03:00:30 on day 10
@@ -3842,20 +4026,20 @@ mod schedule_tests {
         let day1_in_window = 11 * 86_400 + 3 * 3600; // 03:00 on day 11
 
         assert!(
-            clock.due_at(&tasks, day0_before_window).is_empty(),
+            clock.due_at(&jobs, day0_before_window).is_empty(),
             "must not fire before the target minute"
         );
         assert_eq!(
-            clock.due_at(&tasks, day0_in_window),
+            clock.due_at(&jobs, day0_in_window),
             vec!["nightly".to_string()],
             "must fire inside the target minute"
         );
         assert!(
-            clock.due_at(&tasks, day0_after_window).is_empty(),
+            clock.due_at(&jobs, day0_after_window).is_empty(),
             "must not re-fire later the same day, even outside the window"
         );
         assert_eq!(
-            clock.due_at(&tasks, day1_in_window),
+            clock.due_at(&jobs, day1_in_window),
             vec!["nightly".to_string()],
             "must fire again the next day's matching window"
         );

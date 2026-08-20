@@ -24,7 +24,7 @@ const RUNTIME_CRATE_NAME: &str = "jet_runtime";
 const CORE_CRATE_NAME: &str = "jet_runtime_core";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
 const CORE_CRATE_PREFIX: &str =
-    "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\n";
+    "#![allow(warnings)]\nextern crate jet_runtime;\npub use jet_runtime::*;\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
 const END: &str = crate::Codegen::CACHED_RUNTIME_END;
 const CORE_BEGIN: &str = crate::Codegen::CACHED_CORE_BEGIN;
@@ -1125,6 +1125,11 @@ mod tests {
         assert!(split.program.contains("fn main() { core(); }"));
         assert!(!split.program.contains("fn runtime()"));
         assert!(!split.program.contains("fn core()"));
+    }
+
+    #[test]
+    fn core_runtime_reexports_runtime_namespace() {
+        assert!(CORE_CRATE_PREFIX.contains("pub use jet_runtime::*;"));
     }
 
     #[test]

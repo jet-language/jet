@@ -392,7 +392,7 @@ fn translate_body(function: &Function) -> Result<Vec<String>, (usize, String)> {
                 )
             })?;
             output.push(format!(
-                "require_eq({}, {})",
+                "assert_eq({}, {})",
                 parse_expression(left).map_err(|why| (*line_no, why))?,
                 parse_expression(right).map_err(|why| (*line_no, why))?
             ));

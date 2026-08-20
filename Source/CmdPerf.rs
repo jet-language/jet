@@ -1,6 +1,6 @@
 //! D-PERFSESSION1=D: `jet perf` family over one versioned `.jettrace` truth.
 //!
-//! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test|bench …`)
+//! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test …`).
 //! with observe enabled, poll live facts while the child runs, then write one
 //! `.jettrace` with wall/alloc/tasks/locks/io/native/task-observation spans before
 //! exiting with the child's code.
@@ -136,7 +136,14 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
             return ExitCodes::USAGE;
         }
     };
-    let mut child_argv = vec![action.to_string()];
+    // D-CLAIM-BENCH1=A: the perf-session spelling remains useful as a trace
+    // label, but its producer is the one measured test mode. There is no
+    // second benchmark runner behind `jet perf bench`.
+    let base_action = if action == "bench" { "test" } else { action };
+    let mut child_argv = vec![base_action.to_string()];
+    if action == "bench" && !parsed.child_args.iter().any(|arg| arg == "--measure") {
+        child_argv.push("--measure".to_string());
+    }
     child_argv.extend(parsed.child_args.iter().cloned());
 
     let mut child = match Command::new(&exe)
@@ -2540,7 +2547,7 @@ fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
         (
             "loss".into(),
             CanonicalJson::String(
-                "chrome-trace-json; X events cover wall/cpu/alloc/browser/task spans/io/locks/native and M lane metadata — no async flow events, counter tracks, screenshots, or source-map events"
+                "chrome-trace-json; captured X events cover wall/cpu/alloc/browser/task spans/io/locks/native and M lane metadata — unavailable states, async flow events, counter tracks, screenshots, and source-map events remain unprojected"
                     .into(),
             ),
         ),
@@ -2637,15 +2644,41 @@ fn chrome_symbol_args(value: &CanonicalJson) -> Option<CanonicalJson> {
     let CanonicalJson::String(name) = fields.get("name")? else {
         return None;
     };
-    CanonicalJson::object([
-        (
-            "location".into(),
-            CanonicalJson::String(format!("{path}:{name}")),
-        ),
-        ("file".into(), CanonicalJson::String(path.clone())),
-        ("symbol".into(), CanonicalJson::String(name.clone())),
-    ])
-    .ok()
+    let mut args = BTreeMap::new();
+    args.insert("file".into(), CanonicalJson::String(path.clone()));
+    args.insert(
+        "location".into(),
+        CanonicalJson::String(format!("{path}:{name}")),
+    );
+    args.insert("symbol".into(), CanonicalJson::String(name.clone()));
+    for key in [
+        "bytes",
+        "cancelled",
+        "capacity",
+        "class",
+        "clock",
+        "closed",
+        "count",
+        "depth",
+        "domain",
+        "id",
+        "kind",
+        "parent",
+        "parent_task_id",
+        "reason",
+        "recv_waiters",
+        "send_waiters",
+        "state",
+        "status",
+        "target",
+        "task_id",
+        "wait",
+    ] {
+        if let Some(value) = fields.get(key) {
+            args.insert(key.into(), value.clone());
+        }
+    }
+    Some(CanonicalJson::Object(args))
 }
 
 fn chrome_integer(fields: &BTreeMap<String, CanonicalJson>, key: &str) -> Option<u64> {
@@ -3081,6 +3114,198 @@ fn symbol_label(value: &CanonicalJson) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn chrome_projection_trace() -> CanonicalJson {
+        let symbol = CanonicalJson::object([
+            ("name".into(), CanonicalJson::String("run".into())),
+            ("path".into(), CanonicalJson::String("examples/app.jet".into())),
+        ])
+        .unwrap();
+        let task = |id: &str| {
+            CanonicalJson::object([
+                ("id".into(), CanonicalJson::Integer(id.into())),
+                ("symbol".into(), symbol.clone()),
+            ])
+            .unwrap()
+        };
+        let content = CanonicalJson::object([
+            (
+                "allocations".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("bytes".into(), CanonicalJson::Integer("64".into())),
+                        ("count".into(), CanonicalJson::Integer("2".into())),
+                        ("symbol".into(), symbol.clone()),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "browser".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("class".into(), CanonicalJson::String("dom".into())),
+                        ("duration_ns".into(), CanonicalJson::Integer("3000000".into())),
+                        ("start_ns".into(), CanonicalJson::Integer("2000000".into())),
+                        ("symbol".into(), symbol.clone()),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "io".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("end_ns".into(), CanonicalJson::Integer("9000000".into())),
+                        ("kind".into(), CanonicalJson::String("tcp".into())),
+                        ("start_ns".into(), CanonicalJson::Integer("4000000".into())),
+                        ("symbol".into(), symbol.clone()),
+                        ("task_id".into(), CanonicalJson::Integer("1".into())),
+                        ("wait".into(), CanonicalJson::String("tcp accept".into())),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "locks".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("depth".into(), CanonicalJson::Integer("1".into())),
+                        ("kind".into(), CanonicalJson::String("channel".into())),
+                        ("recv_waiters".into(), CanonicalJson::Integer("1".into())),
+                        ("send_waiters".into(), CanonicalJson::Integer("0".into())),
+                        ("symbol".into(), symbol.clone()),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "native".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("duration_ns".into(), CanonicalJson::Integer("5000000".into())),
+                        ("observed_at_ns".into(), CanonicalJson::Integer("1000000".into())),
+                        ("status".into(), CanonicalJson::String("captured".into())),
+                        ("symbol".into(), symbol.clone()),
+                        ("task_id".into(), CanonicalJson::Integer("1".into())),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "samples".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("domain".into(), CanonicalJson::String("wall".into())),
+                        ("duration_ns".into(), CanonicalJson::Integer("1500000".into())),
+                        ("symbol".into(), symbol.clone()),
+                    ])
+                    .unwrap(),
+                    CanonicalJson::object([
+                        ("domain".into(), CanonicalJson::String("cpu".into())),
+                        ("duration_ns".into(), CanonicalJson::Integer("2500000".into())),
+                        ("symbol".into(), symbol.clone()),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "spans".into(),
+                CanonicalJson::Array(vec![
+                    CanonicalJson::object([
+                        ("end_ns".into(), CanonicalJson::Integer("8000000".into())),
+                        ("start_ns".into(), CanonicalJson::Integer("1000000".into())),
+                        ("status".into(), CanonicalJson::String("captured".into())),
+                        ("symbol".into(), symbol.clone()),
+                        ("task_id".into(), CanonicalJson::Integer("1".into())),
+                    ])
+                    .unwrap(),
+                    CanonicalJson::object([
+                        ("end_ns".into(), CanonicalJson::Integer("7000000".into())),
+                        ("start_ns".into(), CanonicalJson::Integer("2000000".into())),
+                        ("status".into(), CanonicalJson::String("captured".into())),
+                        ("symbol".into(), symbol.clone()),
+                        ("task_id".into(), CanonicalJson::Integer("2".into())),
+                    ])
+                    .unwrap(),
+                ]),
+            ),
+            (
+                "tasks".into(),
+                CanonicalJson::Array(vec![task("1"), task("2")]),
+            ),
+        ])
+        .unwrap();
+        CanonicalJson::object([
+            ("content".into(), content),
+            ("trace_id".into(), CanonicalJson::String("trace-test".into())),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn chrome_projection_emits_all_domains_in_trace_event_units() {
+        let projection = export_chrome_projection(&chrome_projection_trace());
+        let CanonicalJson::Object(fields) = &projection else {
+            panic!("projection is not an object")
+        };
+        let CanonicalJson::Array(events) = fields.get("traceEvents").unwrap() else {
+            panic!("traceEvents is not an array")
+        };
+        let mut complete = 0;
+        let mut metadata_names = std::collections::BTreeSet::new();
+        let mut task_tids = std::collections::BTreeSet::new();
+        for event in events {
+            let CanonicalJson::Object(fields) = event else {
+                panic!("trace event is not an object")
+            };
+            let CanonicalJson::String(phase) = fields.get("ph").unwrap() else {
+                panic!("trace event has no phase")
+            };
+            assert!(phase == "X" || phase == "M", "unexpected phase {phase}");
+            if phase == "X" {
+                complete += 1;
+                assert!(fields.contains_key("args"), "complete event has no args");
+                assert!(fields.contains_key("dur"), "complete event has no duration");
+                assert!(fields.contains_key("ts"), "complete event has no timestamp");
+                assert!(fields.contains_key("tid"), "complete event has no lane");
+            } else if let Some(CanonicalJson::String(name)) = fields.get("name") {
+                metadata_names.insert(name.clone());
+                if name == "thread_name" {
+                    if let Some(CanonicalJson::Integer(tid)) = fields.get("tid") {
+                        if tid == "1001" || tid == "1002" {
+                            task_tids.insert(tid.clone());
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(complete, 9, "every captured domain row needs an X event");
+        assert!(metadata_names.contains("process_name"));
+        assert!(metadata_names.contains("thread_name"));
+        assert_eq!(
+            task_tids.into_iter().collect::<Vec<_>>(),
+            vec!["1001".to_string(), "1002".to_string()]
+        );
+        assert!(events.iter().any(|event| {
+            let CanonicalJson::Object(fields) = event else {
+                return false;
+            };
+            fields.get("name") == Some(&CanonicalJson::String("examples/app.jet#run".into()))
+                && fields.get("dur") == Some(&CanonicalJson::Integer("1500".into()))
+                && fields.get("ph") == Some(&CanonicalJson::String("X".into()))
+                && fields.get("args").is_some()
+        }));
+        let CanonicalJson::String(loss) = fields.get("loss").unwrap() else {
+            panic!("loss is not a string")
+        };
+        assert!(loss.contains("unavailable states"), "{loss}");
+        assert!(!loss.contains("no pprof/otel/chrome payloads"), "{loss}");
+        assert_eq!(
+            CanonicalJson::parse_canonical(&projection.bytes()).unwrap(),
+            projection
+        );
+    }
 
     #[test]
     fn task_ingestion_is_capped_and_audits_possible_io_loss() {

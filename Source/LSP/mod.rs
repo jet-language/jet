@@ -471,12 +471,30 @@ fn run() {}
     }
 
     #[test]
+    fn inlay_hints_for_bare_call_parameter_names() {
+        let src = "fn clamp(value: Int, low: Int, high: Int) :> Int {\n    return value\n}\nfn run() {\n    print(clamp(12, low: 0, high: 10))\n}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let hints = db.inlay_hints_for(project.entry());
+        assert!(
+            hints.iter().any(|hint| hint.label == "value: "),
+            "expected the bare argument to carry its public name: {hints:?}"
+        );
+        assert!(
+            !hints.iter().any(|hint| hint.label == "low: " || hint.label == "high: "),
+            "written labels must not receive duplicate ghost text: {hints:?}"
+        );
+    }
+
+    #[test]
     fn inlay_and_hover_for_inferred_struct_lit_from_place() {
         let src = "\
 struct Point { x: Int y: Int }
 fn run() {
-    p := Point.{ x: 1, y: 2 }
-    p = .{ x: 3, y: 4 }
+    p := Point{ x: 1, y: 2 }
+    p = { x: 3, y: 4 }
 }
 ";
         let (project, _, bundle, facts) = check_test_document(src);

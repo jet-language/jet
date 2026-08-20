@@ -3011,7 +3011,7 @@ mod project_part_tests {
         let file = ReportPath::from_process("src/main.jet");
         let json = diagnostic_json(&diagnostic, &file, src);
         let fix_marker = format!(
-            r#""fix_edits":[{{"file":"{}","span":{{"start":{},"end":{}}},"new_text":","}}]"#,
+            r#""fix_edits":[{{"file":"{}","span":{{"start":{},"end":{}}},"new_text":",","safety":"formatting"}}]"#,
             json_escape(file.as_str()),
             start,
             start + 1

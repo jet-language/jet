@@ -38,7 +38,7 @@ const LENSES: &[Lens] = &[
     },
     Lens {
         name: "memory",
-        summary: "transitive no_alloc / zero_rc / arena_bounded facts (D-MEM-FACTS1)",
+        summary: "transitive Mem.* denial facts (D-MEM-FACTS1 / D-AUTHORITY-MEM1)",
         render: render_memory,
         render_json: render_memory_json,
     },

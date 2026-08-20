@@ -226,7 +226,7 @@ fn create_bundle() -> Result<PathBuf, String> {
 
 pub(crate) fn run_report(args: &[String]) -> i32 {
     if args.iter().any(|arg| arg == "--send" || arg.starts_with("--send=")) {
-        crate::cli_error!(@full "E2104", "`jet report --send` is not available", "Jet never uploads report bundles (D-REPORT-SEND1=A)", "run `jet report`, inspect `.jet/reports/…`, then attach that directory yourself");
+        crate::cli_error!(@full "E2104", "`jet report --send` is not available", "Jet never uploads report bundles", "run `jet report`, inspect `.jet/reports/…`, then attach that directory yourself");
         return jet::ExitCodes::USAGE;
     }
     if !args.is_empty() {

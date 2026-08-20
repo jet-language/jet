@@ -913,7 +913,7 @@ fn is_trivial_extract(tokens: &[Token], span: Span) -> bool {
                 token.kind,
                 TokKind::Ident(_)
                     | TokKind::Int(_, _)
-                    | TokKind::Float(_)
+                    | TokKind::Float(..)
                     | TokKind::Char(_)
                     | TokKind::KwTrue
                     | TokKind::KwFalse
@@ -947,7 +947,7 @@ fn is_total_pure_expr(db: &SymbolDB, tokens: &[Token], path: &str, span: Span) -
         let safe = match &token.kind {
             TokKind::Ident(_)
             | TokKind::Int(_, _)
-            | TokKind::Float(_)
+            | TokKind::Float(..)
             | TokKind::Char(_)
             | TokKind::KwTrue
             | TokKind::KwFalse
@@ -1011,7 +1011,7 @@ fn expr_comparison_operands_are_scalar(
                     return false;
                 }
             }
-            TokKind::Float(_) => {
+            TokKind::Float(..) => {
                 if has_bool_op || !agree_scalar_leaf(&mut leaf, "Float") {
                     return false;
                 }
@@ -1100,7 +1100,7 @@ fn infer_total_pure_return_type(
                 }
                 literal = Some("Int");
             }
-            TokKind::Float(_) => {
+            TokKind::Float(..) => {
                 if literal.is_some_and(|existing| existing != "Float") {
                     return None;
                 }
@@ -1307,7 +1307,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
 
         TokKind::Str(_) => Some((st::STRING, 0)),
 
-        TokKind::Int(..) | TokKind::Float(_) | TokKind::Char(_) => Some((st::NUMBER, 0)),
+        TokKind::Int(..) | TokKind::Float(..) | TokKind::Char(_) => Some((st::NUMBER, 0)),
 
         TokKind::LineComment(_) | TokKind::BlockComment(_) => Some((st::COMMENT, 0)),
 
@@ -1330,6 +1330,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::Ge
         | TokKind::Compare
         | TokKind::Arrow
+        | TokKind::UnifiedArrow
         | TokKind::LambdaArrow
         | TokKind::Question
         | TokKind::DotDot => Some((st::OPERATOR, 0)),
@@ -1532,7 +1533,7 @@ pub(crate) fn format_inlay_hints(hints: &[&InlayHint], src: &str) -> String {
         if i > 0 {
             items.push(',');
         }
-        // Position: just after the name span
+        // Position: at the semantic source anchor (binding name or argument expression).
         let pos = byte_offset_to_lsp(src, h.span.end);
         items.push_str(&format!(
             r#"{{"position":{{"line":{},"character":{}}},"label":"{}","kind":1}}"#,

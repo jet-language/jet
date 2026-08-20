@@ -59,9 +59,8 @@ use CmdCompile::{
     run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
-    run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
+    run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
     run_eval, run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
-    BenchRunOpts,
 };
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExpand::run_expand;
@@ -610,6 +609,8 @@ Get started:
 
 /// Teach E2101 for an unknown subcommand, with a "did you mean" when one is
 /// close (reusing the edit-distance muscle behind S14 teaching errors).
+// E2101 has the same argv-only boundary as E2102: no Jet source span exists for
+// a command token, so there is no `fix_edits` entry for `jet fix` to apply.
 fn unknown_subcommand(cmd: &str) -> ! {
     let bin = jet::Syntax::BINARY_NAME;
     eprintln!("Error [E2101]: `{}` isn't a {} command.", cmd, bin);
@@ -839,6 +840,9 @@ fn teach_retired(spec: &jet::CLI::RetiredCommandSpec, raw: &[String], json: bool
 /// separator form (D-CLI1=A).
 fn check_flags(raw: &[String], subcmd: &str) {
     let bin = jet::Syntax::BINARY_NAME;
+    // E2102 is an argv diagnostic, not a Jet-source diagnostic: there is no
+    // source file and byte span for `jet fix` to apply, so its flag suggestion
+    // remains prose-only until the CLI report gains an argv edit surface.
     for a in raw {
         if !a.starts_with("--") || a == "--" {
             continue;
@@ -877,26 +881,6 @@ fn check_flags(raw: &[String], subcmd: &str) {
     }
 }
 
-fn reject_bench_test_flags(argv: &[String]) {
-    let Some(flag) = argv.iter().find(|arg| {
-        matches!(
-            arg.as_str(),
-            "-u" | "--serial" | "--coverage" | "--shuffle" | "--update-snapshots"
-        )
-            || arg.starts_with("--shuffle=")
-            || arg.starts_with("--coverage=")
-            || arg.starts_with("--update-snapshots=")
-    }) else {
-        return;
-    };
-    crate::cli_error!(
-        @fix "E2104",
-        format!("`{flag}` applies only to `jet test`"),
-        format!("run `jet test <file> {flag}`")
-    );
-    exit(ExitCodes::USAGE);
-}
-
 fn reject_retired_gate_flags(argv: &[String], json: bool) {
     let Some(retirement) = jet::Syntax::retirement("allow-impure") else {
         return;
@@ -912,6 +896,79 @@ fn reject_retired_gate_flags(argv: &[String], json: bool) {
         json,
     );
     exit(ExitCodes::USAGE);
+}
+
+fn named_record_for_command(argv: &[String], command: &str, json: bool) -> Option<String> {
+    let mut name = None;
+    for arg in argv.iter().skip(1) {
+        if arg == "--record" {
+            crate::cli_error!(
+                @fix "E2104",
+                "`--record` needs a closed `=NAME` value",
+                "write `--record=NAME` on `run`, `dev`, or `test`"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        let Some(parsed) = crate::ProveReplay::parse_record_flag(arg) else {
+            continue;
+        };
+        if !matches!(command, "run" | "dev" | "test") {
+            crate::cli_error!(
+                @fix "E2102",
+                format!("`--record` is not valid with `jet {command}`"),
+                "use `--record=NAME` with `jet run`, `jet dev`, or `jet test`"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        match parsed {
+            Ok(value) => name = Some(value),
+            Err(message) => {
+                crate::ProveReplay::emit_diag(
+                    "E2104",
+                    "invalid replay name",
+                    &message,
+                    "write `--record=NAME` with letters, digits, `-`, or `_`",
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+    name
+}
+
+fn named_debug_replay(argv: &[String], command: &str, json: bool) -> Option<String> {
+    if command != "debug" {
+        return None;
+    }
+    let mut path = None;
+    for arg in argv.iter().skip(1) {
+        if arg == "--replay" {
+            crate::cli_error!(
+                @fix "E2104",
+                "`--replay` needs a closed `=NAME` value",
+                "write `--replay=NAME` on `jet debug`"
+            );
+            exit(ExitCodes::USAGE);
+        }
+        let Some(parsed) = crate::ProveReplay::parse_closed_replay_flag(arg) else {
+            continue;
+        };
+        match parsed {
+            Ok(value) => path = Some(value),
+            Err(message) => {
+                crate::ProveReplay::emit_diag(
+                    "E2104",
+                    "invalid replay name",
+                    &message,
+                    "write `--replay=NAME` with letters, digits, `-`, or `_`",
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+    path
 }
 
 fn parse_gate_flags(argv: &[String], json: bool) -> jet::Policy::GateSet {
@@ -1326,10 +1383,6 @@ fn main() {
         }
         out
     };
-    let bench_filter = jet_argv
-        .iter()
-        .find_map(|a| a.strip_prefix("--filter=").map(str::to_string));
-
     if args.first().map(|s| s.as_str()) == Some("lsp") {
         // #1659 c2 (round 2): `jet self lsp --help`/`-h` must print help, not
         // start the language server on stdio.
@@ -1373,6 +1426,8 @@ fn main() {
             exit(ExitCodes::OK);
         }
     };
+    let record_name = named_record_for_command(jet_argv, cmd, json);
+    let debug_replay = named_debug_replay(jet_argv, cmd, json);
     if let Some(output) = output_name.as_deref() {
         if cmd != "run" || output.is_empty() {
             crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address with `jet run`", format!("write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT));
@@ -1430,6 +1485,7 @@ fn main() {
                 output_name.as_deref(),
                 &program_args,
                 mode,
+                record_name.as_deref(),
             );
             return;
         }
@@ -1499,10 +1555,6 @@ fn main() {
     if !owns_flags {
         check_flags(jet_argv, cmd);
     }
-    if cmd == "bench" {
-        reject_bench_test_flags(jet_argv);
-    }
-
     // Commands with no required positional target.
     match cmd {
         "fix" if args.get(1).map(|arg| arg.as_str()) == Some("memory") => {
@@ -2120,12 +2172,20 @@ fn main() {
             // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
             // --restart / --swap / --watch=off.
             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
+            let bare_member = flag_value(&raw, "-p");
+            let bare_file;
             let file = match args.get(1) {
                 Some(f) => f.as_str(),
-                None => {
-                    crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
-                    exit(ExitCodes::USAGE);
-                }
+                None => match resolve_bare_entry("dev", &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")), bare_member) {
+                    Some(entry) => {
+                        bare_file = entry.to_string_lossy().into_owned();
+                        bare_file.as_str()
+                    }
+                    None => {
+                        crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                        exit(ExitCodes::USAGE);
+                    }
+                },
             };
             // E2-M15: `jet dev` has the same target validation contract as
             // build/run, even when its execution tier is the native watcher.
@@ -2152,7 +2212,7 @@ fn main() {
             // unreachable on any file that also declared #Target(Web), e.g.
             // ui_web_click.jet, which has both.)
             if has_dev_entry_fn(file) {
-                run_dev_entry(file, mode, &setting_overrides);
+                run_dev_entry(file, mode, &setting_overrides, record_name.as_deref());
                 return;
             }
             if entry_returns_app(file) {
@@ -2174,9 +2234,10 @@ fn main() {
                         true,
                         named_profile.as_deref().unwrap_or("dev"),
                         &setting_overrides,
+                        record_name.as_deref(),
                     );
                 }
-                run_web_app_dev_entry(file, mode, dev_port, &setting_overrides);
+                run_web_app_dev_entry(file, mode, dev_port, &setting_overrides, record_name.as_deref());
                 return;
             }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
@@ -2201,6 +2262,7 @@ fn main() {
                 use_interpreter,
                 named_profile.as_deref().unwrap_or("dev"),
                 &setting_overrides,
+                record_name.as_deref(),
             );
             return;
         }
@@ -2218,7 +2280,7 @@ fn main() {
             let raw_frames = raw.iter().any(|a| a == "--raw-frames"); // D-DBG2
             let dap = raw.iter().any(|a| a == "--dap");
             // D-CLI-BARE1=A: bare `jet debug` inside a package resolves the
-            // entry the same way run/build/check/bench do; outside a package
+            // entry the same way run/build/check/dev do; outside a package
             // the usage error is unchanged.
             let file: String = match args.get(1) {
                 Some(f) => f.to_string(),
@@ -2235,6 +2297,10 @@ fn main() {
                 }
             };
             let resolved = resolve_source_path(&file);
+            if let Some(path) = debug_replay.as_deref() {
+                let _authority = crate::ProveReplay::open_named_replay(&resolved, path, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
             let use_native = dap || jet::Debug::needs_native(&resolved).unwrap_or(false);
             if !use_native {
                 exit(jet::Debug::run_debug(&resolved));
@@ -2345,9 +2411,9 @@ fn main() {
         }
         Some(f) => f.as_str(),
         None => {
-            // No target: try project-root mode for run/build/test/bench.
+            // No target: try project-root mode for run/build/test/check/dev.
             match cmd {
-                "run" | "build" | "test" | "check" | "bench" => {
+                "run" | "build" | "test" | "check" | "dev" => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     if let Some(entry) = resolve_bare_entry(cmd, &cwd, bare_member_flag) {
                         let entry_str = entry.to_string_lossy().to_string();
@@ -2356,7 +2422,7 @@ fn main() {
                                 // Spec S43: bare `jet test` collects every
                                 // `#Test` in the package, so the target is the
                                 // package the resolved entry belongs to — the
-                                // same project shape bare `jet bench` uses
+                                // same project shape as the package test resolver
                                 // below, with member selection unchanged.
                                 let entry_dir = entry
                                     .parent()
@@ -2370,34 +2436,30 @@ fn main() {
                                         show_default: jet_argv.iter().any(|a| a == "--show-default"),
                                         release: release_flag,
                                         trace_tiers: jet_argv.iter().any(|a| a == "--trace-tiers"),
+                                        measure: jet_argv.iter().any(|a| a == "--measure"),
+                                        record: record_name.clone(),
                                         ..Default::default()
                                     },
                                     mode,
                                 );
                                 return;
                             }
-                            "bench" => {
-                                // A bare bench is a project target, not only
-                                // the resolved run entry. This keeps its
-                                // discovery surface identical to `jet bench
-                                // <directory>` while preserving workspace
-                                // member selection from the shared resolver.
-                                let entry_dir = entry
-                                    .parent()
-                                    .filter(|path| !path.as_os_str().is_empty())
-                                    .unwrap_or_else(|| Path::new("."));
-                                let project = jet::Loader::find_manifest_root(entry_dir)
-                                    .unwrap_or_else(|| entry_dir.to_path_buf());
-                                let project = project.to_string_lossy();
-                                run_bench(
-                                    &project,
-                                    BenchRunOpts {
-                                        show_default: jet_argv.iter().any(|a| a == "--show-default"),
-                                        filter: bench_filter.clone(),
-                                    },
+                            "dev" => {
+                                let try_anyway = jet_argv.iter().any(|a| a == "--try-anyway");
+                                let use_interpreter = jet_argv.iter().any(|a| a == "--interpret");
+                                let policy = watch_policy_from(&raw, WatchPolicy::Auto);
+                                run_dev(
+                                    &entry_str,
+                                    try_anyway,
+                                    policy,
+                                    gates,
                                     mode,
+                                    use_interpreter,
+                                    named_profile.as_deref().unwrap_or("dev"),
+                                    &setting_overrides,
+                                    record_name.as_deref(),
                                 );
-                                unreachable!("run_bench exits after the project walk")
+                                return;
                             }
                             _ => {
                                 // D-CLI1: use passthrough slice if `--` was present;
@@ -2419,6 +2481,7 @@ fn main() {
                                         use_interpreter,
                                         named_profile.as_deref().unwrap_or("dev"),
                                         &setting_overrides,
+                                        record_name.as_deref(),
                                     );
                                     return;
                                 }
@@ -2445,6 +2508,7 @@ fn main() {
                                     output_name.as_deref(),
                                     &program_args,
                                     mode,
+                                    record_name.as_deref(),
                                 );
                                 return;
                             }
@@ -2525,6 +2589,7 @@ fn main() {
             // of a plain boolean flag).
             let serial = jet_argv.iter().any(|a| a == "--serial");
             let show_default = jet_argv.iter().any(|a| a == "--show-default");
+            let measure = jet_argv.iter().any(|a| a == "--measure");
             // Keep directory targets intact so package tests/checks are
             // collected together instead of resolving to one run entry.
             let target_path = Path::new(target);
@@ -2544,6 +2609,8 @@ fn main() {
                     filter,
                     shuffle_seed,
                     serial,
+                    measure,
+                    record: record_name.clone(),
                 },
                 mode,
             );
@@ -2568,23 +2635,6 @@ fn main() {
                 exit(ExitCodes::USAGE);
             }
             run_emit_rust(target, mode);
-        }
-        // D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.
-        "bench" => {
-            let target_path = Path::new(target);
-            let resolved = if target_path.is_dir() {
-                target.to_string()
-            } else {
-                resolve_source_path(target)
-            };
-            run_bench(
-                &resolved,
-                BenchRunOpts {
-                    show_default: jet_argv.iter().any(|a| a == "--show-default"),
-                    filter: bench_filter,
-                },
-                mode,
-            );
         }
         // D-TESTKIT1=A (c308 pass 2): `jet fuzz <file> [<test-name>]` — fuzz a
         // parameterized `#Test fn` (D-TEST1's property-test form).
@@ -2693,6 +2743,7 @@ fn main() {
                         use_interpreter,
                         named_profile.as_deref().unwrap_or("dev"),
                         &setting_overrides,
+                        record_name.as_deref(),
                     );
                     return;
                 }
@@ -2719,6 +2770,7 @@ fn main() {
                 output_name.as_deref(),
                 &program_args,
                 mode,
+                record_name.as_deref(),
             );
         }
     }
@@ -3064,8 +3116,8 @@ fn resolve_member_build_entry(root: &Path) -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
-/// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`bench`/
-/// `check`/`build` inside a package — the one rule all six share instead of
+/// D-CLI-BARE1=A: shared bare-entry resolver for `run`/`dev`/`debug`/`check`/
+/// `build` inside a package — the one rule all five share instead of
 /// each hand-rolling its own "no file given" fallback.
 ///
 /// A workspace member list (D-JPK-WORKSPACE, `jetpack::WorkspaceFile`)

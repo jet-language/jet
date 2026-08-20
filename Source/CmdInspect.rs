@@ -156,8 +156,9 @@ fn digest_slices() -> Vec<DigestSlice> {
             .scan(header_end, |offset, line| {
                 let start = *offset;
                 *offset += line.len();
-                line.starts_with("core.").then_some((start, *offset))
+                Some((start, *offset, line.starts_with("core.")))
             })
+            .filter_map(|(start, end, is_module)| is_module.then_some((start, end)))
             .collect::<Vec<_>>();
         for (row_index, (row_start, row_end)) in rows.iter().enumerate() {
             let topic = digest[*row_start..*row_end]
@@ -204,7 +205,7 @@ fn llm_digest() -> String {
         "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ? E`.",
         "Errors: handle `T?` or `T ? E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition { ... } else { ... }`; collecting loops use `loop name, source { ... }`; exit with `break` and advance with `next`.",
-        "Construction: use `Type.{ field: value }`; list literals use `[T].{ value1, value2 }`.",
+        "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
         "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     ]
