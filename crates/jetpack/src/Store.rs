@@ -89,8 +89,6 @@ const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
 const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
-}
-
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowsDirectorySyncContract {

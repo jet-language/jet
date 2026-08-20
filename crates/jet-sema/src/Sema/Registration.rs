@@ -1009,7 +1009,7 @@ pub(crate) fn check_effect_boundaries(
                 if let Some(body) = &module.body {
                     for item in body {
                         if let Item::Func(f) = item {
-                            let identity = jet_foundation::Names::member_name(&module.name, &f.name);
+                            let identity = super::inline_effect_key(&module.name, &f.name);
                             check_one(
                                 f,
                                 None,

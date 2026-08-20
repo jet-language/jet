@@ -27,7 +27,7 @@
 
 use crate::Syntax;
 use crate::AST::{Func, Item, TraitMethodSig, Type};
-use crate::Sema::EffectSet;
+use crate::Sema::{inline_effect_key, EffectSet};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -683,6 +683,9 @@ fn collect_pub_fns(
                 let ledger_name = semantic_module
                     .map(|module| jet_foundation::Names::member_name(module, &f.name))
                     .unwrap_or_else(|| f.name.clone());
+                let effect_name = semantic_module
+                    .map(|module| inline_effect_key(module, &f.name))
+                    .unwrap_or_else(|| f.name.clone());
                 let is_public = ledger
                     .map(|ledger| ledger.public(module_idx, &ledger_name))
                     .unwrap_or(f.is_pub && !f.is_package_pub);
@@ -697,7 +700,7 @@ fn collect_pub_fns(
                             f,
                             solved.map(|sets| {
                                 module_alias
-                                    .and_then(|alias| sets.get(&format!("{alias}::{ledger_name}")))
+                                    .and_then(|alias| sets.get(&format!("{alias}::{effect_name}")))
                                     .or_else(|| sets.get(&f.name))
                                     .unwrap_or(&empty_effects)
                             }),

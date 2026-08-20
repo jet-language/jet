@@ -3755,6 +3755,8 @@ fn program_uses_embed(bundle: &jet::AST::ProgramBundle) -> bool {
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
 /// Runs `rustc --print target-list` and exits with E3302 if the triple is absent.
 /// D-WEBKIND1=A (c123): `web` is a Jet backend target, not a rustc triple — accepted here.
+/// D-WASISRV1=A: `wasm32-wasip2` is a supported Rust Component Model server
+/// target; installed-rustc checks below still teach E3302 when missing.
 pub(crate) fn validate_target(triple: &str, mode: OutputMode) {
     // D-WEBKIND1=A: Jet backend target, not a rustc triple.
     if triple == "web" || triple == jet::Syntax::BUILD_TARGET_WEB {
@@ -3784,6 +3786,8 @@ pub(crate) fn validate_target(triple: &str, mode: OutputMode) {
         report_problems(mode, "<target>", &src, &[diag]);
         exit(ExitCodes::USER_ERROR);
     }
+    // D-WASISRV1=A: the p2 Component target still needs its installed std
+    // component; do not defer a missing toolchain to generated-code failure.
     // Check that the std library is installed for this target.
     // `rustc --print sysroot` + check for lib/<triple>/ directory.
     let sysroot = Command::new("rustc").arg("--print").arg("sysroot").output();

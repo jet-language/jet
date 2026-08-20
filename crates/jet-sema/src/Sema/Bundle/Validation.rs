@@ -1256,7 +1256,7 @@ pub(crate) fn check_module_bodies(
                             }
                             if let Some(summary) = summaries.remove(&f.name) {
                                 summaries.insert(
-                                    jet_foundation::Names::member_name(&cm.name, &f.name),
+                                    crate::Sema::inline_effect_key(&cm.name, &f.name),
                                     summary,
                                 );
                             }

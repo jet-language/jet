@@ -278,7 +278,7 @@ fn jet_crypto_entropy_fill_native(out: &mut [u8]) -> Result<(), JetCryptoEntropy
     })
 }
 
-#[cfg(all(target_os = "wasi", target_arch = "wasm32"))]
+#[cfg(all(target_os = "wasi", target_env = "p1", target_arch = "wasm32"))]
 fn jet_crypto_entropy_wasi_attempt(out: &mut [u8]) -> Result<(), u16> {
     #[link(wasm_import_module = "wasi_snapshot_preview1")]
     unsafe extern "C" {
@@ -288,7 +288,28 @@ fn jet_crypto_entropy_wasi_attempt(out: &mut [u8]) -> Result<(), u16> {
     if errno == 0 { Ok(()) } else { Err(errno) }
 }
 
-#[cfg(any(test, all(target_os = "wasi", target_arch = "wasm32")))]
+#[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+fn jet_crypto_entropy_wasi_attempt(out: &mut [u8]) -> Result<(), u16> {
+    // D-WASISRV1=A: Preview 2 replaces preview1 random_get with the
+    // wasi:random/random get-random-u64 function. Scalar import avoids a
+    // second allocator/return-area ABI in the shared Prelude.
+    #[link(wasm_import_module = "wasi:random/random@0.2.0")]
+    unsafe extern "C" {
+        #[link_name = "get-random-u64"]
+        fn get_random_u64() -> u64;
+    }
+    for chunk in out.chunks_mut(8) {
+        let bytes = unsafe { get_random_u64() }.to_ne_bytes();
+        chunk.copy_from_slice(&bytes[..chunk.len()]);
+    }
+    Ok(())
+}
+
+#[cfg(any(
+    test,
+    all(target_os = "wasi", target_env = "p1", target_arch = "wasm32"),
+    all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
+))]
 fn jet_crypto_entropy_wasi_with(
     count: usize,
     mut provider: impl FnMut(&mut [u8]) -> u16,
@@ -362,14 +383,18 @@ pub fn jet_crypto_entropy_wasi_with_for_test(
         target_env = "msvc",
         any(target_arch = "x86_64", target_arch = "aarch64")
     ),
-    all(target_os = "wasi", target_arch = "wasm32")
+    all(target_os = "wasi", target_env = "p1", target_arch = "wasm32"),
+    all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
 )))]
 fn jet_crypto_entropy_fill_native(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
     jet_crypto_entropy_zeroize(out);
     Err(JetCryptoEntropyError::EntropyUnavailable)
 }
 
-#[cfg(not(all(target_os = "wasi", target_arch = "wasm32")))]
+#[cfg(not(any(
+    all(target_os = "wasi", target_env = "p1", target_arch = "wasm32"),
+    all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
+)))]
 fn jet_crypto_entropy_fill_platform(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
     #[cfg(test)]
     {
@@ -396,7 +421,10 @@ pub fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, JetCryptoEntropyE
         return Ok(Vec::new());
     }
 
-    #[cfg(all(target_os = "wasi", target_arch = "wasm32"))]
+    #[cfg(any(
+        all(target_os = "wasi", target_env = "p1", target_arch = "wasm32"),
+        all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
+    ))]
     {
         return jet_crypto_entropy_wasi_with(count as usize, |out| {
             match jet_crypto_entropy_wasi_attempt(out) {

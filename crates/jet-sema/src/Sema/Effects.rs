@@ -74,6 +74,16 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
     Some(name.to_string())
 }
 
+/// D-EFF1: inline-module effect summaries use a semantic member key. The
+/// `__jet_` projection belongs to registration and codegen, not the effect
+/// graph.
+pub(crate) fn inline_effect_key(module: &str, name: &str) -> String {
+    let module = module
+        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(module);
+    format!("{module}__{name}")
+}
+
 pub fn resolve_effect_name(
     name: &str,
     facts: &jet_foundation::Facts::FactRegistry,
@@ -202,6 +212,12 @@ impl<'a> super::Checker<'a> {
     /// D-EFF1: record a call-graph edge to a user function `name` — into the
     /// function's edges and every open `#Caps(…)` region.
     pub(crate) fn record_edge(&mut self, name: String, span: Span) {
+        let inline_edge = self.code_modules.values().find_map(|module| {
+            let prefix = jet_foundation::Names::member_name(module, "");
+            name.strip_prefix(&prefix)
+                .map(|member| inline_effect_key(module, member))
+        });
+        let name = inline_edge.unwrap_or(name);
         self.record_edge_with_executions(name, span, self.memory_control_multiplier);
     }
 
@@ -965,7 +981,7 @@ pub fn check_inferred_purity(
                 if let Some(body) = &module.body {
                     for item in body {
                         if let Item::Func(f) = item {
-                            let identity = jet_foundation::Names::member_name(&module.name, &f.name);
+                            let identity = inline_effect_key(&module.name, &f.name);
                             check_one(
                                 f,
                                 None,

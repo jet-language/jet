@@ -424,6 +424,11 @@ pub const WEB_BUCKET_WASM: &str = "Wasm";
 /// D-WEBKIND1=A (c123): `jet build --target=web` Jet backend target (not a rustc triple).
 pub const BUILD_TARGET_WEB: &str = "web";
 
+/// D-WASISRV1=A (ratified 2026-08-19): first-class WASI Preview 2 server
+/// target. Rust emits its Component Model artifact and std::net carries the
+/// wasi-sockets adapter.
+pub const BUILD_TARGET_WASI_SERVER: &str = "wasm32-wasip2";
+
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` argument spelling — a file-level
 /// marker distinct from the `Wasm`/`JS` partition-ceiling values above (same
 /// `#Target(...)` marker, different axis: "build me for the web backend by
