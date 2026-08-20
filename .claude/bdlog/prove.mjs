@@ -18,13 +18,15 @@
 //   node .claude/bdlog/prove.mjs --dry <cardId>...  # run, show, record nothing
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 
 const BY = "fable-e3-burndown";
 const args = process.argv.slice(2);
 const dry = args.includes("--dry");
 const cards = args.filter((a) => a !== "--dry");
 const map = JSON.parse(readFileSync(".claude/bdlog/proofmap.json", "utf8"));
+const scratch = process.env.JET_TEST_SCRATCH ?? `${process.env.HOME}/.cache/jet-test-scratch`;
+mkdirSync(scratch, { recursive: true });
 
 const tower = (a) =>
   execFileSync("node", ["plugins/tower/tower.mjs", ...a], {
@@ -37,7 +39,16 @@ const run = (cmd) => {
     const out = execFileSync("sh", ["-c", `scripts/agent/jet-env ${cmd}`], {
       encoding: "utf8",
       maxBuffer: 1e9,
-      env: { ...process.env, JET_NIX_TMP_CLEANED: "1" },
+      env: {
+        ...process.env,
+        JET_NIX_TMP_CLEANED: "1",
+        // /tmp is RAM-backed here and cargo defaults to one rustc per thread.
+        TMPDIR: scratch,
+        TMP: scratch,
+        TEMP: scratch,
+        CARGO_INCREMENTAL: "0",
+        CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "8",
+      },
       timeout: 2_400_000,
     });
     return { code: 0, out };

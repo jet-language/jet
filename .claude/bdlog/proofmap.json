@@ -1,7 +1,7 @@
 {
   "c0fxc599": {
     "1": {
-      "cmd": "cargo test --test single_use -- task_handles_owe_join_or_detach",
+      "cmd": "cargo test --test single_use",
       "note": "The bound-handle duty is an error whose fix names join, using the result, or detach; tests/ui/unjoined_task.stderr and tests/ui/discarded_task.stderr pin the rendered reports."
     },
     "2": {
@@ -9,16 +9,16 @@
       "note": "D-LIN1 covers Task<T> and the task-list forms through one shared obligation pass."
     },
     "3": {
-      "cmd": "cargo test --test taskgroup_params -- evaluator_supports_taskgroup_combinators",
+      "cmd": "cargo test --test taskgroup_params",
       "note": "all, race and any discharge the handles they consume, so no duty error is raised at those calls."
     },
     "4": {
       "cmd": "cargo test --test task_state",
-      "note": "detach still discharges the duty for fire-and-forget; the join-duty pass is the one D-LIN1 obligation pass."
+      "note": "detach still discharges the duty; the join-duty pass is the one D-LIN1 obligation pass."
     },
     "7": {
       "cmd": "cargo test --test task_state_tiers --test task_control_tiers",
-      "note": "Tier parity: the duty is a compile-time fact, and the task control plane matches on default run, under AOT and in the interpreter."
+      "note": "Tier parity: the duty is a compile-time fact and the task control plane matches on default run, under AOT and in the interpreter."
     },
     "9": {
       "cmd": "cargo test --test gate_ledger",
@@ -31,7 +31,7 @@
   },
   "c07zohrf": {
     "2": {
-      "cmd": "cargo test --test task_control_tiers -- stream_drop_uses_task_cancel_cleanup_path",
+      "cmd": "cargo test --test task_control_tiers",
       "note": "Breaking out of a stream loop cancels the producer, which unwinds at its next yield and runs its defer close."
     },
     "6": {
@@ -47,17 +47,16 @@
   },
   "c0rhcnm6": {
     "3": {
-      "cmd": "cargo test --test diagnostic_snapshots -- ui_snapshots",
-      "note": "tests/ui/list_literal_ambiguous_dot.stderr pins the E0119 refusal for a list with no determinable element type, and its fix text now names a spelling that parses."
+      "cmd": "cargo test --test diagnostic_snapshots",
+      "note": "tests/ui/list_literal_ambiguous_dot.stderr pins the E0119 refusal for a list with no determinable element type, and its fix text names a spelling that parses."
     }
   },
   "c0p48658": {
     "1": {
-      "cmd": "cargo test --test golden -- examples_compile_and_run",
-      "note": "The parallel walk path ships with a grep-style flagship example whose golden matches the sequential walk."
+      "cmd": "cargo test --test golden",
+      "note": "The parallel walk ships with a grep-style flagship example whose golden matches the sequential walk on every tier."
     }
   },
-  "c0hr2wez": {},
   "c0vvnebk": {
     "1": {
       "cmd": "cargo test --test terminal",
@@ -77,5 +76,24 @@
       "cmd": "cargo test --test dev_corpus_gate -- example_corpus_strict_jit_aot_differential_gate",
       "note": "The differential gate reaches its own assertion rather than dying on a panic."
     }
-  }
+  },
+  "c0jr1xem": {
+    "2": {
+      "cmd": "jet test --release --filter=sqlite_style_fail_nth_effect_loop_is_deterministic examples/features/tooling/testing_helpers.jet",
+      "note": "The SQLite-style fail-nth loop is deterministic under the shipped marker."
+    },
+    "5": {
+      "cmd": "cargo test --test golden",
+      "note": "The fault-injection example runs with its golden output on every applicable tier."
+    },
+    "8": {
+      "cmd": "cargo test --test grammar",
+      "note": "The faults marker configuration needs no grammar change beyond the registered row; the grammar suite is green at HEAD."
+    },
+    "9": {
+      "cmd": "cargo test --test diagnostic_snapshots",
+      "note": "Snapshots are green at HEAD with the faults row registered."
+    }
+  },
+  "c0hr2wez": {}
 }
