@@ -743,7 +743,10 @@ fn run() ? {
     assert_eq!(code, 1);
     assert!(stdout.is_empty());
     assert!(
-        stderr.ends_with("rounded unit conversion needs nonnegative digits\n"),
+        stderr.starts_with("Error: rounded unit conversion needs nonnegative digits\n")
+            && stderr.contains(" Trail [E3002] (1 hop via ?, origin first):")
+            && stderr.contains(" 1. run (")
+            && stderr.contains("rounded_negative_digits.jet:5)"),
         "unexpected stderr: {stderr}"
     );
 }

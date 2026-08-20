@@ -1444,7 +1444,10 @@ mod crypto_diagnostic_contract_tests {
         assert_eq!(lint.fix, "write `total += …`");
 
         let unsupported = crate::Prelude::jet_e0956_unsupported("a compiler fact", Span::new(0, 1));
-        assert_eq!(unsupported.what, "`a compiler fact` can't run at compile time yet");
+        assert_eq!(
+            unsupported.what,
+            "`a compiler fact` isn't supported by the current evaluator yet"
+        );
     }
 
     #[test]

@@ -692,7 +692,7 @@ fn report_openers_ignore_prose_comments_and_rust_assertion_text() {
 
 #[test]
 fn reverse_coverage_diff_names_retired_and_unregistered_fixture_codes() {
-    let left = code_set(&["E0001"]);
+    let left = BTreeSet::new();
     let right: BTreeSet<String> = extract_report_opening_codes(
         "Error [E0004]: retired\nError [E9999]: no longer registered\n",
     )
@@ -962,9 +962,6 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("L0205", "left-only", "Tower #2093"),
     ("L2902", "left-only", "Tower #2093"),
     ("L3102", "left-only", "Tower #2093"),
-    ("R0801", "left-only", "Tower #2093"),
-    ("R0802", "left-only", "Tower #2093"),
-    ("R0803", "left-only", "Tower #2093"),
     // RIGHT-only: existing report openers for retired/reserved rows.
     ("E0060", "right-only", "Tower #2093"),
     ("E0065", "right-only", "Tower #2093"),
@@ -1519,6 +1516,7 @@ fn registered_unimplemented_codes_are_expected() {
         ("E0004", "retired"),
         ("E0005", "retired"),
         ("E0006", "retired"),
+        ("E0007", "retired"),
         ("E0062", "retired"),
         ("E0071", "retired"),
         ("E0010", "retired"),
@@ -1556,6 +1554,7 @@ fn registered_unimplemented_codes_are_expected() {
         ("E0954", "retired"),
         ("E0920", "retired"),
         ("E1109", "staged #1220"),
+        ("E1111", "retired"),
         ("E1229", "retired"),
         ("E0410", "retired"),
         ("E0859", "staged #521"),

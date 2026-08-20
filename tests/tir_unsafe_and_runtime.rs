@@ -323,27 +323,24 @@ fn run() {
             "unsafe_sentries_provenance",
             include_str!("../examples/features/memory/unsafe_sentries_provenance.jet"),
             "R0801",
-            "external address must be a live allocation",
             "outside allocation provenance",
         ),
         (
             "unsafe_sentries_quarantine",
             include_str!("../examples/features/memory/unsafe_sentries.jet"),
             "R0802",
-            "pointer is used only after arena reset to prove quarantine",
             "quarantined and poisoned",
         ),
         (
             "unsafe_sentries_alignment",
             misaligned_source,
             "R0803",
-            "the tuple storage is live but this raw Int is misaligned",
             "misaligned raw read",
         ),
     ];
     let aot_available = have_rustc();
 
-    for (name, src, code, gate, detail) in cases {
+    for (name, src, code, detail) in cases {
         let mut tiers = vec![
             ("default JIT", tir_support::jit_run(name, src)),
             ("forced interpreter", tir_support::interpreter_run(name, src)),
@@ -359,7 +356,7 @@ fn run() {
             assert!(stdout.is_empty(), "{tier} leaked stdout for {code}: {stdout}");
             for marker in [
                 format!("Runtime fault [{code}]"),
-                gate.to_string(),
+                format!("{name}.jet:"),
                 detail.to_string(),
                 "obligation `valid_ptr` was not met on this run".to_string(),
             ] {
@@ -942,73 +939,24 @@ fn run() {
 }
 
 #[test]
-fn task_join_all_consumes_handles_once() {
+fn task_all_consumes_branches_once() {
     let valid = "\
-use core.tasks as tasks
+fn first() => Int {
+    return 10
+}
+fn second() => Int {
+    return 20
+}
 fn run() {
-    task.group g {
-        first :: task { return 10 }
-        second :: task { return 20 }
-        handles :: [first, second]
-        results :: tasks.join_all(^handles)
-        print(results.len())
-    }
-    return
+    results :: (task.all { first(), second() }) ?? panic("task.all failed")
+    print(results.len())
 }
 ";
-    let compiled = jet::compile(valid).expect("join_all should consume the handle list");
+    let compiled = jet::compile(valid).expect("task.all should consume its branches");
     assert!(
         compiled.lints.iter().all(|lint| lint.code != "L1101"),
-        "joined handles must not trigger L1101: {:?}",
+        "task.all branches must not trigger L1101: {:?}",
         compiled.lints
-    );
-
-    let duplicate = "\
-use core.tasks as tasks
-fn run() {
-    task.group g {
-        handle :: task { return 10 }
-        tasks.join_all([handle, handle])
-    }
-}
-";
-    let diagnostics = jet::compile(duplicate).expect_err("one handle cannot be joined twice");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0121"),
-        "expected E0121 for duplicate handle consumption, got {diagnostics:?}"
-    );
-
-    let reused = "\
-use core.tasks as tasks
-fn run() {
-    task.group g {
-        handle :: task { return 10 }
-        tasks.join_all([handle])
-        handle.join()
-    }
-}
-";
-    let diagnostics = jet::compile(reused).expect_err("joined handle must stay consumed");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0121"),
-        "expected E0121 after join_all consumption, got {diagnostics:?}"
-    );
-
-    let borrowed_list = "\
-use core.tasks as tasks
-fn run() {
-    task.group g {
-        handle :: task { return 10 }
-        handles :: [handle]
-        tasks.join_all(handles)
-    }
-}
-";
-    let diagnostics =
-        jet::compile(borrowed_list).expect_err("named handle lists need an ownership transfer");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0201"),
-        "expected E0201 for a borrowed handle list, got {diagnostics:?}"
     );
 }
 

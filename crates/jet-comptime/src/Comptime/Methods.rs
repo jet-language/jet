@@ -65,6 +65,10 @@ mod structure_tests {
                 "core_calls/impure",
                 include_str!("Methods/core_calls/impure.rs"),
             ),
+            (
+                "core_calls/random",
+                include_str!("Methods/core_calls/random.rs"),
+            ),
             ("pool", include_str!("Methods/pool.rs")),
         ] {
             let lines = source.lines().count();

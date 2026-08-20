@@ -43,8 +43,8 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
         "jet_sentry_scope"
     };
     out.push_str(&format!(
-        "{pad}let _jet_sentry = {}jet_mem::{scope}({}, {:?}, {}, {:?});\n",
-        cx.root_prefix, gate.enabled, gate.file, gate.line, gate.reason,
+        "{pad}let _jet_sentry = {}jet_mem::{scope}({}, {:?}, {}, \"\");\n",
+        cx.root_prefix, gate.enabled, gate.file, gate.line,
     ));
 }
 

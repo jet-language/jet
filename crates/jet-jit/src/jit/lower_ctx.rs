@@ -10683,7 +10683,7 @@ impl LowerCtx<'_, '_> {
                     if let Type::Named(type_name) = &push_ty {
                         if matches!(
                             type_name.as_str(),
-                            "Url" | "Mime" | "Path" | "Date" | "DateTime" | "Instant"
+                            "Duration" | "Url" | "Mime" | "Path" | "Date" | "DateTime" | "Instant"
                                 | "LocalTime" | "Period" | "Zone" | "ZonedDateTime"
                         ) {
                             let text = self.lower_jet_show(e)?;

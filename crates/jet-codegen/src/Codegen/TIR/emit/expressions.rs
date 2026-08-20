@@ -3053,9 +3053,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             if *all { "all" } else { "one" }
         ),
         TExprKind::PtrFromAddr { elem, addr } => {
+            // A radix-prefixed address reaches TIR as a BigInt because the
+            // decimal fast path does not parse the prefix. Keep a representable
+            // address as the ordinary i64 literal expected by the pointer ABI;
+            // true large integers retain the packed Prelude representation.
+            let rendered_addr = match &addr.kind {
+                TExprKind::CtLit(crate::AST::CtValue::BigInt(value)) => value
+                    .to_string_rep()
+                    .parse::<i64>()
+                    .map(|address| format!("{address}i64"))
+                    .unwrap_or_else(|_| emit_tir_expr(addr, cx)),
+                _ => emit_tir_expr(addr, cx),
+            };
             format!(
                 "(({}) as usize as *mut {})",
-                emit_tir_expr(addr, cx),
+                rendered_addr,
                 cx.rust_type(elem)
             )
         }

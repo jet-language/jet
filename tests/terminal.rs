@@ -126,7 +126,9 @@ fn run_pty(mode: &str) -> String {
     let output = child.wait_with_output().expect("collect PTY transcript");
     assert!(
         output.status.success(),
-        "PTY child failed: {}",
+        "PTY child failed with {}\nstdout: {:?}\nstderr: {:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).into_owned()

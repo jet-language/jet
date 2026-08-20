@@ -497,7 +497,7 @@ pub(crate) fn jet_crypto_entropy_fail_closed(
     // `jet_ffi_*` bridge crate in jet-pkg-model/src/FFI.rs). Those projections
     // do not all carry Foundation's registered-row adapter
     // `jet_render_runtime_stop`: the bridge strips it with the rest of the host
-    // wrapper (`JET_HOST_RUNTIME_STOP_BEGIN`/`_END`) and, unlike
+    // wrapper boundary and, unlike
     // `push_embedded_outcome`, never appends a replacement. Rendering here
     // therefore emitted a call whose definition lived in another projection's
     // guard — rustc E0425 inside a crate Jet itself generated, surfaced to the
