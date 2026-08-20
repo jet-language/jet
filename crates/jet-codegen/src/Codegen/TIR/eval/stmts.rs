@@ -1327,7 +1327,11 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
                 if let Some(stream_index) = super::EvalCtx::stream_index(&coll) {
-                    let stream_control = {
+                    // D-CONC-STREAM1=A: the producer is a scheduler child. Its
+                    // control is the one cancellation fact for this stream, and
+                    // drop-close (`break`, or a consumer that stops pulling) is
+                    // a cancel of that child.
+                    let producer = {
                         let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                         runtime
                             .streams
@@ -1336,10 +1340,9 @@ impl<'a> EvalCtx<'a> {
                             .ok_or_else(|| unsupported("stream handle", self.span()))?
                     };
                     self.task_wait_check("stream pull")?;
-                    if stream_control.cancelled() {
+                    if producer.cancelled.load(std::sync::atomic::Ordering::Acquire) {
                         return Ok(Flow::Normal);
                     }
-                    let previous_stream_cancel = self.stream_cancel.replace(stream_control);
                     let (func, args) = {
                         let runtime =
                             self.runtime.lock().expect("evaluator runtime poisoned");
@@ -1352,15 +1355,32 @@ impl<'a> EvalCtx<'a> {
                     let previous_consumer = self.yield_consumer.replace(super::YieldConsumer {
                         var: var.clone(),
                         body,
+                        producer: producer.clone(),
+                        consumer_cancel: self.task_cancel.clone(),
+                        consumer_shield_depth: self.shield_depth,
                     });
                     let previous_scope = self.yield_scope.replace(std::mem::take(scope));
+                    // The producer's own frames run under the child's control,
+                    // so `yield` reaches the same `task_wait_check` every other
+                    // wait point in a cancelled task reaches. The child starts
+                    // unshielded: a `#Shield` the consumer is inside belongs to
+                    // the consuming task, not to this new one.
+                    let previous_task_cancel =
+                        self.task_cancel.replace(Arc::clone(&producer.cancelled));
+                    let previous_shield_depth = std::mem::replace(&mut self.shield_depth, 0);
                     let mut generator_scope = HashMap::new();
                     let result = self.run_func(func, args, &mut generator_scope);
+                    self.shield_depth = previous_shield_depth;
+                    self.task_cancel = previous_task_cancel;
                     *scope = self.yield_scope.take().unwrap_or_default();
                     self.yield_scope = previous_scope;
                     self.yield_consumer = previous_consumer;
-                    self.stream_cancel = previous_stream_cancel;
-                    result?;
+                    match result {
+                        Ok(_) => {}
+                        Err(error)
+                            if super::stream_producer_cancel_completed(&producer, &error) => {}
+                        Err(error) => return Err(error),
+                    }
                     return Ok(Flow::Normal);
                 }
                 let stride = match step {

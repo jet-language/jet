@@ -264,6 +264,21 @@ fn task_failure_value(error: &Diagnostic) -> CtValue {
     }
 }
 
+/// D-CONC-STREAM1=A: the consumer's view of a cancelled producer child. `break`
+/// cancels the child, the child unwinds at its next wait point through
+/// `task_wait_check`, and the consumer turns that outcome into ordinary stream
+/// completion — the evaluator's spelling of `jet_stream_task`'s cancel
+/// classification plus the spawn frame's `JetSchedulerResult::Cancelled`. Both
+/// ends read the one shared code table in `Prelude/TaskGroup.rs`.
+fn stream_producer_cancel_completed(
+    control: &Arc<crate::scheduler::JetTaskControl>,
+    error: &Diagnostic,
+) -> bool {
+    control.cancelled.load(Ordering::Acquire)
+        && crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone())
+            == crate::task_group::JetTaskFailure::Cancelled
+}
+
 fn task_child_panic(message: String, span: Span) -> Diagnostic {
     crate::Sema::Diagnostics::render_registered(
         "E0953",
@@ -1157,11 +1172,6 @@ pub(super) struct EvalCtx<'a> {
     task_sender: Option<mpsc::Sender<EvalTaskJob<'a>>>,
     task_cancel: Option<Arc<AtomicBool>>,
     task_paused: Option<Arc<AtomicBool>>,
-    /// D-CONC-STREAM1=A / D-CANCELMODEL1=C: the active stream's shared
-    /// Prelude cancellation control. The evaluator checks it at the same
-    /// yield wait boundary used by task cancellation; cleanup remains ordinary
-    /// function unwinding and deferred-close execution.
-    stream_cancel: Option<crate::scheduler::JetStreamControl>,
     pub(super) context_deadline: Option<i64>,
     pub(super) shield_depth: usize,
     /// Direct yield delivery keeps generator evaluation streaming: no eager
@@ -1292,10 +1302,14 @@ struct EvalAppStep {
     args: Vec<CtValue>,
 }
 
+/// D-CONC-STREAM1=A: a stream producer is a scheduler child, so the handle
+/// carries the child's ordinary `JetTaskControl` — not a stream-local
+/// cancellation fact. `break` cancels that control and `yield` reads it at the
+/// shared task wait point.
 struct EvalStream<'a> {
     func: &'a TFunc,
     args: Vec<CtValue>,
-    control: crate::scheduler::JetStreamControl,
+    control: Arc<crate::scheduler::JetTaskControl>,
 }
 
 const TIR_SELECT_BUILDER: &str = "__JetTirSelectBuilder";
@@ -1559,6 +1573,15 @@ impl EvalRuntime<'_> {
 struct YieldConsumer<'a> {
     var: String,
     body: &'a [TStmt],
+    /// The producer child's control: `break` out of the consumer cancels it,
+    /// which is what the producer's next wait point observes.
+    producer: Arc<crate::scheduler::JetTaskControl>,
+    /// The consuming frame's wait-point facts, restored while a delivered value
+    /// runs its body. A delivered value executes under the consuming task's
+    /// cancellation and its own shield depth: the producer child is a separate
+    /// task, so a `#Shield` in the producer never shields the consumer.
+    consumer_cancel: Option<Arc<AtomicBool>>,
+    consumer_shield_depth: usize,
 }
 
 impl<'a> EvalCtx<'a> {
@@ -1665,18 +1688,6 @@ impl<'a> EvalCtx<'a> {
 
     fn task_join_wait_check(&self) -> Result<(), Diagnostic> {
         self.task_wait_check("task join")
-    }
-
-    /// The stream twin of the task wait boundary. Task cancellation and
-    /// deadlines still use the shared task policy; a consumer break uses the
-    /// shared Prelude control because it is ordinary stream completion, not a
-    /// user-visible task error.
-    fn stream_wait_check(&self, wait_kind: &str) -> Result<bool, Diagnostic> {
-        self.task_wait_check(wait_kind)?;
-        Ok(self
-            .stream_cancel
-            .as_ref()
-            .is_some_and(crate::scheduler::JetStreamControl::cancelled))
     }
 
     /// The evaluator twin of `JetTaskControl::wait_while_paused`: a paused task
@@ -1852,7 +1863,6 @@ impl<'a> EvalCtx<'a> {
             task_sender: Some(job.task_sender),
             task_cancel: Some(job.control.cancelled.clone()),
             task_paused: Some(job.control.paused.clone()),
-            stream_cancel: None,
             context_deadline: job.context_deadline,
             shield_depth: 0,
             yield_consumer: None,
@@ -3296,7 +3306,7 @@ impl<'a> EvalCtx<'a> {
         runtime.streams.push(EvalStream {
             func,
             args,
-            control: crate::scheduler::JetStreamControl::new(),
+            control: crate::scheduler::JetTaskControl::new(),
         });
         CtValue::Struct {
             type_name: "__JetTirStream".to_string(),
@@ -4311,7 +4321,6 @@ fn run_program_with_structs_on_stack(
         task_sender: None,
         task_cancel: None,
         task_paused: None,
-        stream_cancel: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -4456,7 +4465,6 @@ fn run_named_func_on_program_edition(
         task_sender: None,
         task_cancel: None,
         task_paused: None,
-        stream_cancel: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -4724,7 +4732,6 @@ fn eval_expr_hook(
         task_sender: None,
         task_cancel: None,
         task_paused: None,
-        stream_cancel: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -4865,7 +4872,6 @@ fn eval_block_hook(
         task_sender: None,
         task_cancel: None,
         task_paused: None,
-        stream_cancel: None,
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,

@@ -659,13 +659,6 @@
         pub fn close(&self) {
             self.tx.close();
         }
-
-        /// D-CONC-STREAM1=A / D-CANCELMODEL1=C: Stream send is the producer
-        /// task's shared wait point. A dropped consumer cancels that task; no
-        /// second shutdown protocol lives here.
-        pub fn send_stream(&self, value: T) -> bool {
-            self.tx.send(value)
-        }
     }
     impl<T> Clone for JetSender<T> {
         fn clone(&self) -> Self {

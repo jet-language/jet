@@ -8,7 +8,6 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
     let acknowledgements = JetSchedulerChannel::new();
     let completion = JetSchedulerChannel::<JetStreamCompletion>::new();
     let failure_report = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let stream_control = JetStreamControl::new();
     let value_tx = values.sender();
     let acknowledgement_tx = acknowledgements.sender();
     let completion_tx = completion.sender();
@@ -28,7 +27,6 @@ pub fn jet_stream<T: Send>() -> (JetStreamSender<T>, JetStream<T>) {
             failed: false,
             failure_report,
             producer_task: None,
-            stream_control,
         },
     )
 }
@@ -74,36 +72,6 @@ pub enum JetStreamCompletion {
     Failed(Option<String>),
 }
 
-/// Shared task cancellation state for every execution adapter. The native
-/// producer and the evaluator both use the same task control; the evaluator
-/// drives its producer directly but still observes the task wait-point fact.
-#[derive(Clone)]
-pub struct JetStreamControl {
-    task: std::sync::Arc<JetTaskControl>,
-}
-
-impl JetStreamControl {
-    pub fn new() -> Self {
-        Self {
-            task: JetTaskControl::new(),
-        }
-    }
-
-    fn from_task(task: std::sync::Arc<JetTaskControl>) -> Self {
-        Self { task }
-    }
-
-    pub fn cancel(&self) {
-        self.task.cancel();
-    }
-
-    pub fn cancelled(&self) -> bool {
-        self.task
-            .cancelled
-            .load(std::sync::atomic::Ordering::Acquire)
-    }
-}
-
 pub struct JetStream<T> {
     values: Option<JetSchedulerChannel<T>>,
     acknowledgements: Option<JetSchedulerSender<()>>,
@@ -112,7 +80,6 @@ pub struct JetStream<T> {
     failed: bool,
     failure_report: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     producer_task: Option<JetStreamTask>,
-    stream_control: JetStreamControl,
 }
 
 struct JetStreamTask {
@@ -131,8 +98,11 @@ impl JetStreamTask {
         }
     }
 
-    fn cancel_and_drain(mut self) {
+    fn cancel(&self) {
         self.control.cancel();
+    }
+
+    fn drain(mut self) {
         if let Some(drain) = self.drain.take() {
             drain();
         }
@@ -140,11 +110,6 @@ impl JetStreamTask {
 }
 
 impl<T: Send> JetStream<T> {
-    /// Return the shared stream cancellation fact for an execution adapter.
-    pub fn control(&self) -> JetStreamControl {
-        self.stream_control.clone()
-    }
-
     /// Attach the scheduler child that produces this stream. Runtime adapters
     /// use this after their ABI handle has been created.
     pub fn attach_task<J: Send + 'static>(
@@ -152,7 +117,6 @@ impl<T: Send> JetStream<T> {
         control: std::sync::Arc<JetTaskControl>,
         join: JetSchedulerJoin<J>,
     ) {
-        self.stream_control = JetStreamControl::from_task(control.clone());
         self.producer_task = Some(JetStreamTask::new(control, join));
     }
 
@@ -238,16 +202,36 @@ impl<T: Send> IntoIterator for JetStream<T> {
 
 impl<T> Drop for JetStream<T> {
     fn drop(&mut self) {
-        // D-CONC-STREAM1=A: dropping the iterator cancels its producer. The
-        // shared task wait point performs the unwind, so all producer defers
-        // run before the consumer endpoints disappear.
-        if let Some(task) = self.producer_task.take() {
-            task.cancel_and_drain();
-        } else {
-            self.stream_control.cancel();
+        // D-CONC-STREAM1=A: dropping the iterator cancels its producer, which
+        // is an ordinary scheduler child, and the shared task wait point
+        // performs the unwind — so every producer cleanup runs before the
+        // consumer endpoints disappear. There is no stream-local shutdown to
+        // fall back to: a stream with no attached child has no producer to
+        // stop, and its cancellation fact is that child's `JetTaskControl`.
+        //
+        // Cancel, then close, then join. The order is the whole law:
+        //   * cancel first sets the fact before the producer can resume, so a
+        //     producer parked at `yield` unwinds there and never runs the code
+        //     after it;
+        //   * closing the consumer endpoints releases a producer inside
+        //     `#Shield`, which parks on the real event only and ignores the
+        //     cancel wake (`Prelude/Scheduler.rs::jet_scheduler_yield`). It
+        //     finishes its critical section and unwinds at the shield's exit,
+        //     exactly as a shielded task cancelled at any other wait point
+        //     does. Joining before the close would wait on a producer that is
+        //     waiting on us;
+        //   * the join then observes the child's outcome, and the completion
+        //     receive picks up the notification its sender sent while
+        //     unwinding.
+        let producer = self.producer_task.take();
+        if let Some(task) = &producer {
+            task.cancel();
         }
         let _ = self.acknowledgements.take();
         let _ = self.values.take();
+        if let Some(task) = producer {
+            task.drain();
+        }
         if let Some(completion) = self.completion.take() {
             let _ = completion.receive();
         }

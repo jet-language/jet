@@ -7926,10 +7926,14 @@ impl<'a> EvalCtx<'a> {
                     Ok(result)
                 }
                 crate::Codegen::TIR::THostCall::YieldSend { value } => {
-                    if self.stream_wait_check("stream yield")? {
-                        self.pending_return = Some(CtValue::Unit);
-                        return Ok(CtValue::Unit);
-                    }
+                    // D-CONC-STREAM1=A / D-CANCELMODEL1=C: `yield` is the
+                    // producer's wait point, so it takes the one shared task
+                    // boundary — `task_wait_check` — that every other wait
+                    // point in a cancelled task takes, including its `#Shield`
+                    // deferral and its deadline. `JetStreamSender::send_stream`
+                    // has the same two halves natively: hand the value over,
+                    // then park until the next pull.
+                    self.task_wait_check("stream yield")?;
                     let yielded = self.eval_expr_child(value, scope)?;
                     if let Some(items) = self.collecting_items.last_mut() {
                         items.push(yielded);
@@ -7939,20 +7943,45 @@ impl<'a> EvalCtx<'a> {
                         .yield_consumer
                         .clone()
                         .ok_or_else(|| unsupported("yield outside a stream consumer", self.span()))?;
+                    if consumer
+                        .producer
+                        .cancelled
+                        .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        // Reachable only from inside a `#Shield`, which deferred
+                        // the cancel above. The consumer endpoints are already
+                        // gone, so the value is dropped instead of delivered —
+                        // the evaluator's spelling of a closed value channel.
+                        return Ok(CtValue::Unit);
+                    }
                     let mut consumer_scope = self
                         .yield_scope
                         .take()
                         .ok_or_else(|| unsupported("stream consumer scope", self.span()))?;
                     consumer_scope.insert(consumer.var, yielded);
+                    // The delivered value runs in the consuming task's frame,
+                    // under that task's cancellation fact, not the child's.
+                    let producer_cancel =
+                        std::mem::replace(&mut self.task_cancel, consumer.consumer_cancel);
+                    let producer_shield_depth = std::mem::replace(
+                        &mut self.shield_depth,
+                        consumer.consumer_shield_depth,
+                    );
                     let result = self.exec_stmts(consumer.body, &mut consumer_scope);
+                    self.shield_depth = producer_shield_depth;
+                    self.task_cancel = producer_cancel;
                     self.yield_scope = Some(consumer_scope);
                     match result? {
-                        Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
+                        Flow::Normal | Flow::Continue => {
+                            self.task_wait_check("stream yield")?;
+                            Ok(CtValue::Unit)
+                        }
                         Flow::Break => {
-                            if let Some(cancel) = &self.stream_cancel {
-                                cancel.cancel();
-                            }
-                            self.pending_return = Some(CtValue::Unit);
+                            // Drop-close is a cancel: the consumer stops
+                            // pulling, so its producer child is cancelled and
+                            // unwinds right here, running its cleanups.
+                            consumer.producer.cancel();
+                            self.task_wait_check("stream yield")?;
                             Ok(CtValue::Unit)
                         }
                         other => Err(unsupported(
