@@ -112,6 +112,21 @@ pub fn bin_match_consumed(bit_pos: usize) -> Option<usize> {
     (bit_pos % 8 == 0).then_some(bit_pos / 8)
 }
 
+/// Fixed-width holes use the smallest standard integer carrier that holds the
+/// declared width. This matches sema and codegen (`U24` is carried as `U32`).
+fn bin_bits_type(width: u8) -> Type {
+    let bits = if width <= 8 {
+        8
+    } else if width <= 16 {
+        16
+    } else if width <= 32 {
+        32
+    } else {
+        64
+    };
+    Type::IntN { signed: false, bits }
+}
+
 /// Byte-mode sibling of `str_match_scan`. Returns the bit position reached
 /// plus the bound holes.
 pub fn bin_match_scan(
@@ -185,14 +200,23 @@ pub fn bin_match_scan(
                             slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
                             slice[7],
                         ]) as i64,
+                        (3..=7, endian) => {
+                            let value = if endian {
+                                slice.iter().fold(0u64, |value, &byte| {
+                                    (value << 8) | u64::from(byte)
+                                })
+                            } else {
+                                slice.iter().enumerate().fold(0u64, |value, (index, &byte)| {
+                                    value | (u64::from(byte) << (index * 8))
+                                })
+                            };
+                            value as i64
+                        }
                         _ => return None,
                     };
                     binds.push((
                         name.clone(),
-                        Type::IntN {
-                            signed: false,
-                            bits: width as u8,
-                        },
+                        bin_bits_type(width as u8),
                         BinBind::Int(v),
                     ));
                     bit_pos += width;
@@ -210,10 +234,7 @@ pub fn bin_match_scan(
                     }
                     binds.push((
                         name.clone(),
-                        Type::IntN {
-                            signed: false,
-                            bits: width as u8,
-                        },
+                        bin_bits_type(width as u8),
                         BinBind::Int(v as i64),
                     ));
                 }
@@ -286,5 +307,35 @@ mod match_scan_tests {
         assert_eq!(bits, 32);
         assert_eq!(binds[0].2, BinBind::Int(1));
         assert_eq!(binds[1].2, BinBind::Rest(vec![9, 9]));
+    }
+
+    #[test]
+    fn bin_scan_reads_new_byte_widths_both_endians_and_rejects_short_input() {
+        let cases = [
+            (24, &[1, 2, 3], 66051, 197121),
+            (40, &[1, 2, 3, 4, 5], 4328719365, 21542142465),
+            (48, &[1, 2, 3, 4, 5, 6], 1108152157446, 6618611909121),
+            (56, &[1, 2, 3, 4, 5, 6, 7], 283686952306183, 1976943448883713),
+        ];
+
+        for (width, bytes, big_endian, little_endian) in cases {
+            for (endian, expected) in [
+                (BinEndian::Big, big_endian),
+                (BinEndian::Little, little_endian),
+            ] {
+                let parts = vec![BinMatchPart::Hole {
+                    name: "value".to_string(),
+                    spec: BinSpec::Bits { width, endian },
+                    span: Span::new(0, 0),
+                }];
+                let (bits, binds) =
+                    bin_match_scan(bytes, &parts, false).expect("full-width match");
+                assert_eq!(bits, width as usize);
+                assert_eq!(binds[0].1, bin_bits_type(width));
+                assert_eq!(binds[0].2, BinBind::Int(expected));
+                assert!(bin_match_scan(&[], &parts, false).is_none());
+                assert!(bin_match_scan(&bytes[..bytes.len() - 1], &parts, false).is_none());
+            }
+        }
     }
 }
