@@ -689,7 +689,7 @@ pub fn e1258(effects: &str) -> Diagnostic {
         "E1258",
         "a sandbox can't use any effect".to_string(),
         format!(
-            "this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: {effects}. Sandboxes run with zero host capabilities; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in)."
+            "this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: {effects}. Sandboxes run with zero host authority; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in)."
         ),
         "remove the effectful call, or move it out of the sandbox into the host program that loads it".to_string(),
         None,

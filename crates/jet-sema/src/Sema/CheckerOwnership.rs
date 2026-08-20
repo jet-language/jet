@@ -3907,11 +3907,15 @@ impl<'a> Checker<'a> {
     // `return s.after(sep)` written directly (no intermediate binding) always
     // lowers as an ordinary owned `String` — safe, nothing to catch.
 
-    /// D-LIN1 / D-CONC-JOIN1: true when `ty` is a `#SingleUse` value or a Task
-    /// handle. Join duty lives on the handle. A list of handles is drained by
-    /// moving those handles out, not by treating the list as `#SingleUse`.
+    /// D-LIN1 / D-CONC-JOIN1: true when `ty` is a `#SingleUse` value, a Task
+    /// handle, or one of the task-list forms D-CONC-JOIN1 extends the duty to
+    /// (syntax-decisions.md:2177-2182 covers the handle AND the task-list forms
+    /// from D-VERDICT-1323-1). Narrowing this to `is_task_type` alone let a
+    /// `[Task<Int>]` be dropped with its tasks never joined and no diagnostic at
+    /// all, and it also split this rule from the E0120 loop rule, which demands
+    /// the list be moved with `^` and so requires the list to carry the duty.
     pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
-        if is_task_type(ty) {
+        if type_requires_owned_iteration(ty) {
             return true;
         }
         let Some(name) = ty.base_name() else {
