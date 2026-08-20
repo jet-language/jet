@@ -664,12 +664,19 @@ impl<'a> ComptimeTypeResolver<'a> {
             }
             Type::FixedList { elem, len } => {
                 self.resolve_type(elem);
+                // D-META-CONST1: a same-file `@` binding is a constant, so the
+                // measure resolves against the comptime globals this pass just
+                // evaluated. Only a symbol nobody declared is an error.
+                *len = len.resolve_symbols(&|name| match self.globals.get(name) {
+                    Some(crate::Comptime::CtValue::Int(value)) => u64::try_from(*value).ok(),
+                    _ => None,
+                });
                 if len.literal_value().is_none() {
                     self.push_constant_error(
                         "E0963",
-                        "a fixed-size list length must resolve from a module value parameter",
-                        "symbolic measures exist only while a generic module is being specialized",
-                        "pass an Int value argument to the module, or write an integer literal",
+                        "a fixed-size list length must resolve to a compile-time integer",
+                        "the measure named something that is not a declared constant or module value parameter",
+                        "use an integer literal, a same-file `@` constant, or a module Int value argument",
                         crate::Diagnostics::Span::new(0, 0),
                     );
                 }
