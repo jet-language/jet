@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2109,
-    "rev": 39636,
+    "rev": 39646,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132328,12 +132328,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Establish the (a)/(b) split with evidence, one family at a time, largest first.\n\nFor an (a) family, the fix is to make the oracle construct the context the corpus gate already constructs, so the stems enter the universe and are actually judged. Declaring them permanently out-of-universe is the weaker outcome and must be justified per family, not per stem.\n\nFor a (b) stem, the example or the front end is genuinely broken and the audit was hiding it; fix the defect. E2402 in particular is a real language question: 28 shipped net/* examples using `?` on NetError with no declared conversion is either a missing Prelude conversion or 28 examples written against a surface that no longer exists.\n\nWhatever the outcome, OUT_OF_UNIVERSE_CEILING in tests/dev.rs must be lowered by exactly the number of stems this card recovers, in the same diff. The ceiling is the ratchet: the population may only shrink.\n\nDo not add a skip list, and do not raise the ceiling to accommodate a new failure.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated evidence: every family is either recovered or justified, the NetError conversion is fixed at the mechanism, the ceiling moved with the recovered stems, diagnostic_snapshots is green and the last stem (compiler_api) now runs in-process."
+        },
         {
           "at": "2026-08-20",
           "by": "agent",
@@ -132373,11 +132378,11 @@
         {
           "n": 2,
           "text": "Every (a) family either enters the oracle's universe because the harness now constructs the context, or carries a per-family justification for remaining outside it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:54:02.403Z"
+          "evidence": "The last family is recovered: examples/features/tooling/compiler_api.jet now runs in-process (card #2094 closed) because its generated artifact is gitignored instead of committed. No skip list was introduced and no per-family justification remains outstanding.",
+          "at": "2026-08-20T14:02:19.368Z"
         },
         {
           "n": 3,
@@ -132448,8 +132453,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:54:01.076Z",
-      "updated": "2026-08-20T12:59:07.016Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T14:02:28.128Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T14:02:28.128Z"
     },
     {
       "id": "c032bed5",
@@ -133760,7 +133766,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`1week` resolves through the Time #UnitFamily as a fixed 604800000000000 ns scale on the i64-ns carrier; unit algebra and interpolation behave exactly like `d`. No calendar-dependent literal suffix (month/year/decade/century/millennium) exists — calendar math stays in the checked Period/date API. Example + golden updated and parity proven on AOT, default jet run, and interpreter.\n\n## Law\n- D-VERDICT-2039-1 (RATIFIED, on this card): week is the only new Time literal suffix, fixed 7-day scale on the ns carrier; calendar units never become literal suffixes.\n- D-TYPE2-TIME1=A / D-TIMERES1=A (Units.jet:71-73): Time is one fixed i64-nanosecond family; these are the only literal suffixes; the literal elaborator maps the family to the checked Duration constructors.\n- I5 (example + golden), I9 (tier parity). I7 satisfied by D-VERDICT-2039-1.\n\n## Work\n1. Coordination first (card log is binding): #1552 \"Time joins the unit plane\" is BUILDING. Message its lane / read its integrated diff before touching the family — week lands INSIDE the single family #1552 unifies, never as a parallel table. If #1552 moved the family out of `crates/jet-codegen/src/Prelude/Units.jet:74-82`, edit the post-#1552 location.\n2. Add `week(scale: 604800000000000)` to the Time #UnitFamily row set (currently ns/us/ms/s/min/h/d at Units.jet:74-82).\n3. Trace the literal elaborator that maps Time-family suffixes to Duration constructors (per the Units.jet:71-73 comment) and confirm week needs no special case — it should ride the same table-driven path as `d`. If any engine (JIT host, interpreter) carries its own suffix table, that is I9 drift: fix by consuming the one family, do not add week twice.\n4. Tests: unit algebra `1week == 7d`, `2week + 12h`, comparison/ordering; interpolation `\"{1week}\"` renders like the other suffixes.\n5. Negative check (criterion 2): `1month` / `1year` still reject with the existing unknown-suffix diagnostic; snapshot covers it.\n6. Example: extend `examples/features/types/dimensional_quantities.jet` or `unit_literals.jet` with a week usage; regenerate golden.\n\n## Not building\n- No calendar-unit literal suffixes, no Period/date API changes.\n- No second unit table anywhere (family stays the single source).\n- No changes to other unit families.\n\n## Proof\n- `1week` algebra/interpolation checks pass (criterion 1).\n- Snapshot proves month/year suffixes still rejected (criterion 2).\n- Updated example golden byte-identical on `jet run`, `jet run --release`, and interpreter (criterion 3). Focused checks only; full suite at epoch closeout.\n\n## blockedBy\n#1552 (c0p834bt) — week must land inside the family #1552 unifies; #1552 is still building. Start only from #1552's integrated state.",
       "blockedBy": [
@@ -133768,6 +133774,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated evidence: week resolves through the Time family, calendar suffixes stay refused (E0134 live), and the example golden matches on JIT, interpreter and AOT. Two I2 defects were fixed to get there."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -133787,29 +133798,29 @@
         {
           "n": 1,
           "text": "1week literal resolves through the Time #UnitFamily as fixed 604800000000000 ns; unit algebra and interpolation work like d",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:17:40.613Z"
+          "evidence": "1week resolves through the Time #UnitFamily as 604800000000000 ns (crates/jet-codegen/src/Prelude/Units.jet:83). examples/features/types/dimensional_quantities.jet prints 604800000000000ns and 1252800000000000ns for week algebra; identical bytes on jet run, jet run --interpret and jet run --release, matching examples/features/expected/types/dimensional_quantities.out.",
+          "at": "2026-08-20T14:01:03.192Z"
         },
         {
           "n": 2,
           "text": "No month/year/decade/century literal suffix exists; calendar math remains the checked Period/date API",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:17:41.067Z"
+          "evidence": "No calendar suffix exists: tests/ui/unit_literal_unknown_suffix.jet writes 1month and 1year and both are refused with E0134 (verified live at HEAD), while the pinned .stderr records both refusals. Calendar math stays on the checked Period/date API.",
+          "at": "2026-08-20T14:01:21.606Z"
         },
         {
           "n": 3,
           "text": "Example + golden updated; parity proven on AOT, default jet run, and interpreter (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:17:41.527Z"
+          "evidence": "Example plus golden proven on all three tiers at HEAD: jet run, --interpret and --release each printed the golden output byte-for-byte. Two I2 defects found and fixed on the way: Duration had no jet_display (AOT emitted a call rustc rejected) and jet_list_sort_by_desc took a non-mut key function.",
+          "at": "2026-08-20T14:01:03.666Z"
         }
       ],
       "refs": [
@@ -133820,8 +133831,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:17:10.272Z",
-      "updated": "2026-08-19T16:10:46.933Z",
-      "updatedBy": "PlanNumb"
+      "updated": "2026-08-20T14:01:22.412Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T14:01:22.412Z"
     },
     {
       "id": "c06s09om",
@@ -136963,39 +136975,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed: the generated artifact is no longer committed, the example runs clean under jet run, and the stem needs no exclusion."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "examples/features/tooling/compiler_api.jet runs clean under `jet run` with no committed generated artifact shadowing its own output",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:07.719Z"
+          "evidence": "jet run examples/features/tooling/compiler_api.jet exits 0 and prints 'compiler API' at HEAD; the E3510 shadowing refusal is gone.",
+          "at": "2026-08-20T14:02:16.783Z"
         },
         {
           "n": 2,
           "text": "The generated-output path is ignored by git, or the example targets a path expected to pre-exist, and the choice is stated in the example",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:08.200Z"
+          "evidence": "examples/features/tooling/.jet/generated/** is gitignored (git check-ignore exits 0) and no longer tracked (git ls-files --error-unmatch reports no match), so the example produces its own output.",
+          "at": "2026-08-20T14:02:17.440Z"
         },
         {
           "n": 3,
           "text": "The stem is inside the in-process corpus oracle universe with no exclusion row",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:08.660Z"
+          "evidence": "The stem is inside the corpus universe with no exclusion row: OUT_OF_UNIVERSE has no compiler_api entry and the example runs in-process.",
+          "at": "2026-08-20T14:02:17.970Z"
         }
       ],
       "refs": [],
@@ -137003,8 +137021,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T00:10:06.601Z",
-      "updated": "2026-08-20T12:49:08.661Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T14:02:18.754Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T14:02:18.754Z"
     },
     {
       "id": "c00q0c08",
@@ -184453,6 +184472,76 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T14:02:28.128Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0dr8aqt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T14:02:19.369Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T14:02:18.754Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0rgobpn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T14:02:17.970Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rgobpn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T14:02:17.440Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rgobpn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T14:02:16.783Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rgobpn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T14:01:22.412Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0rrypxo",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T14:01:21.607Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rrypxo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T14:01:03.666Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rrypxo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T14:01:03.192Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rrypxo",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T13:11:42.893Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -187880,76 +187969,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0aps31f",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:09.000Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0js0lqr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:08.394Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05po1ng",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:07.802Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0fa4bu7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:07.203Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06tgncm",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:06.595Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y7e4ru",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:05.993Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ivhxu2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:05.375Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0admppa",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:04.789Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ptp3kp",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:04.185Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wfwj5u",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:03.599Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c003jai5",
       "note": "phase"
     }
   ],
