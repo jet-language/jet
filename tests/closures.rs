@@ -40,14 +40,15 @@ struct Box {
 }
 
 fn bump(box: Shared<Box>) {
-    box.edit(b => b.n += 1)
+    slot :: box.guard_edit().map(b => b.n)
+    slot.value += 1
 }
 
 fn run() {
-    box :: Shared.new(Box.{n: 0})
+    box :: shared Box.{n: 0}
     t :: task bump(box)
     t.join() ?? panic("task failed")
-    print(box.read(b => b.n))
+    print(box.n)
 }
 "#;
     let out = jet::compile(src).expect("brace-free single-statement lambdas should compile");

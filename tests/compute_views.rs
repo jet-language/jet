@@ -111,9 +111,9 @@ fn run() {
     print(compute.to_list(copied))
 
     holder := Holder.{ value: ~tensor }
-    shared :: holder.value
-    shared_edit :: &shared[0..1]
-    shared_edit[0] = 8.0
+    aliased :: holder.value
+    aliased_edit :: &aliased[0..1]
+    aliased_edit[0] = 8.0
 }
 "#;
     assert!(

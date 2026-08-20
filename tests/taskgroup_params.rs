@@ -8,17 +8,19 @@ use jet::Interpreter::{dev_iteration, RunOutcome};
 use std::fs;
 
 const OUTER_GROUP_HELPER: &str = r#"
-fn spawn_later(group: TaskGroup) => Shared<[Int]> {
-    gate :: Shared.new([0])
+struct Gate { step: Int }
+
+fn spawn_later(group: TaskGroup) => Shared<Gate> {
+    gate :: shared Gate.{ step: 0 }
     task {
-        gate.edit((state: [Int]) => state[0] = state[0] + 1)
-        loop gate.read((state: [Int]) => state[0]) == 1 {}
-        gate.edit((state: [Int]) => state[0] = state[0] + 1)
+        gate.step += 1
+        loop gate.step == 1 {}
+        gate.step += 1
         total := 0
         loop n, 0..<2000000 { total += n }
         print("task")
     }
-    loop gate.read((state: [Int]) => state[0]) == 0 {}
+    loop gate.step == 0 {}
     return ~gate
 }
 
@@ -26,8 +28,8 @@ fn run() {
     task.group group {
         gate :: spawn_later(group)
         print("inside")
-        gate.edit((state: [Int]) => state[0] = state[0] + 1)
-        loop gate.read((state: [Int]) => state[0]) < 3 {}
+        gate.step += 1
+        loop gate.step < 3 {}
     }
     print("after")
 }
@@ -521,22 +523,24 @@ fn run() {
 #[test]
 fn native_panicked_wait_closes_group_before_caller_continues() {
     let source = r#"
-fn slow_value(gate: Shared<[Int]>) => Int {
-    gate.edit((state: [Int]) => state[0] = 1)
+struct Gate { step: Int }
+
+fn slow_value(gate: Shared<Gate>) => Int {
+    gate.step = 1
     total := 0
     loop n, 0..<2000000 { total += n }
     print("settled")
     return 1
 }
 
-fn fail_after_start(gate: Shared<[Int]>) => Int {
-    loop gate.read((state: [Int]) => state[0]) == 0 {}
+fn fail_after_start(gate: Shared<Gate>) => Int {
+    loop gate.step == 0 {}
     panic("wait failed")
     return 0
 }
 
 fn leave_on_wait_panic() {
-    gate :: Shared.new([0])
+    gate :: shared Gate.{ step: 0 }
     task.group group {
         slow :: task slow_value(gate)
         ignored :: task.any { fail_after_start(gate) }

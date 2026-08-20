@@ -16,13 +16,13 @@ fn mark_started(started: Shared<Int>, began: Condition) {
 }
 
 fn wait_until_cancel(
-    shared: Shared<Int>,
+    handle: Shared<Int>,
     changed: Condition,
     started: Shared<Int>,
     began: Condition
 ) => Int {
     mark_started(started, began)
-    guard :: shared.guard_edit()
+    guard :: handle.guard_edit()
     guard.wait(changed, value => value == 1) ?? panic("wait failed")
     return 1
 }
@@ -34,40 +34,40 @@ fn finish_after_start(started: Shared<Int>, began: Condition) => Int {
 }
 
 fn run() {
-    shared := Shared.new(0)
+    cell := shared 0
     changed := Condition.new()
-    started := Shared.new(0)
+    started := shared 0
     began := Condition.new()
     task.group workers {
         print((task.race {
-            wait_until_cancel(shared, changed, started, began),
+            wait_until_cancel(cell, changed, started, began),
             finish_after_start(started, began)
         }) ?? panic("race failed"))
     }
-    reacquired :: shared.guard_edit()
+    reacquired :: cell.guard_edit()
     reacquired.value += 1
     print(reacquired.value)
 }
 "#;
 
 const EARLY_EXITS: &str = r#"
-fn return_early(shared: Shared<Int>) {
-    guard :: shared.guard_edit()
+fn return_early(handle: Shared<Int>) {
+    guard :: handle.guard_edit()
     guard.value += 1
     return
 }
 
-fn fail_early(shared: Shared<Int>) => Int ? String {
-    guard :: shared.guard_edit()
+fn fail_early(handle: Shared<Int>) => Int ? String {
+    guard :: handle.guard_edit()
     guard.value += 1
     return .Err("stop")
 }
 
 fn run() {
-    shared := Shared.new(0)
-    return_early(shared)
-    _ :: fail_early(shared) ?? 0
-    guard :: shared.guard_edit()
+    cell := shared 0
+    return_early(cell)
+    _ :: fail_early(cell) ?? 0
+    guard :: cell.guard_edit()
     guard.value += 1
     print(guard.value)
 }
@@ -83,8 +83,8 @@ fn bump(&guard: SharedGuard<Int>) {
 }
 
 fn run() {
-    shared := Shared.new(4)
-    guard := shared.guard_edit()
+    cell := shared 4
+    guard := cell.guard_edit()
     print(inspect(guard))
     bump(&guard)
     print(guard.value)
@@ -92,20 +92,25 @@ fn run() {
 "#;
 
 const RETURNED_GUARD: &str = r#"
-fn acquire(shared: Shared<Int>) => SharedGuard<Int> {
-    return shared.guard_edit()
+fn acquire(handle: Shared<Int>) => SharedGuard<Int> {
+    return handle.guard_edit()
 }
 
-fn read_returned(shared: Shared<Int>) => Int {
-    guard :: acquire(shared)
+fn read_returned(handle: Shared<Int>) => Int {
+    guard :: acquire(handle)
     return guard.value
 }
 
+fn bump(handle: Shared<Int>) {
+    guard :: handle.guard_edit()
+    guard.value += 1
+}
+
 fn run() {
-    shared := Shared.new(6)
-    print(read_returned(shared))
-    shared.edit(value => value += 1)
-    print(shared.read(value => value))
+    cell := shared 6
+    print(read_returned(cell))
+    bump(cell)
+    print(cell.guard_read().value)
 }
 "#;
 
@@ -116,12 +121,12 @@ struct Counter {
 
 fn increment(counter: Shared<Counter>) {
     #Transact(tx) {
-        counter.edit(value => value.value += 1)
+        counter.value += 1
     }
 }
 
 fn run() {
-    counter := Shared.new(Counter.{ value: 0 })
+    counter := shared Counter.{ value: 0 }
     task.group workers {
         first := task increment(counter)
         second := task increment(counter)
@@ -139,13 +144,13 @@ struct Pair {
     right: Int,
 }
 
-fn map_left(shared: Shared<Pair>) {
-    mapped := shared.guard_edit().map(value => value.left)
+fn map_left(handle: Shared<Pair>) {
+    mapped := handle.guard_edit().map(value => value.left)
     mapped.value += 10
 }
 
-fn split_pair(shared: Shared<Pair>) {
-    (left, right) := shared.guard_edit().split(
+fn split_pair(handle: Shared<Pair>) {
+    (left, right) := handle.guard_edit().split(
         value => value.left,
         value => value.right
     )
@@ -154,13 +159,13 @@ fn split_pair(shared: Shared<Pair>) {
 }
 
 fn run() {
-    mapped := Shared.new(Pair.{ left: 1, right: 2 })
+    mapped := shared Pair.{ left: 1, right: 2 }
     map_left(mapped)
-    print(mapped.read(value => value.left + value.right))
+    print(mapped.left + mapped.right)
 
-    split := Shared.new(Pair.{ left: 3, right: 4 })
+    split := shared Pair.{ left: 3, right: 4 }
     split_pair(split)
-    print(split.read(value => value.left + value.right))
+    print(split.left + split.right)
 }
 "#;
 
@@ -177,9 +182,9 @@ fn ignore_union(value: SharedGuard<Int> | Int) => Int {
     return 0
 }
 
-fn read_stored(shared: Shared<Int>) => Int {
+fn read_stored(handle: Shared<Int>) => Int {
     HeldGuard.{ stored } :: HeldGuard.{
-        stored: (lease: shared.guard_edit(), marker: 0),
+        stored: (lease: handle.guard_edit(), marker: 0),
     }
     (lease, marker) :: stored
     return lease.value + marker
@@ -198,12 +203,13 @@ fn read_pair(first: Shared<Int>, second: Shared<Int>) => Int {
 }
 
 fn run() {
-    first := Shared.new(8)
-    second := Shared.new(2)
+    first := shared 8
+    second := shared 2
     print(read_stored(first))
     print(read_pair(first, second))
-    first.edit(value => value += 1)
-    print(first.read(value => value))
+    bumped :: first.guard_edit()
+    bumped.value += 1
+    print(bumped.value)
 }
 "#;
 

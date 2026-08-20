@@ -255,6 +255,38 @@ impl<'a> Checker<'a> {
         .is_err()
     }
 
+    /// D-PREPOST1: a `#Pre`/`#Post` clause is checked in every build, so a call
+    /// that carries one cannot become literal data. The comptime interpreter
+    /// models no contracts (there is no `contract` in
+    /// `crates/jet-comptime/src/Comptime/Interpreter.rs`), so folding
+    /// `_ :: checked(0)` would evaluate the body with the claim never asked and
+    /// then drop the call itself — the program would exit 0 where AOT, the
+    /// resident tier, and the interpreter all owe a `Stop [E3005]` (I9).
+    fn implicit_fold_reaches_contracted_function(&self, init: &Expr) -> bool {
+        crate::Comptime::walk_purity_expr(
+            init,
+            self.ct_funcs,
+            &|name| {
+                self.ct_funcs.get(name).is_some_and(|function| {
+                    !function.pre.is_empty() || !function.post.is_empty()
+                })
+            },
+            // The shared call-graph walker carries its short-circuit as a
+            // diagnostic; only `is_err` below observes this value.
+            &|name, _, span| {
+                Diagnostic::error(
+                    "E0938",
+                    format!("`{name}` carries a contract"),
+                    "a `#Pre`/`#Post` claim is checked at run time in every build".to_string(),
+                    "leave this call for runtime evaluation".to_string(),
+                    Some(span),
+                )
+            },
+            crate::Comptime::PurityStage::BuildTime,
+        )
+        .is_err()
+    }
+
 
     pub(crate) fn ct_value_is_emittable(&self, value: &crate::AST::CtValue) -> bool {
         use crate::AST::{CtReport, CtValue};
@@ -775,6 +807,14 @@ impl<'a> Checker<'a> {
                 }
             }
     
+            // A name is poisoned only when nothing typed it — the `(None, None)`
+            // arm below, where the initializer reported an error and handed back
+            // no type at all. An ownership, sendability, or contract error still
+            // leaves the binding well-typed, and every later report about that
+            // name must survive: `.detach()` on an unsendable task (E1103/E1106,
+            // D-DETACH1) and an unchecked `.join()` (E0402) are exactly the
+            // reports that exist because the spawn was already wrong.
+            let init_type_unusable = init_has_error && b.ty.is_none() && it.is_none();
             let final_ty = match (&b.ty, it) {
                 (Some(_), Some(actual)) if !annot_valid => actual,
                 (Some(annot), Some(actual)) => {
@@ -872,6 +912,9 @@ impl<'a> Checker<'a> {
             let skip_ct_memo_fold = !b.mutable
                 && !b.is_comptime
                 && self.implicit_fold_reaches_memoized_function(&b.init);
+            let skip_ct_contract_fold = !b.mutable
+                && !b.is_comptime
+                && self.implicit_fold_reaches_contracted_function(&b.init);
             // D-DECIMAL1: default-on float-money lint for money-like binding names.
             if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
                 self.diags.push(Diagnostic::lint(
@@ -925,6 +968,7 @@ impl<'a> Checker<'a> {
                 && !skip_ct_view_bake
                 && !skip_ct_field_read_bake
                 && !skip_ct_memo_fold
+                && !skip_ct_contract_fold
             {
                 let is_patch_binding = matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
@@ -1115,7 +1159,7 @@ impl<'a> Checker<'a> {
                     reactive_shared: b.reactive_shared(),
                     single_use_span,
                     constant_value,
-                    invalid: init_has_error,
+                    invalid: init_type_unusable,
                 },
                 binding_sendable,
             );

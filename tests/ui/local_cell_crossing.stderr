@@ -23,12 +23,12 @@ Error [E0120]: `cell` was not moved here, so it cannot be taken with the move ma
  Fix: copy it instead: `_ :: ~cell`
 
 Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
-  --> tests/ui/local_cell_crossing.jet:9:22
+  --> tests/ui/local_cell_crossing.jet:9:17
     |
-  9 |     _ :: Shared.new(^cell)
-    |                      ^^^^
+  9 |     _ :: shared cell
+    |                 ^^^^
  Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
- Fix: store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`
+ Fix: store the value itself in `Shared<T>`, then read and write its fields directly
 
 Error [E0119]: there's no type called `Cache`
   --> tests/ui/local_cell_crossing.jet:16:31

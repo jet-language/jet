@@ -151,9 +151,9 @@ fn run() {
 
     keep_result(ok_result())
 
-    shared :: Shared.new(9)
-    shared_cell :: Cell.new(shared)
-    print(shared_cell.read(handle => handle.read(value => value)))
+    handle :: shared 9
+    shared_cell :: Cell.new(handle)
+    print(shared_cell.read(inner => inner.guard_read().value))
 
     nested :: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
     projected :: nested.guard_read().map(value => value.value.value)

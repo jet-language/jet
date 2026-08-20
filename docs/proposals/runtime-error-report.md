@@ -110,11 +110,61 @@ Stop [E3001]: `panic: expected condition` — with Jet file, line, function name
 Stop [E3001]: `panic: expected condition`
 ```
 
+## Terminal state
+
+The report is laid out against two facts and nothing else, resolved once by
+`JetReportStyle::for_stderr` at the report edge — the same source text on every
+tier, so no engine owns a terminal decision (I9):
+
+| Fact | Rule |
+|---|---|
+| Colour | `NO_COLOR` presence off, else `FORCE_COLOR` presence on, else stderr is a terminal. `Terminal.rs`'s `ColorChoice::Auto` calls the same ladder. |
+| Columns | A terminal's `COLUMNS` when that is a positive integer, else the ratified 80. A pipe, a file and a JSON wire have **no** columns, so nothing elides. |
+
+Colour dims **the trail block and only the trail block**. The root failure is
+the one undimmed line, which is the whole point of the redesign; it also means
+line 1 carries no SGR, so every transport check that reads the first line still
+reads it.
+
+A column budget sheds the trail's disposable parts and never reaches the root
+failure, which is not the trail's line. What a hop keeps is its address — the
+number, the `fn`, and `file:line`. What it sheds, in order:
+
+1. **Leading path segments**, marked `…/`. Whole segments, never characters
+   inside a name, and the file name itself is the floor: a half-spelled file
+   name is worse than a line that wraps. One budget is computed for the whole
+   block from its widest hop, so one file never renders two ways under one
+   header.
+2. **The note's tail**, marked `…`. The note is the prose a hop carried; the
+   site is the fact. A note with no room for a character plus the ellipsis goes
+   entirely rather than leaving ` — …`.
+
+The header is the line that separates the root failure from its trail, so it
+must not wrap: when the full form does not fit it drops the mechanism reminder
+and keeps the facts — ` Trail [E3002] (3 hops):` is the floor.
+
+So the same failure at 40 columns reads (PREDICTION until blessed):
+
+```
+Error: file not found
+ Trail [E3002] (3 hops):
+  1. parse_config (error_context.jet:7)
+  2. load_config (error_context.jet:12)
+  3. run (error_context.jet:16)
+```
+
+Three addressable sites under the root failure, nothing wrapped, commentary
+gone. The root cause is still the first thing on screen and still the only
+thing that never degrades.
+
 ## Where the change lives
 
-- `crates/jet-foundation/src/Outcome.rs:99-231` — the one owner: hop state,
-  `jet_journey_frame`, `jet_journey_trail`, `jet_journey_compose`,
-  `jet_journey_report`.
+- `crates/jet-foundation/src/Outcome.rs:99-457` — the one owner: hop state,
+  `jet_journey_frame`, `JetReportStyle`, `jet_journey_trail`,
+  `jet_journey_compose`, `jet_journey_report`.
+- `crates/jet-foundation/src/Terminal.rs:26-38` — `ColorChoice::Auto` now reads
+  the ladder from `Outcome.rs` instead of spelling its own, because that file is
+  the one emitted verbatim into generated programs.
 - `crates/jet-codegen/src/Prelude/Diagnostics.jet:389-395` — E3002's registered
   grammar; the format description removed from E3001, E3010 and E3012 `what`.
 - Adapters only marshal: `Prelude/Core.rs`, `Codegen/Web.rs`,
@@ -128,10 +178,16 @@ Stop [E3001]: `panic: expected condition`
 
 ## Not in this change
 
-- No terminal-state matrix. The renderer emits no ANSI and reads no width or
-  tty state today, so `NO_COLOR`, a pipe and a narrow terminal all get the same
-  bytes. Card #2044 criterion 2 asks for a proven matrix with a style struct
-  threaded from the boundary; that work is not here.
+- No channel from the `--color=always|never` flag to the report. That flag is
+  CLI state; the report edge is Foundation, which sees the environment and the
+  stream and nothing else. Giving it a channel means a per-tier variant, since
+  `Prelude/Term.rs`'s colour-mode cell is unreachable from the compiler-side
+  build of this file. `NO_COLOR` is the documented way to force a plain report.
+- No amendment to E3002's registered row. It states the canonical grammar,
+  which is unchanged; a narrow terminal adapts that grammar the way wrapping
+  does, and colour is not format.
+- No width from `stty`. `io.terminal_width()` may shell out; the report edge
+  will not spawn a child to lay out a failing program's last line.
 - No change to compile-time diagnostic rendering.
 - No new capture: no stack unwinding, no async trace expansion. The trail is
   still exactly the `?` hops the program claimed.

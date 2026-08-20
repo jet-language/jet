@@ -1861,7 +1861,7 @@ impl<'a> Checker<'a> {
                                 elem_ty.show()
                             ),
                             "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized".to_string(),
-                            "store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`".to_string(),
+                            "store the value itself in `Shared<T>`, then read and write its fields directly".to_string(),
                             Some(args[0].expr.span()),
                         ));
                     }

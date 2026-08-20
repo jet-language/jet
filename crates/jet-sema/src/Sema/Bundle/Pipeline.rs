@@ -3075,7 +3075,9 @@ fn check_bundle_opts_for_output_inner(
     if bundle.modules.iter().any(|m| {
         m.source.contains("Pool<")
             || m.source.contains("Shared<")
-            || m.source.contains("Shared.new(")
+            // D-CONC-SHARE1=A: `shared x` is the one construction spelling
+            // (`Shared.new(` is retired, E1115), so the probe reads the word.
+            || m.source.contains("shared ")
             || m.source.contains("Cell<")
             || m.source.contains("Cell.new(")
             || m.source.contains("Id<")

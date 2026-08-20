@@ -53,8 +53,8 @@ fn shared_guard_cannot_cross_a_task_boundary() {
     assert_rejected(
         r#"
 fn run() {
-    shared := Shared.new(1)
-    guard :: shared.guard_read()
+    cell := shared 1
+    guard :: cell.guard_read()
     worker :: task print(guard.value)
     worker.join() ?? panic("task failed")
 }
@@ -109,36 +109,36 @@ fn run() {}
 fn shared_constructor_rejects_local_cell_at_the_constructor() {
     let source = r#"
 fn cross(cell: Cell<Int>) {
-    _ :: Shared.new(^cell)
+    _ :: shared cell
 }
 fn run() {}
 "#;
-    let diagnostics = jet::compile(source).expect_err("Shared.new(Cell) must fail in sema");
+    let diagnostics = jet::compile(source).expect_err("`shared cell` must fail in sema");
     let error = diagnostics
         .iter()
         .find(|diagnostic| {
             diagnostic.code == "E1102"
                 && diagnostic.what.contains("cannot be stored in `Shared<T>`")
         })
-        .expect("E1102 must point at Shared.new instead of a later task use");
+        .expect("E1102 must point at the `shared` construction instead of a later task use");
     let start = error.span.expect("E1102 must have a source span").start;
     assert!(
-        source[start..].starts_with("^cell") || source[start..].starts_with("cell"),
-        "E1102 must point at Shared.new's Cell argument: {error:?}"
+        source[start..].starts_with("cell"),
+        "E1102 must point at the constructed Cell value: {error:?}"
     );
 }
 
 #[test]
 fn shared_constructor_rejects_cell_nested_in_a_struct() {
     let source = r#"
-struct Cache { value: Cell<Int> }
-fn cross(cache: Cache) {
-    _ :: Shared.new(^cache)
+struct Holder { value: Cell<Int> }
+fn cross(holder: Holder) {
+    _ :: shared holder
 }
 fn run() {}
 "#;
     let diagnostics =
-        jet::compile(source).expect_err("Shared.new(struct containing Cell) must fail in sema");
+        jet::compile(source).expect_err("`shared` on a struct containing a Cell must fail in sema");
     assert!(
         diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "E1102"
@@ -476,14 +476,12 @@ fn shared_is_the_safe_mutation_control_case() {
     let source = r#"
 struct Counter { value: Int }
 fn run() {
-    counter := Shared.new(Counter.{ value: 0 })
+    counter := shared Counter.{ value: 0 }
     handle :: task {
-        counter.edit((value) => {
-            value.value += 1
-        })
+        counter.value += 1
     }
     handle.join() ?? panic("task failed")
-    print(counter.read((value) => value.value))
+    print(counter.value)
 }
 "#;
 

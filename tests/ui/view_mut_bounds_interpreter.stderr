@@ -1,3 +1,7 @@
 Stop [E3001]: `panic: can't view 1 items from 2 to 2 (inclusive)` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.
+  --> tests/ui/view_mut_bounds_interpreter.jet:4 in run
+    |
+4 |     outside :: [&values[0..0], &values[2..2]]
+    | ^
  Why: The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
  Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.

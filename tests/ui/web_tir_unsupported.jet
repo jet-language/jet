@@ -1,10 +1,14 @@
 #Target(Web)
 
 // @web_target
-#Pre(x > 0, "x must be positive") fn guarded(x: Int) => Int {
-    return x
-}
-
+// D-WEBTIR1: web output has no lowering for a structured `task.group` — the
+// browser artifact is single-threaded, so the group statement never reaches
+// the JS or Wasm emitter. This fixture is the only rendering of
+// E-WEB-TIR-UNSUPPORTED, so it must stay on a construct web TIR refuses.
 fn run() {
-    print("{guarded(1)}")
+    task.group workers {
+        child :: task { 7 }
+        value :: child.join() ?? 0
+        print("{value}")
+    }
 }

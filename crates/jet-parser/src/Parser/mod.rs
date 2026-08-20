@@ -185,6 +185,13 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0418"
             | "E0998"
             | "E0927"
+            // D-CONC-SHARE1=A (card #1561): the retired `Shared.new(x)` call
+            // recovers as the node `shared x` builds (see
+            // `Parser/Expressions/postfix.rs`), so `jet check` still reports
+            // the rest of the file and `jet fmt` rewrites the call to the
+            // prefix form. `jet build`/`jet run` still reject it: the teaching
+            // clause in `parse_inner` is gated on the formatter path.
+            | "E1115"
     )
 }
 

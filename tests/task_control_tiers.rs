@@ -75,28 +75,30 @@ fn run() {
 const LOSER_CLEANUP_SOURCE: &str = r#"
 use core.time as time
 
-fn win(state: Shared<[Int]>) => Int {
-    state.edit((value: [Int]) => value[0] = 1)
+struct Mark { step: Int }
+
+fn win(state: Shared<Mark>) => Int {
+    state.step = 1
     return 1
 }
 
-fn lose(state: Shared<[Int]>) => Int {
+fn lose(state: Shared<Mark>) => Int {
     time.sleep(100ms)
-    state.edit((value: [Int]) => value[0] = 2)
+    state.step = 2
     return 2
 }
 
 fn run() {
-    race_state :: Shared.new([0])
-    any_state :: Shared.new([0])
+    race_state :: shared Mark.{ step: 0 }
+    any_state :: shared Mark.{ step: 0 }
     task.group workers {
         race_result :: (task.race { win(race_state), lose(race_state) }) ?? 0
         any_result :: (task.any { win(any_state), lose(any_state) }) ?? 0
         time.sleep(200ms)
         print(race_result)
-        print(race_state.read((value: [Int]) => value[0]))
+        print(race_state.step)
         print(any_result)
-        print(any_state.read((value: [Int]) => value[0]))
+        print(any_state.step)
     }
 }
 "#;

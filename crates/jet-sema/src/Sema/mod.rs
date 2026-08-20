@@ -835,8 +835,10 @@ pub(crate) struct LocalInfo {
     /// Pure compile-time value for immutable-local diagnostics and folding.
     /// This does not make an ordinary local available to `comptime` code.
     constant_value: Option<crate::Comptime::CtValue>,
-    /// The initializer failed sema. Reads stop at this binding so the original
-    /// diagnostic remains the only report for the failed value.
+    /// The initializer reported an error AND handed back no type, so this name
+    /// has no meaning. Reads stop here so the original diagnostic stays the only
+    /// report. A well-typed value whose initializer failed an ownership,
+    /// sendability, or contract rule is NOT invalid — its later reports stand.
     invalid: bool,
 }
 

@@ -24,13 +24,16 @@ impl ColorChoice {
     }
 
     /// Explicit choice > `NO_COLOR` presence > `FORCE_COLOR` presence > TTY.
+    ///
+    /// The `Auto` ladder itself lives in `Outcome.rs`: that file is emitted
+    /// verbatim into every generated program and this one is not, so a running
+    /// program's breach report can only share this ladder if the ladder lives
+    /// there. One owner, both surfaces.
     pub fn resolve(self, is_tty: bool) -> bool {
         match self {
             Self::Always => true,
             Self::Never => false,
-            Self::Auto if std::env::var_os("NO_COLOR").is_some() => false,
-            Self::Auto if std::env::var_os("FORCE_COLOR").is_some() => true,
-            Self::Auto => is_tty,
+            Self::Auto => crate::Outcome::jet_terminal_auto_color(is_tty),
         }
     }
 }

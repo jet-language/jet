@@ -3911,14 +3911,14 @@ fn jit_1216_adversarial_regressions() {
 struct Slot { value: Int }
 fn rollback(cell: Shared<Slot>) {
     #Transact(tx) {
-        cell.edit(value => { value.value = 9 })
+        cell.value = 9
         return
     }
 }
 fn run() {
-    cell :: Shared.new(Slot.{value: 1})
+    cell :: shared Slot.{value: 1}
     rollback(cell)
-    print(cell.read(value => value.value))
+    print(cell.value)
 }
 "#,
             "generator" => r#"
@@ -4218,10 +4218,11 @@ fn shared_scalar_edit_matches_interpreter_resident_jit_and_aot() {
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let source = r#"
+struct Counter { value: Int }
 fn run() {
-    value :: Shared.new(0)
-    value.edit(current => current += 1)
-    print(value.read(current => current))
+    counter :: shared Counter.{value: 0}
+    counter.value += 1
+    print(counter.value)
 }
 "#;
     let file = std::env::temp_dir().join(format!(
@@ -4245,11 +4246,11 @@ fn run() {
     let resident = run_cranelift_without_fallback(source, "shared_scalar_edit");
     assert!(
         jet_jit::jit_executed_for_test(),
-        "Shared<Int>.edit did not execute in resident JIT"
+        "the shared field write did not execute in resident JIT"
     );
     assert!(
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "Shared<Int>.edit used deopt or fallback"
+        "the shared field write used deopt or fallback"
     );
 
     let dir = std::env::temp_dir().join(format!(

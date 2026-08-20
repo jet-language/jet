@@ -1447,8 +1447,18 @@ impl<'a> Checker<'a> {
                             )
                         })
                     });
+                // D-MEM-COPYSEM1=A: a borrowed window (`View`/`ViewMut`/`Pin`)
+                // is not a value to duplicate. An `Expr::Copy` over a read view
+                // MEANS "materialize an owned value", so it erases the window's
+                // owner relation (`view_call_sources`' `Expr::Copy` arm) — the
+                // returned/bound window would then prove no source (E2307) and
+                // a later owner replacement would go unreported. The one place a
+                // read view becomes owned is the `implicit_copy_target` branch
+                // above, which fires only when the destination type IS the owned
+                // target (`View<T>` -> `[T]`, `View<str>` -> `String`).
                 if !borrowed_param_place
                     && !type_is_copy(t)
+                    && !crate::Sema::CheckerCore::is_core_view_generic(t)
                     && field_read_to_clone(e, self.registry, self.imports)
                 {
                     if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(e) {

@@ -3,14 +3,12 @@ mod common;
 const SHARED_SOURCE: &str = r#"
 struct Counter { value: Int }
 fn run() {
-    counter := Shared.new(Counter.{ value: 0 })
+    counter := shared Counter.{ value: 0 }
     handle :: task {
-        counter.edit((value) => {
-            value.value += 1
-        })
+        counter.value += 1
     }
     handle.join() ?? panic("task failed")
-    print(counter.read((value) => value.value))
+    print(counter.value)
 }
 "#;
 
