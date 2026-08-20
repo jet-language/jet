@@ -431,7 +431,7 @@ Two standing owner rules for GPT-5.6 Luna via codex (2026-08-08):
 Owner directive (2026-08-06): when mining videos for Jet, always analyze the micro in addition to the macro — nice APIs, nice features, great syntax, ergonomic defaults, error-message style, tooling niceties — not just architectural or large-scale lessons.
 **Why:** Small design wins are half the value of studying other languages; folding them into macro themes loses them.
 
-**How to apply:** Each micro item gets its own claim-ledger row and Jet cross-check. Skill updated accordingly (`.claude/skills/mine-video/SKILL.md`). Related: [[log-everything-now]].
+**How to apply:** Each micro item gets its own claim-ledger row and Jet cross-check. Skill updated accordingly (`.claude/skills/mine-for-jet/SKILL.md`, formerly `mine-video`; now covers any resource kind). Related: [[log-everything-now]].
 
 ### minimize-fable-usage
 

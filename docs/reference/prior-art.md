@@ -32,7 +32,7 @@ analysis of each one lives in Jet's own primary documents:
 ## Videos, talks & podcasts
 
 Mined in full with transcript + comment analysis (see `docs/research/`,
-`docs/archive/`, and the `mine-video` skill).
+`docs/archive/`, and the `mine-for-jet` skill).
 
 **Logan Smith — Rust series (9 videos, mined 2026-07-24).** External validation
 of Jet's ratified safety/error/ownership design; report at
@@ -511,7 +511,7 @@ discipline.
   across Jet's history. Where a source is a creator regret vs. an official
   retrospective vs. a durable ecosystem issue, the distinction is preserved in
   `docs/archive/language-lessons-and-regrets.md`.
-- Video sources were mined with the `mine-video` skill (full transcript +
+- Video sources were mined with the `mine-for-jet` skill (full transcript +
   stratified comment analysis); dated reports live in `docs/research/`.
 - This record is descriptive, not a ranking. A listed mistake never outweighs a
   language's successes; Jet's rule is to copy the successful invariant and
