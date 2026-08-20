@@ -971,10 +971,14 @@ fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
     std::env::set_current_dir(path).map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
 }
 
+/// The AOT adapter for the one signal mechanism (#2027). It owns only what a
+/// generated program's handler shape needs: `Arc<dyn Fn>` storage, the
+/// dispatcher thread, and the panic boundary a Jet handler's unwind crosses.
+/// The count, the platform handler, the arm path and the consumption rule come
+/// from `Prelude/CoreLib/Top/Interrupt.rs`, embedded alongside this file.
 mod jet_os_interrupt {
     use std::sync::{mpsc, Arc, OnceLock};
 
-    static QUEUE: JetInterruptQueue = JetInterruptQueue::new();
     static DISPATCH: OnceLock<Result<mpsc::Sender<Command>, String>> = OnceLock::new();
 
     enum Command {
@@ -996,45 +1000,9 @@ mod jet_os_interrupt {
         }
     }
 
-    fn note_interrupt() {
-        // OS callbacks do no allocation, locking, or user work.
-        QUEUE.note();
-    }
-
-    #[cfg(unix)]
-    extern "C" fn unix_mark(_: i32) {
-        note_interrupt();
-    }
-
-    #[cfg(unix)]
-    fn install_platform_handler() -> Result<(), String> {
-        super::jet_interrupt_install_unix_handler(unix_mark)
-    }
-
-    #[cfg(windows)]
-    unsafe extern "system" fn windows_mark(kind: u32) -> i32 {
-        const CTRL_C_EVENT: u32 = 0;
-        if kind == CTRL_C_EVENT {
-            note_interrupt();
-            1
-        } else {
-            0
-        }
-    }
-
-    #[cfg(windows)]
-    fn install_platform_handler() -> Result<(), String> {
-        super::jet_interrupt_install_windows_handler(Some(windows_mark))
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    fn install_platform_handler() -> Result<(), String> {
-        Err(super::jet_interrupt_unavailable_error().to_string())
-    }
-
     fn dispatcher() -> Result<&'static mpsc::Sender<Command>, String> {
         match DISPATCH.get_or_init(|| {
-            install_platform_handler()?;
+            super::jet_interrupt_arm()?;
             let (tx, rx) = mpsc::channel::<Command>();
             std::thread::Builder::new()
                 .name("jet-interrupt".to_string())
@@ -1049,7 +1017,7 @@ mod jet_os_interrupt {
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
-                        QUEUE.dispatch(&handlers, |handler| {
+                        super::jet_interrupt_dispatch(&handlers, |handler| {
                             if let Err(payload) = std::panic::catch_unwind(
                                 std::panic::AssertUnwindSafe(|| {
                                     let _boundary = PanicBoundary::enter();

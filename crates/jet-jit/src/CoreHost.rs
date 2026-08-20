@@ -15,9 +15,12 @@ mod path_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
 }
 
-mod interrupt_queue {
-    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs");
-}
+// #2027 / I8+I9: the resident host reaches the one signal mechanism through the
+// single in-binary instance of `Prelude/CoreLib/Top/Interrupt.rs` that the TIR
+// evaluator ambient also uses. A private `include!` here compiled a second
+// pending count, and its `signal(SIGINT, …)` install disarmed whichever tier
+// armed first.
+use jet_codegen::interrupt_runtime;
 
 // The Prelude owns every core.sys fact. This module supplies only the small
 // type/ambient surface needed to include that exact source; wrappers below
@@ -168,12 +171,12 @@ mod os_rt {
 
 // The resident JIT cannot hand a Rust `Rc` callback to the process signal
 // boundary. TIR gives it one Send-safe record containing a function address and
-// environment handle. This adapter owns only the raw-code invocation boundary;
-// pending counts and additive ordering come from the shared Prelude queue.
+// environment handle. This adapter owns only that raw-code invocation boundary
+// and the handler storage; the pending count, the platform handler, the arm path
+// and the count-first additive ordering all come from the shared Prelude owner.
 mod jit_os_interrupt {
-    use super::{interrupt_queue::{self, JetInterruptQueue}, mpsc, Concurrency, OnceLock};
+    use super::{interrupt_runtime, mpsc, Concurrency, OnceLock};
 
-    static QUEUE: JetInterruptQueue = JetInterruptQueue::new();
     static DISPATCH: OnceLock<Result<mpsc::Sender<DispatchCommand>, String>> = OnceLock::new();
 
     struct Command {
@@ -187,63 +190,29 @@ mod jit_os_interrupt {
         Reset(mpsc::SyncSender<()>),
     }
 
-    fn note_interrupt() {
-        QUEUE.note();
-    }
-
-    #[cfg(unix)]
-    extern "C" fn unix_mark(_: i32) {
-        note_interrupt();
-    }
-
-    #[cfg(unix)]
-    fn install_platform_handler() -> Result<(), String> {
-        interrupt_queue::jet_interrupt_install_unix_handler(unix_mark)
-    }
-
-    #[cfg(windows)]
-    unsafe extern "system" fn windows_mark(kind: u32) -> i32 {
-        if kind == 0 {
-            note_interrupt();
-            1
-        } else {
-            0
-        }
-    }
-
-    #[cfg(windows)]
-    fn install_platform_handler() -> Result<(), String> {
-        interrupt_queue::jet_interrupt_install_windows_handler(Some(windows_mark))
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    fn install_platform_handler() -> Result<(), String> {
-        Err(interrupt_queue::jet_interrupt_unavailable_error().to_string())
-    }
-
     fn dispatcher() -> Result<&'static mpsc::Sender<DispatchCommand>, String> {
         match DISPATCH.get_or_init(|| {
-            install_platform_handler()?;
+            interrupt_runtime::jet_interrupt_arm()?;
             let (tx, rx) = mpsc::channel::<DispatchCommand>();
             std::thread::Builder::new()
                 .name("jet-jit-interrupt".to_string())
                 .spawn(move || {
                     let mut handlers: Vec<(usize, i64)> = Vec::new();
                     loop {
-                        match rx.recv_timeout(interrupt_queue::jet_interrupt_poll_interval()) {
+                        match rx.recv_timeout(interrupt_runtime::jet_interrupt_poll_interval()) {
                             Ok(DispatchCommand::Register(command)) => {
                                 handlers.push((command.callback, command.env));
                                 let _ = command.ready.send(());
                             }
                             Ok(DispatchCommand::Reset(ready)) => {
                                 handlers.clear();
-                                QUEUE.clear();
+                                interrupt_runtime::jet_interrupt_clear();
                                 let _ = ready.send(());
                             }
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
-                        QUEUE.dispatch(&handlers, |&(callback, environment)| {
+                        interrupt_runtime::jet_interrupt_dispatch(&handlers, |&(callback, environment)| {
                             Concurrency::with_http_jet_runtime(|| {
                                 // Every callback, including named and
                                 // capture-free callbacks, uses this one ABI.
@@ -256,7 +225,7 @@ mod jit_os_interrupt {
                         });
                     }
                 })
-                .map_err(interrupt_queue::jet_interrupt_dispatcher_start_error)?;
+                .map_err(interrupt_runtime::jet_interrupt_dispatcher_start_error)?;
             Ok(tx)
         }) {
             Ok(tx) => Ok(tx),
@@ -274,7 +243,7 @@ mod jit_os_interrupt {
             });
             if callback == 0 {
                 return Err(
-                    interrupt_queue::jet_interrupt_invalid_callback_record_error().to_string(),
+                    interrupt_runtime::jet_interrupt_invalid_callback_record_error().to_string(),
                 );
             }
             let tx = dispatcher()?;
@@ -285,17 +254,17 @@ mod jit_os_interrupt {
                 ready: ready_tx,
             }))
             .map_err(|_| {
-                interrupt_queue::jet_interrupt_dispatcher_stopped_error().to_string()
+                interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
             })?;
             ready_rx
                 .recv()
                 .map_err(|_| {
-                    interrupt_queue::jet_interrupt_dispatcher_stopped_error().to_string()
+                    interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
                 })
         })();
         if let Err(message) = result {
             Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(&interrupt_queue::jet_interrupt_core_error(&message));
+                rt.set_trap(&interrupt_runtime::jet_interrupt_core_error(&message));
             });
         }
     }

@@ -80,10 +80,12 @@ mod division_semantics {
     include!("../../../Prelude/Core/Division.rs");
 }
 
-#[allow(dead_code)]
-mod interrupt_queue {
-    include!("../../../Prelude/CoreLib/Top/Interrupt.rs");
-}
+/// #2027 / I8+I9: the interpreter ambient reaches the one signal mechanism
+/// through `crate::interrupt_runtime` — the single in-binary instance of
+/// `Prelude/CoreLib/Top/Interrupt.rs` that the resident Cranelift host also
+/// uses. A private `include!` here would compile a second pending count whose
+/// `signal(SIGINT, …)` install disarmed whichever tier armed first.
+use crate::interrupt_runtime;
 
 #[allow(dead_code)]
 mod uninit_semantics {
@@ -166,54 +168,12 @@ pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
 }
 
-static INTERPRETER_INTERRUPT_QUEUE: interrupt_queue::JetInterruptQueue =
-    interrupt_queue::JetInterruptQueue::new();
-static INTERPRETER_INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
-
 fn wall_now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
         .min(i64::MAX as u128) as i64
-}
-fn note_interpreter_interrupt() {
-    INTERPRETER_INTERRUPT_QUEUE.note();
-}
-
-#[cfg(unix)]
-extern "C" fn interpreter_unix_mark(_: i32) {
-    note_interpreter_interrupt();
-}
-
-fn install_interpreter_interrupt_handler() -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        return interrupt_queue::jet_interrupt_install_unix_handler(interpreter_unix_mark);
-    }
-    #[cfg(windows)]
-    {
-        unsafe extern "system" fn mark(kind: u32) -> i32 {
-            if kind == 0 {
-                note_interpreter_interrupt();
-                1
-            } else {
-                0
-            }
-        }
-        return interrupt_queue::jet_interrupt_install_windows_handler(Some(mark));
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(interrupt_queue::jet_interrupt_unavailable_error().to_string())
-    }
-}
-
-fn ensure_interpreter_interrupt_handler() -> Result<(), String> {
-    match INTERPRETER_INTERRUPT_HANDLER.get_or_init(install_interpreter_interrupt_handler) {
-        Ok(()) => Ok(()),
-        Err(message) => Err(message.clone()),
-    }
 }
 
 pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
@@ -1544,9 +1504,6 @@ impl EvalRuntime<'_> {
     }
 
     fn with_memos(memos: MemoState) -> Self {
-        // A fresh interpreter runtime is a teardown boundary. Do not deliver
-        // a SIGINT that was marked for a previous dev/restart instance.
-        INTERPRETER_INTERRUPT_QUEUE.clear();
         Self {
             callables: Vec::new(),
             interrupt_handlers: Vec::new(),
@@ -3201,14 +3158,14 @@ impl<'a> EvalCtx<'a> {
         callback: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        ensure_interpreter_interrupt_handler().map_err(|message| {
-            unsupported(&interrupt_queue::jet_interrupt_core_error(&message), self.span())
+        interrupt_runtime::jet_interrupt_arm().map_err(|message| {
+            unsupported(&interrupt_runtime::jet_interrupt_core_error(&message), self.span())
         })?;
         let value = self.eval_expr(callback, scope)?;
         let index = Self::callable_index(&value)
             .ok_or_else(|| {
                 unsupported(
-                    interrupt_queue::jet_interrupt_invalid_callback_value_error(),
+                    interrupt_runtime::jet_interrupt_invalid_callback_value_error(),
                     self.span(),
                 )
             })?;
@@ -3267,7 +3224,7 @@ impl<'a> EvalCtx<'a> {
             .clone();
         let mut deferred_panic = None;
         let mut failure = None;
-        INTERPRETER_INTERRUPT_QUEUE.dispatch(&handlers, |index| {
+        interrupt_runtime::jet_interrupt_dispatch(&handlers, |index| {
             if failure.is_some() {
                 return;
             }
@@ -4237,6 +4194,13 @@ fn run_program_with_structs_on_stack(
     jet_foundation::MemSentry::jet_sentry_set_hardened(package_hardened);
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
+    // A whole-program run starts with no interrupt pending: a SIGINT marked for
+    // a previous dev/restart instance must not land on this one. This is the
+    // run boundary, not `EvalRuntime::with_memos` — that also builds the
+    // per-call runtime for mid-run deopt (`run_named_func_with_memos`), and
+    // clearing there would drop a signal delivered to the JIT tier mid-run now
+    // that both tiers share one count (#2027).
+    interrupt_runtime::jet_interrupt_clear();
     let _browser_session = browser::SessionGuard::new();
     insert_core_struct_field_types(&mut struct_field_types);
     for (name, fields) in program_struct_field_types(program) {

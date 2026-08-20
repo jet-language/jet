@@ -126,6 +126,16 @@ pub mod typed_text {
 pub mod memo {
     include!("Prelude/Memo.rs");
 }
+/// #2027 (I8 + I9): the one signal-handler mechanism inside the `jet` binary.
+/// `Prelude/CoreLib/Top/Interrupt.rs` owns the pending count, the platform
+/// handler, the arm path and the consumption rule; AOT embeds that same source
+/// in the generated program. This is the single in-binary instance, so the TIR
+/// evaluator ambient (`Codegen/TIR/eval/mod.rs`) and the resident Cranelift host
+/// (`jet-jit/src/CoreHost.rs`) marshal into one count instead of each compiling
+/// a private copy whose `signal(SIGINT, …)` install disarmed the other.
+pub mod interrupt_runtime {
+    include!("Prelude/CoreLib/Top/Interrupt.rs");
+}
 /// Card #1751: the one 80x24 terminal default, read by both AOT's
 /// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
 #[path = "Prelude/TerminalDefault.rs"]
