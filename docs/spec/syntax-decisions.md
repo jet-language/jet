@@ -5559,7 +5559,10 @@ policy, the built-in constructor fails closed; it must not fabricate a token.
 **D-SERVICE1=D — sema-known structured service tree**: typed builders promote
 ordinary functions into named workers/groups; sema validates topology, endpoint
 types, effects, cycles, and lifetimes. Each group is a supervisor-owned child
-taskgroup. Beginner default is bounded OneForOne restart with parent escalation.
+group — D-CONC-GROUP1=A later renamed `TaskGroup` to `Group`, so the older
+"taskgroup" spelling in this ruling's ballot text is retired. Beginner default
+is a bounded OneForOne restart budget with parent escalation, carried as data on
+the group (D-CONC-SCHED1=A).
 Deployment may place/scale the declared graph but never invent children.
 
 **D-SERVICE-DELIVERY1=D — at-most-once default, proved durable retry**: live

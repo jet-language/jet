@@ -3701,10 +3701,20 @@ D-SERVICE1=D / D-SERVICE-DELIVERY1=D / D-SERVICE-STATE1=D /
 D-SERVICE-WORKFLOW1=D / D-SERVICE-IDENTITY1=D / D-SERVICE-UPGRADE1=D: typed
 service trees over the existing task/channel model. Workers own mailboxes; the
 delivery pressure rule is in the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
-`send_durable` requires DurableAtLeastOnce plus an idempotency key; restart
-policy defaults to OneForOne (also OneForAll / RestForOne); state adapters are
-Empty / Snapshot / EventLog; workflows, directory identity, and generation
-handoff/rollback are first-class.
+`send_durable` requires DurableAtLeastOnce plus an idempotency key; state
+adapters are Empty / Snapshot / EventLog; workflows, directory identity, and
+generation handoff/rollback are first-class.
+
+A supervisor is a task that owns a group, and a restart rule is data on that
+group (D-CONC-SCHED1=A). `services.group` gives each declared group a restart
+strategy — OneForOne by default, also OneForAll and RestForOne — and the
+ratified restart budget: five restarts per rolling minute. `services.restarts`
+reports how much of that budget the worker has spent inside the window, and
+`services.tree_show` prints the root row as `budget=<max>/<per>ms`. When a
+worker's budget is spent, the supervisor does not restart again: it escalates,
+failing its own task on the one `TaskFailure` rail (D-CONC-FAIL1=A), stopping
+the tree, and returning a typed `ServiceError`. Supervision reads no outcome
+strings and keeps no second restart counter.
 
 `send_durable` remains the bounded in-memory tree path and returns
 `Unit ? ServiceError`. Durable delivery uses the explicit `ServiceRuntime`

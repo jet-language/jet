@@ -28,7 +28,7 @@ producer only one tier can reach; that is an I9 gap, not a completed row.
 | D-VALIDATE1 | unshipped-law | `crates/jet-sema/src/Sema/CheckerValidate.rs`; `crates/jet-sema/src/Sema/Registration/Serde.rs`; `crates/jet-codegen/src/Codegen/Context.rs`; `crates/jet-parser/src/Parser/Items/states_protocols.rs` | `examples/features/serde/validate.jet`; `tests/ui/validate_*`; `docs/spec/spec.md` | `#1161` | In-body `validate {}` and `Type.validate` ship. Derived struct decoders now run their synthesized validator automatically, and every typed Decode codec uses the canonical `[FieldError]` result contract. Hand-written codecs opt in explicitly. `Validate.over` is unshipped. Rule vocabulary is `check(...)` only. |
 | D-VALIDATE-DECODE1 | shipped | `crates/jet-sema/src/Sema/Registration/Serde.rs`; `crates/jet-codegen/src/Codegen/TIR/emit/functions.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs`; `crates/jet-codegen/src/Prelude/Core/FieldError.rs`; `crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs` | `tests/corelib.rs`; `tests/encoding_parity.rs`; `examples/features/serde/validate.jet` | `#1161` | Every generated, hand-written, and format adapter Decode path returns `Result<T, [FieldError]>`; `FieldError.rs` is the one rendering kernel AOT, the Cranelift host, the ambient interpreter, and comptime all marshal to. The retired codec `DecodeError` envelope has no alias or second decoder API. `AuthError::DecodeError` is a token-JSON error variant, not a codec result contract. `examples/features/serde/hand_codec.jet` is NOT usable evidence: the corpus gate records it `aot_broken` (AOT exit 1 against a golden expecting 0), so no tier comparison ran for the hand-codec path. |
 | D-DBPOLICY1 | unshipped-law | `crates/jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs` (the one closed policy language); `crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs` (SQL transformer); `crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs` (`JetRowPolicy` carrier); `crates/jet-jit/src/DB.rs`; `crates/jet-jit/src/ambient_interp.rs` | `tests/db_policy.rs`; `examples/features/io/db_policy.jet`; `docs/reference/core-library.md` | `#1160` verified child; `#1161` | Bounded `DBScope` carries policy and user through query, mutation, transaction, and live paths. `RowPolicy.rs` is the single acceptance table every tier includes, and each tier parks the COMPILED policy rather than the caller's text; the accepted table shape and the expression set used to live in two places that disagreed about a leading-digit table name. Policy expressions are only `true` and `owner == user`; the general typed closure compiler, generated per-path proof/filter, and audit-output listing of active policies are unshipped. |
-| D-ENVHOOK1 | shipped | `crates/jetpack/src/EnvHook.rs`; `crates/jetpack/src/CLI/run_enter_dev.rs`; `crates/jet-foundation/src/Syntax/effects_surface.rs` | `tests/env_hook.rs`; `tests/env_dev_trust.rs`; `docs/reference/environment.md` | `#506` slice; env-model follow-up for arbitrary shell variables | Opt-in bash/zsh/fish hook, trust gate, activation/deactivation, and `JET_ENV_DISABLE` ship. `env.jet` does not declare arbitrary shell variables such as `PGHOST`. |
+| D-ENVHOOK1 | shipped | `crates/jetpack/src/EnvHook.rs`; `crates/jetpack/src/CLI/run_enter_dev.rs`; `crates/jetpack/src/CLI/trust_env_build.rs`; `crates/jet-foundation/src/Syntax/effects_surface.rs` | `tests/env_hook.rs`; `tests/env_dev_trust.rs`; `docs/reference/environment.md` | `#506` slice; env-model follow-up for declared shell variables | Opt-in bash/zsh/fish hook (`render_hook`), the D-JPK-GRANTCMD1 trust gate, activate/unload on crossing an env boundary, and the `JET_ENV_DISABLE` escape all ship; host tooling only, so no runtime tier applies. `env.jet` cannot declare arbitrary shell variables: activation variables come only from realized providers (`trust_env_build.rs:295-355` composes them from `provider_vars`), and the user's only control is the `unset` list. The ratified surface's own example activates with `PGHOST=localhost`, so this is owed work, not an unclaimed extra. |
 | D-OBSERVE-LIVE1 | shipped-one-tier | `crates/jet-codegen/src/Prelude/Observe.rs`; `crates/jet-codegen/src/Prelude/EnvInit.rs`; `crates/jet-devserver/src/LiveInspect.rs`; `Source/main.rs` (env setup + `inspect live` dispatch) | `tests/live_inspect.rs`; `tests/event_observations.rs`; `docs/reference/core-library.md` | `#1161`; producer tier gap and GC/Canvas debt below | `JET_OBSERVE=1` publishes bounded PID-scoped facts. Tasks, channels, effects, and arena stats are visible; payloads, locals, environment, credentials, and arbitrary process memory are not. The producer is reachable ONLY from the AOT generated runtime through `EnvInit`; the Cranelift JIT, ambient interpreter, and comptime tiers have no observation bridge, so `jet run --observe` on the default resident tier sets the variable and publishes nothing. `crates/jet-cli/src/CLI.rs` is the flag table only, not dispatch. GC stats and the Canvas task/channel/effect projection named by the ratified text are absent. |
 
 ## Observed tiers
@@ -103,10 +103,14 @@ second scheduler.
 - The DB policy expression is a closed v1 language (`true` and `owner == user`),
   with exact SQL target validation. It is not a general user-supplied policy
   closure compiler.
-- CRDT values preserve replica contributions and converge under their declared
-  laws, and the current process-local session publishes a bounded latest-state
-  event for local reconnect replay. The fixed String session seam does not carry
-  typed atom/LWW metadata or vector clocks. It is not an authenticated remote
+- CRDT merge keeps every NON-CONFLICTING replica contribution and converges under
+  each carrier's declared law: text is an atom-set union with tombstones, list an
+  add-only union, counter a per-replica max. A conflicting map key is
+  last-writer-wins on `(clock, writer, value)`, so the losing value does not
+  survive — "preserves replica contributions" was too strong for `SyncMap`. The
+  process-local session publishes a bounded latest-state event for local
+  reconnect replay; that fixed String seam merges canonical displays and carries
+  no typed atom/LWW metadata or vector clocks. It is not an authenticated remote
   routing or network merge implementation.
 - The live path is a bounded typed registry with explicit errors, generation
   checks, query rerun, canonical signal delivery, serialized native `core.net.ws`
@@ -116,12 +120,36 @@ second scheduler.
 
 ## Implementation checkpoint
 
-The current production patch replaces the live-query and auth thread-local
-registries with process-global mutex state, bounds live-query state with
-oldest-entry eviction and explicit closed-handle errors, requires a registered
-delivery-capable identity for magic links, makes STM buffering an explicit
-typed guard, validates live-inspect JSON through the shared JSON parser, and
-rejects malformed row-policy tables and non-canonical sync documents. Child
-cards #1157 and #1160 carry their focused evidence. This implementation pass
-ran no test, build, formatter, linter, or devtool command; the orchestrator
-owns that verification.
+Earlier passes replaced the live-query and auth thread-local registries with
+process-global mutex state, bounded live-query state with oldest-entry eviction
+and explicit closed-handle errors, required a registered delivery-capable
+identity for magic links, made STM buffering an explicit typed guard, and
+validated live-inspect JSON through the shared JSON parser. Child cards #1157 and
+#1160 carry their focused evidence.
+
+This pass (card #1161) made three facts single-homed rather than mirrored, each
+because the copies had already drifted or could:
+
+- The closed row-policy language moved to `Prelude/CoreLib/JetStd/RowPolicy.rs`
+  and every tier includes it. `DBPluginWire.rs` and `Top/Sync.rs` held two copies
+  that disagreed about a leading-digit table name, and the SQL transformer
+  re-recognized the literal string `"true"` a third time; it now matches the
+  compiled form. `tests/db_policy.rs` gained an AOT/default pair asserting the
+  same verdict for a leading-digit table, a spaced table, an unsupported
+  expression, and a padded-but-legal table.
+- `SyncMap.get` now denies on an invalid carrier, and the comptime marshaller
+  reads carrier validity through one fail-closed helper instead of four
+  `unwrap_or(true)` copies.
+- The session cookie's `HttpOnly`/`Secure`/`SameSite`/`Path` defaults are one
+  helper in `AuthSession.rs` instead of three identical `format!` literals.
+
+Two retired duplicate goldens were deleted:
+`examples/features/crypto/auth_sessions.jet.expected_out` (which CONTRADICTED the
+canonical `expected/crypto/auth_sessions.out` on the `magic_user` line) and
+`examples/features/tooling/sync_crdt.jet.expected_out`. The live convention is
+`examples/features/expected/<topic>/<name>.out`
+(`tests/truthfulness.rs::every_feature_example_has_expected_output`).
+
+No pass that wrote this file ran a test, build, formatter, linter, or devtool
+command; the orchestrator owns that verification. Every tier statement here is
+source reading or a corpus-gate row, never an observed three-leg run.
