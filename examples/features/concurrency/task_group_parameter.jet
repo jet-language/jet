@@ -1,4 +1,25 @@
 // D-TASKGROUP-PARAM1=A: pass a task group to a named helper.
+//
+// D-CONC-GROUP1=A: a group is a borrow of its scope, so it may be named in
+// EVERY direct parameter position — a method's parameter list exactly like a
+// free function's. Helpers live where the code lives.
+//
+// The storage ban is what keeps the guarantee: a group still cannot be a struct
+// field, a return type, a local annotation, or a lambda capture (E1110). `self`
+// holds the receiver, never the group, so a method opens no new escape.
+//
+// A spawn through a parameter group owns its captures. Both spawns below copy
+// plain Ints in, so nothing borrowed can outlive the helper's frame.
+struct Counter {
+    step: Int
+
+    fn print_stepped(self, group: TaskGroup, value: Int) {
+        step :: self.step
+        handle :: task value + step
+        print(handle.join() ?? 0)
+    }
+}
+
 fn print_next(group: TaskGroup, value: Int) {
     handle :: task value + 1
     print(handle.join() ?? panic("task failed"))
@@ -7,5 +28,7 @@ fn print_next(group: TaskGroup, value: Int) {
 fn run() {
     task.group group {
         print_next(group, 41)
+        counter :: Counter.{step: 2}
+        counter.print_stepped(group, 40)
     }
 }

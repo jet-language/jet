@@ -1,6 +1,8 @@
 // D-SERDE11/12: a non-codable type argument to a generic `#Codable` fails at
 // the USE site (E2411), not at the definition. `Wrap<T>` is fine generically;
-// `Wrap<Plain>` isn't, because `Plain` has no wire form.
+// `Wrap<Plain>` isn't, because `Plain` refuses a wire form.
+// D-AUTODERIVE1=E auto-derives both codecs for a qualifying plain struct, so
+// `Plain` states the refusal with `#!Codable`.
 use core.encoding.json as json
 
 #Codable
@@ -8,6 +10,7 @@ struct Wrap<T> {
     value: T
 }
 
+#!Codable
 struct Plain {
     n: Int
 }

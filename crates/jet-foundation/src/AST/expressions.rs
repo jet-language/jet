@@ -34,6 +34,12 @@ pub struct Call {
 pub struct CallArgFlags {
     pub implicit_clone: bool,
     pub shared_auto_clone: bool,
+    /// D-CONC-SHARE1=A (card #1561): sema synthesized this closure argument
+    /// while desugaring a plain field read or write on a `Shared<T>` handle.
+    /// It marks the compiler's own use of the locked read/edit seam apart from
+    /// the retired `read(f)`/`edit(f)` source spellings, which no longer parse
+    /// as user syntax.
+    pub shared_access_desugar: bool,
     /// Retired D-TRAILBLOCK1 flag (D-TRAILBLOCK2=A): trailing `{ }` sugar no
     /// longer parses, so this stays false. Kept so older AST snapshots and
     /// defensive formatter paths remain stable.

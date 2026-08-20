@@ -233,6 +233,15 @@ fn runtime_stop_goldens_match_all_execution_tiers() {
         70,
         include_str!("../examples/features/expected/errors/panic.err.out"),
     );
+    // #1967: the `??` right side is a stop too. `assert_example_cli_error_tiers_agree`
+    // requires EMPTY stdout, so a tier that reports the panic without ending the
+    // program fails here on the unreachable `print` — that is the whole point of
+    // this stem, and why `errors/panic` alone did not catch it.
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/qq_panic",
+        70,
+        include_str!("../examples/features/expected/errors/qq_panic.err.out"),
+    );
     tir_support::assert_example_cli_error_tiers_agree(
         "errors/stack_overflow",
         70,

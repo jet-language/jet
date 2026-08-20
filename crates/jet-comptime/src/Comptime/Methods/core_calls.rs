@@ -51,9 +51,16 @@ fn validate_core_call_projection(
                 span,
             ))
         }
+        // I4: the projection bit is spelled COMPTIME in the table, but this
+        // adapter also serves default `jet run`'s evaluator, so the message
+        // names the evaluator that lacks the row instead of a phase the reader
+        // may not be in.
         Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. }) => Err(
             unsupported(
-                &format!("{}.{}(): comptime projection is not declared", module, method),
+                &format!(
+                    "{}.{}(): no shared-evaluator projection is declared",
+                    module, method
+                ),
                 span,
             ),
         ),
@@ -410,20 +417,16 @@ pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnos
     match v {
         CtValue::Float(value) => Ok(value.as_f64()),
         CtValue::Int(n) => Ok(*n as f64),
-        _ => Err(unsupported(
-            "non-numeric argument to comptime math call",
-            span,
-        )),
+        // I4: these adapters run on default `jet run`'s evaluator too, so the
+        // `what` names the argument and never a phase.
+        _ => Err(unsupported("non-numeric argument to a Core math call", span)),
     }
 }
 
 fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
     match v {
         CtValue::Float(value) => Ok(*value),
-        _ => Err(unsupported(
-            "non-float argument to comptime math call",
-            span,
-        )),
+        _ => Err(unsupported("non-float argument to a Core math call", span)),
     }
 }
 
@@ -491,10 +494,7 @@ fn named_tuple(fields: &[(&str, CtValue)]) -> CtValue {
 pub(in super::super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.as_str()),
-        _ => Err(unsupported(
-            "non-string argument to comptime string call",
-            span,
-        )),
+        _ => Err(unsupported("non-string argument to a Core string call", span)),
     }
 }
 
@@ -2680,16 +2680,21 @@ pub fn apply_core_call_with_type(
             Some(span),
         )),
         // --- unknown / not yet implemented ---
+        //
+        // I4: this adapter serves BOTH comptime folding and the runtime TIR
+        // evaluator that default `jet run` deopts into, so the `what` names the
+        // construct and never the phase. Saying "at comptime" here described a
+        // runtime call site as a compile-time one, which sent readers looking
+        // for a `comptime` block that was not in their program. E0956 already
+        // renders "isn't supported by the current evaluator yet"; a genuinely
+        // compile-time-only refusal is a different row (E3410/E3412).
         _ => {
             if repl_mode {
                 if let Some(_) = repl_native_only_module(module) {
                     return Err(repl_native_module_diag(module, method, span));
                 }
             }
-            Err(unsupported(
-                &format!("`{}.{}()` at comptime", module, method),
-                span,
-            ))
+            Err(unsupported(&format!("`{}.{}()`", module, method), span))
         }
     }
 }

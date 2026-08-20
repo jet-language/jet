@@ -146,10 +146,13 @@ pub const INTERNAL_TASK_SURFACE_TYPE: &str = "\0jet.task.surface";
 /// Compiler-only dispatch type for a canonical combinator inside `task.group`.
 pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
 
-/// D-CONC-SPAWN1=D / D-TASKGROUP-PARAM1=A: the compiler-private handle type
-/// bound by `task.group g { … }` and accepted as a direct named-function
-/// parameter. It carries the lexical group's internal collector through
-/// lowering; it is not a public first-class value.
+/// D-CONC-SPAWN1=D / D-TASKGROUP-PARAM1=A / D-CONC-GROUP1=A: the
+/// compiler-private handle type bound by `task.group g { … }` and accepted in
+/// any direct parameter position — a method's parameter list exactly like a
+/// free function's. It carries the lexical group's internal collector through
+/// lowering; it is not a public first-class value, so it is refused in a struct
+/// field, a return type, a local annotation, a lambda parameter, and every
+/// aggregate.
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
 /// Compiler-private dispatch method for canonical `task` spawn syntax.

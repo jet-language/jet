@@ -1,5 +1,6 @@
-// D-SHAREDGUARD1=A / D-SHAREDGUARD2=A: short Shared.read/edit closures remain
-// the default. Expert guards can span helpers and wait without missing a wake.
+// D-SHAREDGUARD1=A / D-SHAREDGUARD2=A: expert guards keep manual control after
+// D-CONC-SHARE1=A made ordinary shared access plain field reads and writes. A
+// guard can span helpers and wait without missing a wake; plain access cannot.
 struct WorkQueue {
     jobs: [Int]
     capacity: Int
@@ -19,12 +20,12 @@ fn consume(queue: Shared<WorkQueue>, changed: Condition) {
 }
 
 fn run() {
-    queue := Shared.new(WorkQueue.{jobs: [1], capacity: 1})
+    queue := shared WorkQueue.{jobs: [1], capacity: 1}
     changed := Condition.new()
     task.group workers {
         producer :: task produce(queue, changed)
         consume(queue, changed)
         producer.join() ?? panic("producer failed")
     }
-    print(queue.read(value => value.jobs.first() ?? 0))
+    print(queue.jobs.first() ?? 0)
 }

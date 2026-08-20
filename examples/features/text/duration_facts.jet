@@ -1,3 +1,9 @@
+// D-SHAPE-DURATION1=A / D-TYPE2-TIME1=A: a runtime number becomes a checked
+// Duration through the TYPE-owned unit constructor. There is no module-side
+// spelling (`core.time` exposes clock and calendar items, not duration
+// constructors — `Syntax::DURATION_CONSTRUCTORS`), so the second construction
+// below reads the same way as the first.
+
 fn run() ? {
     exact :: Duration.seconds(2) ?? return Err("duration")
     fine :: Duration.microseconds(400) ?? return Err("duration")
@@ -12,9 +18,9 @@ fn run() ? {
     print(exact.is_zero())
     zero :: Duration.milliseconds(0) ?? return Err("zero")
     print(zero.is_zero())
-    via_mod :: time.nanoseconds(1_000_000) ?? return Err("mod duration")
-    via_mod_ms :: via_mod.in(.Milliseconds) ?? return Err("duration read")
-    print(via_mod_ms)
+    from_nanos :: Duration.nanoseconds(1_000_000) ?? return Err("duration")
+    from_nanos_ms :: from_nanos.in(.Milliseconds) ?? return Err("duration read")
+    print(from_nanos_ms)
     if Duration.hours(9223372036854775807) == .Err(_) -> print("range")
     via_literal :: 1ms
     literal_ms :: via_literal.in(.Milliseconds) ?? return Err("duration read")

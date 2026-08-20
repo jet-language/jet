@@ -29,8 +29,10 @@ struct SelfNode {
 }
 
 // An intrusive queue. It never allocates a node: the caller owns the storage
-// and lends it, so `Queue` records the promise instead of copying the node.
-struct Queue {
+// and lends it, so `NodeQueue` records the promise instead of copying the node.
+// (`Queue` itself is a built-in Core type — E0106 — so the example names its
+// own carrier.)
+struct NodeQueue {
     label: String
     head: Pin<Node>
 }
@@ -58,7 +60,7 @@ fn run() {
     // The queue stores the same promise. `head` is declared `Pin<Node>`, so
     // reaching it through the queue projects to a pin again (D-PIN3=A) rather
     // than to a copy of the node.
-    queue :: Queue.{label: "ready", head: mem.pin(&node)}
+    queue :: NodeQueue.{label: "ready", head: mem.pin(&node)}
     print("label: {(queue.label)}")
     print("payload: {(queue.head.payload)}")
     print("hops: {(queue.head.hops)}")

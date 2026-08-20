@@ -437,12 +437,12 @@ impl<'a> EvalCtx<'a> {
                 };
                 DataPipeline::schema_value(&recv, args.first().map(|arg| &arg.ty), row, span)
             }
+            // I4: this evaluator is also default `jet run`'s tier-0, so the
+            // `what` names the call. "at comptime (impure tier)" described a
+            // runtime call site as compile-time work.
             "lazy" | "plan" | "lazy_filter" | "lazy_sort_by" | "collect" | "sort_by"
             | "inner_join" | "left_join" | "describe" | "csv_reader" | "json_reader" => {
-                Err(unsupported(
-                    &format!("`core.data.{method}()` at comptime (impure tier)"),
-                    span,
-                ))
+                Err(unsupported(&format!("`core.data.{method}()`"), span))
             }
             _ => {
                 let mut argv = Vec::with_capacity(args.len());

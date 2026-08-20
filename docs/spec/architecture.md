@@ -130,9 +130,11 @@ snapshots):
   the same capture and result checks as ordinary tasks.
 - `para_map`, `para_filter`, `para_partition`, and `para_fold` reject mutable
   captures and values that workers cannot safely share or transfer.
-- `Shared<T>` is the explicit shared-mutation path. Its `read` and `edit`
-  closures use a lock-scoped view. `#Transact` uses the same handles and commits
-  their changes atomically.
+- `Shared<T>` is the explicit shared-mutation path. `shared x` builds the
+  value; a field read is one locked read, a field write is one locked write,
+  and each statement is one atomic step. `#Transact` groups several statements
+  and commits them atomically, taking every touched value's write lock in
+  stable address order. Expert guards hold one lock across helper calls.
 - `Cell<T>` is the private local-mutation path. It uses one-thread dynamic
   loans without `Arc` or operating-system locks. Sema rejects cells and their
   guards across task, channel, `Shared<T>`, and parallel boundaries.

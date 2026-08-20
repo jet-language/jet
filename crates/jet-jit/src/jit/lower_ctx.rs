@@ -336,6 +336,69 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// The ONE question behind every list-host choice in this file: does this
+    /// element's RESIDENT CARRIER occupy a `JetVal::Float` slot?
+    ///
+    /// That is the exact failure the paragraph above names, and it was answered
+    /// by twenty hand-written copies in FOUR different spellings:
+    /// `jit_list_float_type(list_ty)`, `matches!(ty, Float | Float32)`,
+    /// `matches!(ty, Float)`, and this carrier test. They are not the same set.
+    /// `clif_ty` answers `F64` for `Float` AND `Float32` (`types_meta.rs`), and
+    /// `meta.clif_ty` also resolves a `distinct` alias down to its base — so the
+    /// carrier test is the widest correct answer and the `Type::Float`-only
+    /// spelling was the narrowest wrong one. An `[F32]` element is a type the
+    /// residency gate admits (`jit_list_native_type` accepts `List(Float32)`),
+    /// and nine read sites plus two write sites sent it through the integer
+    /// host carrying a float SSA value.
+    ///
+    /// Post-lowering there is a fifth, even more direct key: the SSA value's own
+    /// `dfg.value_type(v) == types::F64`. `lower_result_option_list_push` uses
+    /// it because at that point the value exists and the Jet type does not.
+    fn list_elem_is_f64(&self, elem_ty: &Type) -> bool {
+        self.meta
+            .clif_ty(elem_ty)
+            .or_else(|| clif_ty(elem_ty))
+            == Some(types::F64)
+    }
+
+    fn list_push_host(&self, elem_ty: &Type) -> FuncId {
+        if self.list_elem_is_f64(elem_ty) {
+            self.host.coll.list_push_f64
+        } else {
+            self.host.coll.list_push
+        }
+    }
+
+    /// [`Self::list_push_host`] keyed by the LIST type, for the callers that
+    /// hold the collection rather than the element. `Type::List` only, which is
+    /// exactly the set `jit_list_float_type` answered for before the lift — a
+    /// `FixedList` element carrier is a separate question and stays where it
+    /// was rather than being widened blind.
+    fn list_push_host_for_list(&self, list_ty: &Type) -> FuncId {
+        match list_ty {
+            Type::List(elem) => self.list_push_host(elem),
+            _ => self.host.coll.list_push,
+        }
+    }
+
+    /// The read half of [`Self::list_push_host`], same table.
+    fn list_get_host(&self, elem_ty: &Type) -> FuncId {
+        if self.list_elem_is_f64(elem_ty) {
+            self.host.coll.list_get_f64
+        } else {
+            self.host.coll.list_get
+        }
+    }
+
+    /// [`Self::list_get_host`] keyed by the LIST type, mirroring
+    /// [`Self::list_push_host_for_list`].
+    fn list_get_host_for_list(&self, list_ty: &Type) -> FuncId {
+        match list_ty {
+            Type::List(elem) => self.list_get_host(elem),
+            _ => self.host.coll.list_get,
+        }
+    }
+
     /// Declared positional-parameter count of a resident host symbol, read from
     /// the host table without materializing the parameter list.
     fn host_param_count(&self, id: FuncId) -> usize {
@@ -4583,10 +4646,7 @@ impl LowerCtx<'_, '_> {
                     let line_c = self.b.ins().iconst(types::I32, *line as i64);
                     let (bound, bound_ty) = if *write {
                         if *single {
-                            let host_id = match &elem_ty {
-                                Type::Float => self.host.coll.list_get_f64,
-                                _ => self.host.coll.list_get,
-                            };
+                            let host_id = self.list_get_host(&elem_ty);
                             let get_ref = self
                                 .module
                                 .declare_func_in_func(host_id, self.b.func);
@@ -4602,10 +4662,7 @@ impl LowerCtx<'_, '_> {
                             },
                         )
                     } else if *single {
-                        let host_id = match &elem_ty {
-                            Type::Float => self.host.coll.list_get_f64,
-                            _ => self.host.coll.list_get,
-                        };
+                        let host_id = self.list_get_host(&elem_ty);
                         let result = self.call_host(host_id, &[list, start_v, line_c]);
                         self.emit_trap_check()?;
                         (result, elem_ty.clone())
@@ -4987,10 +5044,7 @@ impl LowerCtx<'_, '_> {
                             let (list, start, _) = self.unpack_view_mut(dst)?;
                             let line = self.b.ins().iconst(types::I32, 1);
                             let assigned = if let Some(op) = op {
-                                let get_id = match &elem_ty {
-                                    Type::Float => self.host.coll.list_get_f64,
-                                    _ => self.host.coll.list_get,
-                                };
+                                let get_id = self.list_get_host(&elem_ty);
                                 let current = self.call_host(get_id, &[list, start, line]);
                                 self.emit_trap_check()?;
                                 let rhs = self.lower_assignment_value(value, *clone_value)?;
@@ -6068,13 +6122,8 @@ impl LowerCtx<'_, '_> {
                             self.vars.insert(TIR::local_place(var), idx_bind);
                             self.var_tys.insert(TIR::local_place(var), Type::Int);
                             let line = self.b.ins().iconst(types::I32, 1);
-                            let get_ref = self.module.declare_func_in_func(
-                                match elem_ty {
-                                    Type::Float => self.host.coll.list_get_f64,
-                                    _ => self.host.coll.list_get,
-                                },
-                                self.b.func,
-                            );
+                            let get_id = self.list_get_host(&elem_ty);
+                            let get_ref = self.module.declare_func_in_func(get_id, self.b.func);
                             let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
                             let elem = self.b.inst_results(get_call)[0];
                             self.emit_trap_check()?;
@@ -6233,13 +6282,8 @@ impl LowerCtx<'_, '_> {
                             .declare_func_in_func(self.host.io.progress_pull, self.b.func);
                         self.b.ins().call(progress_pull, &[coll, pulls]);
                         let line = self.b.ins().iconst(types::I32, 1);
-                        let get_ref = self.module.declare_func_in_func(
-                            match elem_ty {
-                                Type::Float => self.host.coll.list_get_f64,
-                                _ => self.host.coll.list_get,
-                            },
-                            self.b.func,
-                        );
+                        let get_id = self.list_get_host(&elem_ty);
+                        let get_ref = self.module.declare_func_in_func(get_id, self.b.func);
                         let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
                         let elem = self.b.inst_results(get_call)[0];
                         self.emit_trap_check()?;
@@ -7879,11 +7923,7 @@ impl LowerCtx<'_, '_> {
         })?;
         let out = self.b.use_var(out_var);
         let mapped_ty = self.erase_distinct_ty(&body_expr.ty);
-        let (push_id, push_val) = if matches!(mapped_ty, Type::Float | Type::Float32) {
-            (self.host.coll.list_push_f64, mapped)
-        } else {
-            (self.host.coll.list_push, mapped)
-        };
+        let (push_id, push_val) = (self.list_push_host(&mapped_ty), mapped);
         let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
         self.b.ins().call(push_ref, &[out, push_val]);
         self.b.ins().jump(step, &[]);
@@ -11165,10 +11205,7 @@ impl LowerCtx<'_, '_> {
         if let Some(elem_ty) = view_elem_ty {
             let (list, start, _) = self.unpack_view_mut(raw)?;
             let line = self.b.ins().iconst(types::I32, 1);
-            let host_id = match elem_ty {
-                Type::Float => self.host.coll.list_get_f64,
-                _ => self.host.coll.list_get,
-            };
+            let host_id = self.list_get_host(elem_ty);
             let result = self.call_host(host_id, &[list, start, line]);
             self.emit_trap_check()?;
             return Ok(result);
@@ -11401,17 +11438,57 @@ impl LowerCtx<'_, '_> {
         self.call_host(self.host.struct_new, &[count])
     }
 
-    fn zip_value_kind(&self, ty: &Type) -> Option<JitZipValueKind> {
-        match self.erase_distinct_ty(ty) {
+    /// The ONE table naming which value kind a zip/unzip column word carries.
+    ///
+    /// `zip_value_kind` is this after `erase_distinct_ty`; `safety.rs`'s
+    /// `TBuiltinOp::Unzip` gate is this without it, because the gate answers
+    /// before a `LowerCtx` (and so before `JitMeta`) exists. Both tiers read
+    /// THIS function rather than restating the kinds, so an unzip receiver the
+    /// host can honour cannot be refused by the gate, and one the host cannot
+    /// honour cannot reach it (#2091).
+    pub(crate) fn zip_column_kind(ty: &Type) -> Option<JitZipValueKind> {
+        match ty {
             Type::Int | Type::IntN { .. } => Some(JitZipValueKind::Int),
             Type::Float | Type::Float32 => Some(JitZipValueKind::Float),
             Type::Bool => Some(JitZipValueKind::Bool),
             Type::Char => Some(JitZipValueKind::Char),
             Type::String => Some(JitZipValueKind::String),
             Type::Option(_) => Some(JitZipValueKind::Opaque),
-            ty if clif_ty(&ty) == Some(types::I64) => Some(JitZipValueKind::Opaque),
+            ty if clif_ty(ty) == Some(types::I64) => Some(JitZipValueKind::Opaque),
             _ => None,
         }
+    }
+
+    /// The ONE table naming which `[(A, B)]` / `Iter<(A, B)>` receivers
+    /// `jet_jit_list_unzip` can honour, and the two column kinds it needs to
+    /// honour them.
+    ///
+    /// `safety.rs`'s `TBuiltinOp::Unzip` arm and the `TBuiltinOp::Unzip`
+    /// lowering both call THIS — the gate to decide residency, the lowering to
+    /// pick the immediates it hands the host. Before the lift they were two
+    /// hand-written tables: the gate demanded two `intish` columns while the
+    /// lowering accepted every receiver and the host answered two EMPTY lists
+    /// for a `String` column (#2091, and the reason `["a","bb","c"]
+    /// .zip([1,2,3]).unzip()` was refused rather than fixed).
+    pub(crate) fn unzip_column_kinds(
+        recv_ty: &Type,
+    ) -> Option<(JitZipValueKind, JitZipValueKind)> {
+        let elem =
+            jit_list_iter_elem_type(recv_ty).or_else(|| jit_closure_elem_type(recv_ty))?;
+        let Type::Tuple(fields) = elem else {
+            return None;
+        };
+        let [(_, left), (_, right)] = fields.as_slice() else {
+            return None;
+        };
+        Some((
+            Self::zip_column_kind(left)?,
+            Self::zip_column_kind(right)?,
+        ))
+    }
+
+    fn zip_value_kind(&self, ty: &Type) -> Option<JitZipValueKind> {
+        Self::zip_column_kind(&self.erase_distinct_ty(ty))
     }
 
     fn zip_input_kind(&self, ty: &Type) -> Option<JitZipValueKind> {
@@ -11936,10 +12013,7 @@ impl LowerCtx<'_, '_> {
         }
         let list = self.lower_expr(init)?;
         let line_const = self.b.ins().iconst(types::I32, line as i64);
-        let host_id = match &elem_ty {
-            Type::Float => self.host.coll.list_get_f64,
-            _ => self.host.coll.list_get,
-        };
+        let host_id = self.list_get_host(&elem_ty);
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
         let clif = clif_ty(&elem_ty).ok_or_else(|| {
             format!("jit list destructure element type unsupported: {elem_ty:?}")
@@ -11971,10 +12045,7 @@ impl LowerCtx<'_, '_> {
                 continue;
             }
             let v = self.lower_expr(e)?;
-            let push_id = match list_ty {
-                ty if jit_list_float_type(ty) => self.host.coll.list_push_f64,
-                _ => self.host.coll.list_push,
-            };
+            let push_id = self.list_push_host_for_list(list_ty);
             let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
             self.b.ins().call(push_ref, &[handle, v]);
             self.adopt_compute_resource(v, handle);
@@ -12388,11 +12459,7 @@ impl LowerCtx<'_, '_> {
         parts: &[ListSpreadPart],
     ) -> Result<Value, String> {
         let out = self.call_host(self.host.coll.list_new, &[]);
-        let push_id = if jit_list_float_type(list_ty) {
-            self.host.coll.list_push_f64
-        } else {
-            self.host.coll.list_push
-        };
+        let push_id = self.list_push_host_for_list(list_ty);
         let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
         for part in parts {
             match part {
@@ -12419,11 +12486,7 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(body);
                     self.b.seal_block(body);
                     let line = self.b.ins().iconst(types::I32, 1);
-                    let get_id = if jit_list_float_type(list_ty) {
-                        self.host.coll.list_get_f64
-                    } else {
-                        self.host.coll.list_get
-                    };
+                    let get_id = self.list_get_host_for_list(list_ty);
                     let value = self.call_host(get_id, &[input, idx, line]);
                     self.emit_trap_check()?;
                     self.b.ins().call(push_ref, &[out, value]);
@@ -12645,11 +12708,7 @@ impl LowerCtx<'_, '_> {
                         .ok_or("jit crypto list lowering value stack underflow")?;
                     let elems = values.split_off(start);
                     let handle = self.call_host(self.host.coll.list_new, &[]);
-                    let push_id = if jit_list_float_type(list_ty) {
-                        self.host.coll.list_push_f64
-                    } else {
-                        self.host.coll.list_push
-                    };
+                    let push_id = self.list_push_host_for_list(list_ty);
                     let push = self.module.declare_func_in_func(push_id, self.b.func);
                     for value in elems {
                         self.b.ins().call(push, &[handle, value]);
@@ -12878,14 +12937,8 @@ impl LowerCtx<'_, '_> {
                     let environment = self.call_host(self.host.coll.list_new, &[]);
                     for (outer, _place, ty) in &lam.captures {
                         let value = self.lower_lambda_capture_value(lam, outer, ty)?;
-                        let push = self.module.declare_func_in_func(
-                            if matches!(ty, Type::Float) {
-                                self.host.coll.list_push_f64
-                            } else {
-                                self.host.coll.list_push
-                            },
-                            self.b.func,
-                        );
+                        let push_id = self.list_push_host(ty);
+                        let push = self.module.declare_func_in_func(push_id, self.b.func);
                         self.b.ins().call(push, &[environment, value]);
                     }
                     environment
@@ -17752,10 +17805,7 @@ impl LowerCtx<'_, '_> {
                     } else {
                         (list, idx)
                     };
-                    let host_id = match &expr.ty {
-                        Type::Float => self.host.coll.list_get_f64,
-                        _other => self.host.coll.list_get,
-                    };
+                    let host_id = self.list_get_host(&expr.ty);
                     let result = self.call_host(host_id, &[list, idx, line_const]);
                     self.emit_trap_check()?;
                     Ok(result)
@@ -20225,8 +20275,7 @@ impl LowerCtx<'_, '_> {
                         (Type::Apply { name, .. }, _) if name == "PriorityQueue" => {
                             self.host.coll.priority_queue_push
                         }
-                        (_, Type::Float) => self.host.coll.list_push_f64,
-                        _ => self.host.coll.list_push,
+                        _ => self.list_push_host(&args[0].ty),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     self.b.ins().call(host_ref, &[recv_val, v]);
@@ -20948,7 +20997,16 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::Unzip { .. } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    Ok(self.call_host(self.host.coll.list_unzip, &[recv_val]))
+                    // Same table the residency gate reads, so this arm refuses
+                    // exactly the receivers the gate refuses instead of
+                    // accepting every one of them and letting the host answer
+                    // two empty lists (#2091).
+                    let Some((left, right)) = Self::unzip_column_kinds(&recv_ty) else {
+                        return Err(format!("jit unzip receiver unsupported: {recv_ty:?}"));
+                    };
+                    let left = self.b.ins().iconst(types::I64, left.code());
+                    let right = self.b.ins().iconst(types::I64, right.code());
+                    Ok(self.call_host(self.host.coll.list_unzip, &[recv_val, left, right]))
                 })
             }
             TBuiltinOp::Clear => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
@@ -22475,20 +22533,12 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(body);
         self.b.seal_block(body);
         let line = self.b.ins().iconst(types::I32, 0);
-        let get = if matches!(elem_ty, Type::Float | Type::Float32) {
-            self.host.coll.list_get_f64
-        } else {
-            self.host.coll.list_get
-        };
+        let get = self.list_get_host(elem_ty);
         let element = self.call_host(get, &[input, index, line]);
         self.emit_trap_check()?;
         let cloned = self.lower_clone_raw_value(element, elem_ty, Some(owner))?;
         let output_now = self.b.use_var(output_var);
-        let push = if matches!(elem_ty, Type::Float | Type::Float32) {
-            self.host.coll.list_push_f64
-        } else {
-            self.host.coll.list_push
-        };
+        let push = self.list_push_host(elem_ty);
         let push = self.module.declare_func_in_func(push, self.b.func);
         self.b.ins().call(push, &[output_now, cloned]);
         self.adopt_compute_resource(cloned, owner);
@@ -29161,11 +29211,7 @@ impl LowerCtx<'_, '_> {
         } else {
             let out = self.b.use_var(out_var);
             let mapped_ty = self.erase_distinct_ty(&body_expr.ty);
-            let (push_id, push_val) = if matches!(mapped_ty, Type::Float | Type::Float32) {
-                (self.host.coll.list_push_f64, pred_or_mapped)
-            } else {
-                (self.host.coll.list_push, pred_or_mapped)
-            };
+            let (push_id, push_val) = (self.list_push_host(&mapped_ty), pred_or_mapped);
             let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
             self.b.ins().call(push_ref, &[out, push_val]);
             self.b.ins().jump(step, &[]);

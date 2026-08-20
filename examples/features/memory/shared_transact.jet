@@ -1,39 +1,41 @@
-// D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of `#Transact`.
-// A `#Transact` block that touches `Shared<T>` handles turns every `.edit`
-// inside it into ONE atomic commit — either every handle's change lands or none
-// does, and no concurrent task ever observes a half-applied transfer. The
-// deferred edits are applied together at the block's end under all the handles'
-// locks at once, taken in a canonical order that cannot deadlock. No new marker
-// (I8): the same `#Transact` that already gives single-task rollback now spans
-// shared state. An irreversible effect inside is still rejected (E0746).
+// D-CONC-STM1=A (ratified 2026-08-06, card #1561; amends D-STM1=A): the Shared
+// plane of `#Transact`. Several statements that touch `Shared` values commit
+// together — either every value's change lands or none does, and no concurrent
+// task ever observes a half-applied transfer. The block body runs exactly ONCE:
+// the writes are buffered, and at the block's end the commit takes every
+// touched value's write lock at once, in a fixed address order that cannot
+// deadlock. Contention waits on the locks instead of re-running the body, so a
+// log line inside a transaction is emitted exactly once. No new marker (I8):
+// the same `#Transact` that already gives single-task rollback spans shared
+// state. An irreversible effect inside is still rejected (E0746).
+//
+// D-CONC-SHARE1=A: the transaction name is optional and is kept for
+// `on_commit`/`on_rollback` hooks. This transfer needs no hooks, so it opens a
+// bare `#Transact`.
 struct Account {
     balance: Int
 }
 
-// Move `amount` from one account handle to another, atomically. Under heavy
-// concurrent load a second task can never read a total that is briefly wrong:
-// the debit and the credit land together at the transaction's commit.
+// Move `amount` from one account to another, atomically. Under heavy concurrent
+// load a second task can never read a total that is briefly wrong: the debit
+// and the credit land together at the transaction's commit.
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
-    #Transact(tx) {
-        from.edit(a => {
-            a.balance -= amount
-        })  // both land, or neither
-        to.edit(a => {
-            a.balance += amount
-        })  // no lock ordering to get wrong
+    #Transact {
+        from.balance -= amount   // both land, or neither
+        to.balance += amount     // no lock ordering to get wrong
     }
 }
 
 fn run() {
-    from :: Shared.new(Account.{balance: 1000})
-    to :: Shared.new(Account.{balance: 0})
+    from :: shared Account.{balance: 1000}
+    to :: shared Account.{balance: 0}
     // Eight concurrent transfers of 100 each. Whatever order the runtime picks,
     // every transfer is atomic, so the final balances are deterministic and the
     // grand total is conserved exactly.
     @[ t1..t8 ]@ :: task transfer(from, to, 100)
     @[ t1..t8 ]@.join() ?? panic("transfer failed")
-    from_bal :: from.read(a => a.balance)
-    to_bal :: to.read(a => a.balance)
+    from_bal :: from.balance
+    to_bal :: to.balance
 
     print(@[ "from={from_bal}", "to={to_bal}", "total={from_bal + to_bal}" ]@)
 }

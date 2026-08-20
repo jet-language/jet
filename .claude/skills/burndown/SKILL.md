@@ -109,8 +109,11 @@ Zero ambiguity. Resolve every open question before dispatch.
 ## Command hygiene (put in every brief)
 
 - **Every** test/build command `timeout`-wrapped (300–900s).
-- Harness guards are live: 10 GB allocation cap, 900s suite deadline. A guard trip is a
-  defect to report — never a limit to raise. No suite may exceed 15 minutes.
+- Harness guards are live: 10 GB allocation cap, and a 900s suite deadline unless
+  `tests/suite_budgets.txt` names that suite (#677). A guard trip is a defect to report
+  — never a limit to raise, and never an env var: `JET_TEST_DEADLINE_SECS` can only
+  tighten. Longer needs a committed row with its reason, under the ceiling pinned in
+  `tests/suite_membership.rs`.
 - Build via `scripts/agent/jet-env cargo …` at repo root. Never a cargo target under
   `/tmp` (tmpfs → swap → kernel OOM, which kills the whole agent scope).
 - `rm -rf ~/.cache/jet` before any post-codegen smoke run; the build cache is keyed on

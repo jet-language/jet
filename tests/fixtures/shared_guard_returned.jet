@@ -1,15 +1,18 @@
-fn acquire(shared: Shared<Int>) => SharedGuard<Int> :: shared.guard_edit()
+fn acquire(handle: Shared<Int>) => SharedGuard<Int> :: handle.guard_edit()
 
-fn read_returned(shared: Shared<Int>) => Int {
-    guard :: acquire(shared)
+fn read_returned(handle: Shared<Int>) => Int {
+    guard :: acquire(handle)
     return guard.value
 }
 
+fn bump(handle: Shared<Int>) {
+    guard :: handle.guard_edit()
+    guard.value += 1
+}
+
 fn run() {
-    shared := Shared.new(6)
-    print(read_returned(shared))
-    shared.edit(value => {
-        value += 1
-    })
-    print(shared.read(value => value))
+    handle := shared 6
+    print(read_returned(handle))
+    bump(handle)
+    print(handle.guard_read().value)
 }

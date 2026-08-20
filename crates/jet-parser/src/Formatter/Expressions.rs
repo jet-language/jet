@@ -1078,6 +1078,18 @@ impl<'a> Fmt<'a> {
                 args,
                 ..
             } => {
+                // D-CONC-SHARE1=A: `shared expr` is the only source spelling
+                // that builds this node (the `Shared.new(x)` call is retired),
+                // so print the prefix form back.
+                if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::TYPE_SHARED)
+                    && method == "new"
+                    && args.len() == 1
+                {
+                    self.write(Syntax::KW_SHARED);
+                    self.write(" ");
+                    self.fmt_expr(&args[0].expr, Prec::Unary);
+                    return;
+                }
                 if matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::INTERNAL_TASK_RECEIVER)
                     && self.fmt_task_surface_method(method, args)
                 {

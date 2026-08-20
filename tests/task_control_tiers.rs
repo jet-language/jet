@@ -193,6 +193,63 @@ fn stream_drop_uses_task_cancel_cleanup_path() {
     }
 }
 
+/// A generator whose `yield` sits inside `#Shield`. The consumer's `break`
+/// cancels the producer child while it is parked at that yield.
+const SHIELDED_STREAM_SOURCE: &str = r#"
+fn shielded_tail() => Stream<Int> {
+    #Shield {
+        yield 1
+        print("shielded: after")
+    }
+    print("unshielded: after")
+    yield 2
+}
+
+fn run() {
+    loop x, shielded_tail() {
+        print("consumer: {x}")
+        break
+    }
+    print("closed")
+}
+"#;
+
+const SHIELDED_STREAM_EXPECTED: &str = "consumer: 1\nshielded: after\nclosed\n";
+
+/// D-CONC-STREAM1=A + D-CANCELMODEL1=C: `yield` is a wait point and drop-close
+/// is a cancel, so a cancel that arrives while the producer is inside `#Shield`
+/// is DEFERRED to the region exit — exactly as for any other cancelled task.
+/// The shielded tail runs, the unshielded tail never does, and the consumer's
+/// `break` is still ordinary completion, not a program error.
+///
+/// This is the case a stream-local shutdown law got wrong: it stopped the
+/// producer at the yield and skipped the shielded tail, because it read a
+/// stream-only cancellation fact instead of the task wait policy. One law
+/// cannot disagree with itself, so all three tiers print the same transcript.
+#[test]
+fn a_shielded_yield_defers_the_consumer_cancel_on_every_tier() {
+    let interpreted = run_forced_interpreter("shielded_stream", SHIELDED_STREAM_SOURCE);
+    assert_eq!(interpreted, SHIELDED_STREAM_EXPECTED);
+
+    let (code, stdout, stderr) = run_default_multi(
+        "shielded_stream",
+        "main.jet",
+        &[("main.jet", SHIELDED_STREAM_SOURCE)],
+    );
+    assert_eq!(code, 0, "default JIT: {stderr}");
+    assert_eq!(
+        strip_tier_trace(&stdout),
+        SHIELDED_STREAM_EXPECTED,
+        "JIT drifted: {stderr}"
+    );
+
+    if have_rustc() {
+        let (code, stdout) = build_and_run("shielded_stream", SHIELDED_STREAM_SOURCE);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, SHIELDED_STREAM_EXPECTED);
+    }
+}
+
 fn run_forced_interpreter(name: &str, source: &str) -> String {
     let dir = std::env::temp_dir().join(format!("jet_task_control_interp_{name}_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

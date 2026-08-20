@@ -516,9 +516,10 @@ pub fn apply_impure_core_call_with_type(
                 .to_string(),
             Some(span),
         )),
-        _ => Err(unsupported(
-            &format!("`{}.{}()` at comptime", module, method),
-            span,
-        )),
+        // I4: this adapter is also the runtime TIR evaluator's Core seam (see
+        // the doc comment above: `jet run` deopt, #778), so the `what` names
+        // the call and never a phase. "at comptime" here labelled a plain
+        // runtime IO call site as compile-time work.
+        _ => Err(unsupported(&format!("`{}.{}()`", module, method), span)),
     }
 }

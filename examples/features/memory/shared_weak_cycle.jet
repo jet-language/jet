@@ -2,6 +2,11 @@
 // Expert intentional cycles use Shared.Weak back-edges. Free-when-strong-roots-
 // drop is proved by Prelude unit tests (JetShared Weak Arc semantics); this
 // example proves the Weak cycle surface with identical AOT / jet run output.
+//
+// D-CONC-SHARE1=A: `shared x` builds the cell and a field write is one locked
+// step, so the back-edges are plain assignments. Reading the WHOLE value (not
+// one field) is the expert guard's job — the guard is the one form that keeps a
+// lock across a helper call.
 struct Node {
     label: String
     peer: Shared.Weak<Node>?
@@ -11,28 +16,30 @@ fn peer_label(n: Node) => String {
     if n.peer == .None -> return "none"
     if n.peer == .Val(weak) {
         if weak.upgrade() == .None -> return "gone"
-        if weak.upgrade() == .Val(peer) -> return peer.read(p => p.label)
+        if weak.upgrade() == .Val(peer) -> return peer.label
     }
     return "none"
 }
 
+// One whole-value read under one lock, in the smallest possible scope.
+fn label_of(handle: Shared<Node>) => String {
+    guard :: handle.guard_read()
+    return peer_label(~guard.value)
+}
+
 fn run() {
-    a := Shared.new(Node.{label: "a", peer: None})
-    b := Shared.new(Node.{label: "b", peer: None})
-    // Downgrade before edit so the closures do not move the strong handles.
+    a := shared Node.{label: "a", peer: None}
+    b := shared Node.{label: "b", peer: None}
+    // Downgrade before the writes so the strong handles are not moved.
     wa := a.downgrade()
     wb := b.downgrade()
-    a.edit(n => {
-        n.peer = Val(~wb)
-    })
-    b.edit(n => {
-        n.peer = Val(~wa)
-    })
-    alive :: a.read(n => peer_label(~n))
+    a.peer = Val(~wb)
+    b.peer = Val(~wa)
+    alive :: label_of(a)
     print("while-alive:{alive}")
     count :: a.strong_count()
     print("strong:{count}")
-    // Fresh weak — wa/wb were moved into the edit closures above.
+    // Fresh weak — wa/wb were moved into the back-edges above.
     up := a.downgrade()
     if up.upgrade() == .Val(_) -> print("upgrade-ok")
     if up.upgrade() == .None -> print("upgrade-gone")

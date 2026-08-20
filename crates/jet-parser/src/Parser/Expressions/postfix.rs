@@ -142,6 +142,20 @@ impl<'a> Parser<'a> {
                             }
                             self.expect(TokKind::RParen, "to finish the call")?;
                             self.parse_generate_template_arg(&member, &mut args)?;
+                            // D-CONC-SHARE1=A (card #1561): `Shared.new(x)` is
+                            // retired — `shared x` is the one construction
+                            // word. Teach here, then recover as the same node
+                            // the prefix form builds so the rest of the file
+                            // still checks.
+                            if matches!(&expr, Expr::Ident(name, _) if name == Syntax::TYPE_SHARED)
+                                && member == "new"
+                            {
+                                self.diags.push(Diagnostic::from_row(
+                                    "E1115",
+                                    &[],
+                                    Some(member_span),
+                                ));
+                            }
                             expr = Expr::MethodCall {
                                 receiver: Box::new(expr),
                                 method: member,

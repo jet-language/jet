@@ -584,7 +584,9 @@ impl<'a> Interp<'a> {
                 }
                 Ok(CtValue::List(joined))
             }
-            _ => Err(unsupported(&format!("`data.{}()` at comptime", method), span)),
+            // I4: the pipeline runs on the runtime evaluator too; name the
+            // call, not a phase.
+            _ => Err(unsupported(&format!("`data.{}()`", method), span)),
         }
     }
 }

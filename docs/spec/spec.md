@@ -555,21 +555,32 @@ without ownership.
 They are distinct from provenance-carrying `View<T>`/`ViewMut<T>`, which model
 owner-tied borrowed access.
 
-**`Shared<T>`** (D-SHARED-API1) is a lock-guarded shared handle — "a
-copyable door":
+**`Shared<T>`** (D-SHARED-API1, amended by D-CONC-SHARE1=A) is a lock-guarded
+shared value — "a copyable door". It reads and writes like any other value:
 
 ```jet
-config :: Shared.new(AppConfig.{ name: "jet-server", hits: 0 })
-t1 :: task handle(1, config)   // no `take` needed
-label :: config.read(c => c.name)
-config.edit(c => { c.hits += 1 })
+config :: shared AppConfig.{ name: "jet-server", hits: 0 }
+t1 :: task handle(1, config)   // no `^` needed
+label :: config.name           // one locked read
+config.hits += 1               // one locked write
 ```
 
-(examples/features/memory/shared_config.jet) `Shared.new(x)` infers `T` from
-`x`; `.read(f)`/`.edit(f)` run a closure against a read- or write-locked view,
-the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
-handle clone, never a deep copy of `T` — so it crosses a `task`
-boundary with no `^`.
+(examples/features/memory/shared_config.jet) `shared x` builds the cell and
+infers `T` from `x`. A field read takes the read lock, a field write takes the
+write lock, and **each statement is one atomic step** — a read-modify-write
+like `config.hits += 1` holds one lock across both halves, so no update is
+lost. Several statements commit together under `#Transact`. Cloning
+`Shared<T>` is always a cheap handle clone, never a deep copy of `T` — so it
+crosses a `task` boundary with no `^`.
+
+The lock is per statement, so a reader sees locking at the `shared` binding and
+in `#Transact` blocks. When one statement reads a second shared value, the
+write commits through the ordered engine below instead of nesting one value's
+lock inside another's, so plain access cannot deadlock.
+
+The `read(f)` / `edit(f)` closure spellings are retired (E1116), and so is the
+`Shared.new(x)` constructor (E1115). Reading a whole payload rather than one
+field is the expert guard's job.
 
 Expert code can hold the same lock across helper calls (D-SHAREDGUARD1=A,
 D-SHAREDGUARD2=A):
@@ -596,33 +607,47 @@ the acquisition site or through an explicit write helper.
 requires an edit guard. It registers before release, reacquires the same lock,
 and checks the predicate again. Cancellation unregisters the waiter before the
 guard's final release. `notify_one()` wakes one waiter; `notify_all()` wakes
-all waiters. Short `.read` and `.edit` closures remain the default.
+all waiters. A guard is the one form that holds a lock across a helper call or
+a whole-payload read; plain field access covers everything else.
 
 See `examples/features/memory/shared_guard_queue.jet` for a bounded queue that
 covers the notify-before-park race.
 
-Inside a `#Transact` block (D-STM1), a `Shared<T>.edit` joins the block's
-atomic commit instead of locking on its own line: every touched handle changes
-together or not at all, and no other task ever sees a half-applied change. The
-runtime defers each edit and, at the block's end, takes all the touched
-handles' locks at once in a fixed order that cannot deadlock — the deadlock
-class hand-ordered locking is famous for simply disappears. One marker, one
-meaning (I8): the same `#Transact` that gives single-task rollback now spans
-shared state.
+Inside a `#Transact` block (D-STM1, amended by D-CONC-STM1=A), a write to a
+`Shared` value joins the block's atomic commit instead of locking on its own
+line: every touched value changes together or not at all, and no other task
+ever sees a half-applied change. One marker, one meaning (I8): the same
+`#Transact` that gives single-task rollback spans shared state. The
+transaction name is optional; it is required only to attach `on_commit` and
+`on_rollback` hooks.
+
+**The transaction law** (D-CONC-STM1=A):
+
+- The block body runs **exactly once**. A `log.info(…)` inside a transaction is
+  emitted exactly once, never duplicated.
+- Writes are buffered as the body runs. At the block's end the commit sorts the
+  touched values by stable address, takes **every write lock at once in that
+  fixed order**, applies the buffered writes, and releases. Address-ordered
+  acquisition cannot deadlock, so the deadlock class hand-ordered locking is
+  famous for simply disappears.
+- Under contention a transaction **waits on the locks**. It is never retried,
+  and the body is never re-run. An optimistic retrying mode would need its own
+  ballot.
+- A `?`-failure or early return before the commit drops the buffered writes.
 
 ```jet
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
-    #Transact(tx) {
-        from.edit(a => a.balance -= amount)  // both land, or neither
-        to.edit(a => a.balance += amount)    // no lock order to get wrong
+    #Transact {
+        from.balance -= amount   // both land, or neither
+        to.balance += amount     // no lock order to get wrong
     }
 }
 ```
 
-(examples/features/memory/shared_transact.jet) A `Shared.edit` here yields
-nothing — the write happens at commit — so its closure ends in a statement.
-An irreversible effect (`Net`/`FS`/`Exec`) directly in the block is still
-E0746: move it after the block or register it with `tx.on_commit(…)`.
+(examples/features/memory/shared_transact.jet) A shared write inside a
+transaction yields nothing — the write happens at commit. An irreversible
+effect (`Net`/`FS`/`Exec`) directly in the block is still E0746: move it after
+the block or register it with `tx.on_commit(…)` on the named form.
 
 **`Cell<T>`** (D-LOCALCELL1=A) is the local interior-mutation path. It lets a
 read receiver update private state without an `Arc` or an operating-system
@@ -2518,20 +2543,40 @@ consume their children; there are no list twins or handle-list spellings.
 also bounds the number of active children; an `n` below one is clamped to one
 before child admission. The group owns every child created in its body and
 joins the children when the block closes.
-The same `TaskGroup` parameter may be passed to a named helper; `task` in that
-helper uses the caller's group:
+The same `TaskGroup` parameter may be passed to a helper; `task` in that helper
+uses the caller's group. A group is a borrow of its scope, so it may be named in
+every direct parameter position — a method's parameter list exactly like a free
+function's (**D-CONC-GROUP1=A**, which amends D-TASKGROUP-PARAM1=A by lifting
+its named-free-function restriction only):
 
 ```jet
 fn add_work(group: TaskGroup, value: Int) {
     task value + 1
 }
 
+struct Crawler {
+    step: Int
+
+    fn add_stepped(self, group: TaskGroup, value: Int) {
+        step :: self.step
+        task value + step
+    }
+}
+
 fn run() {
     task.group workers(limit: 4) {
         add_work(workers, 41)
+        crawler :: Crawler.{step: 1}
+        crawler.add_stepped(workers, 41)
     }
 }
 ```
+
+Nothing else about the ban moved. `TaskGroup` in a struct field, a return type,
+a local annotation, a lambda parameter, an alias, or any aggregate is still
+refused, and a lambda may not capture the handle — so no child outlives the
+scope that joins it. `self` holds the receiver, never the group, so a method
+opens no new escape. A spawn through a parameter group still owns its captures.
 
 `join()` is fallible: `Task<T>.join() => T ? TaskFailure`. The failure values
 are `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`,
@@ -2603,9 +2648,12 @@ is `#[ignore]` for local 100k stress.
 
 ### Deadlock stance
 
-**Guarantee.** Jet guarantees deadlock-free lock acquisition for one narrow path:
-`#Transact` collects touched `Shared<T>` handles and acquires their locks in stable
-order before commit. This removes lock-order cycles inside transaction commit.
+**Guarantee.** Jet guarantees deadlock-free lock acquisition for one narrow
+path: a `#Transact` commit collects the touched `Shared<T>` values and acquires
+their write locks in stable address order. This removes lock-order cycles
+inside transaction commit. Plain shared access rides the same guarantee: a
+statement that reads a second shared value commits through this ordered engine
+instead of nesting one value's lock inside another's.
 
 **Non-guarantee.** Jet does not guarantee deadlock freedom for arbitrary
 structured-concurrency programs, and it does not detect arbitrary deadlocks at runtime.

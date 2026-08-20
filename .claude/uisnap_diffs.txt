@@ -1,0 +1,405 @@
+snapshot mismatches:
+
+ui snapshot mismatch for tests/ui/ffi_bad_path.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/ffi_bad_path.stderr
++++ tests/ui/ffi_bad_path.jet (actual)
+@@ -1,15 +1,15 @@
+ Error [E0705]: the Rust item doesn't match the Jet signature at `bad` in `extern rust "base64@0.22"`
+  Why: the `= "rust::path"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote
+  Fix: check the path and types on `bad` in `extern rust "base64@0.22"`, or pick a different Rust function
+   cargo said:
+        Compiling jet_ffi_<hash> v0.1.0 (~/.cache/jet/ffi/<hash>)
+     error[E0308]: mismatched types
++      --> src/lib.rs:27:18
+-      --> src/lib.rs:28:18
+        |
++    25 | pub fn jet_ffi_bad(p0: String) -> i64 {
+-    26 | pub fn jet_ffi_bad(p0: String) -> i64 {
+        |                                   --- expected `i64` because of return type
++    26 |     match std::panic::catch_unwind(<generated wrapper>)
++    27 |         Ok(v) => v,
+-    27 |     match std::panic::catch_unwind(<generated wrapper>)
+-    28 |         Ok(v) => v,
+        |                  ^ expected `i64`, found `String`
+     For more information about this error, try `rustc --explain E0308`.
+     error: could not compile `jet_ffi_<hash>` (lib) due to 1 previous error
+
+
+ui snapshot mismatch for tests/ui/impure_net_stub.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/impure_net_stub.stderr
++++ tests/ui/impure_net_stub.jet (actual)
+@@ -1,15 +1,15 @@
+ Error [E3412]: `core.net.tcp_connect()` is not available at comptime
+   --> tests/ui/impure_net_stub.jet:6:22
+     |
+   6 |         @conn :: net.tcp_connect("build.example.com:443")
+     |                      ^^^^^^^^^^^
+  Why: only `core.net.fetch(url, sha256:)` is supported at compile time
+  Fix: use `core.net.fetch(url, sha256: "<hash>")` for content-hash-pinned downloads
+ 
+ Error [E0107]: nothing named `@conn` exists here
+   --> tests/ui/impure_net_stub.jet:7:28
+     |
+   7 |         print("connected: {@conn}")
+     |                            ^^^^^
+  Why: a name must be declared before it's used
++ Fix: declare it first: `@conn :: ...`
+- Fix: did you mean `@conn`?
+
+
+ui snapshot mismatch for tests/ui/impure_no_flag.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/impure_no_flag.stderr
++++ tests/ui/impure_no_flag.jet (actual)
+@@ -1,15 +1,15 @@
+ Error [E3411]: `core.files.read()` inside `#Impure` gate, but `--gate impure=allow` was not passed
+   --> tests/ui/impure_no_flag.jet:5:20
+     |
+   5 |         @cfg :: fs.read("config.txt")
+     |                    ^^^^
+  Why: the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host
+  Fix: add `--gate impure=allow` to your `jet build` / `jet run` invocation
+ 
+ Error [E0107]: nothing named `@cfg` exists here
+   --> tests/ui/impure_no_flag.jet:6:17
+     |
+   6 |         print("{@cfg}")
+     |                 ^^^^
+  Why: a name must be declared before it's used
++ Fix: declare it first: `@cfg :: ...`
+- Fix: did you mean `@cfg`?
+
+
+ui snapshot mismatch for tests/ui/impure_tier2_no_gate.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/impure_tier2_no_gate.stderr
++++ tests/ui/impure_tier2_no_gate.jet (actual)
+@@ -1,15 +1,15 @@
+ Error [E3410]: `core.files.read()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+   --> tests/ui/impure_tier2_no_gate.jet:4:16
+     |
+   4 |     @cfg :: fs.read("config.txt")
+     |                ^^^^
+  Why: effectful Core APIs are not allowed in pure comptime evaluation
+  Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--gate impure=allow` to the build, or keep the call at runtime
+ 
+ Error [E0107]: nothing named `@cfg` exists here
+   --> tests/ui/impure_tier2_no_gate.jet:5:13
+     |
+   5 |     print("{@cfg}")
+     |             ^^^^
+  Why: a name must be declared before it's used
++ Fix: declare it first: `@cfg :: ...`
+- Fix: did you mean `@cfg`?
+
+
+ui snapshot mismatch for tests/ui/loop_borrowed_task_list.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/loop_borrowed_task_list.stderr
++++ tests/ui/loop_borrowed_task_list.jet (actual)
+@@ -1,23 +1,7 @@
+ Error [E0120]: `hs` was not moved here, so this loop can't take its handles
+   --> tests/ui/loop_borrowed_task_list.jet:3:13
+     |
+   3 |     loop h, hs -> total += h.join() ?? 0
+     |             ^^
+  Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
+  Fix: take the list with the move marker `^`: `hs: ^[Task<Int>]`, or collect the work in a canonical `task.all` or `task.group` block
+-
+-Error [E0142]: `handles` can't be shared — it must be used exactly once
+-  --> tests/ui/loop_borrowed_task_list.jet:9:17
+-    |
+-  9 |     print(drain(handles))
+-    |                 ^^^^^^^
+- Why: this value's type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
+- Fix: move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
+-
+-Error [E0140]: `handles` still owes `consume`
+-  --> tests/ui/loop_borrowed_task_list.jet:8:5
+-    |
+-  8 |     handles :: [task 1, task 2]
+-    |     ^^^^^^^
+- Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+- Fix: consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(handles) }` to discard it deliberately
+
+
+ui snapshot mismatch for tests/ui/loop_task_list_index.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/loop_task_list_index.stderr
++++ tests/ui/loop_task_list_index.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0120]: this loop can't take handles out of a field or index
+   --> tests/ui/loop_task_list_index.jet:4:19
+     |
+   4 |     loop h, groups[0] -> total += h.join() ?? 0
+     |                   ^^^
+  Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
+  Fix: bind the list into a local this scope owns first (`hs := …`), then write `loop h, hs { … }`
+-
+-Error [E0140]: `groups` still owes `consume`
+-  --> tests/ui/loop_task_list_index.jet:2:5
+-    |
+-  2 |     groups :: [[task 1, task 2]]
+-    |     ^^^^^^
+- Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+- Fix: consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(groups) }` to discard it deliberately
+
+
+ui snapshot mismatch for tests/ui/loop_two_binding_borrowed_task_list.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/loop_two_binding_borrowed_task_list.stderr
++++ tests/ui/loop_two_binding_borrowed_task_list.jet (actual)
+@@ -1,23 +1,7 @@
+ Error [E0120]: `hs` was not moved here, so this loop can't take its handles
+   --> tests/ui/loop_two_binding_borrowed_task_list.jet:3:18
+     |
+   3 |     loop (i, h), hs -> total += (h.join() ?? 0) + i
+     |                  ^^
+  Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
+  Fix: take the list with the move marker `^`: `hs: ^[Task<Int>]`, or collect the work in a canonical `task.all` or `task.group` block
+-
+-Error [E0142]: `handles` can't be shared — it must be used exactly once
+-  --> tests/ui/loop_two_binding_borrowed_task_list.jet:9:17
+-    |
+-  9 |     print(drain(handles))
+-    |                 ^^^^^^^
+- Why: this value's type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
+- Fix: move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
+-
+-Error [E0140]: `handles` still owes `consume`
+-  --> tests/ui/loop_two_binding_borrowed_task_list.jet:8:5
+-    |
+-  8 |     handles :: [task 1, task 2]
+-    |     ^^^^^^^
+- Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+- Fix: consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(handles) }` to discard it deliberately
+
+
+ui snapshot mismatch for tests/ui/no_prelude_duplicate.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/no_prelude_duplicate.stderr
++++ tests/ui/no_prelude_duplicate.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0999]: `#NoPrelude` is already applied to this file
+   --> tests/ui/no_prelude_duplicate.jet:2:1
+     |
+   2 | #NoPrelude
+     | ^^^^^^^^^^
+  Why: `#NoPrelude` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first
+  Fix: remove the repeated marker
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/no_prelude_duplicate.jet:4:5
+-    |
+-  4 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_duplicate_marker.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_duplicate_marker.stderr
++++ tests/ui/pub_file_duplicate_marker.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0999]: `#PubFile` is already applied to this file
+   --> tests/ui/pub_file_duplicate_marker.jet:2:1
+     |
+   2 | #PubFile
+     | ^^^^^^^^
+  Why: `#PubFile` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first
+  Fix: remove the repeated marker
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_duplicate_marker.jet:5:5
+-    |
+-  5 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_priv_without_marker.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_priv_without_marker.stderr
++++ tests/ui/pub_file_priv_without_marker.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0413]: `priv` only applies inside a `#PubFile` file
+   --> tests/ui/pub_file_priv_without_marker.jet:1:1
+     |
+   1 | priv fn secret() => Int :: 0
+     | ^^^^
+  Why: without `#PubFile`, items are private by default and export with `pub`
+  Fix: add `#PubFile` at the top of the file, or write `pub` instead of `priv`
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_priv_without_marker.jet:3:5
+-    |
+-  3 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_private_teaching.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_private_teaching.stderr
++++ tests/ui/pub_file_private_teaching.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0412]: write `priv`, not `private`
+   --> tests/ui/pub_file_private_teaching.jet:3:1
+     |
+   3 | private fn secret() => Int :: 0
+     | ^^^^^^^
+  Why: inside a `#PubFile` file, `priv` marks an item that stays private to this file
+  Fix: write `priv fn …` instead of `private fn …`
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_private_teaching.jet:5:5
+-    |
+-  5 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_pub_priv_conflict.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_pub_priv_conflict.stderr
++++ tests/ui/pub_file_pub_priv_conflict.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0417]: `priv` and `pub` can't both apply to one item
+   --> tests/ui/pub_file_pub_priv_conflict.jet:3:1
+     |
+   3 | priv pub fn secret() => Int :: 0
+     | ^^^^^^^^
+  Why: an item is either public or private — pick one qualifier
+  Fix: drop `pub` (already public in a `#PubFile` file) or remove `priv`
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_pub_priv_conflict.jet:5:5
+-    |
+-  5 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_publicfile_teaching.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_publicfile_teaching.stderr
++++ tests/ui/pub_file_publicfile_teaching.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0418]: write `#PubFile`, not `#PublicFile`
+   --> tests/ui/pub_file_publicfile_teaching.jet:1:1
+     |
+   1 | #PublicFile
+     | ^
+  Why: `#PubFile` flips this file to public-by-default (D-VISDEFAULT2)
+  Fix: write `#PubFile` at the top of the file
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_publicfile_teaching.jet:5:5
+-    |
+-  5 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_redundant_pub.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_redundant_pub.stderr
++++ tests/ui/pub_file_redundant_pub.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0414]: `pub` is redundant in a `#PubFile` file
+   --> tests/ui/pub_file_redundant_pub.jet:3:1
+     |
+   3 | pub fn greet() => String :: "hi"
+     | ^^^
+  Why: after `#PubFile`, top-level items are already public unless marked `priv`
+  Fix: drop `pub` or mark exceptions with `priv`
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_redundant_pub.jet:5:5
+-    |
+-  5 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/pub_file_section_label.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/pub_file_section_label.stderr
++++ tests/ui/pub_file_section_label.jet (actual)
+@@ -1,15 +1,7 @@
+ Error [E0415]: section visibility labels like `pub:` / `priv:` are not supported
+   --> tests/ui/pub_file_section_label.jet:3:1
+     |
+   3 | pub:
+     | ^^^^
+  Why: moving an item above or below a label would silently change whether it exports
+  Fix: write `#PubFile` once at the top of the file, then mark exceptions with `priv`
+-
+-Error [E0113]: `run` promises to return Unit ? Err, but this `return` is empty
+-  --> tests/ui/pub_file_section_label.jet:6:5
+-    |
+-  6 |     return
+-    |     ^^^^^^
+- Why: the value handed back must match the type after `=>`
+- Fix: add the value: `return ...;`
+
+
+ui snapshot mismatch for tests/ui/runtime_e3002.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/runtime_e3002.stderr
++++ tests/ui/runtime_e3002.jet (actual)
+@@ -1,3 +1,1 @@
+-error propagated from: parse_config (tests/ui/runtime_e3002.jet:4) via ?: reading raw config
+-error propagated from: run (tests/ui/runtime_e3002.jet:9) via ?: loading config
+ Error: file not found
+
+
+ui snapshot mismatch for tests/ui/runtime_e3005.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/runtime_e3005.stderr
++++ tests/ui/runtime_e3005.jet (actual)
+@@ -1,4 +1,1 @@
++(no errors)
+-Stop [E3005]: #Pre contract failed: positive
+-  --> tests/ui/runtime_e3005.jet:3
+- Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `#Pre contract failed: positive` is the clause's own message string. Checked in every build (not a debug/release split).
+- Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).
+
+
+ui snapshot mismatch for tests/ui/sandbox_effect_e1258.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/sandbox_effect_e1258.stderr
++++ tests/ui/sandbox_effect_e1258.jet (actual)
+@@ -1,6 +1,6 @@
+ Error [E1258]: a sandbox can't use any effect
++ Why: this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: Env. Sandboxes run with zero host capabilities; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in).
+- Why: this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: Env. Sandboxes run with zero host authority; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in).
+  Fix: remove the effectful call, or move it out of the sandbox into the host program that loads it
+ 
+ 1 problem found
+ run `jet explain E1258` to learn more
+
+
+ui snapshot mismatch for tests/ui/web_tir_unsupported.jet
+--- /home/nate/Projects/Github/jet/.claude/worktrees/builder/tests/ui/web_tir_unsupported.stderr
++++ tests/ui/web_tir_unsupported.jet (actual)
+@@ -1,15 +1,1 @@
++(no errors)
+-Error [E-WEB-TIR-UNSUPPORTED]: web output cannot compile `guarded` yet
+-  --> tests/ui/web_tir_unsupported.jet:4:38
+-    |
+-  4 | #Pre(x > 0, "x must be positive") fn guarded(x: Int) => Int {
+-    |                                      ^^^^^^^
+- Why: web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today
+- Fix: move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target
+-
+-Error [E-WEB-TIR-UNSUPPORTED]: web output cannot compile `run` yet
+-  --> tests/ui/web_tir_unsupported.jet:8:4
+-    |
+-  8 | fn run() {
+-    |    ^^^
+- Why: web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today
+- Fix: move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target
+
+
+To update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ui_snapshots
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 349.17s
+
+error: test failed, to rerun pass `-p jet --test diagnostic_snapshots`

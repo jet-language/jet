@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2094,
-    "rev": 39429,
+    "nextNum": 2096,
+    "rev": 39431,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -136778,6 +136778,54 @@
       "created": "2026-08-20T00:06:02.398Z",
       "updated": "2026-08-20T00:06:04.479Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0rgobpn",
+      "num": 2094,
+      "title": "tooling/compiler_api ships committed generated output, so it cannot run",
+      "body": "Found while measuring #2018 on 2026-08-19. examples/features/tooling/compiler_api.jet fails 'jet run' with E3510 because its own generated output, examples/features/tooling/.jet/generated/compiler_api/compiler_api.jet, is COMMITTED to the repository, and b.generate correctly refuses to shadow an existing file. So a shipped example cannot run, which violates I5 (examples are executable specs). It is also the single row keeping the in-process corpus oracle from being complete: it is the one stem left outside the universe after the other three loader/sema failures were fixed. Decide and implement one of: the generated artifact is not committed (add it to .gitignore and let the example produce it), or the example targets a path that is expected to pre-exist, or b.generate gains a stated overwrite rule. Whichever, the example must run from a clean checkout.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T00:10:06.601Z",
+      "updated": "2026-08-20T00:10:06.601Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c00q0c08",
+      "num": 2095,
+      "title": "Interpreter ambient gaps: 8 shipped examples die at runtime on E0956",
+      "body": "Found while measuring #2018 on 2026-08-19, and invisible to that card's oracle because these stems pass sema and only fail when run. Eight shipped examples die at runtime with E0956 'isn't supported by the current evaluator yet': net/http_rest_service, net/http_routes, net/http_server_limits, net/http_web_defaults, net/ws_echo, net/http_readiness, io/watcher, crypto/vault_keys. Named causes: HTTP ambient handles, files.create_dir_all at comptime, and vault.current at comptime. This is I9-shaped and the same class fixed today for term.read_key and #Live (#2036), where the kernel had no includable home so neither the interpreter nor the Cranelift host could marshal to it — the fix there was extracting Prelude/Core/TermKey.rs and adding the marshalling arms, never re-encoding policy in an engine. Expect the same shape here: find the one Prelude owner of each ambient, give the evaluator and the JIT host arms that call it, and fix any residency gate that silently deopts the caller. Every one of these is a shipped executable spec (I5) that only proves itself on one tier today.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T00:10:07.160Z",
+      "updated": "2026-08-20T00:10:07.161Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -183086,6 +183134,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T00:10:07.161Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c00q0c08",
+      "note": "Interpreter ambient gaps: 8 shipped examples die at runtime on E0956"
+    },
+    {
+      "at": "2026-08-20T00:10:06.601Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0rgobpn",
+      "note": "tooling/compiler_api ships committed generated output, so it cannot run"
+    },
+    {
       "at": "2026-08-20T00:08:47.178Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186570,20 +186632,6 @@
       "action": "card.update",
       "ref": "c0wqwqaq",
       "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:42:18.116Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-19T13:42:18.116Z"
-    },
-    {
-      "at": "2026-08-19T13:40:12.802Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c054x1px",
-      "note": "#2 tower lint reports zero criteria-evidence-conflict rows (or "
     }
   ],
   "nextNum": 368,

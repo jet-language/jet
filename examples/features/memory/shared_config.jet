@@ -1,23 +1,23 @@
-// D-MEM1 stage S6 (D-SHARED-API1=A): `Shared<T>` is a lock-guarded shared
-// handle — "a copyable door". `Shared.new(x)` constructs (bare type-name call,
-// `T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read-
-// or write-locked view of the wrapped value, the lock scoped to the closure
-// call only. Cloning `Shared<T>` is always a cheap handle clone, never a deep
-// copy of `T` — that's what lets it cross a `task` boundary with no
-// `take`, unlike an ordinary struct.
+// D-CONC-SHARE1=A (amends D-MEM1 stage S6 / D-SHARED-API1=A): `Shared<T>` is a
+// lock-guarded shared value — "a copyable door". `shared x` builds the cell
+// (`T` inferred from `x`). A field read is one locked read and a field write is
+// one locked write, so each statement is one atomic step; several statements
+// commit together under `#Transact`. Cloning `Shared<T>` is always a cheap
+// handle clone, never a deep copy of `T` — that's what lets it cross a `task`
+// boundary with no `^`, unlike an ordinary struct.
 struct AppConfig {
     name: String
     hits: Int
 }
 
 fn handle(id: Int, config: Shared<AppConfig>) => String {
-    label :: config.read(c => c.name)
+    label :: config.name
     return "request {id} on {label}"
 }
 
 fn run() {
-    config :: Shared.new(AppConfig.{name: "jet-server", hits: 0})
-    // Every spawned task captures `config` with no `take` — a `Shared<T>` is
+    config :: shared AppConfig.{name: "jet-server", hits: 0}
+    // Every spawned task captures `config` with no `^` — a `Shared<T>` is
     // meant to be handed to as many concurrent tasks as needed.
     t1 :: task handle(1, config)
     t2 :: task handle(2, config)
@@ -25,9 +25,7 @@ fn run() {
     print(t1.join() ?? panic("task 1 failed"))
     print(t2.join() ?? panic("task 2 failed"))
     print(t3.join() ?? panic("task 3 failed"))
-    config.edit(c => {
-        c.hits += 1
-    })
-    total :: config.read(c => c.hits)
+    config.hits += 1
+    total :: config.hits
     print("hits={total}")
 }

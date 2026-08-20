@@ -3716,31 +3716,28 @@ fn resident_safe_builtin_op(
             }
             true
         }
-        // `jet_jit_list_unzip` is an i64-pair host: it reads both columns with
-        // `record_get_int`, runs `collection_semantics::list_unzip_i64`, and
-        // republishes each column with `list_push_int`. A `String` column has no
-        // raw-int reading, so `["a","bb","c"].zip([1,2,3]).unzip()` came back as
-        // two EMPTY lists — `clone_int_list(..).unwrap_or_default()` and the
-        // `record_get_int(..)?` inside the `filter_map` both swallow the
-        // mismatch. This predicate admitted every receiver, so the swallow was
-        // reachable from a correct program.
+        // I8/I9, and the #2091 lift: admission is not a second policy.
+        // `LowerCtx::unzip_column_kinds` is the ONE table naming which
+        // `[(A, B)]` receivers `jet_jit_list_unzip` can honour and the column
+        // kinds it needs; the `TBuiltinOp::Unzip` lowering reads it to pick the
+        // immediates it hands the host, and this arm reads it to decide
+        // residency. Consulting that table is the whole predicate.
         //
-        // Polarity: the host cannot honour a non-Int column, so the wide form
-        // DEOPTS rather than answering emptily. A future lowering that wants
-        // `[(String, Int)]` needs the per-column representation plan `Zip`
-        // already carries (`JitZipColumn`/`jit_zip_set_value`) threaded into the
-        // unzip host so each column is read and republished in its own kind;
-        // until then the shared kernel stays the only answer for mixed columns.
+        // This used to be two hand-written halves and the split cost a run each
+        // way. The gate demanded two `intish_ty` columns because the host read
+        // BOTH fields with `record_get_int`, so a `record_set_string` column
+        // read `None`, the row fell out of a `filter_map`, and
+        // `["a","bb","c"].zip([1,2,3]).unzip()` answered two EMPTY lists — a
+        // wrong answer, which is why narrowing the gate was right at the time.
+        // Meanwhile the lowering accepted EVERY receiver, so the only thing
+        // standing between that wrong answer and a user was this predicate. The
+        // host now reads and republishes each column in its own kind
+        // (`jit_zip_record_field` / `jit_zip_push_column_value`, the read and
+        // write halves of `jit_zip_set_value`), so the honest set is every
+        // column kind, and both sides get it from one place.
         TBuiltinOp::Unzip { .. } => {
             args.is_empty()
-                && jit_zip_sequence_elem_type(recv_ty).is_some_and(|elem| {
-                    matches!(
-                        &elem,
-                        Type::Tuple(fields)
-                            if fields.len() == 2
-                                && fields.iter().all(|(_, field)| intish_ty(field))
-                    )
-                })
+                && crate::lower_ctx::LowerCtx::unzip_column_kinds(recv_ty).is_some()
         }
         TBuiltinOp::TryCollect => {
             jit_result_list_elem(recv_ty).is_some() && args.is_empty()

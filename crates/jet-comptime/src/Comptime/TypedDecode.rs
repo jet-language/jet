@@ -707,17 +707,16 @@ impl<'a> Interp<'a> {
                 };
                 self.encode_value(value, span)?
             }
+            // I4: this encoder runs on the runtime TIR evaluator too, so both
+            // refusals name the value, never a phase.
             CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => {
                 return Err(unsupported(
-                    "this value has no comptime Encode implementation",
+                    "this value has no shared-evaluator Encode implementation",
                     span,
                 ));
             }
             CtValue::Closure(_) => {
-                return Err(unsupported(
-                    "closures cannot be encoded at comptime",
-                    span,
-                ));
+                return Err(unsupported("closures cannot be encoded", span));
             }
         })
     }
@@ -1184,12 +1183,9 @@ impl<'a> Interp<'a> {
                     Err(e) => Err(super::EncodingLite::xml_error_value(e)),
                 }
             }
-            _ => {
-                return Err(unsupported(
-                    &format!("`{}.{}()` at comptime", module, method),
-                    span,
-                ))
-            }
+            // I4: named construct, not a phase — the typed decoder is the
+            // runtime evaluator's decoder too.
+            _ => return Err(unsupported(&format!("`{}.{}()`", module, method), span)),
         };
         let tree = match parsed {
             Ok(t) => t,

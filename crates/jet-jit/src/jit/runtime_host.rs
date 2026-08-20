@@ -247,6 +247,39 @@ pub(crate) enum JitZipValueKind {
     Opaque,
 }
 
+impl JitZipValueKind {
+    /// The ONE wire encoding for a column kind.
+    ///
+    /// `jet_jit_iter_zip_family` hands its kinds over in a registered
+    /// `JitZipPlan`; `jet_jit_list_unzip` has exactly two columns and no fill
+    /// mode, so it takes them as immediates instead of paying for a plan slot.
+    /// The host cannot read a record field back without knowing the kind
+    /// `jit_zip_set_value` wrote it in — reading a `record_set_string` field
+    /// with `record_get_int` is how unzip used to answer two EMPTY lists.
+    pub(crate) fn code(self) -> i64 {
+        match self {
+            Self::Int => 0,
+            Self::Float => 1,
+            Self::Bool => 2,
+            Self::Char => 3,
+            Self::String => 4,
+            Self::Opaque => 5,
+        }
+    }
+
+    pub(crate) fn from_code(code: i64) -> Option<Self> {
+        match code {
+            0 => Some(Self::Int),
+            1 => Some(Self::Float),
+            2 => Some(Self::Bool),
+            3 => Some(Self::Char),
+            4 => Some(Self::String),
+            5 => Some(Self::Opaque),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct JitZipColumn {
     pub(crate) input: JitZipValueKind,

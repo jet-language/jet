@@ -162,6 +162,24 @@ mod scheduler_host_tests {
             !root.join("src/stream.rs").exists(),
             "src/stream.rs is a second Stream runtime; use Prelude/Stream.rs"
         );
+        // D-CONC-STREAM1=A: one cancellation and cleanup law. A stream's
+        // cancel fact IS the producer child's `JetTaskControl`, and `yield`
+        // reaches the shared task wait point. A stream-local control type or a
+        // stream-only wait check is the second law this card deleted, and it is
+        // how the AOT and development builds freed a producer differently.
+        let stream = std::fs::read_to_string(root.join("src/Prelude/Stream.rs")).unwrap();
+        assert!(
+            !stream.contains("StreamControl"),
+            "a stream-local cancellation control is a second shutdown law; \
+             the producer child's JetTaskControl is the one cancel fact"
+        );
+        let evaluator =
+            std::fs::read_to_string(root.join("src/Codegen/TIR/eval/mod.rs")).unwrap();
+        assert!(
+            !evaluator.contains("stream_wait_check") && !evaluator.contains("stream_cancel"),
+            "the evaluator's yield wait point must be the shared task wait point \
+             (`task_wait_check`), not a stream-only twin"
+        );
     }
 
     #[test]
@@ -233,6 +251,137 @@ mod scheduler_host_tests {
 
         assert!(cleaned.load(Ordering::Acquire));
         assert!(!continued.load(Ordering::Acquire));
+    }
+
+    /// D-CONC-STREAM1=A drift guard, the behavioral half: one cancellation and
+    /// cleanup law means a stream producer and a plain task child are stopped by
+    /// the SAME code. Both park at a wait point; the stream is cancelled by
+    /// dropping its consumer (`JetStream::drop`) and the task by
+    /// `handle.cancel()` (`JetTaskControl::cancel`). Both must unwind at the
+    /// wait point, run cleanup on the way out, execute nothing after the wait,
+    /// and report `Cancelled` — never `Panicked`. A stream-local shutdown path
+    /// makes exactly one of these two columns disagree, which is the drift the
+    /// field audit found between the AOT and development builds.
+    #[test]
+    fn one_cancel_law_stops_a_stream_producer_and_a_task_child_alike() {
+        struct CleanupMark(Arc<AtomicBool>);
+
+        impl Drop for CleanupMark {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        // Column one: a stream producer, cancelled by dropping the consumer.
+        let stream_cleaned = Arc::new(AtomicBool::new(false));
+        let stream_continued = Arc::new(AtomicBool::new(false));
+        let cleaned = Arc::clone(&stream_cleaned);
+        let continued = Arc::clone(&stream_continued);
+        let stream = jet_stream_task(move |sender| {
+            let _cleanup = CleanupMark(cleaned);
+            assert!(sender.send_stream(1));
+            continued.store(true, Ordering::Release);
+        });
+        let mut iterator = stream.into_iter();
+        assert_eq!(iterator.next(), Some(1));
+        drop(iterator);
+
+        // Column two: a plain task child parked on a channel receive, cancelled
+        // through its own control.
+        let task_cleaned = Arc::new(AtomicBool::new(false));
+        let task_continued = Arc::new(AtomicBool::new(false));
+        let cleaned = Arc::clone(&task_cleaned);
+        let continued = Arc::clone(&task_continued);
+        let channel = JetSchedulerChannel::<i64>::new();
+        let parked = channel.clone();
+        let control = JetTaskControl::new();
+        let join = jet_scheduler_spawn_with_control(
+            move || {
+                let _cleanup = CleanupMark(cleaned);
+                let _ = parked.receive();
+                continued.store(true, Ordering::Release);
+            },
+            control.clone(),
+        );
+        control.cancel();
+        match join.rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(JetSchedulerResult::Cancelled) => {}
+            _ => unreachable!("a cancelled task child must report Cancelled"),
+        }
+
+        assert_eq!(
+            (
+                stream_cleaned.load(Ordering::Acquire),
+                stream_continued.load(Ordering::Acquire),
+            ),
+            (
+                task_cleaned.load(Ordering::Acquire),
+                task_continued.load(Ordering::Acquire),
+            ),
+            "a stream producer and a task child must be freed by one law"
+        );
+        assert!(stream_cleaned.load(Ordering::Acquire));
+        assert!(!stream_continued.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_cancel_reached_from_cleanup_defers_instead_of_aborting() {
+        // #2007: `JetStreamSender::drop` runs a channel send — a wait point —
+        // from drop glue while its producer is already unwinding. A second
+        // raise there is a double panic, which Rust turns into `panic in a
+        // destructor during cleanup` and a process abort instead of an outcome.
+        // The cleanup rule defers it: the wait point completes, the
+        // notification is delivered, and the in-flight payload survives.
+        struct SendFromCleanup(JetSchedulerSender<i64>, Arc<AtomicBool>);
+        impl Drop for SendFromCleanup {
+            fn drop(&mut self) {
+                self.1.store(self.0.send(7), Ordering::Release);
+            }
+        }
+
+        let channel = JetSchedulerChannel::<i64>::new();
+        let delivered = Arc::new(AtomicBool::new(false));
+        let control = JetTaskControl::new();
+        control.cancel();
+        jet_scheduler_set_task_control(Some(control));
+        jet_scheduler_task_panic_enter();
+
+        let cleanup_delivered = Arc::clone(&delivered);
+        let sender = channel.sender();
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _cleanup = SendFromCleanup(sender, cleanup_delivered);
+            std::panic::panic_any("producer failure");
+        }))
+        .expect_err("the original unwind must reach the task frame");
+        assert_eq!(
+            payload.downcast_ref::<&'static str>().copied(),
+            Some("producer failure"),
+            "a cancel observed during cleanup must not replace the in-flight failure"
+        );
+        assert!(
+            delivered.load(Ordering::Acquire),
+            "a wait point reached from drop glue must complete instead of raising"
+        );
+        assert_eq!(channel.try_receive(), Some(7));
+        assert!(
+            !jet_scheduler_shielded(),
+            "the cleanup deferral lasts exactly as long as the unwind"
+        );
+
+        // Deferred, not discarded: with no unwind in flight the same cancelled
+        // wait point still unwinds preemptively (D-CANCELMODEL1=C).
+        let raised = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            channel.sender().send(8);
+        }))
+        .expect_err("a cancelled wait point must still unwind outside cleanup");
+        assert!(
+            jet_scheduler_is_cancel_unwind(raised.as_ref()),
+            "the deferral must not change which payload a live wait point raises"
+        );
+        assert_eq!(channel.try_receive(), None);
+
+        jet_scheduler_task_panic_leave();
+        jet_scheduler_set_task_control(None);
     }
 
     #[test]

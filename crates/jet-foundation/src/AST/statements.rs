@@ -389,6 +389,13 @@ pub enum Stmt {
         name: Option<String>,
         name_span: Option<Span>,
         body: Vec<Stmt>,
+        /// D-CONC-SHARE1=A (card #1561): true when sema synthesized this
+        /// transaction so a plain statement that touches several `Shared`
+        /// cells commits through the one ordered engine
+        /// (`jet_shared_acquire_ordered`) instead of nesting one cell's lock
+        /// inside another's. It carries the commit plane but not the D-TXN2
+        /// effect wall, because the user did not open a transaction here.
+        implicit: bool,
         span: Span,
     },
     /// D-STREAMYIELD1: `yield expr` — hand a value to a `Stream<T>` consumer

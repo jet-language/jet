@@ -1381,6 +1381,7 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             body,
+            implicit: false,
             span: Span::new(start.start, end),
         })
     }

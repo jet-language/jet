@@ -568,7 +568,10 @@ mod collection_semantics {
         jet_list_ends_with(xs, suffix)
     }
 
-    pub(super) fn list_unzip_i64(xs: Vec<(i64, i64)>) -> (Vec<i64>, Vec<i64>) {
+    /// The split itself stays in the Prelude kernel (I9); only the per-column
+    /// READ and REPUBLISH representation is the engine's business, so the
+    /// wrapper is generic over the column word instead of pinned to `i64`.
+    pub(super) fn list_unzip_pairs<T, U>(xs: Vec<(T, U)>) -> (Vec<T>, Vec<U>) {
         jet_list_unzip(xs)
     }
 
@@ -2243,7 +2246,16 @@ fn jit_zip_read_value(
     }
 }
 
-fn jit_zip_column_fill_value(
+/// Read record field `index` back in the kind `jit_zip_set_value` wrote it in.
+///
+/// Two callers need this exact per-kind accessor ladder: the per-column fill
+/// record `zip(fill:)` passes, and `jet_jit_list_unzip` taking a row apart
+/// again. It is the read half of `jit_zip_set_value` and must stay total over
+/// the same `JitZipValueKind` set — the unzip host used to read every field
+/// with `record_get_int`, so a `record_set_string` column returned `None`, the
+/// row was dropped, and `["a","bb","c"].zip([1,2,3]).unzip()` answered two
+/// EMPTY lists.
+fn jit_zip_record_field(
     heap: &mut jet_rt::JetArena,
     kind: crate::runtime_host::JitZipValueKind,
     column_fills_handle: i64,
@@ -2390,7 +2402,7 @@ fn zip_family_rows(
                 .iter()
                 .enumerate()
                 .map(|(index, column)| {
-                    jit_zip_column_fill_value(&mut rt.heap, column.field, column_fills, index)
+                    jit_zip_record_field(&mut rt.heap, column.field, column_fills, index)
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -2432,26 +2444,62 @@ fn zip_family_rows(
     })
 }
 
-fn jet_jit_list_unzip(pairs: i64) -> i64 {
+/// Push one already-read column word back into a list in its own kind.
+///
+/// The write half of `jit_zip_read_value`: every kind except `Float` lives as
+/// one `i64` word in a list slot (a `String` slot holds the string handle), and
+/// `Float` needs `list_push_float` because a list slot is a `JetVal::Float`,
+/// not the bit pattern.
+fn jit_zip_push_column_value(
+    heap: &mut jet_rt::JetArena,
+    list: i64,
+    value: JitZipValue,
+) -> Option<()> {
+    match value {
+        JitZipValue::Float(value) => heap.list_push_float(list, value),
+        JitZipValue::Bits(value) => heap.list_push_int(list, value),
+        JitZipValue::Absent => None,
+    }
+}
+
+/// `[(A, B)].unzip()` — two columns, each read and republished in its OWN kind.
+///
+/// The kinds arrive as immediates (`JitZipValueKind::code`) because lowering
+/// already knows the row's field types and an unzip has no fill mode to plan.
+/// This used to be an i64-pair host: it read both fields with `record_get_int`,
+/// so a `String` column read `None`, the whole row fell out of a `filter_map`,
+/// and the answer was two EMPTY lists rather than a stop. The split semantics
+/// still belong to the Prelude kernel (I9); only the representation is here.
+fn jet_jit_list_unzip(pairs: i64, left_kind: i64, right_kind: i64) -> i64 {
+    let (Some(left_kind), Some(right_kind)) = (
+        crate::runtime_host::JitZipValueKind::from_code(left_kind),
+        crate::runtime_host::JitZipValueKind::from_code(right_kind),
+    ) else {
+        jet_foundation::ice!(None, "unzip column kind code out of range");
+    };
     Concurrency::with_runtime_mut(|rt| {
-        let pairs = rt.heap.clone_int_list(pairs).unwrap_or_default();
-        let pairs = pairs
-            .into_iter()
-            .filter_map(|pair| {
-                Some((
-                    rt.heap.record_get_int(pair, 0)?,
-                    rt.heap.record_get_int(pair, 1)?,
-                ))
-            })
-            .collect::<Vec<_>>();
-        let (left_values, right_values) = collection_semantics::list_unzip_i64(pairs);
+        let rows = rt.heap.clone_int_list(pairs).unwrap_or_default();
+        let mut columns = Vec::with_capacity(rows.len());
+        for row in rows {
+            let left = jit_zip_record_field(&mut rt.heap, left_kind, row, 0);
+            let right = jit_zip_record_field(&mut rt.heap, right_kind, row, 1);
+            if matches!(left, JitZipValue::Absent) || matches!(right, JitZipValue::Absent) {
+                jet_foundation::ice!(None, "unzip row representation mismatch");
+            }
+            columns.push((left, right));
+        }
+        let (left_values, right_values) = collection_semantics::list_unzip_pairs(columns);
         let left = rt.heap.alloc_empty_list();
         for value in left_values {
-            let _ = rt.heap.list_push_int(left, value);
+            if jit_zip_push_column_value(&mut rt.heap, left, value).is_none() {
+                jet_foundation::ice!(None, "unzip column representation mismatch");
+            }
         }
         let right = rt.heap.alloc_empty_list();
         for value in right_values {
-            let _ = rt.heap.list_push_int(right, value);
+            if jit_zip_push_column_value(&mut rt.heap, right, value).is_none() {
+                jet_foundation::ice!(None, "unzip column representation mismatch");
+            }
         }
         let result = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(result, 0, left);
@@ -4907,7 +4955,7 @@ host_fns! {
     list_flatten: "jet_jit_list_flatten" => jet_jit_list_flatten: sig_len;
     list_intersperse: "jet_jit_list_intersperse" => jet_jit_list_intersperse: sig_get_opt;
     iter_zip_family: "jet_jit_iter_zip_family" => jet_jit_iter_zip_family: sig_zip_family;
-    list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_len;
+    list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_three_ret;
     list_sort_by_i64_keys: "jet_jit_list_sort_by_i64_keys" => jet_jit_list_sort_by_i64_keys: sig_sort_by_keys;
     list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;

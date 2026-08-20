@@ -189,9 +189,16 @@ fn taskgroup_type_is_second_class() {
             "struct Bad { group: TaskGroup }\nfn run() {}\n",
             &["E1110"][..],
         ),
+        // D-CONC-GROUP1=A: the parameter positions widened, so the positions
+        // that stay banned must teach with the E1110 family instead of the bare
+        // "there is no type called `TaskGroup`" fall-through (E0119).
         (
             "fn bad() => TaskGroup { return 0 }\nfn run() {}\n",
-            &["E0119", "E0113"][..],
+            &["E1110", "E0113"][..],
+        ),
+        (
+            "struct Bad { step: Int\n    fn bad(self) => TaskGroup { return 0 }\n}\nfn run() {}\n",
+            &["E1110", "E0113"][..],
         ),
         (
             "fn run() { group: TaskGroup :: 0 }\n",
@@ -234,6 +241,72 @@ fn escape(group: TaskGroup) => fn() => Int {
 fn run() {}
 "#;
     assert_eq!(error_codes(source), ["E1110"]);
+
+    // D-CONC-GROUP1=A widened the parameter positions only. A method's group
+    // parameter is admitted, and the lambda escape door it could otherwise open
+    // stays shut with the same teaching error.
+    let method_escape = r#"
+fn use_group(group: TaskGroup) => Int :: 1
+
+struct Crawler {
+    step: Int
+
+    fn escape(self, group: TaskGroup) => fn() => Int {
+        return () => use_group(group)
+    }
+}
+
+fn run() {}
+"#;
+    assert_eq!(error_codes(method_escape), ["E1110"]);
+}
+
+/// D-CONC-GROUP1=A: a group is a borrow of its scope, so it may be named in
+/// every direct parameter position — a method's parameter list exactly like a
+/// free function's. The storage ban alone carries the structural guarantee, so
+/// a spawn through the method's parameter group still owns its captures.
+///
+/// One assertion per tier: `assert_group_close_success` runs the interpreter,
+/// probes resident-JIT residency, runs the default `jet run` native tier, and
+/// runs the AOT build, and requires identical observables from all four (I9).
+#[test]
+fn method_parameters_spawn_owned_captures() {
+    let source = r#"
+struct Crawler {
+    step: Int
+
+    fn drain(self, group: TaskGroup, value: Int) {
+        step :: self.step
+        handle :: task value + step
+        print(handle.join() ?? 0)
+    }
+}
+
+fn run() {
+    task.group group {
+        crawler :: Crawler.{step: 2}
+        crawler.drain(group, 40)
+    }
+}
+"#;
+    assert_group_close_success("method_parameter_group", source, "42\n");
+
+    // Admitting the method position does not weaken the capture rule. A group
+    // reached through a parameter joins in another frame, so a view capture
+    // could dangle; it stays E1102 exactly as it does on a free function.
+    let view_capture = r#"
+struct Crawler {
+    step: Int
+
+    fn drain(self, group: TaskGroup, values: View<Int>) {
+        handle :: task values[0]
+        print(handle.join() ?? 0)
+    }
+}
+
+fn run() {}
+"#;
+    assert_eq!(error_codes(view_capture), ["E1102"]);
 }
 
 #[test]

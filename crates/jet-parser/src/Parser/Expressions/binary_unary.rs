@@ -33,6 +33,29 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
     }
 }
 
+/// D-CONC-SHARE1=A: decide whether `shared` opens a shared-cell construction
+/// (`shared expr`) or is an ordinary identifier. The keyword is contextual, so
+/// this is a closed allow-list of tokens that begin the constructed value —
+/// a name, a literal, a list/typed literal, or a parenthesised value. Anything
+/// else (a binding sigil, an operator, a `.`, a separator, a call `(`) leaves
+/// `shared` as a plain name, which keeps existing bindings and arguments
+/// spelled `shared` legal.
+fn starts_shared_operand(kind: &TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::Ident(_)
+            | TokKind::Int(..)
+            | TokKind::Float(_)
+            | TokKind::UnitNumber { .. }
+            | TokKind::Str(_)
+            | TokKind::Char(_)
+            | TokKind::KwTrue
+            | TokKind::KwFalse
+            | TokKind::KwSelf
+            | TokKind::LBracket
+    )
+}
+
 impl<'a> Parser<'a> {
         /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
         pub(super) fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -581,6 +604,44 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     let inner = self.expr_unary(allow_struct_lit)?;
                     Ok(write_window_at_maximal_place(inner, span.start))
+                }
+                // D-CONC-SHARE1=A: `shared expr` is the one shared-cell
+                // construction form (it replaced the retired `Shared.new(x)`
+                // call). It is contextual: `shared` stays an ordinary
+                // identifier unless the next token opens a value, so a
+                // binding or argument still reads as a name. Desugared here
+                // to the `Shared`-receiver constructor shape every tier
+                // already lowers, so no execution tier grows a second
+                // sharing mechanism (I9). The cell owns its payload, so the
+                // value is consumed the way a struct literal's field value is
+                // — construction, not a call argument, so no `^` is written.
+                TokKind::Ident(word)
+                    if word == Syntax::KW_SHARED
+                        && starts_shared_operand(&self.peek2().kind) =>
+                {
+                    let span = self.bump().span; // `shared`
+                    let inner = self.expr_unary(allow_struct_lit)?;
+                    Ok(Expr::MethodCall {
+                        receiver: Box::new(Expr::Ident(
+                            Syntax::TYPE_SHARED.to_string(),
+                            span,
+                        )),
+                        method: "new".to_string(),
+                        method_span: span,
+                        owner_type_args: Vec::new(),
+                        type_args: Vec::new(),
+                        args: vec![crate::AST::CallArg {
+                            convention: crate::AST::AccessConvention::Move,
+                            span: inner.span(),
+                            expr: inner,
+                            flags: Default::default(),
+                            label: None,
+                            spread: false,
+                        }],
+                        recv_type: None,
+                        resolved_ret: None,
+                        checked_widen: false,
+                    })
                 }
                 // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
                 // expression form. Legal on any expression; most useful on a named
