@@ -899,26 +899,16 @@ pub(crate) fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
 /// disagree; the caller keeps its ordinary fix text instead (card #2002).
 pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String> {
     let mut best: Option<(String, usize)> = None;
-    let mut ambiguous = false;
     for cand in candidates {
         let d = edit_distance(name, cand);
-        if d == 0 {
+        if d == 0 || d > 2 {
             continue;
         }
-        if d > 2 {
-            continue;
-        }
-        match best.as_ref() {
-            None => best = Some((cand.clone(), d)),
-            Some((_, best_distance)) if d < *best_distance => {
-                best = Some((cand.clone(), d));
-                ambiguous = false;
-            }
-            Some((_, best_distance)) if d == *best_distance => ambiguous = true,
-            Some(_) => {}
+        if best.as_ref().is_none_or(|(_, best_distance)| d < *best_distance) {
+            best = Some((cand.clone(), d));
         }
     }
-    best.filter(|_| !ambiguous).map(|(s, _)| s)
+    best.map(|(s, _)| s)
 }
 
 /// The one home for cross-language method names (card #1965).
@@ -1035,20 +1025,14 @@ fn foreign_method_fix(name: &str, jet: &str) -> String {
 /// The one method-name suggestion picker, for a receiver that has already
 /// refused `name`.
 ///
-/// Edit distance keeps priority. Foreign aliases are the fallback when no
-/// unambiguous close typo exists; that preserves the original typo fix while
-/// letting `items.add(x)` reach `push` when nearby candidates are ambiguous.
+/// Known facts beat guesses. An exact camelCase-to-snake_case hit comes first
+/// and teaches the naming rule; a cross-language alias comes next; edit
+/// distance is last, because it is the only one that can be wrong.
 pub(crate) fn suggest_method_for_receiver(
     name: &str,
     receiver_family: Option<&str>,
     candidates: &[String],
 ) -> Option<MethodSuggestion> {
-    if let Some(candidate) = suggest_field(name, candidates) {
-        return Some(MethodSuggestion {
-            fix: format!("did you mean `{candidate}`?"),
-            name: candidate,
-        });
-    }
     if let Some(snake) = snake_case_of_camel(name) {
         if candidates.iter().any(|known| *known == snake) {
             return Some(MethodSuggestion {
@@ -1056,6 +1040,8 @@ pub(crate) fn suggest_method_for_receiver(
                 name: snake,
             });
         }
+    }
+    if let Some(snake) = snake_case_of_camel(name) {
         if let Some(jet) = alias_target(&snake, receiver_family, candidates) {
             return Some(MethodSuggestion {
                 fix: foreign_method_fix(name, &jet),
@@ -1063,9 +1049,15 @@ pub(crate) fn suggest_method_for_receiver(
             });
         }
     }
-    alias_target(name, receiver_family, candidates).map(|jet| MethodSuggestion {
-        fix: foreign_method_fix(name, &jet),
-        name: jet,
+    if let Some(jet) = alias_target(name, receiver_family, candidates) {
+        return Some(MethodSuggestion {
+            fix: foreign_method_fix(name, &jet),
+            name: jet,
+        });
+    }
+    suggest_field(name, candidates).map(|candidate| MethodSuggestion {
+        fix: format!("did you mean `{candidate}`?"),
+        name: candidate,
     })
 }
 
