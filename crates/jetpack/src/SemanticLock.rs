@@ -1963,14 +1963,15 @@ fn canonical_json(value: &crate::JSON::JSONValue) -> String {
     match value {
         crate::JSON::JSONValue::Null => "null".to_string(),
         crate::JSON::JSONValue::Bool(value) => value.to_string(),
-        crate::JSON::JSONValue::Num(value) => {
+        crate::JSON::JSONValue::Number(value) => value.to_string(),
+        crate::JSON::JSONValue::Flt(value) => {
             if value.is_finite() && value.fract() == 0.0 {
                 format!("{value:.0}")
             } else {
                 value.to_string()
             }
         }
-        crate::JSON::JSONValue::Str(value) => crate::JSON::quote(value),
+        crate::JSON::JSONValue::String(value) => crate::JSON::quote(value),
         crate::JSON::JSONValue::Array(values) => format!(
             "[{}]",
             values
@@ -2569,8 +2570,8 @@ fn lock_node_name(
         start_node: &str,
     ) -> Result<Option<String>, FlakeGraphError> {
         match value {
-            crate::JSON::JSONValue::Str(value) if !value.is_empty() => Ok(Some(value.clone())),
-            crate::JSON::JSONValue::Str(_) => Err(FlakeGraphError::Io(
+        crate::JSON::JSONValue::String(value) if !value.is_empty() => Ok(Some(value.clone())),
+            crate::JSON::JSONValue::String(_) => Err(FlakeGraphError::Io(
                 "flake.lock node reference is empty".to_string(),
             )),
             crate::JSON::JSONValue::Array(values) => {

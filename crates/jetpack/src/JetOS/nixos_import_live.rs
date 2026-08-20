@@ -129,7 +129,8 @@ fn live_bool(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &s
 
 fn live_num(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> Option<f64> {
     match root.get(key) {
-        Some(JSON::JSONValue::Num(n)) => Some(*n),
+        Some(JSON::JSONValue::Number(n)) => Some(*n as f64),
+        Some(JSON::JSONValue::Flt(n)) => Some(*n),
         _ => None,
     }
 }
@@ -141,7 +142,8 @@ fn live_num_list(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key
             values
                 .iter()
                 .filter_map(|v| match v {
-                    JSON::JSONValue::Num(n) => Some(*n as i64),
+                    JSON::JSONValue::Number(n) => Some(*n),
+                    JSON::JSONValue::Flt(n) => Some(*n as i64),
                     _ => None,
                 })
                 .collect()
@@ -482,13 +484,14 @@ fn plan_from_live_facts(
             // `kernel.poweroff_cmd` from shutdown.nix), not configuration
             // intent — the target system regenerates them itself, and
             // re-declaring them collides with the module that owns them.
-            if matches!(value, JSON::JSONValue::Str(s) if s.contains("/nix/store/")) {
+            if matches!(value, JSON::JSONValue::String(s) if s.contains("/nix/store/")) {
                 continue;
             }
             let rendered = match value {
-                JSON::JSONValue::Num(n) => render_live_number(*n),
+                JSON::JSONValue::Number(n) => render_live_number(*n as f64),
+                JSON::JSONValue::Flt(n) => render_live_number(*n),
                 JSON::JSONValue::Bool(b) => b.to_string(),
-                JSON::JSONValue::Str(s) => import_render_string(s),
+                JSON::JSONValue::String(s) => import_render_string(s),
                 other => {
                     omissions.push(format!(
                         "boot.kernel.sysctl.{key} has a shape jetos cannot encode yet: {other:?}"

@@ -846,7 +846,7 @@ fn validate_studio_generation_binding(proved: &StudioProvedSource) -> Result<(),
         return Err("proved generation source proof is not an object".to_string());
     };
     let string = |name: &str| match fields.get(name) {
-        Some(JSON::JSONValue::Str(value)) => Some(value.as_str()),
+        Some(JSON::JSONValue::String(value)) => Some(value.as_str()),
         _ => None,
     };
     let plan = std::fs::read(proved.generation_path.join("plan.json"))
@@ -888,7 +888,7 @@ fn validate_studio_proof_artifact(
         return Err("generation proof is missing source_proof".to_string());
     };
     let field = |name: &str| match source_proof.get(name) {
-        Some(JSON::JSONValue::Str(value)) => Some(value.as_str()),
+        Some(JSON::JSONValue::String(value)) => Some(value.as_str()),
         _ => None,
     };
     if field("source_sha256") != Some(source_revision) {
@@ -897,7 +897,7 @@ fn validate_studio_proof_artifact(
     if field("input_plan_sha256") != Some(input_plan_revision) {
         return Err("generation proof input plan hash does not match captured plan".to_string());
     }
-    let Some(JSON::JSONValue::Str(plan)) = root.get("plan") else {
+    let Some(JSON::JSONValue::String(plan)) = root.get("plan") else {
         return Err("generation proof is missing its plan artifact".to_string());
     };
     let artifact_plan_revision = studio_source_revision(plan);
@@ -905,11 +905,11 @@ fn validate_studio_proof_artifact(
         return Err("generation proof plan hash does not match its plan artifact".to_string());
     }
     let generation = match root.get("generation") {
-        Some(JSON::JSONValue::Str(value)) => value.clone(),
+        Some(JSON::JSONValue::String(value)) => value.clone(),
         _ => return Err("generation proof is missing its generation ID".to_string()),
     };
     let path = match root.get("path") {
-        Some(JSON::JSONValue::Str(value)) => PathBuf::from(value),
+        Some(JSON::JSONValue::String(value)) => PathBuf::from(value),
         _ => return Err("generation proof is missing its generation path".to_string()),
     };
     Ok(StudioProofArtifact {
@@ -1370,7 +1370,7 @@ fn studio_request_string(
     key: &str,
 ) -> Option<String> {
     match request.get(key) {
-        Some(JSON::JSONValue::Str(value)) => Some(value.clone()),
+        Some(JSON::JSONValue::String(value)) => Some(value.clone()),
         _ => None,
     }
 }

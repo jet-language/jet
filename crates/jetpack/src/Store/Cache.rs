@@ -1417,7 +1417,8 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
         .to_string();
     let nar_size = object.get("narSize").map(|value| {
         let size = match value {
-            crate::JSON::JSONValue::Num(size)
+            crate::JSON::JSONValue::Number(size) if *size >= 0 => *size as u64,
+            crate::JSON::JSONValue::Flt(size)
                 if size.is_finite() && *size >= 0.0 && size.fract() == 0.0 => *size as u64,
             _ => return Err(invalid("Nix store metadata NarSize is not an integer")),
         };

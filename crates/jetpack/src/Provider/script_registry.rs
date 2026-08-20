@@ -764,7 +764,7 @@ fn fetch_packagist(
             if let Some(JSONValue::Object(mappings)) = autoload.get("psr-4") {
                 for (prefix, value) in mappings {
                     let paths = match value {
-                        JSONValue::Str(path) => vec![path.clone()],
+                        JSONValue::String(path) => vec![path.clone()],
                         JSONValue::Array(paths) => paths
                             .iter()
                             .map(|path| {
@@ -833,7 +833,7 @@ fn expand_packagist_releases(
             )
         })?;
         for (key, value) in changes {
-            if matches!(value, JSONValue::Str(value) if value == "__unset") {
+            if matches!(value, JSONValue::String(value) if value == "__unset") {
                 previous.remove(key);
             } else {
                 previous.insert(key.clone(), value.clone());

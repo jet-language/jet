@@ -1105,7 +1105,7 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     let mut diff_ids = array(rootfs.get("diff_ids"), "OCI config diff_ids")?
         .iter()
         .map(|value| match value {
-            JSON::JSONValue::Str(digest) => {
+            JSON::JSONValue::String(digest) => {
                 digest_hex(digest)?;
                 Ok(digest.clone())
             }
@@ -1212,7 +1212,7 @@ fn string_field<'a>(
     field: &str,
 ) -> io::Result<&'a str> {
     match object.get(field) {
-        Some(JSON::JSONValue::Str(value)) if !value.is_empty() => Ok(value),
+        Some(JSON::JSONValue::String(value)) if !value.is_empty() => Ok(value),
         _ => Err(invalid(&format!("OCI object field `{field}` is not a string"))),
     }
 }
@@ -1222,14 +1222,12 @@ fn number_field(
     field: &str,
 ) -> io::Result<u64> {
     match object.get(field) {
-        Some(JSON::JSONValue::Num(value))
+        Some(JSON::JSONValue::Number(value)) if *value >= 0 => Ok(*value as u64),
+        Some(JSON::JSONValue::Flt(value))
             if value.is_finite()
                 && *value >= 0.0
                 && *value <= u64::MAX as f64
-                && value.fract() == 0.0 =>
-        {
-            Ok(*value as u64)
-        }
+                && value.fract() == 0.0 => Ok(*value as u64),
         _ => Err(invalid(&format!("OCI object field `{field}` is not a non-negative integer"))),
     }
 }

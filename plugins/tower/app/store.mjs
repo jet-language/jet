@@ -735,9 +735,10 @@ export function findCard(s, ref) {
 }
 const mustCard = (s, ref) => findCard(s, ref) || fail('E_NOT_FOUND', `no card ${ref}`);
 
-// Store blocker refs canonically. Card lanes accept #N for convenience, but
-// lint and persisted state must see the same card id.
-function normalizeBlockedBy(s, raw) {
+// Store known blocker refs canonically. Card lanes accept #N for convenience;
+// preserve dangling add-time refs so lint can report them, while update keeps
+// the existing hard rejection for an unknown replacement.
+function normalizeBlockedBy(s, raw, { rejectUnknown = false } = {}) {
   const refs = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
   return refs.map((value) => {
     const ref = String(value ?? '').trim();
@@ -746,7 +747,8 @@ function normalizeBlockedBy(s, raw) {
     if (card) return card.id;
     const decision = s.decisions.find(d => d.id === ref);
     if (decision) return decision.id;
-    fail('E_NOT_FOUND', `blockedBy: no card or decision ${ref}`);
+    if (rejectUnknown) fail('E_NOT_FOUND', `blockedBy: no card or decision ${ref}`);
+    return ref;
   });
 }
 
@@ -1032,7 +1034,7 @@ export function updateCard(s, ref, patch, config) {
     milestoneId: 'milestoneId' in patch ? patch.milestoneId : c.milestoneId,
   });
   // blockedBy accepts a card ref OR a decision id (D-TWRGUARD1=C #458).
-  if ('blockedBy' in patch) patch.blockedBy = normalizeBlockedBy(s, patch.blockedBy);
+  if ('blockedBy' in patch) patch.blockedBy = normalizeBlockedBy(s, patch.blockedBy, { rejectUnknown: true });
   if ('refs' in patch) checkRefs(patch.refs);
   if ('tags' in patch) patch.tags = normalizeTags(patch.tags);
   if ('parentId' in patch || 'parent' in patch) {

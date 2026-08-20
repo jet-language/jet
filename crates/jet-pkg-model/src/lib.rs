@@ -67,7 +67,7 @@ pub mod FFI;
 // D-LIB-DYNTRUST1=A declared-effect grant). The driver and embedded Prelude
 // consume this pure data/check machinery; no second loader policy is allowed.
 pub mod JetLib;
-pub mod JSON;
+pub use jet_foundation::JSON;
 pub mod LintPolicy;
 pub mod Lock;
 pub mod Manifest;

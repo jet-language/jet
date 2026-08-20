@@ -227,6 +227,8 @@ const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 /// program, while the AOT link seam can replace the block with one `--extern`.
 pub const CACHED_RUNTIME_BEGIN: &str = "// jet:cached-runtime-begin\n";
 pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
+pub const CACHED_CORE_BEGIN: &str = "// jet:cached-core-begin\n";
+pub const CACHED_CORE_END: &str = "// jet:cached-core-end\n";
 
 fn push_prelude(out: &mut String) {
     for (index, part) in PRELUDE_PARTS.iter().enumerate() {
@@ -752,6 +754,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Mime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
@@ -1042,19 +1045,14 @@ fn needs_embedded_runtime(bundle: &ProgramBundle) -> bool {
     core_needs_embedded_runtime(&bundle.used_core) || force_corelib_prelude(bundle)
 }
 
-/// The R10 fragments that ride inside the cached-runtime block: the Core
-/// kernel, the scheduler, and the UI/app templates. Every one is selected by
-/// build facts (`used_core`, target OS, native IO) and never by user source
-/// text, so they are content-addressable exactly like the fixed Prelude — and
-/// they are the bulk of an emitted program (3.4 MB of a 4.0 MB `core.encoding`
-/// build). Emitting them outside the markers is what left every native build
-/// re-feeding rustc the whole Core closure, and it also put
-/// `impl __jet_Comparable for JetInstant` in a different crate from
-/// `JetInstant` (E0117), which no visibility fix can repair.
+/// The R10 Core closure rides in its own content-addressed rlib. This includes
+/// scheduler/UI/app templates: Core calls them, so splitting only the kernel
+/// would create a circular dependency or force an inline fallback.
 fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: bool) {
     if !needs_embedded_runtime(bundle) {
         return;
     }
+    out.push_str(CACHED_CORE_BEGIN);
     let force = force_corelib_prelude(bundle);
     if test_harness {
         push_corelib_prelude_for_test_harness(out, &bundle.used_core, force);
@@ -1067,6 +1065,7 @@ fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: boo
         out.push_str(UI_GTK_PRELUDE);
     }
     push_app_preludes(out, &bundle.used_core);
+    out.push_str(CACHED_CORE_END);
 }
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
@@ -4490,8 +4489,8 @@ pub fn emit_bundle_dbg(
     }
     push_program_allocator_prelude(&mut out, bundle);
     push_cached_runtime_begin(&mut out, bundle, link);
-    push_core_runtime(&mut out, bundle, false);
     out.push_str(CACHED_RUNTIME_END);
+    push_core_runtime(&mut out, bundle, false);
     out.push('\n');
     push_secret_decode_impl(&mut out, bundle, link);
 
@@ -4766,8 +4765,8 @@ fn emit_bundle_tests_cov_inner(
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    push_core_runtime(&mut out, bundle, true);
     out.push_str(CACHED_RUNTIME_END);
+    push_core_runtime(&mut out, bundle, true);
     out.push('\n');
     push_secret_decode_impl(&mut out, bundle, link);
 
@@ -5046,8 +5045,8 @@ pub fn emit_bundle_fuzz(
     // runtime is always needed (unlike `jet test`, which only emits it when a
     // property test is present).
     out.push_str(PROP_PRELUDE);
-    push_core_runtime(&mut out, bundle, true);
     out.push_str(CACHED_RUNTIME_END);
+    push_core_runtime(&mut out, bundle, true);
     out.push('\n');
     push_secret_decode_impl(&mut out, bundle, link);
 
@@ -5371,8 +5370,8 @@ fn emit_bundle_benches_inner(
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    push_core_runtime(&mut out, bundle, true);
     out.push_str(CACHED_RUNTIME_END);
+    push_core_runtime(&mut out, bundle, true);
     out.push('\n');
     push_secret_decode_impl(&mut out, bundle, link);
 

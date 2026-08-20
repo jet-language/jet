@@ -11,6 +11,14 @@ fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
+/// Explicit profile keeps `jet run` on the native AOT path; debug avoids the
+/// optimized release codegen cost for behavior-only assertions.
+fn run_debug_aot(file: &str) -> Command {
+    let mut command = Command::new(jet());
+    command.args(["run", "--profile=debug", file]);
+    command
+}
+
 // ── #2075: which profile a CLI behavior test pays for ────────────────────────
 //
 // D-LENS-RUN1 keeps the AOT escape hatch for ANY explicit profile, so

@@ -79,7 +79,7 @@ fn ruby_bind_round_trips_datatree_state_timeout_and_cancellation() {
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/ruby");fs::copy(example.join("ops.rb"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","ruby"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Ruby bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/ruby");assert!(cache.join("libjet_ruby_ops.a").is_file());assert!(cache.join("ops_worker.rb").is_file());assert!(cache.join("ops.provenance").is_file());
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Ruby binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Ruby binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -109,7 +109,7 @@ fn php_bind_runs_a_persistent_bounded_worker_pool() {
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/php");fs::copy(example.join("ops.php"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"PHP bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/php");assert!(cache.join("libjet_php_ops.a").is_file());assert!(cache.join("ops_worker.php").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("pool_workers=4"));
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PHP binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PHP binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("pool.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <time.h>
@@ -165,7 +165,7 @@ hostile_plot <- function(input) {
 "#).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"R bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/r");assert!(cache.join("libjet_r_ops.a").is_file());assert!(cache.join("ops_worker.R").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"));assert!(!provenance.to_ascii_lowercase().contains("cran"));
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("lifecycle.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>

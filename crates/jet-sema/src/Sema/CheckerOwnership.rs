@@ -6590,11 +6590,12 @@ pub(crate) fn e0140_discarded_wildcard(span: Span) -> Diagnostic {
 /// — the value still owes `join`, and `.detach()` is the one written word that
 /// lets it go free.
 pub(crate) fn l1101_unjoined_task(subject: &str, why: &str, span: Span) -> Diagnostic {
-    Diagnostic::lint(
+    Diagnostic::error(
         "L1101",
         format!("{subject} still owes `join`"),
         why.to_string(),
-        "join it with `.join()`, or write `.detach()` to let it go free".to_string(),
+        "join it with `.join()`, use its result, or write `.detach()` to let it go free"
+            .to_string(),
         Some(span),
     )
 }

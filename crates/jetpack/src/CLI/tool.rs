@@ -1300,13 +1300,16 @@ fn json_field_u64(
     object: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Result<u64, String> {
-    let Some(JSON::JSONValue::Num(value)) = object.get(key) else {
-        return Err(format!("profile field `{key}` is not a number"));
-    };
-    if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 || *value > 9_007_199_254_740_991.0 {
-        return Err(format!("profile field `{key}` is not an exact integer"));
+    match object.get(key) {
+        Some(JSON::JSONValue::Number(value)) if *value >= 0 => Ok(*value as u64),
+        Some(JSON::JSONValue::Flt(value))
+            if value.is_finite()
+                && *value >= 0.0
+                && value.fract() == 0.0
+                && *value <= 9_007_199_254_740_991.0 => Ok(*value as u64),
+        Some(_) => Err(format!("profile field `{key}` is not an exact integer")),
+        None => Err(format!("profile field `{key}` is not a number")),
     }
-    Ok(*value as u64)
 }
 
 fn json_string_array(

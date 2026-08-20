@@ -1,8 +1,8 @@
 //! Content-addressed native runtime rlib cache.
 //!
 //! Codegen keeps emitting one complete Rust program for inspection and I1/I2
-//! audits. Native builders split its marked, canonical runtime block, compile
-//! that dependency once, then compile and link the user program normally.
+//! audits. Native builders split its marked Prelude/runtime and Core blocks,
+//! compile those dependencies once, then compile and link the user program.
 
 use crate::SHA256::sha256_hex;
 use std::collections::HashMap;
@@ -15,15 +15,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-// v4: the block now carries the Core/CoreLib closure and the package edition,
-// and `export_runtime_source` no longer mis-promotes multi-line item headers.
-// Every v3 entry on disk is an empty directory from a runtime crate that never
-// compiled, so nothing of value shares the old namespace.
-const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v4";
-const CRATE_NAME: &str = "jet_runtime";
+// v5: the canonical Prelude/runtime and the used Core/CoreLib closure are
+// separate rlibs. `export_runtime_source` no longer mis-promotes multi-line
+// item headers. Every v4 entry used the combined block, so nothing shares its
+// namespace.
+const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v5";
+const RUNTIME_CRATE_NAME: &str = "jet_runtime";
+const CORE_CRATE_NAME: &str = "jet_runtime_core";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
+const CORE_CRATE_PREFIX: &str =
+    "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
 const END: &str = crate::Codegen::CACHED_RUNTIME_END;
+const CORE_BEGIN: &str = crate::Codegen::CACHED_CORE_BEGIN;
+const CORE_END: &str = crate::Codegen::CACHED_CORE_END;
 const DIGEST_LEN: usize = 64;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
@@ -45,7 +50,8 @@ impl std::fmt::Display for Error {
 
 pub struct PreparedRuntime {
     rust: String,
-    rlib: Option<PathBuf>,
+    runtime_rlib: Option<PathBuf>,
+    core_rlib: Option<PathBuf>,
     cache_hit: bool,
 }
 
@@ -53,7 +59,8 @@ impl PreparedRuntime {
     pub fn inline(rust: &str) -> Self {
         Self {
             rust: rust.to_string(),
-            rlib: None,
+            runtime_rlib: None,
+            core_rlib: None,
             cache_hit: false,
         }
     }
@@ -70,14 +77,19 @@ impl PreparedRuntime {
     /// carrying the runtime source itself. A caller that can retry uses this to
     /// tell a split-only rejection apart from a genuine codegen bug.
     pub fn is_split(&self) -> bool {
-        self.rlib.is_some()
+        self.runtime_rlib.is_some()
     }
 
     pub fn add_rustc_args(&self, command: &mut Command) {
-        if let Some(rlib) = &self.rlib {
+        if let Some(rlib) = &self.runtime_rlib {
             command
                 .arg("--extern")
-                .arg(format!("{CRATE_NAME}={}", rlib.display()));
+                .arg(format!("{RUNTIME_CRATE_NAME}={}", rlib.display()));
+        }
+        if let Some(rlib) = &self.core_rlib {
+            command
+                .arg("--extern")
+                .arg(format!("{CORE_CRATE_NAME}={}", rlib.display()));
         }
     }
 }
@@ -136,7 +148,7 @@ fn prepare_at(
 ) -> Result<PreparedRuntime, Error> {
     let prepared = prepare_at_uncounted(root, rustc, generated, rustc_flags, rustc_env)?;
     if std::env::var_os("JET_RUNTIME_CACHE_STATS").is_some() {
-        let outcome = match (&prepared.rlib, prepared.cache_hit) {
+        let outcome = match (&prepared.runtime_rlib, prepared.cache_hit) {
             (None, _) => "inline".to_string(),
             (Some(rlib), hit) => format!(
                 "{} key={}",
@@ -169,63 +181,140 @@ fn prepare_at_uncounted(
         Err(Error::Cache(_)) => return Ok(PreparedRuntime::inline(generated)),
         Err(error) => return Err(error),
     };
-    let Some((runtime, program)) = split else {
+    let Some(split) = split else {
         return Ok(PreparedRuntime::inline(generated));
     };
-    let exported = export_runtime_source(&runtime);
     let rustc_version = rustc_identity(rustc, rustc_env)?;
-    let key = cache_key(
-        &runtime,
+    let exported = export_runtime_source(&split.runtime);
+    let runtime_key = cache_key(
+        RUNTIME_CRATE_NAME,
+        &split.runtime,
         &exported,
+        RUNTIME_CRATE_PREFIX,
+        None,
         rustc,
         &rustc_version,
         rustc_flags,
         rustc_env,
     );
-    let entry = root.join(&key);
+    let Some(runtime) = compile_artifact(
+        root,
+        &runtime_key,
+        RUNTIME_CRATE_NAME,
+        &exported,
+        RUNTIME_CRATE_PREFIX,
+        None,
+        rustc,
+        rustc_flags,
+        rustc_env,
+    )? else {
+        return Ok(PreparedRuntime::inline(generated));
+    };
+
+    let core = if let Some(core) = split.core.as_deref() {
+        let exported = export_runtime_source(core);
+        let key = cache_key(
+            CORE_CRATE_NAME,
+            core,
+            &exported,
+            CORE_CRATE_PREFIX,
+            Some(&runtime_key),
+            rustc,
+            &rustc_version,
+            rustc_flags,
+            rustc_env,
+        );
+        compile_artifact(
+            root,
+            &key,
+            CORE_CRATE_NAME,
+            &exported,
+            CORE_CRATE_PREFIX,
+            Some((RUNTIME_CRATE_NAME, runtime.path.as_path())),
+            rustc,
+            rustc_flags,
+            rustc_env,
+        )?
+    } else {
+        None
+    };
+    if split.core.is_none() {
+        return Ok(PreparedRuntime {
+            rust: split.program,
+            runtime_rlib: Some(runtime.path),
+            core_rlib: None,
+            cache_hit: runtime.cache_hit,
+        });
+    }
+    let Some(core) = core else {
+        return Ok(PreparedRuntime::inline(generated));
+    };
+    Ok(PreparedRuntime {
+        rust: split.program,
+        runtime_rlib: Some(runtime.path),
+        core_rlib: Some(core.path),
+        cache_hit: runtime.cache_hit && core.cache_hit,
+    })
+}
+
+struct SplitGenerated {
+    runtime: String,
+    core: Option<String>,
+    program: String,
+}
+
+struct Artifact {
+    path: PathBuf,
+    cache_hit: bool,
+}
+
+fn compile_artifact(
+    root: &Path,
+    key: &str,
+    crate_name: &str,
+    exported: &str,
+    crate_prefix: &str,
+    dependency: Option<(&str, &Path)>,
+    rustc: &OsStr,
+    rustc_flags: &[OsString],
+    rustc_env: &[(OsString, OsString)],
+) -> Result<Option<Artifact>, Error> {
+    let entry = root.join(key);
     safe_dir(root, &entry)?;
     fs::create_dir_all(&entry)
         .map_err(|error| Error::Cache(format!("could not create {}: {error}", entry.display())))?;
-    let rlib = entry.join(format!("lib{CRATE_NAME}.rlib"));
+    let rlib = entry.join(format!("lib{crate_name}.rlib"));
     if verified_artifact(&rlib) {
-        return Ok(PreparedRuntime {
-            rust: program,
-            rlib: Some(rlib),
-            cache_hit: true,
-        });
+        return Ok(Some(Artifact { path: rlib, cache_hit: true }));
     }
 
     let _lock = BuildLock::acquire(&entry)?;
     if verified_artifact(&rlib) {
-        return Ok(PreparedRuntime {
-            rust: program,
-            rlib: Some(rlib),
-            cache_hit: true,
-        });
+        return Ok(Some(Artifact { path: rlib, cache_hit: true }));
     }
 
-    // The lock serializes ordinary writers; the private directory also keeps
-    // a slow compile safe if another process eventually reaps a stale lock.
-    // Stable leaf names plus one remapped directory give rustc the same input
-    // and output identity in every clean cache.
+    // The lock serializes writers; the private directory keeps a slow compile
+    // safe if another process eventually reaps a stale lock.
     let temporary_id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let staging = entry.join(format!(
-        ".build.{}.{temporary_id}",
-        std::process::id()
-    ));
+    let staging = entry.join(format!(".build.{}.{temporary_id}", std::process::id()));
     fs::create_dir_all(&staging)
         .map_err(|error| Error::Cache(format!("could not create {}: {error}", staging.display())))?;
     let source = staging.join("runtime.rs");
-    let staged_rlib = staging.join(format!("lib{CRATE_NAME}.rlib"));
-    fs::write(&source, format!("{RUNTIME_CRATE_PREFIX}{exported}")).map_err(|error| {
+    let staged_rlib = staging.join(format!("lib{crate_name}.rlib"));
+    fs::write(&source, format!("{crate_prefix}{exported}")).map_err(|error| {
         let _ = fs::remove_dir_all(&staging);
         Error::Cache(format!("could not write {}: {error}", source.display()))
     })?;
 
     let mut command = Command::new(rustc);
     command
-        .args(["--edition", "2021", "--crate-name", CRATE_NAME, "--crate-type", "rlib"])
+        .args(["--edition", "2021", "--crate-name", crate_name, "--crate-type", "rlib"])
         .args(rustc_flags);
+    if let Some((dependency_name, dependency_path)) = dependency {
+        command
+            .arg("--extern")
+            .arg(format!("{dependency_name}={}", dependency_path.display()));
+    }
     if let Ok(staging_prefix) = fs::canonicalize(&staging) {
         command
             .arg("--remap-path-prefix")
@@ -243,7 +332,7 @@ fn prepare_at_uncounted(
     if !output.status.success() {
         let _ = fs::remove_dir_all(&staging);
         // A cache-only rustc rejection must never replace a valid inline build.
-        return Ok(PreparedRuntime::inline(generated));
+        return Ok(None);
     }
 
     let bytes = fs::read(&staged_rlib).map_err(|error| {
@@ -260,16 +349,12 @@ fn prepare_at_uncounted(
     publish(&entry.join("artifact.sha256"), format!("{digest}\n").as_bytes())?;
     publish(
         &entry.join("runtime.rs"),
-        format!("{RUNTIME_CRATE_PREFIX}{exported}").as_bytes(),
+        format!("{crate_prefix}{exported}").as_bytes(),
     )?;
-    Ok(PreparedRuntime {
-        rust: program,
-        rlib: Some(rlib),
-        cache_hit: false,
-    })
+    Ok(Some(Artifact { path: rlib, cache_hit: false }))
 }
 
-fn split_generated(generated: &str) -> Result<Option<(String, String)>, Error> {
+fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, Error> {
     let Some(begin) = generated.find(BEGIN) else {
         return Ok(None);
     };
@@ -283,18 +368,53 @@ fn split_generated(generated: &str) -> Result<Option<(String, String)>, Error> {
         .find(END)
         .ok_or_else(|| Error::Cache("generated Rust has an unterminated runtime block".to_string()))?;
     let runtime_end = runtime_start + relative_end;
-    let after = runtime_end + END.len();
+    let after_runtime = runtime_end + END.len();
     let runtime = generated[runtime_start..runtime_end].to_string();
-    let mut program = String::with_capacity(generated.len() - runtime.len() + 64);
+    let core_begin = generated.find(CORE_BEGIN);
+    if core_begin.is_none() && generated.matches(CORE_END).count() != 0 {
+        return Err(Error::Cache("generated Rust has an invalid core marker pair".to_string()));
+    }
+    if generated.matches(CORE_BEGIN).count() > 1 || generated.matches(CORE_END).count() > 1 {
+        return Err(Error::Cache("generated Rust has an invalid core marker pair".to_string()));
+    }
+    let core = if let Some(core_begin) = core_begin {
+        if core_begin < after_runtime {
+            return Err(Error::Cache("generated Rust has nested runtime/core markers".to_string()));
+        }
+        let core_start = core_begin + CORE_BEGIN.len();
+        let core_end = core_start
+            + generated[core_start..]
+                .find(CORE_END)
+                .ok_or_else(|| Error::Cache("generated Rust has an unterminated core block".to_string()))?;
+        Some((generated[core_start..core_end].to_string(), core_end + CORE_END.len()))
+    } else {
+        None
+    };
+    let mut program = String::with_capacity(generated.len() - runtime.len() + 96);
     program.push_str(&generated[..begin]);
     program.push_str("extern crate jet_runtime;\nuse jet_runtime::*;\n");
-    program.push_str(&generated[after..]);
-    Ok(Some((runtime, program)))
+    match &core {
+        Some((_, core_after)) => {
+            let core_begin = core_begin.expect("core marker present");
+            program.push_str(&generated[after_runtime..core_begin]);
+            program.push_str("extern crate jet_runtime_core;\nuse jet_runtime_core::*;\n");
+            program.push_str(&generated[*core_after..]);
+        }
+        None => program.push_str(&generated[after_runtime..]),
+    }
+    Ok(Some(SplitGenerated {
+        runtime,
+        core: core.map(|(source, _)| source),
+        program,
+    }))
 }
 
 fn cache_key(
-    runtime: &str,
-    exported_runtime: &str,
+    crate_name: &str,
+    source: &str,
+    exported_source: &str,
+    crate_prefix: &str,
+    dependency_key: Option<&str>,
     rustc: &OsStr,
     rustc_version: &str,
     rustc_flags: &[OsString],
@@ -302,9 +422,11 @@ fn cache_key(
 ) -> String {
     let mut data = Vec::new();
     push_bytes(&mut data, CACHE_SCHEMA);
-    push_bytes(&mut data, runtime.as_bytes());
-    push_bytes(&mut data, RUNTIME_CRATE_PREFIX.as_bytes());
-    push_bytes(&mut data, exported_runtime.as_bytes());
+    push_bytes(&mut data, crate_name.as_bytes());
+    push_bytes(&mut data, source.as_bytes());
+    push_bytes(&mut data, crate_prefix.as_bytes());
+    push_bytes(&mut data, exported_source.as_bytes());
+    push_bytes(&mut data, dependency_key.unwrap_or_default().as_bytes());
     push_bytes(&mut data, &os_bytes(rustc));
     push_bytes(&mut data, rustc_version.as_bytes());
     push_bytes(&mut data, b"flags");
@@ -912,8 +1034,11 @@ mod tests {
         environment: &[(OsString, OsString)],
     ) -> String {
         cache_key(
+            RUNTIME_CRATE_NAME,
             runtime,
             &export_runtime_source(runtime),
+            RUNTIME_CRATE_PREFIX,
+            None,
             rustc,
             rustc_version,
             flags,
@@ -979,11 +1104,27 @@ mod tests {
         let generated = format!(
             "#![allow(warnings)]\n{BEGIN}fn runtime() {{}}\n{END}fn main() {{ runtime(); }}\n"
         );
-        let (runtime, program) = split_generated(&generated).unwrap().unwrap();
-        assert_eq!(runtime, "fn runtime() {}\n");
-        assert!(program.contains("extern crate jet_runtime;"));
-        assert!(program.contains("fn main() { runtime(); }"));
-        assert!(!program.contains("fn runtime()"));
+        let split = split_generated(&generated).unwrap().unwrap();
+        assert_eq!(split.runtime, "fn runtime() {}\n");
+        assert!(split.core.is_none());
+        assert!(split.program.contains("extern crate jet_runtime;"));
+        assert!(split.program.contains("fn main() { runtime(); }"));
+        assert!(!split.program.contains("fn runtime()"));
+    }
+
+    #[test]
+    fn split_extracts_core_and_links_both_crates() {
+        let generated = format!(
+            "#![allow(warnings)]\n{BEGIN}fn runtime() {{}}\n{END}{CORE_BEGIN}fn core() {{}}\n{CORE_END}fn main() {{ core(); }}\n"
+        );
+        let split = split_generated(&generated).unwrap().unwrap();
+        assert_eq!(split.runtime, "fn runtime() {}\n");
+        assert_eq!(split.core.as_deref(), Some("fn core() {}\n"));
+        assert!(split.program.contains("extern crate jet_runtime;"));
+        assert!(split.program.contains("extern crate jet_runtime_core;"));
+        assert!(split.program.contains("fn main() { core(); }"));
+        assert!(!split.program.contains("fn runtime()"));
+        assert!(!split.program.contains("fn core()"));
     }
 
     #[test]
@@ -991,7 +1132,7 @@ mod tests {
         let generated = format!(
             "#![allow(warnings)]\nconst __JET_PACKAGE_EDITION: u16 = 2027;\nextern crate helper;\n{BEGIN}pub trait __jet_Display {{}}\n{END}use __jet_Display;\n"
         );
-        let (_, program) = split_generated(&generated).unwrap().unwrap();
+        let program = split_generated(&generated).unwrap().unwrap().program;
         let edition = program.find("__JET_PACKAGE_EDITION").unwrap();
         let helper = program.find("extern crate helper;").unwrap();
         let runtime = program.find("extern crate jet_runtime;").unwrap();
@@ -1144,7 +1285,7 @@ use std::fmt::Debug;
         assert!(second.cache_hit());
         assert_eq!(fs::read(&count).unwrap(), b"x");
 
-        fs::write(second.rlib.as_ref().unwrap(), b"corrupt!").unwrap();
+        fs::write(second.runtime_rlib.as_ref().unwrap(), b"corrupt!").unwrap();
         let repaired = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
         assert!(!repaired.cache_hit());
         assert_eq!(fs::read(&count).unwrap(), b"xx");

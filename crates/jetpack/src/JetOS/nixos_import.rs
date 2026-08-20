@@ -629,14 +629,11 @@ fn import_render_json_value(value: &JSON::JSONValue) -> String {
     match value {
         JSON::JSONValue::Null => "null".to_string(),
         JSON::JSONValue::Bool(value) => value.to_string(),
-        JSON::JSONValue::Num(value) => {
-            if value.fract() == 0.0 {
-                format!("{}", *value as i64)
-            } else {
-                value.to_string()
-            }
+        JSON::JSONValue::Number(value) => value.to_string(),
+        JSON::JSONValue::Flt(value) => {
+            if value.fract() == 0.0 { format!("{}", *value as i64) } else { value.to_string() }
         }
-        JSON::JSONValue::Str(value) => import_render_string(value),
+        JSON::JSONValue::String(value) => import_render_string(value),
         JSON::JSONValue::Array(values) => {
             let rendered = values
                 .iter()
@@ -653,8 +650,9 @@ fn import_render_json_for_audit(value: &JSON::JSONValue) -> String {
     match value {
         JSON::JSONValue::Null => "null".to_string(),
         JSON::JSONValue::Bool(value) => value.to_string(),
-        JSON::JSONValue::Num(value) => value.to_string(),
-        JSON::JSONValue::Str(value) => JSON::quote(value),
+        JSON::JSONValue::Number(value) => value.to_string(),
+        JSON::JSONValue::Flt(value) => value.to_string(),
+        JSON::JSONValue::String(value) => JSON::quote(value),
         JSON::JSONValue::Array(values) => {
             let parts = values
                 .iter()

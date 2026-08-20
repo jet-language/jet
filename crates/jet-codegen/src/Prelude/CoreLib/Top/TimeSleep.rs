@@ -21,20 +21,26 @@ pub fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 fn jet_deadline_check(wait_kind: &str) {
-    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+    // Deadline delivery is a wait-point raise; cleanup defers it with the same
+    // shield that protects cancellation, so a destructor cannot double-panic.
+    if !jet_scheduler_shielded()
+        && matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0)
+    {
         jet_deadline_exceeded(wait_kind);
     }
 }
 
 pub fn jet_std_time_sleep(millis: i64) {
     let want = millis.max(0);
-    if let Some(remaining) = jet_deadline_remaining_ms() {
-        if remaining <= 0 {
-            jet_deadline_exceeded("time sleep");
-        }
-        if want > remaining {
-            jet_scheduler_sleep_ms(remaining as u64);
-            jet_deadline_exceeded("time sleep");
+    if !jet_scheduler_shielded() {
+        if let Some(remaining) = jet_deadline_remaining_ms() {
+            if remaining <= 0 {
+                jet_deadline_exceeded("time sleep");
+            }
+            if want > remaining {
+                jet_scheduler_sleep_ms(remaining as u64);
+                jet_deadline_exceeded("time sleep");
+            }
         }
     }
     jet_scheduler_sleep_ms(want as u64);

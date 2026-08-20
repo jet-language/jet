@@ -20,6 +20,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use jet_driver::Diagnostics::ColorChoice;
+use jet_foundation::JSON::json_escape;
 
 use crate::{content_type_for, query_param, static_path, write_response, Request};
 
@@ -699,23 +700,6 @@ fn clock_time() -> String {
     let sod = secs % 86400;
     format!("{:02}:{:02}:{:02}", sod / 3600, (sod % 3600) / 60, sod % 60)
 }
-
-fn json_escape(s: &str) -> String {
-    let mut out = String::new();
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push(' '),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 
 /// Move every file `write_web_artifacts` staged into the real output
 /// directory. Each `fs::rename` is atomic on the same filesystem (staging

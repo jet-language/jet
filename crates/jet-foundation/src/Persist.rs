@@ -12,6 +12,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::AST::{CtFloat, CtValue, Expr, Item, ProgramBundle, StrPart, Type};
+use crate::JSON::json_escape;
 
 thread_local! {
     static SHARED: RefCell<PersistStore> = RefCell::new(PersistStore::new());
@@ -245,17 +246,17 @@ fn encode_payload(value: &CtValue) -> String {
         CtValue::Str(s) => {
             format!(
                 r#"{{"shape":"String","value":"{}"}}"#,
-                escape_json_string(s)
+                json_escape(s)
             )
         }
         CtValue::Char(c) => {
             format!(
                 r#"{{"shape":"Char","value":"{}"}}"#,
-                escape_json_string(&c.to_string())
+                json_escape(&c.to_string())
             )
         }
         CtValue::Float(f) => format!(r#"{{"shape":"Float","value":{}}}"#, f.render()),
-        other => format!(r#"{{"shape":"Opaque","debug":"{}"}}"#, escape_json_string(&format!("{other:?}"))),
+        other => format!(r#"{{"shape":"Opaque","debug":"{}"}}"#, json_escape(&format!("{other:?}"))),
     }
 }
 
@@ -284,21 +285,6 @@ fn decode_payload(payload: &str) -> Option<CtValue> {
     }
 }
 
-fn escape_json_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 fn unescape_json_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -310,6 +296,14 @@ fn unescape_json_string(s: &str) -> String {
                 Some('n') => out.push('\n'),
                 Some('r') => out.push('\r'),
                 Some('t') => out.push('\t'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                        if let Some(value) = char::from_u32(code) {
+                            out.push(value);
+                        }
+                    }
+                }
                 Some(other) => out.push(other),
                 None => break,
             }

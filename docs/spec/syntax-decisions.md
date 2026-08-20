@@ -5774,6 +5774,13 @@ service runtime. D-TYPE2-TIME1 now supplies the ordinary typed `Duration` and
 Instant carriers; the service path remains a future slice and must not
 reinterpret raw extras as `#Every` or add a second scheduler.
 
+*Implementation log 2026-08-20 (card c0a5nr50)*: D-JOB-SUBCMD1=C is wired
+through one Prelude job-scope selector. `jet run <entry> -- <name>` and built
+binaries select the first program word before ordinary CLI parsing. Dev tiers
+expose bare/`.Dev`/`.Ship` jobs; release binaries expose `.Ship` only;
+`.Internal` remains code/scheduler-only. Release builds report stripped jobs
+with the `#Job(.Ship)` fix.
+
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the
 nix-only `jetpack run pkg@nixpkgs` bridge); `jetpack tool install <ref>`

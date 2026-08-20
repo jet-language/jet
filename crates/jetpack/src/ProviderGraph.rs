@@ -638,7 +638,7 @@ fn json_string(
     key: &str,
 ) -> Option<String> {
     match object.get(key) {
-        Some(JSONValue::Str(value)) if !value.trim().is_empty() => Some(value.clone()),
+        Some(JSONValue::String(value)) if !value.trim().is_empty() => Some(value.clone()),
         _ => None,
     }
 }
@@ -661,9 +661,9 @@ fn json_array_strings(
         Some(JSONValue::Array(values)) => values
             .iter()
             .filter_map(|value| match value {
-                JSONValue::Str(value) => Some(value.clone()),
+                JSONValue::String(value) => Some(value.clone()),
                 JSONValue::Object(value) => value.get("name").and_then(|value| match value {
-                    JSONValue::Str(value) => Some(value.clone()),
+                    JSONValue::String(value) => Some(value.clone()),
                     _ => None,
                 }),
                 _ => None,

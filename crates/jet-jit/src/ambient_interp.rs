@@ -2731,6 +2731,21 @@ pub fn ambient_core_call(
             span,
         ));
     }
+    // Watcher handles and callback slots use the Cranelift ABI carrier. Keep
+    // this boundary explicit instead of letting the shared comptime adapter
+    // misreport it as an unknown Core call.
+    if module == "core.watcher" {
+        return Some(Err(unsupported(
+            &format!("{module}.{method} requires an interpreter watcher host marshaller"),
+            span,
+        )));
+    }
+    if module == "core.net.ws" {
+        return Some(Err(unsupported(
+            "core.net.ws requires a native WebSocket carrier marshaller",
+            span,
+        )));
+    }
     if let Some(result) = ambient_time_call(module, method, &args, span, resolved_ret.as_ref()) {
         return Some(result);
     }
@@ -5153,8 +5168,17 @@ fn ambient_http_handle(
             crate::net_http_rt::runtime_http_json_decode_error(),
         ))));
     }
+    if op == "HTTPClientNew" {
+        return Some(Err(unsupported(
+            "HTTP client construction requires a host HTTP carrier marshaller",
+            span,
+        )));
+    }
     if !(op.starts_with("HTTPClient:") || op.starts_with("HTTPServer:")) {
         return None;
+    }
+    if let Some(result) = ambient_http_projection(op, recv, args, span) {
+        return Some(result);
     }
     let result = match op {
         "HTTPServer:HTTPRequest:json" if args.is_empty() => {
@@ -5260,6 +5284,206 @@ fn ambient_http_handle(
             })
         }
         _ => Err(unsupported(&format!("HTTP ambient handle `{op}`"), span)),
+    };
+    Some(result)
+}
+
+fn ambient_http_projection(
+    op: &str,
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let optional_text = |value: Option<String>| match value {
+        Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        None => CtValue::absent(Type::String),
+    };
+    let handle = |type_name: &str, what: &str| {
+        http_handle_id(recv, type_name).ok_or_else(|| unsupported(what, span))
+    };
+    let result = match op {
+        "HTTPServer:HTTPRequest:body" if args.is_empty() => handle("HTTPRequest", "HTTPRequest.body receiver")
+            .and_then(|request| {
+                crate::net_http_rt::runtime_http_req_body(request)
+                    .map(|body| http_handle_value("HTTPBody", body))
+                    .map_err(|error| unsupported(&error, span))
+            }),
+        "HTTPServer:HTTPRequest:method" if args.is_empty() => handle("HTTPRequest", "HTTPRequest.method receiver")
+            .and_then(|request| {
+                crate::net_http_rt::runtime_http_req_method(request)
+                    .map(CtValue::Str)
+                    .map_err(|error| unsupported(&error, span))
+            }),
+        "HTTPServer:HTTPRequest:path" if args.is_empty() => handle("HTTPRequest", "HTTPRequest.path receiver")
+            .and_then(|request| {
+                crate::net_http_rt::runtime_http_req_path(request)
+                    .map(CtValue::Str)
+                    .map_err(|error| unsupported(&error, span))
+            }),
+        "HTTPServer:HTTPRequest:param" if args.len() == 1 => {
+            let Some(CtValue::Str(name)) = args.first() else {
+                return Some(Err(unsupported("HTTPRequest.param name", span)));
+            };
+            handle("HTTPRequest", "HTTPRequest.param receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_req_param(request, name.clone())
+                    .map(optional_text)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
+        "HTTPServer:HTTPRequest:header" if args.len() == 1 => {
+            let Some(CtValue::Str(name)) = args.first() else {
+                return Some(Err(unsupported("HTTPRequest.header name", span)));
+            };
+            handle("HTTPRequest", "HTTPRequest.header receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_req_header(request, name.clone())
+                    .map(optional_text)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
+        "HTTPServer:HTTPRequest:body_len" if args.is_empty() => handle(
+            "HTTPRequest",
+            "HTTPRequest.body_len receiver",
+        )
+        .and_then(|request| {
+            crate::net_http_rt::runtime_http_req_body_len(request)
+                .map(CtValue::Int)
+                .map_err(|error| unsupported(&error, span))
+        }),
+        "HTTPServer:HTTPRequest:under_limit" if args.len() == 1 => {
+            let Some(CtValue::Int(max)) = args.first() else {
+                return Some(Err(unsupported("HTTPRequest.under_limit limit", span)));
+            };
+            handle("HTTPRequest", "HTTPRequest.under_limit receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_req_under_limit(request, *max)
+                    .map(CtValue::Bool)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
+        "HTTPServer:HTTPRequest:trailers" if args.is_empty() => {
+            handle("HTTPRequest", "HTTPRequest.trailers receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_req_trailers(request)
+                    .map_err(|error| unsupported(&error, span))
+                    .map(|result| match result {
+                        Ok(headers) => CtValue::Present(Box::new(http_handle_value(
+                            "HTTPHeaders", headers,
+                        ))),
+                        Err(error) => CtValue::failed(Box::new(error)),
+                    })
+            })
+        }
+        "HTTPClient:HTTPResponse:status" | "HTTPServer:HTTPResponse:status"
+            if args.is_empty() => handle("HTTPResponse", "HTTPResponse.status receiver")
+        .and_then(|response| {
+            crate::net_http_rt::runtime_http_resp_status(response)
+                .map(CtValue::Int)
+                .map_err(|error| unsupported(&error, span))
+        }),
+        "HTTPClient:HTTPResponse:body" | "HTTPServer:HTTPResponse:body"
+            if args.is_empty() => handle("HTTPResponse", "HTTPResponse.body receiver")
+        .and_then(|response| {
+            crate::net_http_rt::runtime_http_resp_body(response)
+                .map(|body| http_handle_value("HTTPBody", body))
+                .map_err(|error| unsupported(&error, span))
+        }),
+        "HTTPClient:HTTPResponse:header" if args.len() == 1 => {
+            let Some(CtValue::Str(name)) = args.first() else {
+                return Some(Err(unsupported("HTTPResponse.header name", span)));
+            };
+            handle("HTTPResponse", "HTTPResponse.header receiver").and_then(|response| {
+                crate::net_http_rt::runtime_http_resp_header(response, name.clone())
+                    .map(optional_text)
+                    .map_err(|error| unsupported(&error, span))
+            })
+        }
+        "HTTPClient:HTTPResponse:cookies" if args.is_empty() => handle(
+            "HTTPResponse",
+            "HTTPResponse.cookies receiver",
+        )
+        .and_then(|response| {
+            crate::net_http_rt::runtime_http_resp_cookies(response)
+                .map(|values| CtValue::List(values.into_iter().map(CtValue::Str).collect()))
+                .map_err(|error| unsupported(&error, span))
+        }),
+        "HTTPClient:HTTPRequest:form"
+        | "HTTPClient:HTTPRequest:cookie"
+        | "HTTPClient:HTTPRequest:header"
+            if args.len() == 2 => {
+            let (Some(CtValue::Str(name)), Some(CtValue::Str(value))) =
+                (args.first(), args.get(1))
+            else {
+                return Some(Err(unsupported("HTTPRequest mutator arguments", span)));
+            };
+            handle("HTTPRequest", "HTTPRequest mutator receiver").and_then(|request| {
+                let updated = match op {
+                    "HTTPClient:HTTPRequest:form" => crate::net_http_rt::runtime_http_request_form(
+                        request,
+                        name.clone(),
+                        value.clone(),
+                    ),
+                    "HTTPClient:HTTPRequest:cookie" => crate::net_http_rt::runtime_http_request_cookie(
+                        request,
+                        name.clone(),
+                        value.clone(),
+                    ),
+                    _ => crate::net_http_rt::runtime_http_request_header(
+                        request,
+                        name.clone(),
+                        value.clone(),
+                    ),
+                }
+                .map_err(|error| unsupported(&error, span))?;
+                Ok(http_handle_value("HTTPRequest", updated))
+            })
+        }
+        "HTTPClient:HTTPRequest:redirects"
+        | "HTTPClient:HTTPRequest:connect_timeout"
+        | "HTTPClient:HTTPRequest:read_timeout"
+            if args.len() == 1 => {
+            let Some(CtValue::Int(value)) = args.first() else {
+                return Some(Err(unsupported("HTTPRequest option value", span)));
+            };
+            handle("HTTPRequest", "HTTPRequest option receiver").and_then(|request| {
+                let updated = match op {
+                    "HTTPClient:HTTPRequest:redirects" => {
+                        crate::net_http_rt::runtime_http_request_redirects(request, *value)
+                    }
+                    "HTTPClient:HTTPRequest:connect_timeout" => {
+                        crate::net_http_rt::runtime_http_request_connect_timeout(request, *value)
+                    }
+                    _ => crate::net_http_rt::runtime_http_request_read_timeout(request, *value),
+                }
+                .map_err(|error| unsupported(&error, span))?;
+                Ok(http_handle_value("HTTPRequest", updated))
+            })
+        }
+        "HTTPClient:HTTPRequest:send" if args.is_empty() => {
+            handle("HTTPRequest", "HTTPRequest.send receiver").and_then(|request| {
+                crate::net_http_rt::runtime_http_request_send(request)
+                    .map_err(|error| unsupported(&error, span))
+                    .map(|result| match result {
+                        Ok(response) => CtValue::Present(Box::new(http_handle_value(
+                            "HTTPResponse", response,
+                        ))),
+                        Err(error) => CtValue::failed(Box::new(error)),
+                    })
+            })
+        }
+        op if op.starts_with("HTTPServer:HTTPMux:")
+            || op.starts_with("HTTPServer:HTTPRouterRegister:") => Err(unsupported(
+            "HTTP server callback registration requires a host callback marshaller; interpreter cannot pass a Jet closure to the native server",
+            span,
+        )),
+        op if op.starts_with("HTTPServer:Ws") || op.starts_with("HTTPClient:Ws") => Err(
+            unsupported(
+                "WebSocket callback/connection requires a host marshaller; interpreter cannot pass the native WebSocket carrier",
+                span,
+            ),
+        ),
+        "HTTPClientNew" => Err(unsupported(
+            "HTTP client construction requires a host HTTP carrier marshaller",
+            span,
+        )),
+        _ => return None,
     };
     Some(result)
 }

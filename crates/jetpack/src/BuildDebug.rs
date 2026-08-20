@@ -262,7 +262,8 @@ fn str_field(obj: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> 
 
 fn num_field(obj: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> usize {
     match obj.get(key) {
-        Some(JSONValue::Num(n)) => *n as usize,
+        Some(JSONValue::Number(n)) => *n as usize,
+        Some(JSONValue::Flt(n)) => *n as usize,
         _ => 0,
     }
 }

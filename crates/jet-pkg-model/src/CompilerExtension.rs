@@ -332,20 +332,20 @@ impl TypedSnapshot {
         let mut obj = BTreeMap::new();
         obj.insert(
             "capabilities".into(),
-            JSONValue::Array(caps.into_iter().map(JSONValue::Str).collect()),
+            JSONValue::Array(caps.into_iter().map(JSONValue::String).collect()),
         );
         obj.insert("limits".into(), limits_to_json(&self.limits));
-        obj.insert("protocol".into(), JSONValue::Num(self.protocol as f64));
+        obj.insert("protocol".into(), JSONValue::Number(self.protocol as i64));
         obj.insert(
             "spans".into(),
             JSONValue::Array(self.spans.iter().map(span_to_json).collect()),
         );
-        obj.insert("stage".into(), JSONValue::Str(self.stage.clone()));
+        obj.insert("stage".into(), JSONValue::String(self.stage.clone()));
         obj.insert(
             "symbols".into(),
             JSONValue::Array(self.symbols.iter().map(symbol_to_json).collect()),
         );
-        obj.insert("trust".into(), JSONValue::Str(self.trust.as_str().to_string()));
+        obj.insert("trust".into(), JSONValue::String(self.trust.as_str().to_string()));
         obj.insert(
             "types".into(),
             JSONValue::Array(self.types.iter().map(type_to_json).collect()),
@@ -447,13 +447,13 @@ impl AnalyzeResponse {
         let mut obj = BTreeMap::new();
         obj.insert(
             "artifacts".into(),
-            JSONValue::Array(self.artifacts.iter().cloned().map(JSONValue::Str).collect()),
+            JSONValue::Array(self.artifacts.iter().cloned().map(JSONValue::String).collect()),
         );
         obj.insert(
             "findings".into(),
             JSONValue::Array(self.findings.iter().map(finding_to_json).collect()),
         );
-        obj.insert("protocol".into(), JSONValue::Num(self.protocol as f64));
+        obj.insert("protocol".into(), JSONValue::Number(self.protocol as i64));
         obj.insert(
             "proposed_edits".into(),
             JSONValue::Array(self.proposed_edits.iter().map(edit_to_json).collect()),
@@ -889,14 +889,9 @@ fn stringify(v: &JSONValue) -> String {
         JSONValue::Null => "null".into(),
         JSONValue::Bool(true) => "true".into(),
         JSONValue::Bool(false) => "false".into(),
-        JSONValue::Num(n) => {
-            if n.fract() == 0.0 && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
-                format!("{}", *n as i64)
-            } else {
-                format!("{n}")
-            }
-        }
-        JSONValue::Str(s) => JSON::quote(s),
+        JSONValue::Number(n) => n.to_string(),
+        JSONValue::Flt(n) => format!("{n}"),
+        JSONValue::String(s) => JSON::quote(s),
         JSONValue::Array(items) => {
             let mut out = String::from("[");
             for (i, item) in items.iter().enumerate() {
@@ -926,22 +921,22 @@ fn stringify(v: &JSONValue) -> String {
 
 fn limits_to_json(l: &ResourceLimits) -> JSONValue {
     let mut m = BTreeMap::new();
-    m.insert("max_edits".into(), JSONValue::Num(l.max_edits as f64));
-    m.insert("max_findings".into(), JSONValue::Num(l.max_findings as f64));
-    m.insert("max_fuel".into(), JSONValue::Num(l.max_fuel as f64));
+    m.insert("max_edits".into(), JSONValue::Number(l.max_edits as i64));
+    m.insert("max_findings".into(), JSONValue::Number(l.max_findings as i64));
+    m.insert("max_fuel".into(), JSONValue::Number(l.max_fuel as i64));
     m.insert(
         "max_memory_bytes".into(),
-        JSONValue::Num(l.max_memory_bytes as f64),
+        JSONValue::Number(l.max_memory_bytes as i64),
     );
     m.insert(
         "max_response_bytes".into(),
-        JSONValue::Num(l.max_response_bytes as f64),
+        JSONValue::Number(l.max_response_bytes as i64),
     );
     m.insert(
         "max_table_elements".into(),
-        JSONValue::Num(l.max_table_elements as f64),
+        JSONValue::Number(l.max_table_elements as i64),
     );
-    m.insert("timeout_ms".into(), JSONValue::Num(l.timeout_ms as f64));
+    m.insert("timeout_ms".into(), JSONValue::Number(l.timeout_ms as i64));
     JSONValue::Object(m)
 }
 
@@ -980,17 +975,17 @@ fn limits_from_json(v: &JSONValue) -> Result<ResourceLimits, ProtocolError> {
 
 fn span_to_json(s: &SpanFact) -> JSONValue {
     let mut m = BTreeMap::new();
-    m.insert("end".into(), JSONValue::Num(s.end as f64));
-    m.insert("file".into(), JSONValue::Str(s.file.clone()));
-    m.insert("id".into(), JSONValue::Str(s.id.clone()));
-    m.insert("start".into(), JSONValue::Num(s.start as f64));
+    m.insert("end".into(), JSONValue::Number(s.end as i64));
+    m.insert("file".into(), JSONValue::String(s.file.clone()));
+    m.insert("id".into(), JSONValue::String(s.id.clone()));
+    m.insert("start".into(), JSONValue::Number(s.start as i64));
     JSONValue::Object(m)
 }
 
 fn type_to_json(t: &TypeFact) -> JSONValue {
     let mut m = BTreeMap::new();
-    m.insert("id".into(), JSONValue::Str(t.id.clone()));
-    m.insert("repr".into(), JSONValue::Str(t.repr.clone()));
+    m.insert("id".into(), JSONValue::String(t.id.clone()));
+    m.insert("repr".into(), JSONValue::String(t.repr.clone()));
     JSONValue::Object(m)
 }
 
@@ -998,31 +993,31 @@ fn symbol_to_json(s: &SymbolFact) -> JSONValue {
     let mut m = BTreeMap::new();
     m.insert(
         "effects".into(),
-        JSONValue::Array(s.effects.iter().cloned().map(JSONValue::Str).collect()),
+        JSONValue::Array(s.effects.iter().cloned().map(JSONValue::String).collect()),
     );
-    m.insert("id".into(), JSONValue::Str(s.id.clone()));
-    m.insert("kind".into(), JSONValue::Str(s.kind.clone()));
-    m.insert("name".into(), JSONValue::Str(s.name.clone()));
-    m.insert("provenance".into(), JSONValue::Str(s.provenance.clone()));
-    m.insert("span_id".into(), JSONValue::Str(s.span_id.clone()));
-    m.insert("type_id".into(), JSONValue::Str(s.type_id.clone()));
+    m.insert("id".into(), JSONValue::String(s.id.clone()));
+    m.insert("kind".into(), JSONValue::String(s.kind.clone()));
+    m.insert("name".into(), JSONValue::String(s.name.clone()));
+    m.insert("provenance".into(), JSONValue::String(s.provenance.clone()));
+    m.insert("span_id".into(), JSONValue::String(s.span_id.clone()));
+    m.insert("type_id".into(), JSONValue::String(s.type_id.clone()));
     JSONValue::Object(m)
 }
 
 fn finding_to_json(f: &Finding) -> JSONValue {
     let mut m = BTreeMap::new();
-    m.insert("message".into(), JSONValue::Str(f.message.clone()));
-    m.insert("rule".into(), JSONValue::Str(f.rule.clone()));
-    m.insert("severity".into(), JSONValue::Str(f.severity.clone()));
-    m.insert("span_id".into(), JSONValue::Str(f.span_id.clone()));
+    m.insert("message".into(), JSONValue::String(f.message.clone()));
+    m.insert("rule".into(), JSONValue::String(f.rule.clone()));
+    m.insert("severity".into(), JSONValue::String(f.severity.clone()));
+    m.insert("span_id".into(), JSONValue::String(f.span_id.clone()));
     JSONValue::Object(m)
 }
 
 fn edit_to_json(e: &ProposedEdit) -> JSONValue {
     let mut m = BTreeMap::new();
-    m.insert("rationale".into(), JSONValue::Str(e.rationale.clone()));
-    m.insert("replacement".into(), JSONValue::Str(e.replacement.clone()));
-    m.insert("span_id".into(), JSONValue::Str(e.span_id.clone()));
+    m.insert("rationale".into(), JSONValue::String(e.rationale.clone()));
+    m.insert("replacement".into(), JSONValue::String(e.replacement.clone()));
+    m.insert("span_id".into(), JSONValue::String(e.span_id.clone()));
     JSONValue::Object(m)
 }
 
@@ -1043,14 +1038,16 @@ fn require_keys(obj: &BTreeMap<String, JSONValue>, keys: &[&str]) -> Result<(), 
 
 fn json_u32(v: &JSONValue, name: &str) -> Result<u32, ProtocolError> {
     match v {
-        JSONValue::Num(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => Ok(*n as u32),
+        JSONValue::Number(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
+        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => Ok(*n as u32),
         _ => Err(ProtocolError::new(format!("`{name}` must be a u32"))),
     }
 }
 
 fn json_u64(v: &JSONValue, name: &str) -> Result<u64, ProtocolError> {
     match v {
-        JSONValue::Num(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => Ok(*n as u64),
+        JSONValue::Number(n) if *n >= 0 => Ok(*n as u64),
+        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => Ok(*n as u64),
         _ => Err(ProtocolError::new(format!("`{name}` must be a u64"))),
     }
 }

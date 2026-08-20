@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crate::file_mtime;
 use jet_driver::Diagnostics::Diagnostic;
+use jet_foundation::JSON::json_escape;
 
 /// What kind of watch root a path is.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -118,7 +119,7 @@ impl InvalidationReceipt {
 fn join_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
-        .map(|p| format!("\"{}\"", escape_json(&p.display().to_string())))
+        .map(|p| format!("\"{}\"", json_escape(&p.display().to_string())))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -126,13 +127,9 @@ fn join_paths(paths: &[PathBuf]) -> String {
 fn join_quoted(items: &[&str]) -> String {
     items
         .iter()
-        .map(|s| format!("\"{}\"", escape_json(s)))
+        .map(|s| format!("\"{}\"", json_escape(s)))
         .collect::<Vec<_>>()
         .join(",")
-}
-
-fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Typed dependency graph with deterministic reverse edges.

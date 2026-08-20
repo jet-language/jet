@@ -6503,6 +6503,47 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 ("cancel" | "is_active", 0)
             )
         }
+        // Keep residency aligned with the actual LowerCtx HTTP arms below.
+        // The evaluator has a separate ambient bridge for the subset field
+        // forms; those stay deopt-only until LowerCtx grows matching ABI arms.
+        THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
+            ("HTTPResponse", "header") if args.len() == 1 => true,
+            ("HTTPResponse", "json") if args.len() <= 1 => true,
+            ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
+            ("HTTPBody", "copy_to") if args.len() == 2 => true,
+            ("HTTPRequest", "body") if args.len() == 1 => true,
+            ("HTTPRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
+            ("HTTPRequest", "redirects" | "connect_timeout" | "read_timeout")
+                if args.len() == 1 => true,
+            ("HTTPRequest", "send") if args.is_empty() => true,
+            _ => false,
+        },
+        THandleOp::HTTPServerMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HTTPMux", m)
+                if matches!(
+                    m,
+                    "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+                ) && args.len() == 2 => true,
+            ("HTTPMux", "middleware") if args.len() == 1 => true,
+            ("HTTPHandler", "handle") if args.len() == 1 => true,
+            ("HTTPRequest", "body" | "method" | "path" | "trailers" | "body_len" | "json")
+                if args.is_empty() => true,
+            ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
+            ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
+            ("HTTPBody", "copy_to") if args.len() == 2 => true,
+            ("HTTPResponse", "status" | "body") if args.is_empty() => true,
+            ("HTTPResponse", "trailers") if args.len() == 1 => true,
+            ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,
+            ("HTTPServer", "shutdown") if args.len() == 1 => true,
+            ("WsConn", "recv") if args.is_empty() => true,
+            ("WsConn", "send_text") if args.len() == 1 => true,
+            ("WsConn", "close") if args.len() == 2 => true,
+            ("WsMessage", "is_text" | "text") if args.is_empty() => true,
+            _ => false,
+        },
+        THandleOp::HTTPReqTrailers => args.is_empty(),
+        THandleOp::HTTPRespTrailers => args.len() == 1,
         THandleOp::WatchMethod { method, .. } => match method.as_str() {
             "poll" | "events" | "cancel" | "is_active" | "summary" => args.is_empty(),
             "add" => args.len() == 1,

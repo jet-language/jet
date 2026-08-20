@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2104,
-    "rev": 39539,
+    "rev": 39543,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81434,6 +81434,11 @@
       "assignee": "gpt-5.6-luna",
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "OWNER REVIEW — criterion 5, the first-hour REPL and notebook (10 minutes)\n\nRead docs/first-hour.md section 4 first. It is the journey under review. Then do exactly what it says, from the repo root:\n\n  scripts/agent/jet-env cargo build\n\n1. The terminal REPL:\n\n  scripts/agent/jet-env jet repl\n\n  Type 1 + 1 and expect 2 : Int. Type print(\"hi\") and expect hi. Ask ?String for docs. Leave with :quit.\n\n2. The browser notebook:\n\n  scripts/agent/jet-env jet notebook first-hour.jetnb\n\n  Open the printed local URL, which carries its own token. Add a Jet cell, edit it, run it. Add a second cell that reads a file. Save, close the tab, reopen the same URL, and confirm the cells and their outputs return.\n\nGood looks like: a first-time user reaches a running cell without reading anything else, the outputs belong to the cell that produced them, an error names the Jet line, and a reopened document still shows what it computed.\n\nReject it if you have to know a repository path or an internal flag to get started, if output appears under the wrong cell, if a stale output looks fresh, or if reopening loses work.\n\nThe machine-checked half of this criterion is already recorded: the headless protocol journey and the real browser client matrix. What is left is your read on whether the first hour feels like a product."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable-e3-burndown",
           "text": "Protocol half of criterion 5 is green: cargo test --test notebook 12/12 ok (builder 1abf0234f) after three integrated fixes — Panic grant per D-NOPANIC1=D, item-plane cell routing (E0118), input() through the authorized REPL seam, and cells now executing the checked AST so sema's prelude normalization reaches every tier. Remaining on criterion 5: owner first-hour acceptance (needsAcceptance=true). Nothing machine-verifiable is outstanding."
@@ -81556,7 +81561,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-04T16:50:40.578Z",
-      "updated": "2026-08-19T21:28:32.111Z",
+      "updated": "2026-08-20T11:12:15.348Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1050,
       "claimedAt": "2026-08-14T13:27:13.655Z"
@@ -133994,12 +133999,26 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "## Outcome\nThe runtime error report becomes a designed product surface: the root error leads (what/why/fix grade), the propagation trail follows as clearly separated, deduplicated journey frames with source locations, and the identical report ships on AOT, default `jet run`, and `jet dev` deopt. Deliverables: (a) a committed report-format design doc with before/after renderings of real failing examples, (b) the implemented format in the one Foundation renderer, (c) a proven terminal-state matrix (tty/pipe, ANSI/NO_COLOR, narrow widths) with snapshots, (d) owner visual acceptance at close (needsAcceptance is set — plan for a look-and-feel sign-off, not a silent close).\n\n## Law\n- D-FAIL-BREACH1=A: one renderer for a running program's breach stop — the redesign happens inside jet-foundation, never per-engine (I9).\n- D-OBS1/D-OBS2 (E3001 report contents: message, file:line, fn, context box, debug-build locals) and D-FAIL-CTX1 (E3002 journey frames) — the redesign reorders and regrades these registered products; their rows' what/why/fix must move with the format (I4).\n- D-FAIL-EXIT1=A / D-FAIL-EDGE1=A: one report at the target-selected boundary — the format must render through the same boundary on every adapter.\n- Coordination (card log 2026-08-19): #1967 pins the failing `??` panic report shape in a golden for tier identity — this card re-blesses that golden when it ships; the golden is not immovable. #2041 (Result/Optional deconstruction) shapes the same journey — coordinate wording, do not block.\n\n## Work\n1. Design doc FIRST (criterion 4's before/after lives here): commit docs/proposals/runtime-error-report.md. Contents: (a) inventory of today's shapes — `Stop [code]: what` + `--> file:line in fn` + context box + locals + `Why/Fix` from jet_render_runtime_stop_from_row (crates/jet-foundation/src/Outcome.rs:584-682); `Error [code]: msg` + indented `cause:` chain from jet_render_err (:202-223); `error propagated from: fn (file:line) via ?` frames appended by jet_journey_frame (:158-199) into JET_JOURNEY_FRAMES; scheduler transport headers (crates/jet-codegen/src/Prelude/Scheduler.rs:82-84). (b) the redesigned grammar: ROOT block first (code, what, why, fix, origin frame with context box), then a visually fenced TRAIL section (frames ordered origin→boundary, repeated frames collapsed to `… ×N`, one line each), then locals/extras. (c) the terminal-state matrix: what changes under pipe (no ANSI), NO_COLOR, and widths <80 (no hard wrapping of user data; graceful caret box degradation). (d) before/after renderings of at least three real failing examples from the corpus (a `?`-deep propagation chain, a `??` panic, a task failure). Owner reads this doc for look-and-feel; expect one iteration.\n2. Implement in the one renderer: rework jet_render_runtime_stop_from_row and jet_render_err in crates/jet-foundation/src/Outcome.rs; give the journey-frame flush (find where JET_JOURNEY_FRAMES drains into the final report at the run boundary) the dedup + ordering pass. Engines (AOT via embedded Prelude, JIT hosts, TIR eval) keep marshalling file/line/fn data only — grep for any host that string-formats its own report lines and route it through Foundation (I9; Scheduler.rs's two-header contract at :82-84 must be updated in lockstep if headers change).\n3. Terminal-state handling (criterion 2): find where the rendered report is printed (runtime boundary in Prelude/Core.rs jet_runtime_* paths) and thread tty/NO_COLOR/width detection there — detection at the boundary, format decisions in the one renderer (pass a plain style struct in; never per-engine). Snapshot each matrix cell (tty+ANSI, pipe, NO_COLOR, narrow) through the harness (I4).\n4. Tier parity (criterion 3): run the same failing examples under `jet run` (default), `jet run --release` (AOT), and `jet dev` deopt; diff the three reports byte-wise (modulo tty detection — force pipe mode for the diff). Re-bless #1967's pinned golden and any runtime-report goldens in the same change, scoped, with UPDATE_EXPECT_REASON naming this card.\n5. Registered rows: update E3001/E3002 what/why/fix wording in the diagnostics registry to match the new grammar; `jet explain E3001/E3002` snapshots re-blessed.\n6. Close-out: criterion 4 requires owner visual acceptance — post the before/after renderings (dark-mode-friendly) to the card and hold close until the owner accepts (needsAcceptance).\n\n## Not building\n- No change to compile-time diagnostic rendering (that surface already has its format).\n- No new error-handling syntax and no dependency on #2041's ballot outcome — if #2041 later re-spells deconstruction, the report grammar here is spelling-agnostic (frames carry fn/file/line, not syntax).\n- No stack-unwinding/backtrace capture beyond the existing journey mechanism; no async-trace expansion.\n- No logging/telemetry integration.\n\n## Proof\n- Criterion 1: snapshot of a deep `?` chain showing root block first, deduped trail (`×N` collapse exercised by a loop that re-propagates the same frame).\n- Criterion 2: matrix snapshots — tty vs pipe, ANSI vs NO_COLOR, width 40 — via the snapshot harness; `scripts/agent/jet-env cargo test` targeted at those tests.\n- Criterion 3: recorded three-tier diff (forced pipe mode) on the same failing examples: byte-identical; #1967's golden re-blessed and green on both tiers.\n- Criterion 4: the committed design doc's before/after section + owner acceptance note on the card. Implementation itself needs no ballot; look-and-feel is owner-accepted at close.\n\n## blockedBy\nnone — the renderer, journey mechanism, and harness are all live; #1967 and #2041 are coordination notes, not gates.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "OWNER REVIEW — what to look at (2 minutes)\n\nRun this from the repo root:\n\n  scripts/agent/jet-env cargo build\n  scripts/agent/jet-env jet run examples/features/errors/error_context.jet\n\nGood looks like this, in this order:\n\n  Error: file not found\n   Trail [E3002] (3 hops via ?, origin first):\n    1. parse_config (examples/features/errors/error_context.jet:7) - reading raw config\n    2. load_config (examples/features/errors/error_context.jet:12) - loading config app.toml\n    3. run (examples/features/errors/error_context.jet:16)\n\nThe first line names the cause. The trail follows it, origin first, one line per hop, each with its file, its line, and the note written at that hop.\n\nThe same program printed this before the card:\n\n  error propagated from: parse_config (examples/features/errors/error_context.jet:7) via ?: reading raw config\n  error propagated from: load_config (examples/features/errors/error_context.jet:12) via ?: loading config app.toml\n  error propagated from: run (examples/features/errors/error_context.jet:16) via ?\n  Error: file not found\n\nReject it if you must read to the last line to learn what failed, if one note repeats, or if the shape changes when you add --release or --interpret to the same command."
+        },
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "All four criteria met with recorded evidence; needsAcceptance holds for owner visual check of the report shape."
+        },
+        {
+          "at": "2026-08-20",
+          "text": "Requested acceptance — minted D-ACCEPT-2044."
+        },
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
@@ -134058,7 +134077,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-19T11:17:12.546Z",
-      "updated": "2026-08-20T02:40:20.859Z",
+      "updated": "2026-08-20T11:12:14.872Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -134395,6 +134414,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "OWNER REVIEW — criterion 1, what jet fmt --simplify does today (5 minutes)\n\nRun this from the repo root to see every rewrite it would make across the example corpus:\n\n  scripts/agent/jet-env cargo build\n  scripts/agent/jet-env jet fmt --check --simplify --diff examples\n\nThree representative rewrites, taken from real corpus files:\n\nR1, a braced single-return body becomes the one-line body — examples/features/errors/qq_panic.jet\n\n  before: fn maybe() => Int? { return None }\n  after:  fn maybe() => Int? :: None\n\nR3, a struct-literal head the return type already names is dropped — examples/features/basics/named_args.jet\n\n  before: fn new(width: Float, height: Float) => Rect { return Rect.{width: width, height: height} }\n  after:  fn new(width: Float, height: Float) => Rect { return .{width: width, height: height} }\n\nR2, a chained classic if becomes one ordered arm table — the shape L0507 already asks for\n\n  before:\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n  after:\n    if {\n        score >= 90 -> { return \"a\" }\n        score >= 80 -> { return \"b\" }\n        else -> { return \"c\" }\n    }\n\nGood looks like: each rewrite is the spelling you would have asked for, the meaning is unchanged, and nothing gets harder to read.\n\nReject any one of the three and say so; the catalog is opt-in per rewrite, so R1, R2, and R3 can ship separately."
+        },
+        {
           "at": "2026-08-19",
           "text": "Promoted from Ideas"
         }
@@ -134444,8 +134468,8 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-19T11:17:15.319Z",
-      "updated": "2026-08-19T16:12:03.564Z",
-      "updatedBy": "PlanM18Bb"
+      "updated": "2026-08-20T11:12:15.818Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0ro98g4",
@@ -181827,6 +181851,47 @@
       "created": "2026-08-19T20:56:49.612Z",
       "outcome": "B",
       "ratifiedAt": "2026-08-19"
+    },
+    {
+      "id": "D-ACCEPT-2044",
+      "cardId": "c0te2a80",
+      "group": "acceptance",
+      "title": "Accept #2044 — Runtime error report redesign: root cause first, then the trail",
+      "gist": "Close #2044, or bounce it back to building.",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "1. Report leads with the root error (what/why/fix grade), then the propagation trail with source frames; repeated frames dedup — met (PROOF (2026-08-19, builder f30728f4d): jet run examples/features/errors/error_context.jet now prints 'Error: file not found' FIRST, then ' Trail [E3002] (3 hops via ?, origin first):' with three numbered frames carrying their notes. Consecutive-identical frames still collapse and now carry a repeat count. Three order copies were found and deleted (Outcome.rs held the order, and the generated wasm store plus the JS projection each concatenated journey+report themselves); all now call one jet_journey_compose. Seven error goldens blessed from real runs (commit ac2c0a19d) and the whole delta reviewed byte by byte.)\n2. Real terminal state matrix proven: tty vs pipe, ANSI vs NO_COLOR, narrow widths; snapshots for each (I4) — met (PROOF cargo test --test terminal 12/12 ok (23.4s, 2026-08-19, builder 1c761ea67). Criterion was 0 percent satisfied before, not partly: the report emitted no ANSI, read no NO_COLOR, read no tty state and read no width, so a pipe, a colour terminal, NO_COLOR and a 40-column terminal all received identical bytes - and the real example's hop lines are 85 and 90 columns, so they already soft-wrapped mid-path at 80. Four matrix fixtures now exist (tests/cli/error_report_pipe.txt, error_report_tty_ansi.txt, error_report_tty_no_color.txt, error_report_tty_narrow40.txt). One design constraint shaped it: Outcome.rs is include_str!'d verbatim into every generated program, so it may use std only - facts go in, policy lives in the one renderer, detection happens in exactly one place, so no per-tier variant can exist and the crate's existing colour ladder now calls that same detector instead of spelling NO_COLOR itself.)\n3. Same report shape on every execution tier: AOT, default jet run, jet dev deopt (I9) — met (PROOF (2026-08-19, builder at the closure_ops caller commit): all three legs of examples/features/errors/error_context.jet now print the byte-identical report - jet run, jet run --release (AOT), and jet run --interpret each emit 'Error: file not found' then ' Trail [E3002] (3 hops via ?, origin first):' with the same three numbered frames and notes. Before the fix --interpret printed the root cause with NO trail block. Root cause was not a missing adapter: the hop store is a thread_local and the TIR evaluator runs every interpreted program on a spawned jet-tir-eval worker, so hops were recorded in the worker while the report edge drained the caller's empty list after the join. The same boundary covered the JIT whole-program deopt edge; mid-run deopt was never affected because it stays on the JIT's own thread. Fixed as marshalling - Foundation still owns the list, the collapse and the rendering, and adopting replays carried hops through the same collapse. A cross-tier snapshot test was added, which the trail example had never had; that absence is why the divergence shipped.)\n4. Before/after comparison on real failing examples shows the actual error is findable first; owner visual acceptance on look-and-feel — met (Before/after on the real failing example examples/features/errors/error_context.jet. BEFORE (its blessed golden at the time): three 'error propagated from: ...' lines first, then 'Error: file not found' LAST - one line said what broke, three near-identical lines said where it passed, and the failure sat at the bottom. AFTER: 'Error: file not found' first, then ' Trail [E3002] (3 hops via ?, origin first):' with the three frames beneath it. Seven error goldens moved accordingly and every delta was reviewed byte by byte. Owner visual acceptance on look-and-feel is the only remaining gate; nothing machine-verifiable is outstanding.)",
+      "options": [
+        {
+          "key": "accept",
+          "name": "Accept — close the card"
+        },
+        {
+          "key": "bounce",
+          "name": "Bounce — back to building (comment why)"
+        }
+      ],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "checkInstructions": {
+        "proof": [
+          "Report leads with the root error (what/why/fix grade), then the propagation trail with source frame…",
+          "Real terminal state matrix proven: tty vs pipe, ANSI vs NO_COLOR, narrow widths; snapshots for each…",
+          "Same report shape on every execution tier: AOT, default jet run, jet dev deopt (I9) — met (PROOF (2…",
+          "Before/after comparison on real failing examples shows the actual error is findable first; owner vi…"
+        ],
+        "visualCheck": null
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-20T10:55:28.471Z"
     }
   ],
   "questions": [
@@ -183618,6 +183683,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-20T11:12:15.818Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0391j1l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T11:12:15.348Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pkjxs2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T11:12:14.872Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0te2a80",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T10:55:28.471Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0te2a80",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T10:55:28.471Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-2044",
+      "note": "Accept #2044 — Runtime error report redesign: root cause first, then the trail"
+    },
     {
       "at": "2026-08-20T08:45:13.072Z",
       "by": "owner",
@@ -187081,41 +187181,6 @@
       "by": "Ballot2042b",
       "action": "decision.update",
       "ref": "D-CALLPOS1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T16:07:25.184Z",
-      "by": "Ballot2040b",
-      "action": "card.update",
-      "ref": "c0zcrs0m",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-19T16:07:02.087Z",
-      "by": "Ballot2040b",
-      "action": "card.update",
-      "ref": "c0zcrs0m",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-08-19T16:06:49.149Z",
-      "by": "Ballot2042b",
-      "action": "decision.add",
-      "ref": "D-CALLPOS1",
-      "note": "Call arguments: positional when unambiguous, named to deconflict (draft)"
-    },
-    {
-      "at": "2026-08-19T16:05:51.365Z",
-      "by": "Ballot2040b",
-      "action": "decision.update",
-      "ref": "D-IF-FOLD1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-19T16:05:50.897Z",
-      "by": "Ballot2040b",
-      "action": "decision.update",
-      "ref": "D-IF-FOLD1",
       "note": ""
     }
   ],

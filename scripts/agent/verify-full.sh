@@ -22,6 +22,7 @@ esac
 tmp_parent="${JET_VERIFY_TMPDIR:-/tmp}"
 mkdir -p -- "$tmp_parent"
 tmp="$(mktemp -d "$tmp_parent/jet-verify.XXXXXX")"
+oracle_cache_dir="$repo/.tmp/jet-test-scratch/verify-oracles-$$"
 cleanup() {
   # card 1640: artifact footprint stays visible every run — target/ has no
   # automatic pruning and once reached 619G unnoticed.
@@ -32,6 +33,7 @@ cleanup() {
     echo "warning: target/ exceeds 150G — run cargo clean (see AGENTS.md pruning note)" >&2
   fi
   rm -rf -- "$tmp"
+  rm -rf -- "$oracle_cache_dir"
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
@@ -42,6 +44,7 @@ export TMPDIR="$tmp"
 export TMP="$tmp"
 export TEMP="$tmp"
 export JET_VERIFY_TMPDIR="$tmp"
+export JET_DEV_ORACLE_CACHE_DIR="$oracle_cache_dir"
 export JET_TEST_JOBS="${JET_TEST_JOBS:-16}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$JET_TEST_JOBS}"
 

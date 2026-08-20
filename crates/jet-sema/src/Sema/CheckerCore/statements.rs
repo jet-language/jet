@@ -1379,7 +1379,7 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             // E0402 is suppressed — that is the entire point of `.drop()`.
-                            // Task drop is still warned (L1101) because `.drop()` on a task
+                            // Task drop is still rejected (L1101) because `.drop()` on a task
                             // doesn't actually join it; use `.detach()` for fire-and-forget.
                             if let Some(ty) = recv_ty {
                                 if is_task_type(&ty) {
@@ -1421,13 +1421,8 @@ impl<'a> Checker<'a> {
                                 Some(expr.span()),
                             ));
                         }
-                        if is_task_type(&ty) {
-                            self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
-                                "this task",
-                                "the program may end before this task finishes",
-                                expr.span(),
-                            ));
-                        }
+                        // An unbound spawn belongs to its enclosing scope; only a
+                        // named handle carries the join duty checked at scope end.
                     }
                 }
                 Stmt::DeferClose { close, .. } => {

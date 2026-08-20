@@ -67,7 +67,7 @@ fn checked_object<'a>(
     required: &[&str],
     optional: &[&str],
     label: &str,
-) -> Result<&'a std::collections::HashMap<String, JSONValue>, String> {
+) -> Result<&'a std::collections::BTreeMap<String, JSONValue>, String> {
     let JSONValue::Object(fields) = value else {
         return Err(format!("{label} must be an object"));
     };

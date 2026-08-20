@@ -1063,17 +1063,16 @@ fn bounded_string(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::
 }
 
 fn integer_field(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<u64> {
-    let Some(JSON::JSONValue::Num(value)) = object.get(key) else {
-        return Err(invalid(format!("profile field `{key}` is not a number")));
-    };
-    if !value.is_finite()
-        || *value < 0.0
-        || value.fract() != 0.0
-        || *value > 9_007_199_254_740_991.0
-    {
-        return Err(invalid(format!("profile field `{key}` is not an exact integer")));
+    match object.get(key) {
+        Some(JSON::JSONValue::Number(value)) if *value >= 0 => Ok(*value as u64),
+        Some(JSON::JSONValue::Flt(value))
+            if value.is_finite()
+                && *value >= 0.0
+                && value.fract() == 0.0
+                && *value <= 9_007_199_254_740_991.0 => Ok(*value as u64),
+        Some(_) => Err(invalid(format!("profile field `{key}` is not an exact integer"))),
+        None => Err(invalid(format!("profile field `{key}` is not a number"))),
     }
-    Ok(*value as u64)
 }
 
 fn string_array(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<Vec<String>> {

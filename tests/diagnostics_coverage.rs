@@ -667,6 +667,44 @@ fn rendered_report_codes() -> BTreeSet<String> {
         .collect()
 }
 
+#[test]
+fn report_openers_ignore_prose_comments_and_rust_assertion_text() {
+    let text = concat!(
+        "Error [E0001]: what; Why: [E9998]; Fix: [E9997]\n",
+        "// Error [E9996]\n",
+        "assert!(stderr.contains(\"[E9995]\"));\n",
+        "  Error [E9994]: indented\n",
+        "Warning [L0001]: lint\n",
+        "Stop [E0002]: stop\n",
+        "Lint [L0002]: lint\n",
+    );
+
+    assert_eq!(
+        extract_report_opening_codes(text),
+        vec![
+            "E0001".to_string(),
+            "L0001".to_string(),
+            "E0002".to_string(),
+            "L0002".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn reverse_coverage_diff_names_retired_and_unregistered_fixture_codes() {
+    let left = code_set(&["E0001"]);
+    let right: BTreeSet<String> = extract_report_opening_codes(
+        "Error [E0004]: retired\nError [E9999]: no longer registered\n",
+    )
+    .into_iter()
+    .collect();
+
+    let (left_only, right_only) = coverage_set_diff(&left, &right);
+    assert!(left_only.is_empty());
+    assert_eq!(right_only, code_set(&["E0004", "E9999"]));
+    assert_eq!(format_code_set(&right_only), "E0004\n  E9999");
+}
+
 fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
     let mut out = Vec::new();
     for dir in [
@@ -987,6 +1025,84 @@ fn all_exclusions() -> BTreeSet<String> {
     out
 }
 
+fn coverage_allowlist_codes(side: &str) -> BTreeSet<String> {
+    DIAGNOSTIC_COVERAGE_ALLOWLIST
+        .iter()
+        .filter(|(_, entry_side, _)| *entry_side == side)
+        .map(|(code, _, _)| (*code).to_string())
+        .collect()
+}
+
+fn coverage_allowlist_errors() -> Vec<String> {
+    let registered = registered_codes();
+    let mut seen = BTreeSet::new();
+    let mut errors = Vec::new();
+
+    for &(code, side, owner) in DIAGNOSTIC_COVERAGE_ALLOWLIST {
+        if !is_report_code(code) {
+            errors.push(format!("{code}: invalid diagnostic code"));
+        }
+        if side != "left-only" && side != "right-only" {
+            errors.push(format!("{code}: side must be `left-only` or `right-only`"));
+        }
+        if owner.trim().is_empty() {
+            errors.push(format!("{code}: coverage owner is empty"));
+        }
+        if !registered.contains(code) {
+            errors.push(format!("{code}: coverage allowlist row is not registered"));
+        }
+        if !seen.insert(code) {
+            errors.push(format!("{code}: duplicate coverage allowlist row"));
+        }
+    }
+
+    errors
+}
+
+/// LEFT: registered-active codes emitted in Source/crates, minus named
+/// exclusions. RIGHT: codes opened by an actual harness/direct fixture report,
+/// minus the same named exclusions. The two sets remain independently derived.
+fn coverage_left() -> BTreeSet<String> {
+    let emitted = emitted_codes();
+    let exclusions = all_exclusions();
+    registered_codes()
+        .into_iter()
+        .filter(|code| emitted.contains(code))
+        .filter(|code| {
+            jet_foundation::Registry::diagnostic(code).is_some_and(|row| {
+                row.status == jet_foundation::Registry::DiagnosticStatus::Active
+            })
+        })
+        .filter(|code| !exclusions.contains(code))
+        .collect()
+}
+
+fn coverage_right() -> BTreeSet<String> {
+    let exclusions = all_exclusions();
+    rendered_report_codes()
+        .into_iter()
+        .filter(|code| !exclusions.contains(code))
+        .collect()
+}
+
+fn coverage_set_diff(
+    left: &BTreeSet<String>,
+    right: &BTreeSet<String>,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    (
+        left.difference(right).cloned().collect(),
+        right.difference(left).cloned().collect(),
+    )
+}
+
+fn format_code_set(codes: &BTreeSet<String>) -> String {
+    if codes.is_empty() {
+        "(none)".to_string()
+    } else {
+        codes.iter().cloned().collect::<Vec<_>>().join("\n  ")
+    }
+}
+
 // ---------------------------------------------------------------------------
 // I2 regression guard
 // ---------------------------------------------------------------------------
@@ -1182,36 +1298,34 @@ fn diagnostics_registry_has_no_duplicate_code_rows() {
 }
 
 // ---------------------------------------------------------------------------
-// I4(b): every emitted Jet code has at least one snapshot
+// I4(b): every emitted Jet code has at least one report-opening fixture
 // ---------------------------------------------------------------------------
 
 #[test]
 fn every_emitted_code_has_snapshot() {
-    let emitted = emitted_codes();
-    let snaps = snapshot_codes();
-    let exclusions = all_exclusions();
-    let diag_md = "";
-    let acknowledged: BTreeSet<String> = ACKNOWLEDGED_COVERAGE_GAPS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let allowlist_errors = coverage_allowlist_errors();
+    assert!(
+        allowlist_errors.is_empty(),
+        "invalid diagnostic coverage allowlist rows:\n{}",
+        allowlist_errors.join("\n")
+    );
 
-    let mut missing: Vec<String> = emitted
-        .iter()
-        .filter(|c| !exclusions.contains(*c))
-        .filter(|c| !acknowledged.contains(*c))
-        .filter(|c| !snaps.contains(*c))
-        .filter(|c| !is_retired(c, &diag_md))
-        .cloned()
-        .collect();
-    missing.sort();
+    let left = coverage_left();
+    let right = coverage_right();
+    let (mut left_only, mut right_only) = coverage_set_diff(&left, &right);
+    let allowed_left = coverage_allowlist_codes("left-only");
+    let allowed_right = coverage_allowlist_codes("right-only");
+    left_only.retain(|code| !allowed_left.contains(code));
+    right_only.retain(|code| !allowed_right.contains(code));
 
     assert!(
-        missing.is_empty(),
-        "The following codes are emitted in Source/ but have NO tests/ui snapshot \
-         (invariant I4b). Add a .jet fixture + .stderr/.warn golden file for each.\n\
-         Missing:\n  {}",
-        missing.join("\n  ")
+        left_only.is_empty() && right_only.is_empty(),
+        "I4(b) diagnostic coverage set mismatch after named exclusions and \
+         owned allowlist rows:\n\
+         LEFT-only (registered-active emitted, no report opener):\n  {}\n\
+         RIGHT-only (report opener, not registered-active emitted):\n  {}",
+        format_code_set(&left_only),
+        format_code_set(&right_only),
     );
 }
 
@@ -1293,32 +1407,37 @@ fn names_one_exact_replacement(fix: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Acknowledged gap sentinel: the list must not grow silently
+// I4(b) coverage allowlist sentinel: rows must shrink, never rot
 // ---------------------------------------------------------------------------
 
-/// Verifies that the ACKNOWLEDGED_COVERAGE_GAPS list does not include codes that
-/// now have coverage (codes should be removed from the list when they're fixed),
-/// and that no new unacknowledged gap has appeared.
 #[test]
-fn acknowledged_gaps_are_still_unresolved() {
-    let snaps = snapshot_codes();
-    let diag_md = "";
+fn diagnostic_coverage_allowlist_rows_are_still_needed() {
+    let allowlist_errors = coverage_allowlist_errors();
+    assert!(
+        allowlist_errors.is_empty(),
+        "invalid diagnostic coverage allowlist rows:\n{}",
+        allowlist_errors.join("\n")
+    );
 
-    // Codes in the acknowledged list that now have snapshot coverage — time to remove them.
-    let mut now_covered: Vec<String> = ACKNOWLEDGED_COVERAGE_GAPS
-        .iter()
-        .filter(|c| {
-            snaps.contains(&c.to_string()) && !is_retired(c, &diag_md)
-        })
-        .map(|s| s.to_string())
-        .collect();
-    now_covered.sort();
+    let left = coverage_left();
+    let right = coverage_right();
+    let mut stale = Vec::new();
+    for &(code, side, owner) in DIAGNOSTIC_COVERAGE_ALLOWLIST {
+        let still_needed = match side {
+            "left-only" => left.contains(code) && !right.contains(code),
+            "right-only" => right.contains(code) && !left.contains(code),
+            _ => false,
+        };
+        if !still_needed {
+            stale.push(format!("{code} ({side}; owner {owner})"));
+        }
+    }
+    stale.sort();
 
     assert!(
-        now_covered.is_empty(),
-        "These codes in ACKNOWLEDGED_COVERAGE_GAPS now have snapshot coverage — \
-         remove them from the list in tests/diagnostics_coverage.rs:\n  {}",
-        now_covered.join("\n  ")
+        stale.is_empty(),
+        "remove stale I4(b) diagnostic coverage allowlist rows:\n  {}",
+        stale.join("\n  ")
     );
 }
 
@@ -1332,7 +1451,11 @@ fn acknowledged_gaps_are_still_unresolved() {
 #[test]
 fn exclusion_list_counts_do_not_grow() {
     const CEILINGS: &[(&str, usize, usize)] = &[
-        ("ACKNOWLEDGED_COVERAGE_GAPS", ACKNOWLEDGED_COVERAGE_GAPS.len(), 2),
+        (
+            "DIAGNOSTIC_COVERAGE_ALLOWLIST",
+            DIAGNOSTIC_COVERAGE_ALLOWLIST.len(),
+            DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING,
+        ),
         ("STAGED_BEHIND_GATE", STAGED_BEHIND_GATE.len(), 5),
         ("UNTESTABLE_VIA_SNAPSHOT", UNTESTABLE_VIA_SNAPSHOT.len(), 1),
         (

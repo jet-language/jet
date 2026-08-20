@@ -34,6 +34,21 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::HTTPServerMethod { kind, method } => {
             return format!("HTTPServer:{kind}:{method}")
         }
+        // These subset forms have the same Prelude owner as the named HTTP
+        // methods above. Keep one ambient spelling so the evaluator cannot
+        // fall through to its context-free E0956 arms while AOT/JIT call the
+        // HTTP Prelude directly.
+        THandleOp::HTTPClientNew => "HTTPClientNew",
+        THandleOp::HTTPReqField(field) => return format!("HTTPServer:HTTPRequest:{field}"),
+        THandleOp::HTTPReqHeader => "HTTPServer:HTTPRequest:header",
+        THandleOp::HTTPReqParam => "HTTPServer:HTTPRequest:param",
+        THandleOp::HTTPReqTrailers => "HTTPServer:HTTPRequest:trailers",
+        THandleOp::HTTPRespField(field) => return format!("HTTPServer:HTTPResponse:{field}"),
+        THandleOp::HTTPRespHeader => "HTTPClient:HTTPResponse:header",
+        THandleOp::HTTPRespTrailers => "HTTPServer:HTTPResponse:trailers",
+        THandleOp::HTTPRouterRegister { verb, .. } => {
+            return format!("HTTPServer:HTTPRouterRegister:{verb}")
+        }
         THandleOp::ArgsSpecFlag => "ArgsSpecFlag",
         THandleOp::ArgsSpecFlagShort => "ArgsSpecFlagShort",
         THandleOp::ArgsSpecOption => "ArgsSpecOption",

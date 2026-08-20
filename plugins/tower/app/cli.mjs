@@ -53,6 +53,7 @@ const COMMAND_FLAGS = {
   serve: { flags: ['port', 'open', 'noWatch'] },
   status: { flags: ['days', 'window', 'color'] },
   state: { flags: [] },
+  help: { flags: ['check'] },
   card: { verbs: {
     list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent'],
     show: [],
@@ -102,8 +103,8 @@ const COMMAND_FLAGS = {
   epoch: { verbs: {
     list: [],
     add: by('name', 'goal', 'status'),
-    update: by('name', 'goal', 'status'),
-    current: by(),
+    update: ['name', 'goal', 'status'],
+    current: [],
   }},
   milestone: { verbs: {
     list: ['epoch', 'archived'],
@@ -1103,7 +1104,6 @@ async function githookPostCommit(store) {
 const HELP = `tower — file-backed project board for an owner + AI agents
 
 ${HELP_SURFACE}
-  tower help --check                         verify help/parser flag agreement
 
   Shared flags: --json, --help, --data DIR.
   Complex payloads: --file FILE or --stdin (writes only where shown above).
@@ -1168,7 +1168,7 @@ export async function run(argv) {
   try {
     if (!cmd) return console.log(HELP);
     if (cmd === 'help') {
-      const unknown = Object.keys(flags).filter((key) => !['check', ...GLOBAL_FLAGS].includes(key));
+      const unknown = Object.keys(flags).filter((key) => ![...commandFlags('help'), ...GLOBAL_FLAGS].includes(key));
       if (unknown.length) throw new TowerError('E_USAGE', `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower help\`: ${unknown.map(spellFlag).join(', ')}`);
       return flags.check ? cmdHelpCheck() : console.log(HELP);
     }

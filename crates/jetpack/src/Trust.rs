@@ -20,6 +20,8 @@
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
+use jet_foundation::JSON::json_escape;
+
 use super::Output::Theme;
 use super::RefSpec::{RefSpec, SourceTable};
 use crate::Syntax;
@@ -788,22 +790,6 @@ pub fn record_json(record: &TrustRecord) -> String {
             json_escape(line)
         ),
     }
-}
-
-fn json_escape(s: &str) -> String {
-    let mut out = String::new();
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 /// The trust gate: shared by `jetpack enter` and `jetpack dev`. Not

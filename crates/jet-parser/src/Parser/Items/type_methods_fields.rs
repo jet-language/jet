@@ -435,6 +435,11 @@ impl<'a> Parser<'a> {
                 None
             };
             let attrs = self.parse_comptime_attrs()?;
+            let rust_kind = if attrs.contains(&crate::AST::ConstAttr::ForceStatic) {
+                crate::AST::RustConstKind::Static
+            } else {
+                crate::AST::RustConstKind::Const
+            };
             let known = self.at_known_lead();
             match self.peek().kind {
                 TokKind::KwComptime => {
@@ -500,7 +505,7 @@ impl<'a> Parser<'a> {
                 value,
                 meta,
                 attrs,
-                rust_kind: crate::AST::RustConstKind::Const,
+                rust_kind,
                 is_comptime: true,
                 ct: None,
                 ty: None,

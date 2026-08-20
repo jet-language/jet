@@ -627,9 +627,12 @@
             // D-CANCELMODEL1=C: cancellation is handled preemptively inside
             // `inner.receive()` — a cancelled recv unwinds at the wait point rather
             // than returning a cooperative `Closed`. No pre-check sentinel here.
-            if let Some(remaining) = super::jet_deadline_remaining_ms() {
-                if remaining <= 0 {
-                    super::jet_deadline_exceeded("channel receive");
+            // Deadline uses the same raise door; cleanup must defer it too.
+            if !super::jet_scheduler_shielded() {
+                if let Some(remaining) = super::jet_deadline_remaining_ms() {
+                    if remaining <= 0 {
+                        super::jet_deadline_exceeded("channel receive");
+                    }
                 }
             }
             match self.inner.receive() {

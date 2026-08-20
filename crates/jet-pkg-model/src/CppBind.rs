@@ -750,7 +750,7 @@ fn object(value: &JSONValue) -> Option<&BTreeMap<String, JSONValue>> {
 
 fn string<'a>(map: &'a BTreeMap<String, JSONValue>, key: &str) -> Option<&'a str> {
     map.get(key).and_then(|value| match value {
-        JSONValue::Str(value) => Some(value.as_str()),
+        JSONValue::String(value) => Some(value.as_str()),
         _ => None,
     })
 }

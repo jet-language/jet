@@ -227,7 +227,7 @@ fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std
     path
 }
 
-// ── #2076: the persistent oracle-binary cache ───────────────────────────────
+// ── #2076: the run-scoped oracle-binary cache ───────────────────────────────
 //
 // Every dev battery pays an optimized (`-O`) rustc build per example, and the
 // six battery targets walk overlapping slices of the same corpus, so one full
@@ -236,16 +236,15 @@ fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std
 // link inputs — so the second caller of one key can reuse the first caller's
 // artifact instead of paying for it again.
 //
-// The default root is the repository's gitignored `.tmp/jet-test-scratch`, so
-// optimized oracle binaries survive `verify-full.sh` and later runs can reuse
-// them. `JET_DEV_ORACLE_CACHE_DIR` moves the root for a measurement run that
-// wants its own ledger, but the shared test guard still rejects `/tmp`.
+// `scripts/agent/verify-full.sh` gives every run a fresh disk-backed root via
+// `JET_DEV_ORACLE_CACHE_DIR`, shared by all six battery processes and removed
+// at run end. Ad-hoc runs get a process-scoped disk root below the same
+// gitignored scratch area; no developer cache crosses runs.
 //
-// An ad-hoc `cargo test` therefore meets previous entries too: that is reuse,
-// not a leak. The key covers everything that decides the bytes rustc emits, and
-// every hit is digest-verified. Everything else — a changed key input, a
-// truncated artifact, an unwritable root — is a MISS, and a miss is the old
-// build path unchanged.
+// The key covers everything that decides the bytes rustc emits, and every hit
+// is digest-verified. Everything else — a changed key input, a truncated
+// artifact, an unwritable root — is a MISS, and a miss is the old build path
+// unchanged.
 // Nothing here can turn a failing battery green: the cache sits strictly
 // between "generated Rust ready" and "binary on disk", and a failed build is
 // never published.
@@ -297,7 +296,7 @@ impl OracleBuildFailure {
     }
 }
 
-/// The persistent oracle artifact directory, or `None` when it cannot be
+/// The current run's oracle artifact directory, or `None` when it cannot be
 /// created — then every caller builds exactly as it did before #2076.
 ///
 /// The path is NOT salted with the toolchain: the key below already carries
@@ -311,7 +310,10 @@ static ORACLE_CACHE_ROOT: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
             common::assert_test_path_on_disk(&root, "JET_DEV_ORACLE_CACHE_DIR");
             root
         }
-        None => common::test_scratch_root("dev-oracle-cache"),
+        None => common::test_scratch_root("dev-oracle-cache").join(format!(
+            "run-{}",
+            std::process::id()
+        )),
     };
     fs::create_dir_all(&root).ok().map(|()| root)
 });
@@ -452,12 +454,70 @@ fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
     }
 }
 
+/// Same-key oracle builds race across the six test processes. The atomic
+/// publish prevents torn hits; this lock prevents duplicate cold rustc work.
+struct OracleCacheLock {
+    dir: PathBuf,
+}
+
+impl OracleCacheLock {
+    fn acquire(entry: &std::path::Path) -> std::io::Result<Self> {
+        fs::create_dir_all(entry)?;
+        let dir = entry.join(".build-lock");
+        loop {
+            match fs::create_dir(&dir) {
+                Ok(()) => return Ok(Self { dir }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stale = fs::metadata(&dir)
+                        .and_then(|meta| meta.modified())
+                        .and_then(|modified| {
+                            modified.elapsed().map_err(std::io::Error::other)
+                        })
+                        .is_ok_and(|age| age > Duration::from_secs(120));
+                    if stale {
+                        let _ = fs::remove_dir(&dir);
+                    } else {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+impl Drop for OracleCacheLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.dir);
+    }
+}
+
+#[derive(Default)]
+struct OracleCacheCounts {
+    hits: usize,
+    misses: usize,
+    builds: usize,
+}
+
+static ORACLE_CACHE_COUNTS: LazyLock<Mutex<OracleCacheCounts>> =
+    LazyLock::new(|| Mutex::new(OracleCacheCounts::default()));
+
+fn report_oracle_cache_counts() {
+    let counts = ORACLE_CACHE_COUNTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if counts.hits + counts.misses + counts.builds > 0 {
+        eprintln!(
+            "oracle cache: {} hits, {} misses, {} builds",
+            counts.hits, counts.misses, counts.builds
+        );
+    }
+}
+
 /// One line per oracle event in the shared cache root — the #2076 ledger.
 ///
 /// Six battery processes share the root, so a per-process counter cannot state
-/// a combined count and an appended line can. The persistent file is
-/// cumulative; total builds against the number of DISTINCT keys built is the
-/// duplicate-compile count the card gates on:
+/// a combined count and an appended line can. The run file is cumulative; total
+/// builds against the number of DISTINCT keys built is the duplicate-compile
+/// count the card gates on:
 ///
 /// ```text
 /// events="$JET_DEV_ORACLE_CACHE_DIR/events"
@@ -471,15 +531,24 @@ fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
 /// old harness did, so the cumulative ledger still exposes reuse without a
 /// cache-off run.
 ///
-/// `hit` is a reuse, `build` a paid compile, `fail` a compile rustc rejected —
-/// a rejection is deliberately NOT published, so the few examples whose oracle
-/// is known broken (`AOT_BROKEN_HELD_OUT`) still pay their compile in every
-/// battery that reaches them, and the ledger says so by name instead of hiding
-/// them in the duplicate count.
+/// `miss` records a caller that needed the lock, `hit` a reuse, `build` a paid
+/// compile, and `fail` a compile rustc rejected. A rejection is deliberately
+/// NOT published, so the few examples whose oracle is known broken
+/// (`AOT_BROKEN_HELD_OUT`) still pay their compile in every battery that reaches
+/// them, and the ledger says so by name instead of hiding them in the duplicate
+/// count.
 ///
 /// Best effort by construction: this ledger measures the cache and never gates
 /// a battery, so a failed append costs a number, never a verdict.
 fn record_oracle_event(event: &str, entry: &std::path::Path) {
+    if let Ok(mut counts) = ORACLE_CACHE_COUNTS.lock() {
+        match event {
+            "hit" => counts.hits += 1,
+            "miss" => counts.misses += 1,
+            "build" => counts.builds += 1,
+            _ => {}
+        }
+    }
     let Some(root) = ORACLE_CACHE_ROOT.as_ref() else {
         return;
     };
@@ -497,9 +566,9 @@ fn record_oracle_event(event: &str, entry: &std::path::Path) {
     }
 }
 
-/// Per-stem AOT scratch on the persistent, gitignored disk root. The process id
-/// keeps two simultaneous batteries from writing the same generated source;
-/// the oracle cache above still supplies cross-run reuse.
+/// Per-stem AOT scratch on the gitignored disk root. The process id keeps two
+/// simultaneous batteries from writing the same generated source; the oracle
+/// cache above supplies same-run reuse.
 fn aot_scratch_dir(tag: &str, stem: &str) -> PathBuf {
     let stem = stem.replace('/', "_");
     common::test_scratch_root("aot").join(format!(
@@ -508,7 +577,7 @@ fn aot_scratch_dir(tag: &str, stem: &str) -> PathBuf {
     ))
 }
 
-/// Build the optimized AOT oracle for one example, or reuse the persistent
+/// Build the optimized AOT oracle for one example, or reuse the run-scoped
 /// artifact for the same inputs (#2076).
 ///
 /// The ONE place a dev battery turns generated Rust into an oracle binary. Both
@@ -538,6 +607,27 @@ fn build_oracle_binary(
     if let Some(entry) = &entry {
         if reuse_cached_oracle(entry, &bin) {
             return Ok(bin);
+        }
+        record_oracle_event("miss", entry);
+    }
+    let _cache_lock = entry.as_ref().and_then(|entry| {
+        match OracleCacheLock::acquire(entry) {
+            Ok(lock) => Some(lock),
+            Err(error) => {
+                eprintln!(
+                    "note: oracle cache lock unavailable for {}: {error}; building uncached",
+                    entry.display()
+                );
+                None
+            }
+        }
+    });
+    if let Some(entry) = &entry {
+        if reuse_cached_oracle(entry, &bin) {
+            return Ok(bin);
+        }
+        if _cache_lock.is_some() {
+            let _ = fs::remove_dir_all(entry.join("ready"));
         }
     }
     let rs = dir.join(format!("jet_{tag}_{i}.rs"));
@@ -1764,6 +1854,7 @@ fn run_dev_default_battery_parallel(
         "dev default parity failures:\n{}",
         failures.join("\n\n")
     );
+    report_oracle_cache_counts();
     stats
 }
 
@@ -1897,6 +1988,7 @@ fn run_interpreter_battery_parallel(
         "interpreter parity failures:\n{}",
         failures.join("\n\n")
     );
+    report_oracle_cache_counts();
     stats
 }
 
@@ -3689,6 +3781,7 @@ fn cranelift_three_way_differential_battery_inner() {
          stems left the battery: restore them, or lower the floor in the same reviewed diff.",
         resident_safe.len()
     );
+    report_oracle_cache_counts();
 }
 
 // ── c727: differential example-corpus gate (D-LENS-RUN1 / #688 C1) ─────────
@@ -4213,6 +4306,7 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
          {CORPUS_GATE_EXCLUDED_CEILING}; exclusions may only SHRINK. Drive the stem instead of \
          excluding it, or lower the ceiling in the same reviewed diff"
     );
+    report_oracle_cache_counts();
     records
 }
 

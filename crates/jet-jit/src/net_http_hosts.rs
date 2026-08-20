@@ -4242,6 +4242,179 @@ pub(crate) fn runtime_http_request_body(
     )))
 }
 
+// CtValue ambient adapters for the HTTP Prelude handle projections. The
+// evaluator owns no HTTP policy; these only borrow the same included Prelude
+// functions that the Cranelift host exports above.
+pub(crate) fn runtime_http_req_method(request: i64) -> Result<String, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_method(request)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_path(request: i64) -> Result<String, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_path(request)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_param(
+    request: i64,
+    name: String,
+) -> Result<Option<String>, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(match jet_http_srv_req_param(request, &name) {
+            Ok(value) => Some(value),
+            Err(_) => None,
+        }),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_header(
+    request: i64,
+    name: String,
+) -> Result<Option<String>, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(match jet_http_srv_req_header(request, &name) {
+            Ok(value) => Some(value),
+            Err(_) => None,
+        }),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_body_len(request: i64) -> Result<i64, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_body_len(request)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_under_limit(request: i64, max: i64) -> Result<bool, String> {
+    with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_under_limit(request, max)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())
+}
+
+pub(crate) fn runtime_http_req_trailers(
+    request: i64,
+) -> Result<Result<i64, CtValue>, String> {
+    let result = with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(
+            jet_http_srv_req_trailers(request)
+                .map(|headers| push_handle(NetHttpHandle::HTTPHeaders(headers)))
+                .map_err(http_error_value),
+        ),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(result)
+}
+
+pub(crate) fn runtime_http_resp_status(response: i64) -> Result<i64, String> {
+    with_handle(response, |handle| match handle {
+        NetHttpHandle::HTTPResponse(response) => Some(jet_http_srv_response_status(response)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPResponse".to_string())
+}
+
+pub(crate) fn runtime_http_resp_header(
+    response: i64,
+    name: String,
+) -> Result<Option<String>, String> {
+    with_handle(response, |handle| match handle {
+        NetHttpHandle::HTTPResponse(response) => {
+            Some(match jet_http_client_response_header(response, &name) {
+                Ok(value) => Some(value),
+                Err(_) => None,
+            })
+        }
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPResponse".to_string())
+}
+
+pub(crate) fn runtime_http_resp_cookies(response: i64) -> Result<Vec<String>, String> {
+    with_handle(response, |handle| match handle {
+        NetHttpHandle::HTTPResponse(response) => Some(jet_http_response_cookies(response)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPResponse".to_string())
+}
+
+pub(crate) fn runtime_http_request_form(
+    request: i64,
+    name: String,
+    value: String,
+) -> Result<i64, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_form(
+        request, &name, &value,
+    ))))
+}
+
+pub(crate) fn runtime_http_request_cookie(
+    request: i64,
+    name: String,
+    value: String,
+) -> Result<i64, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_cookie(
+        request, &name, &value,
+    ))))
+}
+
+pub(crate) fn runtime_http_request_header(
+    request: i64,
+    name: String,
+    value: String,
+) -> Result<i64, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_header(
+        request, &name, &value,
+    ))))
+}
+
+pub(crate) fn runtime_http_request_redirects(request: i64, limit: i64) -> Result<i64, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_redirects(
+        request, limit,
+    ))))
+}
+
+pub(crate) fn runtime_http_request_connect_timeout(request: i64, ms: i64) -> Result<i64, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_connect_timeout(request, ms),
+    )))
+}
+
+pub(crate) fn runtime_http_request_read_timeout(request: i64, ms: i64) -> Result<i64, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_read_timeout(request, ms),
+    )))
+}
+
+pub(crate) fn runtime_http_request_send(
+    request: i64,
+) -> Result<Result<i64, CtValue>, String> {
+    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(native_http_request(request)
+        .map(|response| push_handle(NetHttpHandle::HTTPResponse(response)))
+        .map_err(http_error_value))
+}
+
 pub(crate) fn runtime_http_request_new(method: String, url: String) -> i64 {
     push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
         &method, &url,
