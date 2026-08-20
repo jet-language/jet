@@ -27,10 +27,7 @@ fn failure_text(error: TaskFailure) => String {
 
 fn run() {
     task.group g {
-        results :: task.all {
-            slow_one(),
-            boom()
-        }
+        results :: task.all {slow_one(), boom()}
         if results == {
             .Err(error) -> { panic(failure_text(error)) }
             .Ok(_) -> { print("unexpected success") }

@@ -46,7 +46,9 @@ fn run() {
     files :: watcher.files(root) ?? panic("watch files failed")
     callback_path :: created.to_string()
     sub :: files.on(scope, ev => {
-        if ev.path == callback_path -> print("callback {domain_label(ev.domain)}:{kind_label(ev.kind)}:recursive")
+        if ev.path == callback_path {
+            print("callback {domain_label(ev.domain)}:{kind_label(ev.kind)}:recursive")
+        }
     })
     fs.write(created, "hello") ?? panic("write failed")
     first :: files.poll()
@@ -92,7 +94,7 @@ fn run() {
     loop ev, combined {
         if ev.domain == {
             .File -> {}
-            .Process -> process_kind = kind_label(ev.kind)
+            .Process -> { process_kind = kind_label(ev.kind) }
             .Port -> port_kind = kind_label(ev.kind)
         }
     }

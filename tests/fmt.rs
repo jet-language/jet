@@ -1068,21 +1068,22 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
 
 #[test]
 fn fmt_simplify_keeps_a_struct_literal_return_braced() {
-    // D-DOTCTOR1 against D-FMT-SIMPLIFY1=A: the parser reads a `::` one-line
-    // function body with `expr_no_struct_lit`, so a bare `Rect.{ … }` cannot be
-    // read back there. R1 must leave that body braced rather than write source
-    // that no longer parses.
+    // D-DOTCTOR1/D-DOTCTOR3 against D-FMT-SIMPLIFY1=A: R3 drops the redundant
+    // `Rect.` head because the declared return type names it, but the parser
+    // reads a `::` one-line function body with `expr_no_struct_lit`, so no
+    // struct literal can be read back there. R1 must leave that body braced
+    // rather than write source that no longer parses.
     let options = jet::Formatter::FormatOptions { simplify: true };
     let source = "struct Rect {\n    width: Int,\n    height: Int\n}\n\nfn make(width: Int, height: Int) => Rect {\n    return Rect.{width: width, height: height}\n}\n\nfn run() {}\n";
 
     let once = jet::format_source_with_options(source, options)
         .expect("a struct-literal return must stay parseable under simplify");
     assert!(
-        once.contains("return Rect."),
-        "the struct-literal return was rewritten away:\n{once}"
+        once.contains("fn make(width: Int, height: Int) => Rect { return .{"),
+        "the braced struct-literal return did not survive simplify:\n{once}"
     );
     assert!(
-        !once.contains(":: Rect."),
+        !once.contains(":: Rect.") && !once.contains(":: .{"),
         "R1 collapsed a body the `::` form cannot hold:\n{once}"
     );
     assert_eq!(
