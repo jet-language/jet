@@ -650,10 +650,12 @@ fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
             )
         }
     };
-    Concurrency::with_runtime_mut(|rt| {
-        rt.stderr.push_str(&line);
-        rt.stderr.push('\n');
-    });
+    // One routing adapter: a log line belongs where the program's other lines
+    // land, in the order the program emitted it.
+    let _ = crate::runtime_host::write_jit_stderr(
+        &crate::IO::term_prelude::jet_term_print_frame(&line),
+        false,
+    );
 }
 
 fn jet_jit_log_set_level(msg: i64) {

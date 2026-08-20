@@ -160,15 +160,15 @@ pub(crate) mod json_rt {
     /// D-JSON3 lenient decode. The walk, the coercion message and the audit-line
     /// shape are ONE policy in the included `JSONDataTree.rs`; this host used to
     /// carry a byte-equivalent `coerce_walk` copy self-documented as "same as"
-    /// AOT's (I8/I9). Only the sink is per-tier: raw `eprintln!` would escape
-    /// `ProgramOutput`, so the line goes to `JitRuntime.stderr` like
-    /// `jit_log_emit` and `core.term`.
+    /// AOT's (I8/I9). Only the sink is per-tier, and picking it is the resident
+    /// output adapter's job — a raw `eprintln!` would escape `ProgramOutput`,
+    /// and a raw buffer push would escape the program's own output order.
     pub fn decode_lenient(text: &str) -> Result<DataTree, JSONError> {
         jet_std_json_decode_lenient(text, &mut |line| {
-            crate::Concurrency::with_runtime_mut(|rt| {
-                rt.stderr.push_str(&line);
-                rt.stderr.push('\n');
-            });
+            let _ = crate::runtime_host::write_jit_stderr(
+                &crate::IO::term_prelude::jet_term_print_frame(&line),
+                false,
+            );
         })
     }
 }

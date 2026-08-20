@@ -237,7 +237,7 @@ fn emit_progress_finish(
     if *count != 0 {
         let tty = super::term_semantics::jet_term_stdout_is_terminal();
         let frame = super::term_semantics::jet_term_progress_finish(tty);
-        if tty {
+        if super::term_semantics::jet_term_stdout_is_program_stream() {
             let _ = super::term_semantics::jet_term_write_stdout(frame, true);
         } else if let Some(sink) = sink {
             let mut sink = sink.lock().expect("evaluator sink poisoned");

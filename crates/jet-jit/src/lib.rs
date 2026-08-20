@@ -453,6 +453,18 @@ pub(crate) use runtime_host::JitRuntime;
 #[doc(hidden)]
 pub use runtime_host::{reset_struct_new_count_for_test, struct_new_count_for_test};
 
+/// Declare that the program about to run owns the process's stdout and stderr,
+/// so both in-process tiers write its output through as it is produced instead
+/// of accumulating it for a caller that reads `RunOutcome` as data. The one-shot
+/// `jet run` / `jet dev` verbs call this: they only re-print that buffer, and
+/// withholding it made a piped program that prints and keeps running — a server,
+/// a watch loop, anything with a `loop` — print nothing until it ended, while an
+/// AOT build of the same source printed immediately. The fact itself, its name,
+/// and the routing rule live in `Prelude/Term.rs` (I8/I9).
+pub fn set_program_owns_streams() {
+    std::env::set_var(IO::term_prelude::JET_TERM_PROGRAM_OWNS_STREAMS, "1");
+}
+
 pub use api_debug::{
     cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,
     jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,

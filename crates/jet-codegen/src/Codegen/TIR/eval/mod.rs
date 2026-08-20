@@ -277,9 +277,11 @@ pub(super) fn progress_emit(
     sink: Option<&Arc<Mutex<DevSink>>>,
     text: &str,
 ) {
+    // Framing stays a terminal question — a pipe gets no carriage returns — but
+    // where the frame GOES is the stream-ownership question.
     let tty = term_semantics::jet_term_stdout_is_terminal();
     let frame = term_semantics::jet_term_progress_frame(tty, text);
-    if tty {
+    if term_semantics::jet_term_stdout_is_program_stream() {
         let _ = term_semantics::jet_term_write_stdout(&frame, true);
         return;
     }

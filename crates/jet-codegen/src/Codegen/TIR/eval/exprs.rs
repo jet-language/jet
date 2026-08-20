@@ -9760,13 +9760,14 @@ impl<'a> EvalCtx<'a> {
         };
         // REPL/notebook callers consume the sink as their stdout/stderr event
         // stream and project it into the cell result. Do not bypass it just
-        // because the host process itself has a terminal.
-        let tty = !self.repl_mode && if to_stderr {
-            super::term_semantics::jet_term_stderr_is_terminal()
+        // because the host process itself has a terminal, or because a one-shot
+        // `jet run`/`jet dev` handed its streams to the program.
+        let direct = !self.repl_mode && if to_stderr {
+            super::term_semantics::jet_term_stderr_is_program_stream()
         } else {
-            super::term_semantics::jet_term_stdout_is_terminal()
+            super::term_semantics::jet_term_stdout_is_program_stream()
         };
-        if tty {
+        if direct {
             let frame = super::term_semantics::jet_term_print_frame(text);
             if to_stderr {
                 let _ = super::term_semantics::jet_term_write_stderr(&frame, true);

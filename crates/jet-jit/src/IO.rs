@@ -195,7 +195,7 @@ fn write_prompt_with_sink(
     if crate::fault_injection::jet_fault_should_fail("IO.Flush") {
         return Err("fault injected: IO.Flush".to_string());
     }
-    if term_prelude::jet_term_stdout_is_terminal() || sink.is_none() {
+    if term_prelude::jet_term_stdout_is_program_stream() || sink.is_none() {
         return runtime_host::write_jit_stdout(prompt, true);
     }
     sink.as_deref_mut()

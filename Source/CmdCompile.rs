@@ -435,6 +435,10 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USAGE);
         }
 
+        // The program's output is the program's, not data this verb reads back:
+        // stream it as it is produced, exactly as an AOT build of the same
+        // source does. `emit_run_output` below stays the embedder path.
+        jet_jit::set_program_owns_streams();
         let args = program_args
             .iter()
             .map(|arg| arg.as_str())
@@ -480,6 +484,8 @@ pub(crate) fn run_compile_cmd(
         && !is_plugin
         && !selects_build_entry
     {
+        // Same one-shot contract as the `--interpret` path above.
+        jet_jit::set_program_owns_streams();
         let args = program_args
             .iter()
             .map(|arg| arg.as_str())

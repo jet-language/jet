@@ -603,12 +603,12 @@ fn stream_write(
     text: &str,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let terminal = if to_stderr {
-        super::term_semantics::jet_term_stderr_is_terminal()
+    let direct = if to_stderr {
+        super::term_semantics::jet_term_stderr_is_program_stream()
     } else {
-        super::term_semantics::jet_term_stdout_is_terminal()
+        super::term_semantics::jet_term_stdout_is_program_stream()
     };
-    if terminal {
+    if direct {
         let result = if to_stderr {
             super::term_semantics::jet_term_write_stderr(text, false)
         } else {
@@ -634,12 +634,12 @@ fn stream_flush(
     to_stderr: bool,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let terminal = if to_stderr {
-        super::term_semantics::jet_term_stderr_is_terminal()
+    let direct = if to_stderr {
+        super::term_semantics::jet_term_stderr_is_program_stream()
     } else {
-        super::term_semantics::jet_term_stdout_is_terminal()
+        super::term_semantics::jet_term_stdout_is_program_stream()
     };
-    if terminal {
+    if direct {
         let result = if to_stderr {
             super::term_semantics::jet_term_write_stderr("", true)
         } else {

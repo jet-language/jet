@@ -66,6 +66,12 @@ pub(crate) fn run_dev(
         exit(ExitCodes::USER_ERROR);
     }
 
+    // The dev loop re-prints the run's output and nothing else reads it, so the
+    // program owns the process's streams. Without this a piped `jet dev` showed
+    // nothing at all for a program that prints and keeps running, because both
+    // in-process tiers held the bytes until the run ended.
+    jet_jit::set_program_owns_streams();
+
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
         let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(

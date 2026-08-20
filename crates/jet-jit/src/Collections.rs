@@ -5017,12 +5017,17 @@ fn packed_enum_name(name_ptr: i64, name_len: i64) -> String {
 /// Print a packed i64 enum. `name_ptr`/`name_len` are a UTF-8 view of the Jet
 /// enum name (stable for the process — not a heap string handle).
 fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
-    Concurrency::with_runtime_mut(|rt| {
+    // One routing adapter for every resident print. Pushing straight into the
+    // capture buffer put an enum's line wherever that buffer was flushed, which
+    // is not where the program printed it.
+    let text = Concurrency::with_runtime_mut(|rt| {
         let name = packed_enum_name(name_ptr, name_len);
-        let text = show_packed_enum(packed, &name, &rt.heap);
-        let frame = crate::IO::term_prelude::jet_term_print_frame(&text);
-        rt.stdout.push_str(&frame);
+        Some(show_packed_enum(packed, &name, &rt.heap))
     });
+    if let Some(text) = text {
+        let frame = crate::IO::term_prelude::jet_term_print_frame(&text);
+        let _ = crate::runtime_host::write_jit_stdout(&frame, false);
+    }
 }
 
 /// Return a packed enum's JetShow text as a string handle for interpolation.
