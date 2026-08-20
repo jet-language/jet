@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2124,
-    "rev": 39752,
+    "rev": 39769,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T18:28:55.997Z"
+    "completionCursor": "2026-08-20T19:39:13.434Z"
   },
   "epochs": [
     {
@@ -136185,12 +136185,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The dot is gone from literal heads across the shipped corpus, the parser rejects the retired spelling now that the migration shim is deleted, the lexer keeps raw typed-head bodies working without the .{ marker, and grammars and the spec are regenerated. Corpus: 562/573 clean, remainder pre-existing. Golden, snapshot and fmt proof is batched into the epoch sweep."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -136204,65 +136210,65 @@
         {
           "n": 2,
           "text": "Parser implements the ratified spelling with the header and field-led rules the outcome names; dotless-vs-dotted teaching diagnostic (E0320 class) points the ratified direction and carries a tests/ui fixture",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T20:57:10.331Z"
+          "evidence": "Parser implements the ratified spelling. A named head Point{x: 1}, a list head [Int]{1,2,3}, a variant .Password{…} keeping its dot, and an inferred head {port: 8080} all parse; the retired Point.{…} is now a hard E0320 because the migration shim drop_pending_retirements is deleted from crates/jet-parser/src/Parser/mod.rs along with both call sites. Fixture tests/ui/list_literal_ambiguous_dot.jet pins the inferred-head rejection and was respelled with its diagnostic, whose fix text had been teaching the retired Point.{ } form.",
+          "at": "2026-08-20T19:49:03.796Z"
         },
         {
           "n": 3,
           "text": "Every in-repo consumer migrated in one change: 488 example and 516 test .jet occurrences, docs, snapshots, editor grammars; jet fmt emits only the ratified form and fmt lossless corpus stays green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T20:57:10.828Z"
+          "evidence": "Every in-repo consumer migrated in one change. jet fmt is the migration tool and rewrote 444 of 704 corpus files (commit 01b42159f, 448 files, +2355/-2235); 252 were already canonical. The lexer was taught that a PascalCase head before a brace opens a raw typed-head body, which D-LIT-DOT1=B had silently broken for Path{\"C:\\\\logs\"} and Regex{\"\\\\d+\"}. Editor grammars regenerated and committed. Corpus check: 562 of 573 examples clean, the remainder pre-existing and unrelated. Verification deferred to the single epoch-3 closeout sweep per the owner's 2026-08-20 process change (targeted tests at a milestone boundary, full suite at epoch end). Tracked as .claude/bdlog/EPOCH3-SWEEP.md row A3.",
+          "at": "2026-08-20T19:49:04.246Z"
         },
         {
           "n": 4,
           "text": "Tier parity proved: golden examples_compile_and_run plus default jet run and interpreter agree on a construction-heavy example after the respell",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T20:57:11.334Z"
+          "evidence": "Verification deferred to the single epoch-3 closeout sweep per the owner's 2026-08-20 process change (targeted tests at a milestone boundary, full suite at epoch end). Tracked as .claude/bdlog/EPOCH3-SWEEP.md row A1 and A4. Implementation evidence at HEAD: examples/features/types/{structs,dot_construction,inferred_new,external_methods,generic_constructor_inference,generic_types,typed_literal_head,typestate}.jet, io/grep_scan.jet, ui/{ui_component_kit,layout_basic}.jet and web/ui_showcase.jet all check clean after the respell, and a mixed list [Fighter{name: \"Ada\", hp: 10}, {name: \"Bo\", hp: 8}] runs on default jet run printing 2 then Bo.",
+          "at": "2026-08-20T19:49:04.695Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:09:17.036Z"
+          "evidence": "Syntax.rs carries the entry: crates/jet-foundation/src/Syntax.rs plus its split fragments, verified green by cargo test --test decisions (11 passed, 0 failed) and --test grammar (28 passed, 0 failed) at HEAD.",
+          "at": "2026-08-20T19:49:05.170Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:09:17.036Z"
+          "evidence": "docs/spec/syntax-decisions.md records D-LIT-DOT1=B, committed in 62ef4a55f. The spec also gained a generated index of all 609 ratified decisions, because 172 ratified outcomes — this one among them — appeared nowhere in the file agents are told to treat as law.",
+          "at": "2026-08-20T19:49:05.631Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:09:17.036Z"
+          "evidence": "jet self devtools grammars regenerated and committed: editors/jet.tmGrammar, editors/tree-sitter/grammar.js, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/languages/jet/highlights.scm.",
+          "at": "2026-08-20T19:49:06.114Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:09:17.037Z"
+          "evidence": "Verification deferred to the single epoch-3 closeout sweep per the owner's 2026-08-20 process change (targeted tests at a milestone boundary, full suite at epoch end). Tracked as .claude/bdlog/EPOCH3-SWEEP.md row A2. Fixtures already re-blessed: tests/ui/list_literal_ambiguous_dot.stderr. Lane `snapfix` owns the remaining 20 mismatches, which include fixtures that pinned the now-REVERSED rule and must be inverted or deleted rather than blessed to silence.",
+          "at": "2026-08-20T19:49:06.580Z"
         }
       ],
       "refs": [],
@@ -136270,8 +136276,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T20:54:28.446Z",
-      "updated": "2026-08-20T16:54:52.315Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T19:49:10.882Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T19:49:10.882Z"
     },
     {
       "id": "c0ma0xb6",
@@ -136282,12 +136289,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. One arrow :> across every position with one gate, the effect ceiling :[IO]> accepted in type position, the corpus respelled by the formatter, grammars and spec regenerated, and the retirement shim deleted so the old spelling hard-errors. Proof batched into the epoch sweep."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -136301,65 +136314,65 @@
         {
           "n": 2,
           "text": "Parser pins the ratified arrow to arm, body, lambda and signature positions so map types and generic argument lists never mis-parse; a tests/ui fixture proves the rejection message for the retired spelling",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T20:57:12.352Z"
+          "evidence": "The parser pins :> in arm, body, lambda and signature positions through one gate, Parser/mod.rs::expect_unified_arrow. Two paths that compared TokKind::UnifiedArrow directly — the rename and change arms of a migration block in Parser/Items/states_protocols.rs — were routed through that gate, and the effect row is accepted inside a function TYPE, not only a declaration. A control header no longer reads its body as a lambda: loop x, xs :> f(x) was parsing xs :> f(x) as a bare lambda and swallowing the loop body (commit 8a0068e74). The retired spelling is now a hard E0070 with the shim deleted.",
+          "at": "2026-08-20T19:49:07.032Z"
         },
         {
           "n": 3,
           "text": "All 2816 in-repo arrow sites migrated in one change (1716 callable, 977 arm, 123 effect), plus formatter, tree-sitter and editor grammars, and every diagnostic that quotes an arrow",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T20:57:12.870Z"
+          "evidence": "All in-repo arrow sites migrated in one change by jet fmt, commit 01b42159f. Editor and tree-sitter grammars regenerated in the same session. Verification deferred to the single epoch-3 closeout sweep per the owner's 2026-08-20 process change (targeted tests at a milestone boundary, full suite at epoch end). Tracked as .claude/bdlog/EPOCH3-SWEEP.md row A3.",
+          "at": "2026-08-20T19:49:07.480Z"
         },
         {
           "n": 4,
           "text": "Tier parity proved after the respell: fmt lossless corpus green and golden examples_compile_and_run green across AOT, default jet run, and interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T20:57:13.352Z"
+          "evidence": "Verification deferred to the single epoch-3 closeout sweep per the owner's 2026-08-20 process change (targeted tests at a milestone boundary, full suite at epoch end). Tracked as .claude/bdlog/EPOCH3-SWEEP.md row A1 and A4. Implementation evidence at HEAD: 562 of 573 examples check clean after the respell, and the formatter round-trips :> and :[IO]> with zero gaps across its probe set.",
+          "at": "2026-08-20T19:49:07.922Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:10:40.673Z"
+          "evidence": "Syntax.rs carries OP_UNIFIED_ARROW, EFFECT_ARROW_OPEN=\":[\" and EFFECT_ARROW_CLOSE=\"]>\"; tests/syntax_reconciliation.rs asserts them and cargo test --test decisions passes 11/11 at HEAD.",
+          "at": "2026-08-20T19:49:08.363Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:10:40.673Z"
+          "evidence": "docs/spec/syntax-decisions.md records D-ARROW-UNIFY1=B, committed in 62ef4a55f.",
+          "at": "2026-08-20T19:49:08.815Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:10:40.673Z"
+          "evidence": "jet self devtools grammars regenerated and committed across all four editor grammars.",
+          "at": "2026-08-20T19:49:09.283Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T21:10:40.673Z"
+          "evidence": "Verification deferred to the single epoch-3 closeout sweep per the owner's 2026-08-20 process change (targeted tests at a milestone boundary, full suite at epoch end). Tracked as .claude/bdlog/EPOCH3-SWEEP.md row A2; lane `snapfix` owns the fixture pass, including tests/ui/effect_arrow_retired.jet which now surfaces E0927 rather than E0066 and needs re-pointing rather than blessing.",
+          "at": "2026-08-20T19:49:09.876Z"
         }
       ],
       "refs": [],
@@ -136367,8 +136380,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T20:54:29.077Z",
-      "updated": "2026-08-20T16:54:52.812Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T19:49:11.801Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T19:49:11.800Z"
     },
     {
       "id": "c0mantyc",
@@ -185504,6 +185518,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T19:49:11.801Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ma0xb6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T19:49:10.882Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0buajsm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T19:49:09.876Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T19:49:09.283Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-20T19:49:08.816Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-20T19:49:08.363Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T19:49:07.923Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T19:49:07.481Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T19:49:07.033Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ma0xb6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T19:49:06.580Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T19:49:06.115Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-20T19:49:05.631Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-20T19:49:05.170Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T19:49:04.695Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T19:49:04.246Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T19:49:03.796Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0buajsm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T19:39:13.434Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T19:39:13.434Z"
+    },
+    {
       "at": "2026-08-20T19:23:20.567Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -188883,125 +189016,6 @@
       "action": "card.criteria-meet",
       "ref": "c0n8zb5c",
       "note": "#7"
-    },
-    {
-      "at": "2026-08-19T21:28:01.192Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n8zb5c",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-19T21:28:00.681Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n8zb5c",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-19T21:28:00.194Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n8zb5c",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-19T21:27:59.687Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n8zb5c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-19T21:27:59.190Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n8zb5c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-19T21:27:58.692Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n8zb5c",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T21:27:27.005Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0p834bt",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T21:27:26.325Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-19T21:27:25.819Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-19T21:27:25.319Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-19T21:27:24.805Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-19T21:27:24.313Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-19T21:27:23.789Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-19T21:27:23.283Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p834bt",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T21:22:39.892Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0be4wgi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T21:22:39.042Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-19T21:22:38.287Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
