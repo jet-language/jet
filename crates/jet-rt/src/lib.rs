@@ -279,10 +279,17 @@ impl JetArena {
                 values.push(value);
                 Some(())
             }
-            Some(slot @ JetVal::List(values)) => {
-                if values.is_empty() {
+            // An empty untyped list promotes to the dense carrier on first
+            // push; a populated one keeps its boxed shape. Read emptiness
+            // through a borrow that ends before the slot is overwritten.
+            Some(slot) => {
+                let empty = match &*slot {
+                    JetVal::List(values) => values.is_empty(),
+                    _ => return None,
+                };
+                if empty {
                     *slot = JetVal::IntList(vec![value]);
-                } else {
+                } else if let JetVal::List(values) = slot {
                     values.push(JetVal::Int(value));
                 }
                 Some(())
