@@ -17,6 +17,7 @@ use jet_codegen::Codegen::TIR::{
     TZipFillMode, TContract, TContractDisposition, TContractKind,
 };
 use jet_foundation::AST::{BinOp, GcPromotion, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
+use jet_rt::JetArena;
 use std::collections::{HashMap, HashSet};
 
 use super::runtime_host::{
@@ -4426,6 +4427,185 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    /// Return the local updated by the one pure integer reduction shape that
+    /// can keep its list buffer borrowed for the whole native loop.
+    fn direct_int_sum_target(var: &str, body: &[TStmt]) -> Option<String> {
+        let [TStmt::Assign {
+            place: TPlace::Local(target),
+            op: Some(BinOp::Add),
+            value,
+            ..
+        }] = body
+        else {
+            return None;
+        };
+        if target.deref || !matches!(value.ty, Type::Int) {
+            return None;
+        }
+        let TExprKind::Local(rhs) = &value.kind else {
+            return None;
+        };
+        if rhs.deref || rhs.name != var {
+            return None;
+        }
+        Some(target.rust_name())
+    }
+
+    /// Inline the resident signed-63-bit fast path. Tagged values and sums
+    /// outside the inline range call the existing exact `Int` kernel.
+    fn lower_direct_int_add(&mut self, left: Value, right: Value) -> Value {
+        let min = self
+            .b
+            .ins()
+            .iconst(types::I64, JetArena::INT_SMALL_MIN);
+        let max = self
+            .b
+            .ins()
+            .iconst(types::I64, JetArena::INT_SMALL_MAX);
+        let left_tagged = self.b.ins().icmp(IntCC::SignedLessThan, left, min);
+        let right_tagged = self.b.ins().icmp(IntCC::SignedLessThan, right, min);
+        let tagged = self.b.ins().bor(left_tagged, right_tagged);
+        let slow = self.b.create_block();
+        let fast = self.b.create_block();
+        let overflow = self.b.create_block();
+        let done = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(tagged, slow, &[], fast, &[]);
+
+        self.b.switch_to_block(slow);
+        self.b.seal_block(slow);
+        let slow_value = self.call_host(self.host.num.int_add, &[left, right]);
+        self.b.ins().jump(merge, &[slow_value]);
+
+        self.b.switch_to_block(fast);
+        self.b.seal_block(fast);
+        let sum = self.b.ins().iadd(left, right);
+        let below = self.b.ins().icmp(IntCC::SignedLessThan, sum, min);
+        let above = self.b.ins().icmp(IntCC::SignedGreaterThan, sum, max);
+        let out_of_range = self.b.ins().bor(below, above);
+        self.b.ins().brif(out_of_range, overflow, &[], done, &[]);
+
+        self.b.switch_to_block(overflow);
+        self.b.seal_block(overflow);
+        let overflow_value = self.call_host(self.host.num.int_add, &[left, right]);
+        self.b.ins().jump(merge, &[overflow_value]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        self.b.ins().jump(merge, &[sum]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        self.b.block_params(merge)[0]
+    }
+
+    /// Native lowering for `loop x, xs { total += x }` over `[Int]`.
+    fn lower_direct_int_list_sum(
+        &mut self,
+        label: &Option<String>,
+        var: &str,
+        source: &TExpr,
+        target_key: &str,
+    ) -> Result<(), String> {
+        let coll = self.lower_expr(source)?;
+        let ptr = self.call_host(self.host.coll.list_int_ptr, &[coll]);
+        self.emit_trap_check()?;
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
+        self.progress_pull(coll, len);
+
+        let header = self.b.create_block();
+        let body_block = self.b.create_block();
+        let step_block = self.b.create_block();
+        let exhausted = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let loop_var = self.fresh_var(types::I64);
+        let target_var = self
+            .vars
+            .get(target_key)
+            .copied()
+            .ok_or_else(|| format!("jit direct integer reduction target `{target_key}` missing"))?;
+        let loop_key = TIR::local_place(var);
+        if loop_key == target_key {
+            return Err("jit direct integer reduction aliases its loop variable".to_string());
+        }
+        let prior_loop_var = self.vars.get(&loop_key).copied();
+        let prior_loop_ty = self.var_tys.get(&loop_key).cloned();
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        self.b.seal_block(header);
+        let idx = self.b.use_var(idx_var);
+        let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exhausted, &[], body_block, &[]);
+
+        self.b.switch_to_block(exhausted);
+        self.b.seal_block(exhausted);
+        self.progress_exhaust(coll);
+        self.b.ins().jump(exit, &[]);
+
+        self.loop_stack.push(LoopTargets {
+            label: label.clone(),
+            continue_block: step_block,
+            break_block: exit,
+            break_value_ty: None,
+            shield_depth: self.shield_depth,
+            shared_transaction_depth: self.shared_transaction_depth,
+            compute_resource_depth: self.compute_resources.len(),
+            compute_preserve_names: self.vars.keys().cloned().collect(),
+        });
+        self.b.switch_to_block(body_block);
+        self.b.seal_block(body_block);
+        let word_size = self.b.ins().iconst(types::I64, 8);
+        let byte_offset = self.b.ins().imul(idx, word_size);
+        let element_address = self.b.ins().iadd(ptr, byte_offset);
+        let element = self
+            .b
+            .ins()
+            .load(types::I64, MemFlags::trusted(), element_address, 0);
+        self.b.def_var(loop_var, element);
+        self.vars.insert(loop_key.clone(), loop_var);
+        self.var_tys.insert(loop_key.clone(), Type::Int);
+        let current = self.b.use_var(target_var);
+        let next = self.lower_direct_int_add(current, element);
+        self.b.def_var(target_var, next);
+        self.loop_stack.pop();
+        self.b.ins().jump(step_block, &[]);
+
+        self.b.switch_to_block(step_block);
+        self.b.seal_block(step_block);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next_idx = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next_idx);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(exit);
+        self.progress_finish(coll);
+        match prior_loop_var {
+            Some(var) => {
+                self.vars.insert(loop_key.clone(), var);
+            }
+            None => {
+                self.vars.remove(&loop_key);
+            }
+        }
+        match prior_loop_ty {
+            Some(ty) => {
+                self.var_tys.insert(loop_key, ty);
+            }
+            None => {
+                self.var_tys.remove(&TIR::local_place(var));
+            }
+        }
+        self.dead = false;
+        Ok(())
+    }
+
     fn lower_stmt(&mut self, stmt: &TStmt) -> Result<(), String> {
         if self.dead {
             return Ok(());
@@ -6038,6 +6218,29 @@ impl LowerCtx<'_, '_> {
                         return in_own_frame(|| -> Result<(), String> {
                             return Err("jit for-in by-value stream unsupported".to_string());
                         });
+                    }
+                    if var2.is_none()
+                        && step.is_none()
+                        && method_kind.is_none()
+                        && !*columnar
+                        && !*by_value
+                        && matches!(&collection.ty, Type::List(elem) if matches!(elem.as_ref(), Type::Int))
+                    {
+                        if let Some(target_key) = Self::direct_int_sum_target(var, body) {
+                            if self
+                                .var_tys
+                                .get(&target_key)
+                                .is_some_and(|ty| matches!(ty, Type::Int))
+                            {
+                                self.lower_direct_int_list_sum(
+                                    label,
+                                    var,
+                                    source,
+                                    &target_key,
+                                )?;
+                                return Ok(());
+                            }
+                        }
                     }
                     let stride = match step {
                         Some(step) => {

@@ -1260,6 +1260,25 @@ fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
     })
 }
 
+/// Return a stable dense integer-list buffer for the one native reduction loop
+/// that proves the list is not mutated while it runs. The heap's dense carrier
+/// needs no copy; older erased carriers get one resident snapshot instead.
+fn jet_jit_list_int_ptr(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(ptr) = rt.heap.int_list_ptr(list) {
+            return ptr as i64;
+        }
+        let Some(values) = rt.heap.clone_int_list(list) else {
+            rt.set_host_fault("jit integer-list view: bad list carrier");
+            return 0;
+        };
+        rt.int_list_views.push(values.into_boxed_slice());
+        rt.int_list_views
+            .last()
+            .map_or(0, |values| values.as_ptr() as i64)
+    })
+}
+
 fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(value) = crate::Compute::try_get_list_f64(rt, list, idx) {
@@ -5286,6 +5305,7 @@ host_fns! {
     string_try_push: "jet_jit_string_try_push" => jet_jit_string_try_push: sig_try_string_push;
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
+    list_int_ptr: "jet_jit_list_int_ptr" => jet_jit_list_int_ptr: sig_len;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
     columnar_gather: "jet_jit_columnar_gather" => jet_jit_columnar_gather: sig_get;
     fixed_list_get: "jet_jit_fixed_list_get" => jet_jit_fixed_list_get: sig_get;

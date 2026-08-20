@@ -18,18 +18,22 @@ Largest gaps:
 1. P1 — terminal lifecycle contract is split. REPL uses raw ANSI; `jet inspect
    live` clears with literal ANSI; dev/build/test mostly print lines. Resize and
    cancellation behavior differ by surface.
-2. P1 — status/progress is split between `watching`, `[watch]`, `[build]`, test
+2. P1 — raw ANSI ownership is violated in multiple terminal owners. The
+   mechanical sweep found escapes in `jet-cli` help, `jet-devserver`, Jetpack
+   output, command helpers, and generated Prelude paths outside the two named
+   owners.
+3. P1 — status/progress is split between `watching`, `[watch]`, `[build]`, test
    result lines, timing lines, and ad-hoc notices. No common event grammar or
    first-paint contract.
-3. P1 — interactive discovery is uneven. REPL advertises most keys, but debug,
+4. P1 — interactive discovery is uneven. REPL advertises most keys, but debug,
    help, notebook, and live inspect have separate prompt/control vocabularies.
-4. P2 — progressive disclosure is strong in REPL but weak in diagnostics,
+5. P2 — progressive disclosure is strong in REPL but weak in diagnostics,
    explain/inspect, test, and build output. Long reports are text streams, not
    summaries with drill-down.
-5. P2 — Canvas is a browser/dev-server surface, not a terminal surface. The
+6. P2 — Canvas is a browser/dev-server surface, not a terminal surface. The
    requested “canvas/scene CLI” has no identified terminal entry point; this is
    an inventory gap, not proof of a missing feature.
-6. P2 — non-TTY behavior is intentionally present but not demonstrated for all
+7. P2 — non-TTY behavior is intentionally present but not demonstrated for all
    surfaces. `jet ?` has an explicit floor; REPL has a cooked floor; dev/build/
    test/inspect need transcript proof under pipes and narrow columns.
 
@@ -79,6 +83,37 @@ NO_COLOR=1 target/debug/jet ? </dev/null > /tmp/jet-tui-captures-2026-08-20/help
 
 Use the same four-way matrix for every non-interactive command below. Use a PTY
 helper for key scripts where `script` cannot inject the required sequence.
+
+### ANSI ownership sweep
+
+Command used (read-only source search):
+
+```sh
+rg -n '\\x1b\\[' Source crates --glob '*.rs' \
+  | rg -v 'crates/jet-foundation/src/(Terminal|Diagnostics)\\.rs|crates/jet-repl/src/(Term|Interactive)\\.rs'
+```
+
+Representative hits:
+
+```text
+Source/main.rs:1532                         live inspect clear/redraw
+Source/CmdMemory.rs:362                     audit banner
+Source/CmdGc.rs:463                         local color helper
+Source/CmdDevTools.rs:1566-1580            local bold/status helpers
+crates/jet-cli/src/Help/Interactive.rs:38-294  alternate-screen/key redraw
+crates/jet-cli/src/Help/Render.rs:73-193       direct color sequences
+crates/jet-devserver/src/WebHost.rs:233-373    dashboard redraw
+crates/jet-devserver/src/WebHost.rs:667         status dot color
+crates/jetpack/src/Output.rs:399-489           progress redraw
+crates/jet-codegen/src/Prelude/Term.rs:257     generated terminal color
+crates/jet-foundation/src/Outcome.rs:262-263   generated report color
+```
+
+This is a finding, not a claim that every hit is wrong: `jet-cli` help and the
+dev-server are legitimate terminal owners, but they are outside the two-owner
+allow-list and do not visibly share one lifecycle contract. The follow-up must
+either widen the canonical owner list with explicit seams or migrate these
+paths. Tests in the grep output are not product paths.
 
 ## Current-state captures
 
@@ -340,18 +375,23 @@ source pointer, not a runtime claim.
 | bare `jet` / usage | color / NO_COLOR | 1U | usage wrapper does not show explicit color resolution (`main.rs:455-462`) |
 | bare `jet` / usage | resize | 1U | no width argument in wrapper (`main.rs:455-462`) |
 
+The scorecard's color scores are deliberately conservative after the ANSI
+sweep: shared diagnostics are strong, but the terminal family is not compliant
+with one-owner policy until the listed alternate owners are reconciled.
+
 ## Ranked gap list
 
 | Rank | Severity | Affected surface | Evidence | Fix direction |
 |---:|---|---|---|---|
 | 1 | P1 | All TTY surfaces | raw ANSI in REPL plus literal live clear (`Interactive.rs:806-851`, `main.rs:1531-1534`) | Make one terminal session/renderer own clear, cursor, width, resize, color, and restore; callers emit semantic rows. |
-| 2 | P1 | Dev/build/test/run | separate `[watch]`, `[build]`, test, and timing strings (`CmdDevTools.rs:178-184`, `CmdCompile.rs:4553-4567`, `4670-4675`) | Define one progress event vocabulary with plain, TTY, JSON, and quiet renderers. |
-| 3 | P1 | REPL/help/debug/live inspect | each surface has distinct controls; only REPL has a broad discovery hint (`Render.rs:39-60`, `Native.rs:199-220`, `main.rs:1523-1539`) | Add a shared interaction footer and consistent Esc/Ctrl-C/EOF cancellation semantics. |
-| 4 | P2 | Diagnostics/explain/inspect/test/build | long output has batch text and JSON, but no summary/drill-down (`Diagnostics.rs:869-900`, `CmdDossier.rs:69-80`) | Add summary-first human output with explicit detail requests; keep JSON complete. |
-| 5 | P2 | REPL/live inspect/dev/build/diagnostics | width is handled only in REPL; other output has no width input (`Term.rs:368-385`, `Diagnostics.rs:869-877`) | Centralize terminal width and graceful narrow rendering; add resize/redraw or line-safe degradation. |
-| 6 | P2 | Canvas/scene | browser routes exist, no terminal CLI entry point (`WebHost.rs:889-1129`) | Decide inventory boundary. If terminal status is intended, expose a small semantic status/report surface; otherwise remove CLI claim. |
-| 7 | P2 | notebook | shipped client is HTML; no terminal client path found (`CmdNotebook.rs:145-175`, `client.html:1-125`) | Decide whether protocol stdin is the terminal surface; document or delete the candidate from TUI scope. |
-| 8 | P3 | bare `jet` / usage | generated usage wrapper has no width/color contract (`main.rs:455-462`) | Route usage through shared terminal policy and width-aware renderer; preserve pipe-safe plain output. |
+| 2 | P1 | All terminal owners | raw escape sweep finds `jet-cli`, `jet-devserver`, Jetpack, command helpers, and generated Prelude paths (`ANSI ownership sweep` above) | Define the canonical owner boundary; migrate or explicitly seam every hit; keep generated paths on the same policy. |
+| 3 | P1 | Dev/build/test/run | separate `[watch]`, `[build]`, test, and timing strings (`CmdDevTools.rs:178-184`, `CmdCompile.rs:4553-4567`, `4670-4675`) | Define one progress event vocabulary with plain, TTY, JSON, and quiet renderers. |
+| 4 | P1 | REPL/help/debug/live inspect | each surface has distinct controls; only REPL has a broad discovery hint (`Render.rs:39-60`, `Native.rs:199-220`, `main.rs:1523-1539`) | Add a shared interaction footer and consistent Esc/Ctrl-C/EOF cancellation semantics. |
+| 5 | P2 | Diagnostics/explain/inspect/test/build | long output has batch text and JSON, but no summary/drill-down (`Diagnostics.rs:869-900`, `CmdDossier.rs:69-80`) | Add summary-first human output with explicit detail requests; keep JSON complete. |
+| 6 | P2 | REPL/live inspect/dev/build/diagnostics | width is handled only in REPL; other output has no width input (`Term.rs:368-385`, `Diagnostics.rs:869-877`) | Centralize terminal width and graceful narrow rendering; add resize/redraw or line-safe degradation. |
+| 7 | P2 | Canvas/scene | browser routes exist, no terminal CLI entry point (`WebHost.rs:889-1129`) | Decide inventory boundary. If terminal status is intended, expose a small semantic status/report surface; otherwise remove CLI claim. |
+| 8 | P2 | notebook | shipped client is HTML; no terminal client path found (`CmdNotebook.rs:145-175`, `client.html:1-125`) | Decide whether protocol stdin is the terminal surface; document or delete the candidate from TUI scope. |
+| 9 | P3 | bare `jet` / usage | generated usage wrapper has no width/color contract (`main.rs:455-462`) | Route usage through shared terminal policy and width-aware renderer; preserve pipe-safe plain output. |
 
 ## Proposed follow-up card clusters
 
@@ -361,7 +401,7 @@ clusters the orchestrator should mint, each body linking this report and
 
 1. **P1: unify Jet terminal lifecycle and ANSI ownership** — all raw mode,
    cursor control, clear/redraw, color, width, resize, restore, and non-TTY
-   floor rules.
+   floor rules; reconcile the ANSI sweep hits.
 2. **P1: unify Jet progress/status event rendering** — dev, build, run, test,
    timing, quiet, pipe, and JSON contracts.
 3. **P1: unify interactive key discovery and cancellation** — REPL, help,

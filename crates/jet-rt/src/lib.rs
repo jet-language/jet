@@ -78,6 +78,9 @@ pub enum JetVal {
         start: usize,
         end: usize,
     },
+    /// Dense resident carrier for integer-backed lists. String and opaque
+    /// handles use the same `i64` word representation.
+    IntList(Vec<i64>),
     List(Vec<JetVal>),
     /// D-RANGE-VALUE1: inline list element, not an arena record handle.
     Range {
@@ -190,8 +193,7 @@ impl JetArena {
 
     pub fn alloc_int_list(&mut self, values: Vec<i64>) -> i64 {
         let id = self.values.len() as i64;
-        self.values
-            .push(JetVal::List(values.into_iter().map(JetVal::Int).collect()));
+        self.values.push(JetVal::IntList(values));
         id
     }
 
@@ -273,8 +275,16 @@ impl JetArena {
 
     pub fn list_push_int(&mut self, list: i64, value: i64) -> Option<()> {
         match self.values.get_mut(list as usize) {
-            Some(JetVal::List(values)) => {
-                values.push(JetVal::Int(value));
+            Some(JetVal::IntList(values)) => {
+                values.push(value);
+                Some(())
+            }
+            Some(slot @ JetVal::List(values)) => {
+                if values.is_empty() {
+                    *slot = JetVal::IntList(vec![value]);
+                } else {
+                    values.push(JetVal::Int(value));
+                }
                 Some(())
             }
             _ => None,
@@ -293,8 +303,12 @@ impl JetArena {
 
     pub fn replace_int_list(&mut self, list: i64, values: Vec<i64>) -> Option<()> {
         match self.values.get_mut(list as usize) {
-            Some(JetVal::List(target)) => {
-                *target = values.into_iter().map(JetVal::Int).collect();
+            Some(slot @ JetVal::List(_)) => {
+                *slot = JetVal::IntList(values);
+                Some(())
+            }
+            Some(JetVal::IntList(target)) => {
+                *target = values;
                 Some(())
             }
             _ => None,
@@ -333,6 +347,7 @@ impl JetArena {
 
     pub fn list_len(&self, list: i64) -> Option<i64> {
         match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => Some(values.len() as i64),
             Some(JetVal::List(values)) => Some(values.len() as i64),
             Some(JetVal::UninitList { values, .. }) => Some(values.len() as i64),
             _ => None,
@@ -344,6 +359,7 @@ impl JetArena {
             return None;
         }
         match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => values.get(index as usize).copied(),
             Some(JetVal::List(values)) => match values.get(index as usize) {
                 Some(JetVal::Int(value)) => Some(*value),
                 _ => None,
@@ -367,6 +383,7 @@ impl JetArena {
     /// bounds check; an invalid carrier is an internal compiler/runtime fault.
     pub fn list_get_int_proven(&self, list: i64, index: i64) -> i64 {
         let value = match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => return values[index as usize],
             Some(JetVal::List(values)) => &values[index as usize],
             Some(JetVal::UninitList {
                 values,
@@ -393,6 +410,7 @@ impl JetArena {
             return None;
         }
         let handle = match self.values.get(list as usize)? {
+            JetVal::IntList(values) => Some(*values.get(index as usize)?),
             JetVal::List(values) => match values.get(index as usize)? {
                 JetVal::Int(handle) => Some(*handle),
                 JetVal::String(value) => return Some(value.clone()),
@@ -469,6 +487,10 @@ impl JetArena {
             return None;
         }
         match self.values.get_mut(list as usize) {
+            Some(JetVal::IntList(values)) => {
+                *values.get_mut(index as usize)? = value;
+                Some(())
+            }
             Some(JetVal::List(values)) => match values.get_mut(index as usize) {
                 Some(slot @ JetVal::Int(_)) => {
                     *slot = JetVal::Int(value);
@@ -516,6 +538,10 @@ impl JetArena {
 
     pub fn list_sort_int(&mut self, list: i64) -> Option<()> {
         match self.values.get_mut(list as usize) {
+            Some(JetVal::IntList(values)) => {
+                values.sort_unstable();
+                Some(())
+            }
             Some(JetVal::List(values)) => {
                 let mut ints = Vec::with_capacity(values.len());
                 for value in values.iter() {
@@ -537,18 +563,22 @@ impl JetArena {
             return None;
         }
         let slice = match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) if end <= values.len() as i64 => {
+                JetVal::IntList(values[start as usize..end as usize].to_vec())
+            }
             Some(JetVal::List(values)) if end <= values.len() as i64 => {
-                values[start as usize..end as usize].to_vec()
+                JetVal::List(values[start as usize..end as usize].to_vec())
             }
             _ => return None,
         };
         let id = self.values.len() as i64;
-        self.values.push(JetVal::List(slice));
+        self.values.push(slice);
         Some(id)
     }
 
     pub fn clone_int_list(&self, list: i64) -> Option<Vec<i64>> {
         match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => Some(values.clone()),
             Some(JetVal::List(values)) => {
                 let mut out = Vec::with_capacity(values.len());
                 for value in values {
@@ -577,8 +607,19 @@ impl JetArena {
         }
     }
 
+    /// Borrow the dense carrier used by the resident JIT's proven native loop.
+    /// The caller must keep this arena alive and must not mutate this list while
+    /// using the pointer.
+    pub fn int_list_ptr(&self, list: i64) -> Option<*const i64> {
+        match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => Some(values.as_ptr()),
+            _ => None,
+        }
+    }
+
     pub fn clone_list(&mut self, list: i64) -> Option<i64> {
         let value = match self.values.get(list as usize) {
+            Some(JetVal::IntList(values)) => JetVal::IntList(values.clone()),
             Some(JetVal::List(values)) => JetVal::List(values.clone()),
             Some(JetVal::UninitList {
                 values,
@@ -672,8 +713,10 @@ impl JetArena {
     /// host never has to know the arena's private shape, and the store — not an
     /// engine — owns the layout, the row bookkeeping and the bounds policy (I9).
     pub fn record_rows(&self, list: i64) -> Option<Vec<Vec<JetVal>>> {
-        let Some(JetVal::List(values)) = self.values.get(list as usize) else {
-            return None;
+        let values = match self.values.get(list as usize)? {
+            JetVal::IntList(values) => values.iter().copied().map(JetVal::Int).collect(),
+            JetVal::List(values) => values.clone(),
+            _ => return None,
         };
         values
             .iter()
@@ -747,8 +790,8 @@ impl JetArena {
     // A resident signed 63-bit payload is its own value. Larger values use
     // the same arena and CtBigInt limbs as the spill carrier; the public
     // language type is still only `Int`.
-    const INT_SMALL_MIN: i64 = -(1i64 << 62);
-    const INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
+    pub const INT_SMALL_MIN: i64 = -(1i64 << 62);
+    pub const INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
     const INT_BIG_TAG: i64 = i64::MIN;
 
     fn int_is_tagged(value: i64) -> bool {

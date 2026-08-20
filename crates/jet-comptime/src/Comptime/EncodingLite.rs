@@ -1658,24 +1658,34 @@ fn xml_value_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     }
 }
 
-fn restore_xml_snapshot_order(
-    mut entries: Vec<(String, jet_foundation::XmlPull::Value)>,
-) -> Vec<(String, jet_foundation::XmlPull::Value)> {
-    // CtValue maps sort keys; D-ENCXML1 closed schemas preserve exact field order.
-    if let Some(order) = jet_foundation::XmlPull::xml_schema_order(&entries) {
-        entries.sort_by_key(|(key, _)| {
-            order
-                .iter()
-                .position(|expected| *expected == key)
-                .expect("checked XML schema key")
-        });
+fn restore_xml_snapshot_order(value: &mut jet_foundation::XmlPull::Value) {
+    use jet_foundation::XmlPull::Value;
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                restore_xml_snapshot_order(value);
+            }
+        }
+        Value::Object(entries) => {
+            for (_, value) in entries.iter_mut() {
+                restore_xml_snapshot_order(value);
+            }
+            // CtValue maps sort keys; D-ENCXML1 closed schemas preserve exact
+            // field order, but only after lexical evidence has been checked.
+            if let Some(order) = jet_foundation::XmlPull::xml_schema_order(entries) {
+                entries.sort_by_key(|(key, _)| {
+                    order
+                        .iter()
+                        .position(|expected| *expected == key)
+                        .expect("checked XML schema key")
+                });
+            }
+        }
+        _ => {}
     }
-    entries
 }
 
-pub(super) fn xml_from_ct(
-    value: &CtValue,
-) -> Result<jet_foundation::XmlPull::Value, String> {
+fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
     use jet_foundation::XmlPull::Value;
     if matches!(
         value,
@@ -1698,17 +1708,32 @@ pub(super) fn xml_from_ct(
     }
     if let Some(CtValue::List(values)) = json_payload(value, "Array") {
         return Ok(Value::Array(
-            values.iter().map(xml_from_ct).collect::<Result<Vec<_>, _>>()?,
+            values
+                .iter()
+                .map(xml_value_from_ct)
+                .collect::<Result<Vec<_>, _>>()?,
         ));
     }
     if let Some(entries) = json_object_entries(value) {
         let converted: Result<Vec<_>, String> = entries
             .into_iter()
-            .map(|(key, value)| Ok((key, xml_from_ct(&value)?)))
+            .map(|(key, value)| Ok((key, xml_value_from_ct(&value)?)))
             .collect();
-        return Ok(Value::Object(restore_xml_snapshot_order(converted?)));
+        return Ok(Value::Object(converted?));
     }
     Err("XML tree contains a non-DataTree value".to_string())
+}
+
+pub(super) fn xml_from_ct(
+    value: &CtValue,
+) -> Result<jet_foundation::XmlPull::Value, String> {
+    let mut value = xml_value_from_ct(value)?;
+    // The runtime kernel owns XML attribute-value normalization and lexical
+    // trust. Validate before restoring closed-schema order, or a reordered
+    // semantic object could make stale raw XML look trustworthy.
+    jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+    restore_xml_snapshot_order(&mut value);
+    Ok(value)
 }
 
 pub(super) fn xml_parse(text: &str) -> Result<CtValue, jet_foundation::XmlPull::Error> {

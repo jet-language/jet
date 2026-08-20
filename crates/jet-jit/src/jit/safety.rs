@@ -1407,9 +1407,35 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
 
 fn jit_cell_value_type(ty: &Type) -> bool {
     let ty = erase_runtime_qualifiers(ty);
-    matches!(ty, Type::Named(name) if name == "Unit")
+    cell_value_map_keys_are_string(ty)
+        && (matches!(ty, Type::Named(name) if name == "Unit")
         || matches!(ty, Type::Tuple(fields) if fields.is_empty())
-        || super::types_meta::clif_ty(ty).is_some()
+        || super::types_meta::clif_ty(ty).is_some())
+}
+
+fn cell_value_map_keys_are_string(ty: &Type) -> bool {
+    match erase_runtime_qualifiers(ty) {
+        Type::Map { key, value, .. } => {
+            matches!(erase_runtime_qualifiers(key), Type::String)
+                && cell_value_map_keys_are_string(value)
+        }
+        Type::List(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => cell_value_map_keys_are_string(inner),
+        Type::Result { ok, err } => {
+            cell_value_map_keys_are_string(ok) && cell_value_map_keys_are_string(err)
+        }
+        Type::Apply { args, .. } => args.iter().all(cell_value_map_keys_are_string),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| cell_value_map_keys_are_string(field)),
+        Type::Union(members) => members.iter().all(cell_value_map_keys_are_string),
+        Type::Fn { .. } => true,
+        _ => true,
+    }
 }
 
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {

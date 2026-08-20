@@ -305,6 +305,10 @@ pub(crate) struct JitRuntime {
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
+    /// Stable backing buffers for resident pure integer-list loops. A list
+    /// already using `JetVal::IntList` is borrowed directly; erased list
+    /// carriers are copied here once before native lowering reads them.
+    pub(crate) int_list_views: Vec<Box<[i64]>>,
     /// Canonical Prelude allocator instance for resident fallible allocations.
     /// The checked package fact selects its mode before any host call runs.
     pub(crate) program_allocator: jet_codegen::program_allocator::JetProgramAllocator,
@@ -450,6 +454,9 @@ pub(crate) struct JitRuntime {
     /// A Rust helper fault is a Jet defect. The resident driver renders the
     /// branded ICE report after generated control flow reaches the boundary.
     pub(crate) host_fault: bool,
+    /// True when the host-fault path captured an owned helper message in
+    /// `trapped`; false when a boundary supplied only an opaque trap token.
+    pub(crate) host_fault_payload_captured: bool,
     /// Soft process exit for rich `require`/`panic` reports — stderr already
     /// holds the AOT-matching text; resident returns `Ran` with this code.
     pub(crate) exit_code: Option<i32>,
@@ -515,15 +522,16 @@ impl JitRuntime {
     }
 
     /// A Rust helper panic is an engine fault, not a user runtime stop. Keep
-    /// no Rust payload in the program report; the resident driver owns the
-    /// branded ICE boundary.
-    pub(crate) fn set_host_fault(&mut self, _msg: &str) {
+    /// the ICE status and trap boundary, while carrying the owned message to
+    /// the resident ICE renderer as data.
+    pub(crate) fn set_host_fault(&mut self, msg: &str) {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
         self.host_fault = true;
+        self.host_fault_payload_captured = true;
         self.exit_code = Some(jet_foundation::ExitCodes::ICE);
-        self.trapped = Some("__jet_host_fault__".to_string());
+        self.trapped = Some(msg.to_string());
     }
 
     pub(crate) fn set_deadline(&mut self, rendered: String) {

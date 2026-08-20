@@ -71,6 +71,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
+        int_list_views: Vec::new(),
         program_allocator: cap_bytes.map_or_else(
             jet_codegen::program_allocator::JetProgramAllocator::system,
             jet_codegen::program_allocator::JetProgramAllocator::counting,
@@ -156,6 +157,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         complex_values: Vec::new(),
         trapped: None,
         host_fault: false,
+        host_fault_payload_captured: false,
         exit_code: None,
         deadline_exceeded: None,
         readers: Vec::new(),
@@ -178,6 +180,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     // publish_capture reads the heap after this scrub for the warm-run artifact.
     let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
+    rt.int_list_views.clear();
     rt.program_allocator.release_hosted_reservations();
     rt.heap.install_string_slots(&compile_strings);
     rt.compute.clear();
@@ -198,6 +201,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.current_function.clear();
     rt.current_source_line.clear();
     rt.host_fault = false;
+    rt.host_fault_payload_captured = false;
     rt.jit_callables.clear();
     rt.atexit_handlers.clear();
     rt.channels.clear();
@@ -256,14 +260,23 @@ fn take_host_fault_outcome(runtime: &mut JitRuntime) -> Option<RunOutcome> {
     if !std::mem::take(&mut runtime.host_fault) {
         return None;
     }
-    runtime.trapped.take();
+    let payload_captured = std::mem::take(&mut runtime.host_fault_payload_captured);
+    let what = if payload_captured {
+        runtime
+            .trapped
+            .take()
+            .unwrap_or_else(|| "the JIT runtime helper failed".to_string())
+    } else {
+        runtime.trapped.take();
+        "the JIT runtime helper failed".to_string()
+    };
     runtime.exit_code.take();
     let stdout = runtime.stdout.clone();
     reset_run_heap(runtime);
     Some(RunOutcome::Problems(vec![
         jet_foundation::Diagnostics::Diagnostic::runtime_host_fault(
             stdout,
-            "the JIT runtime helper failed".to_string(),
+            what,
         ),
     ]))
 }

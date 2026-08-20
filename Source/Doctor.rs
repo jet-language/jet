@@ -413,11 +413,12 @@ fn check_cross_target(triple: &str) -> Check {
                 false,
             );
         }
-        Check::ok(
-            "cross",
-            triple,
-            format!("installed ({})", target_lib.display()),
-        )
+        let description = if triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
+            format!("Jet WASI Preview 2 server Component target ({})", target_lib.display())
+        } else {
+            format!("installed ({})", target_lib.display())
+        };
+        Check::ok("cross", triple, description)
     } else {
         Check::note(
             "cross",
