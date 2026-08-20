@@ -128,7 +128,11 @@ fn jet_auth_opaque_token(prefix: &str) -> Result<String, String> {
 /// defaults are ONE fact. Password login, magic-link consume, and OAuth finish
 /// all mint a session cookie; spelling the flags at each site meant a hardening
 /// change could reach two of the three.
-fn jet_auth_session_cookie(id: &str) -> String {
+///
+/// Named `_mint` because `jet_auth_session_cookie` is already taken by the Core
+/// accessor below, which is the registered symbol for `core.auth.session_cookie`
+/// and returns a stored cookie rather than building one.
+fn jet_auth_session_cookie_mint(id: &str) -> String {
     format!("jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/")
 }
 
@@ -139,7 +143,7 @@ fn jet_auth_session_value(
 ) -> Result<JetAuthSession, String> {
     let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
     let id = jet_auth_opaque_token("sess")?;
-    let cookie = jet_auth_session_cookie(&id);
+    let cookie = jet_auth_session_cookie_mint(&id);
     Ok(JetAuthSession {
         id,
         user_id,
@@ -292,7 +296,7 @@ fn jet_auth_magic_link_consume(
         id: id.clone(),
         user_id: entry.user_id,
         expires_at,
-        cookie: jet_auth_session_cookie(&id),
+        cookie: jet_auth_session_cookie_mint(&id),
     };
     store.sessions.push(session.clone());
     Ok(session)
@@ -348,7 +352,7 @@ fn jet_auth_oauth_finish(
         id: id.clone(),
         user_id,
         expires_at,
-        cookie: jet_auth_session_cookie(&id),
+        cookie: jet_auth_session_cookie_mint(&id),
     };
     store.sessions.push(session.clone());
     Ok(session)
