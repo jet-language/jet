@@ -9903,34 +9903,6 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<String, Diagnostic> {
         let _ = scope;
-        if let CtValue::List(entries) = v {
-            let mut rendered = Vec::new();
-            for entry in entries {
-                let CtValue::Struct { type_name, fields } = entry else { break };
-                if type_name != "FieldError" {
-                    rendered.clear();
-                    break;
-                }
-                let string_field = |name: &str| {
-                    fields.iter().find_map(|(field, value)| {
-                        (field == name).then_some(value).and_then(|value| match value {
-                            CtValue::Str(text) => Some(text.as_str()),
-                            _ => None,
-                        })
-                    })
-                };
-                let path = string_field("path").unwrap_or_default();
-                let reason = string_field("reason").unwrap_or_default();
-                rendered.push(if path.is_empty() {
-                    reason.to_string()
-                } else {
-                    format!("at `{path}`: {reason}")
-                });
-            }
-            if !rendered.is_empty() {
-                return Ok(format!("[{}]", rendered.join(", ")));
-            }
-        }
         if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
             let canonical_type_name = crate::Codegen::nominal_leaf(type_name)
                 .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)

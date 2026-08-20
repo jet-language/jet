@@ -1804,6 +1804,16 @@ impl TraitRegistry {
         // D-DATAFLOW1=A: DataError Display is the typed analytics/stream error law.
         self.trait_impls
             .insert(("DataError".to_string(), DISPLAY.to_string()));
+        // D-VALIDATE-DECODE1=B: the one accumulated decode/validate failure is
+        // `[FieldError]`, and a list is displayable exactly when its element is.
+        // Without this row the contract was printable (`print(errs)` — FieldError
+        // is already `auto_printable` above) but not interpolatable (`"{errs}"`
+        // was E0915), the exact predicate split `is_core_shown_type`
+        // (jet-sema/src/Sema/Diagnostics.rs) warns about. The Prelude owns the
+        // text: `impl JetShow`/`impl JetDisplay for FieldError` in
+        // Prelude/CoreLib/JetStd/DataTree.rs, one projection every tier calls.
+        self.trait_impls
+            .insert(("FieldError".to_string(), DISPLAY.to_string()));
         for ty in [
             "EncodingFormat",
             "EncodingErrorKind",

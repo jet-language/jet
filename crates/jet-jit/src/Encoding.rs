@@ -22,6 +22,10 @@ mod encoding_error_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
 }
 
+mod field_error_rt {
+    include!("../../jet-codegen/src/Prelude/Core/FieldError.rs");
+}
+
 mod inline_range_rt {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
@@ -1820,7 +1824,10 @@ fn jet_jit_encoding_error_show(handle: i64) -> i64 {
     })
 }
 
-/// Mirror `jet_std::FieldError` list rendering for resident `print(errors)`.
+/// Resident `[FieldError]` rendering for `print(errors)` and `"{errors}"`.
+/// Marshals each record out of the heap and calls the one Prelude projection
+/// (`jet_field_error_kernel_show`); the `[a, b]` wrapper matches AOT's
+/// `impl<T: JetDisplay> JetDisplay for Vec<T>` (Prelude/Core/Values.rs).
 fn jet_jit_decode_error_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let mut shown = Vec::new();
@@ -1831,11 +1838,7 @@ fn jet_jit_decode_error_show(handle: i64) -> i64 {
             let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
             let path = rt.heap.clone_string(path_id).unwrap_or_default();
             let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
-            shown.push(if path.is_empty() {
-                reason
-            } else {
-                format!("at `{path}`: {reason}")
-            });
+            shown.push(field_error_rt::jet_field_error_kernel_show(&path, &reason));
         }
         let shown = format!("[{}]", shown.join(", "));
         rt.heap.alloc_string(shown)

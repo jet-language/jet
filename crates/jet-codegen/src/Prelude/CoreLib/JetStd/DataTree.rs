@@ -422,17 +422,24 @@
         };
     }
 
+    // D-VALIDATE-DECODE1=B: one user-facing projection of a decode/validate
+    // failure. `JetShow` is the value shape; `JetDisplay` is the interpolation
+    // hook `{errs}` lowers to (`Vec<T>` has the blanket impl), so `print(errs)`
+    // and `print("{errs}")` render the same text. The text itself lives in
+    // `jet_field_error_kernel_show` (Prelude/Core/FieldError.rs), which the
+    // Cranelift host and the TIR evaluator call too — no tier re-encodes it.
     impl super::JetShow for FieldError {
         fn jet_show(&self) -> String {
-            if self.path.is_empty() {
-                self.reason.clone()
-            } else {
-                format!("at `{}`: {}", self.path, self.reason)
-            }
+            jet_field_error_kernel_show(&self.path, &self.reason)
         }
     }
     impl super::JetDebug for FieldError {
         fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDisplay for FieldError {
+        fn jet_display(&self) -> String {
             <Self as super::JetShow>::jet_show(self)
         }
     }

@@ -662,20 +662,18 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     // rendered the projection — the same value printed two ways.
     if core_type == "FieldError" {
         if let CtValue::Struct { fields, .. } = value {
-            let text = |wanted: &str| -> Option<&str> {
-                fields
-                    .iter()
-                    .find_map(|(name, held)| {
-                        (name
-                            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-                            .unwrap_or(name.as_str())
-                            == wanted)
-                            .then_some(held)
-                    })
-                    .and_then(|held| match held {
-                        CtValue::Str(text) => Some(text.as_str()),
-                        _ => None,
-                    })
+            let get = |wanted: &str| -> Option<&CtValue> {
+                fields.iter().find_map(|(name, held)| {
+                    (name
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(name.as_str())
+                        == wanted)
+                        .then_some(held)
+                })
+            };
+            let text = |wanted: &str| match get(wanted)? {
+                CtValue::Str(held) => Some(held.as_str()),
+                _ => None,
             };
             return Some(super::field_error_kernel::jet_field_error_kernel_show(
                 text("path")?,

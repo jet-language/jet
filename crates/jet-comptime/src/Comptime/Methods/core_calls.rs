@@ -129,6 +129,10 @@ mod encoding_error_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
 }
 
+mod field_error_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/FieldError.rs");
+}
+
 mod fmt_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Fmt.rs");
 }

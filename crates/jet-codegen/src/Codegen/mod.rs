@@ -750,6 +750,10 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
+    // D-VALIDATE-DECODE1=B: the accumulated decode/validate failure has one
+    // rendering. Splice it beside the type so `impl JetShow for FieldError`
+    // below, the Cranelift host, and the TIR evaluator cannot drift (I9).
+    include_str!("../Prelude/Core/FieldError.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
     "\njet_datatree_decode_helpers!();\n",
     // `EncodingStream.rs` validates exact JSON number tokens through
