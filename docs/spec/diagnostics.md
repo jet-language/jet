@@ -750,7 +750,7 @@ renumbered, and no new `W` code may be allocated.
 | E1111 | sema  | *retired by D-CONC-CROSS1; parallel crossings use E1101/E1102* |
 | E1112 | sema  | a task combinator has no task branch (D-CONCSELECT1) |
 | E1130 | sema/parse | *retired by D-CONC-CROSS1; kernel proof crossings use E1102 and duplicate markers use E0003* |
-| L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
+| L1101 | sema  | Bound `Task` value dropped without discharge  |
 | W0410 | sema  | `core.math.random.bytes` output used in a crypto context — `core.math.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
 | E2301 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference return spelling `-> &T` remains absent; invalid named-view returns use E2305/E2307) |
 | E2302 | sema  | *retired for raw references by D-MEM1/S3* (raw-reference field spelling `&T`/`#Ref` remains absent; named view fields follow D-MEM-VIEWRET1) |
@@ -1141,7 +1141,7 @@ CLI.
 |------|-----|-----|
 | *retired; kernel proof crossings use E1102* | Safe-kernel refusal is part of the concurrent crossing family. | Follow E1102 at the kernel boundary. |
 | *retired; duplicate markers use E0003* | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
-| L1101 | A `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged only by joining it. | Join it with `.join()`, or write `.detach()` to let it go free. |
+| L1101 | A bound `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged by joining it or using its result. | Join it with `.join()`, use its result, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Write `task work()` or use `task.all { work_a(), work_b() }`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 | E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |

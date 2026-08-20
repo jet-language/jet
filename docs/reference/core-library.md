@@ -2653,9 +2653,9 @@ there's no combined channel value).
 
 Values crossing a task body or `send` must be sendable: no `View<T>` or string-view
 windows, no trait values, and no closure values with non-sendable captures.
-Copyable captures copy automatically; owned non-copyable captures move. A
-`Task` that goes out of scope without
-`.join()` emits warning **L1101**.
+Copyable captures copy automatically; owned non-copyable captures move. A bound
+`Task` that goes out of scope without `.join()`, without its result being used,
+and without `.detach()` is a compile error (**L1101**).
 With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`handle.join()` /
 `ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
 and `ProcessChild.wait()`) observe the inherited budget and report runtime

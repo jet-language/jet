@@ -2381,10 +2381,11 @@ Example and golden: `examples/features/concurrency/freeze_capture.jet` and
 `tests/ui/freeze_shared_source.jet`.
 
 `handle.join() => T ? TaskFailure` waits for the task and consumes its handle.
-Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a
-`Task` without joining or detaching emits **L1101** because the program may end
-before the task finishes. A panic, cancellation, or blown deadline is returned
-as `.Panicked(reason)`, `.Cancelled`, or `.DeadlineBlown`.
+Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a bound
+`Task` without joining, using its result, or detaching it is a compile error
+(**L1101**, D-CONC-JOIN1) because the program may end before the task finishes.
+A panic, cancellation, or blown deadline is returned as `.Panicked(reason)`,
+`.Cancelled`, or `.DeadlineBlown`.
 
 `handle.detach()` (D-DETACH1) fire-and-forgets the task — it consumes the
 `Task<T>` handle so **L1101** is suppressed, and the task continues running in
