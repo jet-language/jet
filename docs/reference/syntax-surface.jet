@@ -62,12 +62,12 @@ ready :: true // Bool (S11)
 // Default numerics are exact Int / Float (f64) (S42, D-INTBIG1).
 // Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
 fn sized() {
-small :: U8.{ 255 }
-wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
+small :: U8{ 255 }
+wide :: I64{ 9_000_000_000 } // `_` digit separators (S67)
     mask :: 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big :: 6.022e23                 // float exponent (S67)
     // safe widening is implicit; narrowing uses named methods (S42)
-    f := Float.{ 0.0 }
+    f := Float{ 0.0 }
     f = small
     n :: Int.from_float(f) ?? 0
 }
@@ -75,8 +75,8 @@ wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
 // D-INTBIG1/D-NUMOPS1: default Int arithmetic is exact; fixed-width arithmetic
 // traps by default. Fixed-width receiver methods make the policy explicit.
 // fn overflow_surface() {
-//     a :: U8.{200}
-//     b :: U8.{100}
+//     a :: U8{200}
+//     b :: U8{100}
 //     print(a.wrapping_add(b))       // 44
 //     print(a.saturating_add(b))      // 255
 //     print(a.checked_add(b) ?? 0)    // 0
@@ -86,19 +86,19 @@ wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
 // ============================================================================
 // FUNCTIONS & GENERICS
 // ============================================================================
-// `fn name(params) => Ret :: value` or `fn name(params) => Ret { … }` (S1/S12).
+// `fn name(params) :> Ret :: value` or `fn name(params) :> Ret { … }` (S1/S12).
 // Private by default; `pub` exports
 // to every consumer; `pub(package)` exports only inside the package boundary.
 
-fn greet(who: String) => String :: "hello, {who}"
-fn id<T>(x: ^T) => T :: x
-fn largest<T: Comparable>(xs: [T]) => T {
+fn greet(who: String) :> String :: "hello, {who}"
+fn id<T>(x: ^T) :> T :: x
+fn largest<T: Comparable>(xs: [T]) :> T {
     // ...
 }
 
 // Argument labels bind by name and may skip defaults; `/` and `*` mark the
 // positional-only and label-only zones (S61, D-APILABEL1=A).
-fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) => Bool :: urgent
+fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) :> Bool :: urgent
 fn call_with_labels() {
     schedule("backup", delay: 30, urgent: true)   // labels are checked docs
     schedule("ping")                               // trailing defaults fill
@@ -107,8 +107,8 @@ fn call_with_labels() {
 // S83 / D-CHOOSE-HEADS1=A: multi-head functions use one exhaustive enum table.
 // Same name, different parameter patterns, dispatched by argument shape; the
 // first matching declaration-order head wins.
-// fn area(Circle(r: Float)) => Float :: 3.14 * r * r
-// fn area(Rect(w: Float, h: Float)) => Float :: w * h
+// fn area(Circle(r: Float)) :> Float :: 3.14 * r * r
+// fn area(Rect(w: Float, h: Float)) :> Float :: w * h
 
 
 // ============================================================================
@@ -164,27 +164,27 @@ fn control() {
 }
 
 // `if` is the universal branching keyword (D-IF1).
-fn branch(a: Int, b: Int) => Int {
+fn branch(a: Int, b: Int) :> Int {
     // expression form — `else` required, both branches share a type (S68)
-    m :: if a > b -> a else -> b
+    m :: if a > b :> a else :> b
 
     // Arm tables are ordered. Each head is evaluated as written; only the
     // first matching or true arm runs.
     if a < 0 print("negative")
     if {
-        a == 0 -> print("zero")
-        a < b -> print("smaller")
+        a == 0 :> print("zero")
+        a < b :> print("smaller")
     }
     word :: if {
-        a < b -> "low"
-        else -> "high"
+        a < b :> "low"
+        else :> "high"
     }
 
     // An arm table may evaluate unrelated Boolean expressions in order.
     label :: if {
-        m == 200 -> "ok"
-        m == 400 || m == 404 -> "client error"
-        else -> "other"
+        m == 200 :> "ok"
+        m == 400 || m == 404 :> "client error"
+        else :> "other"
     }
     return m
 }
@@ -193,30 +193,30 @@ fn branch(a: Int, b: Int) => Int {
 // ============================================================================
 // STRUCTS
 // ============================================================================
-// Construction is dot-brace `T.{ field: value }` (D-DOTCTOR1/2, S29-FLUSH).
+// Construction is `T{ field: value }` (D-LIT-DOT1, D-DOTCTOR1/2).
 // Methods may live in the body or in a separate `impl` block (S27).
 
 struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) => Float :: (self.x * self.x) + (self.y * self.y)
-    fn origin() => Point {                // no `self` => static/constructor (D-CTOR1)
-        return Point.{x: 0.0, y: 0.0}
+    fn dist_sq(self) :> Float :: (self.x * self.x) + (self.y * self.y)
+    fn origin() :> Point {                // no `self` :> static/constructor (D-CTOR1)
+        return Point{x: 0.0, y: 0.0}
     }
-    fn polar(r: Float, theta: Float) => Point { return Point.{x: r, y: theta} }
+    fn polar(r: Float, theta: Float) :> Point { return Point{x: r, y: theta} }
 }
 
 // Field punning: a bare name is shorthand for `name: name` when in scope (S77).
 fn punning(name: String, x: Float, y: Float) {
-    p :: Point.{x, y}                      // ≡ Point.{x: x, y: y}
+    p :: Point{x, y}                       // ≡ Point{x: x, y: y}
 }
 
 // Tuples are named-only (S73); destructuring reuses bracket conventions (S74).
 fn aggregates() {
     pair :: (x: 1, y: 2)                    // named tuple
     print("{pair.x} {pair.y}")
-    Point.{x, y} :: Point.origin()         // struct destructure (S74)
+    Point{x, y} :: Point.origin()          // struct destructure (S74)
     (x: a, y: b) :: pair                    // tuple destructure
 }
 
@@ -234,20 +234,20 @@ enum Shape {
 
 //<<< Owner Enum Dispatch: Enum variants syntax cleanup
 // Leading-dot patterns are required (D-ENUMDOT1 / E0367).
-fn describe(s: Shape) => String {
+fn describe(s: Shape) :> String {
     return if s == {
-        .Circle(r) -> "circle {r}"             // binds `r`
-        .Rect(w, h) -> "rect {w}x{h}"
-        .Empty -> "nothing"
+        .Circle(r) :> "circle {r}"             // binds `r`
+        .Rect(w, h) :> "rect {w}x{h}"
+        .Empty :> "nothing"
     }
 }
 //>>> tracked: #32 D-ENUMDOT1
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
-fn nested(r: Shape ? Error) => Bool {
+fn nested(r: Shape ? Error) :> Bool {
     return if r == {
-        .Ok(.Rect(w, h)) && w > h -> true
-        else -> false
+        .Ok(.Rect(w, h)) && w > h :> true
+        else :> false
     }
 }
 
@@ -259,21 +259,21 @@ fn nested(r: Shape ? Error) => Bool {
 
 enum ParseError { Empty }
 
-fn parse_age(raw: String) => Int ? ParseError {
+fn parse_age(raw: String) :> Int ? ParseError {
     if raw == "" {
         return Err(ParseError.Empty)          // Err(...) constructor (S35)
     }
     return Ok(7)                              // Ok(...) constructor
 }
 
-fn use_errors(raw: String) => Int ? ParseError {
+fn use_errors(raw: String) :> Int ? ParseError {
     n :: parse_age(raw)?                       // `?` propagates (S7)
     fallback :: parse_age("0") ?? 0            // `??` fallback (S35/S71)
     return Ok(n * 2)
 }
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
-fn optionals(user: User?) => String {
+fn optionals(user: User?) :> String {
     city :: user?.address?.city               // optional chaining produces T? (S71)
     name :: user?.display_name()              // `?.` through methods (D-SUGAR6)
     return city ?? "unknown"
@@ -288,7 +288,7 @@ impl FileErr => Err {
 impl String => Err {
     return Err(self)
 }
-// fn load() => Config ? {
+// fn load() :> Config ? {
 //     return Err(Error.message("bad config").code(2).with_source(io_err))
 // }
 // fn run() ? {
@@ -311,17 +311,17 @@ fn skip_bad(lines: [String]) {
 // Named traits, not Go-structural (S28). Two equivalent impl spellings.
 
 trait Shape2 {
-    fn area(self) => Float
+    fn area(self) :> Float
 }
 
 struct Square { side: Float }
 
 impl Square.Shape2 {                          // top-level impl (S28)
-    fn area(self) => Float :: self.side * self.side
+    fn area(self) :> Float :: self.side * self.side
 }
 
 // Trait name in type position => dynamic dispatch; `<T: Trait>` => monomorphize (S48).
-fn total_area(shapes: [Shape2]) => Float {     // boxed dynamic dispatch
+fn total_area(shapes: [Shape2]) :> Float {     // boxed dynamic dispatch
     // ...
 }
 
@@ -352,14 +352,14 @@ struct Score {
 // List `[a, b, c]` (S37); map `["k": v]` (S38). Type shorthands `[T]` / `[K:V]`.
 
 fn collections() {
-     nums := [Int].{ 3, 1, 2 } // list type shorthand (S65)
+     nums := [Int]{ 3, 1, 2 } // list type shorthand (S65)
     nums.push(4)
     nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
-     seen := [Int].{} // (S78 / explicit)
+     seen := [Int]{} // (S78 / explicit)
 
-     fruits := [String:Float].{ "limes": 4.2 } // map shorthand (S64)
+     fruits := [String:Float]{ "limes": 4.2 } // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
     got :: fruits.get("limes")                  // safe access produces V? (S39)
 
@@ -374,11 +374,11 @@ fn collections() {
 
     // concrete map/filter are eager; `.lazy()` enters the Iter adapter plane
     // (D-CORE-EAGER1 / D-LOOPMAP1=B).
-    out :: nums.indexed().zip(seen).take(2).map((p) => p.value).to_list()
+    out :: nums.indexed().zip(seen).take(2).map((p) :> p.value).to_list()
 }
 
 // Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
-fn fixed() => [Int#3] :: [1, 2, 3]                            // `.len` is a compile-time const
+fn fixed() :> [Int#3] :: [1, 2, 3]                            // `.len` is a compile-time const
 fn strings() {
     parts :: "a,b,c".split(",").to_list()
     trimmed :: "  hi  ".trim()
@@ -392,8 +392,8 @@ fn strings() {
 // Typed-head bodies give backslashes to the head grammar (D-BOUND-RAW1=A).
 // `\n` stays literal here; ordinary strings keep the four-entry escape table.
 fn typed_head_bodies() {
-    path :: Path.{"C:\logs\app.txt"}
-    regex :: Regex.{"\d+{{2}}"}               // Regex still rejects holes
+    path :: Path{"C:\logs\app.txt"}
+    regex :: Regex{"\d+{{2}}"}               // Regex still rejects holes
 }
 
 // Libraries declare checked text heads on the existing marker rail
@@ -406,7 +406,7 @@ marker Selector on [.Text] {
 fn accept_selector(selector: Selector) { }
 fn checked_text() {
     value :: "cart"
-    selected :: Selector.{"#cart {value}"}
+    selected :: Selector{"#cart {value}"}
     accept_selector(selected)
     accept_selector(Selector.raw("already checked"))
 }
@@ -415,23 +415,23 @@ fn checked_text() {
 // ============================================================================
 // CLOSURES
 // ============================================================================
-// `(params) => expr` or `(params) => { ... }` (S46). `=>` defines a callable
-// result; `->` selects an arm or yields a finite-loop item.
+// `(params) :> expr` or `(params) :> { ... }` (S46). `:>` defines a callable
+// result, selects an arm, or yields a finite-loop item.
 
 fn closures() {
     nums :: [3, 1, 2]
-    squares :: nums.map((n: Int) => n * n)
-    big :: squares.filter((n: Int) => n > 5)
-    total :: nums.reduce(0, (acc: Int, n: Int) => acc + n)
+    squares :: nums.map((n: Int) :> n * n)
+    big :: squares.filter((n: Int) :> n > 5)
+    total :: nums.reduce(0, (acc: Int, n: Int) :> acc + n)
 
     // captures are implicit: copyable values copy; other owned values move
-    make :: () => total
+    make :: () :> total
 }
 
-// Function types: `fn(T1, T2) => R` (S47). Named fns coerce to function values.
-fn apply(f: fn(Int) => Int, x: Int) => Int :: f(x)
+// Function types: `fn(T1, T2) :> R` (S47). Named fns coerce to function values.
+fn apply(f: fn(Int) :> Int, x: Int) :> Int :: f(x)
 fn fixed_size_list() {
-    tripled :: [Int#3].{3, 6, 9}
+    tripled :: [Int#3]{3, 6, 9}
     [t0, t1, t2] :: tripled
 }
 
@@ -439,7 +439,7 @@ fn fixed_size_list() {
 // one ordinary consumer pull. The producer resumes after that value is
 // accepted. A consumer `break` drops the iterator; task cancellation and
 // deferred cleanup follow D-CANCELMODEL1=C at the next wait point.
-fn numbers(n: Int) => Stream<Int> {
+fn numbers(n: Int) :> Stream<Int> {
     i := 0
     loop i < n {
         yield i
@@ -468,7 +468,7 @@ use core.regex as re                  // std-only linear regex (D-REGEXENGINE1)
 
 // Inline module; `pub` controls cross-file access (S18).
 module math {
-    pub fn double(n: Int) => Int :: n * 2
+    pub fn double(n: Int) :> Int :: n * 2
 }
 
 // Kebab-case allowed in name positions only (package/module/system/image/env) (S84).
@@ -476,21 +476,21 @@ module web-app { }
 
 
 // ============================================================================
-// EFFECTS  (=> / =[IO]=>)
+// EFFECTS  (:> / :[IO]>)
 // ============================================================================
-// Every fn carries an inferred, erased effect set; an `=[…]=>` row bounds it (D-EFF1).
+// Every fn carries an inferred, erased effect set; a `:[…]>` row bounds it (D-EFF1).
 // Effect tags are PascalCase (D-CASING1). Effects flow through calls (D-EFF2).
 // D-SHAPE8 puts every explicit effect row inside the arrow.
 
-fn square(n: Int) =[]=> Int :: n * n
-fn announce(label: String, n: Int) =[IO]=> {    // upper bound: may use IO
+fn square(n: Int) :[]> Int :: n * n
+fn announce(label: String, n: Int) :[IO]> {    // upper bound: may use IO
     print("{label} {n}")
 }
 
 // Expert levers (D-EFF2): demand/bound a callback, or publish a pass-through.
 // The same arrow-row spelling applies to function types.
-fn run_all(cb: fn(Int) =[]=> Int) { }      // lever 1: param-type effect bound
-fn map_each(f: fn(Int) => Int) =[via f]=> { }   // lever 2: callback pass-through
+fn run_all(cb: fn(Int) :[]> Int) { }      // lever 1: param-type effect bound
+fn map_each(f: fn(Int) :> Int) :[via f]> { }   // lever 2: callback pass-through
 
 // Scoped authority: granted into a lexical scope, revoked at scope end (D-SCAP1).
 fn with_fs() {
@@ -525,7 +525,7 @@ fn call_sites(player: Player, file: File) {
 
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
 #Unsafe("reads through a raw pointer; addr must be live and valid")
-fn deref_cell(cell: Int) => Int {
+fn deref_cell(cell: Int) :> Int {
     addr :: mem.address_of(cell)               // address-of is a call, not a sigil
     #Unsafe("addr is the address of a live Int on this frame") {
         p :: *addr                             // raw-pointer-of
@@ -536,7 +536,7 @@ fn deref_cell(cell: Int) => Int {
 // Visible uninitialization, gated behind `use core.mem`; write-before-read
 // proof (D-UNINIT1); body sentinel spelling (D-UNINIT-SENTINEL2).
 fn uninit() {
-    n := Int.{ uninit }
+    n := Int{ uninit }
     n = 7
     print("{n}")
 }
@@ -595,18 +595,18 @@ fn tasks_demo() {
 
 tag Reviewed                                   // marker tag, erases at runtime
 tag Internal { }
-trait Greeter { fn greet(self) => String }
+trait Greeter { fn greet(self) :> String }
 
 // Typestate via transitioning tags (D-STATE1): require a state, or transition states.
 #State(Open) fn write_line(self, s: String) { }       // valid only when Open
-#Transition(Closed, Open) fn open(self) => File { }  // consume Closed, yield Open
+#Transition(Closed, Open) fn open(self) :> File { }  // consume Closed, yield Open
 
 // Taint tracking (D-TAINT1): `#Input` value-fact spreads; `#Scrub(Input) fn` strips it.
 fn taint(raw: String) {
     user :: #Input raw                        // marks untrusted input
     clean :: sanitize(user)                     // strip via sanitizer
 }
-#Scrub(Input) fn sanitize(s: #Input String) => String { return s }
+#Scrub(Input) fn sanitize(s: #Input String) :> String { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
 #SingleUse
@@ -614,12 +614,12 @@ struct Ticket { id: Int }
 
 // Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare
 // statement (E0419). D-MARKERMOVE1: `#MustUse` is a contract marker.
-#MustUse fn ack() => Int { return 1 }
+#MustUse fn ack() :> Int { return 1 }
 #MustUse struct Receipt { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 #UnitFamily(Currency) { usd, eur }
-fn price() => Usd :: Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
+fn price() :> Usd :: Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
 #Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 // WANT:
@@ -643,7 +643,7 @@ fn simd() {
 // Rust FFI: explicit `extern rust` blocks, each entry a Jet signature + path (S50).
 
 extern rust "base64@0.22" {
-    fn b64encode(s: String) => String  = "base64::encode"
+    fn b64encode(s: String) :> String  = "base64::encode"
 }
 
 // C FFI: auto-generated bindings, consumed with `use c.<lib> as alias` or
@@ -678,7 +678,7 @@ fn c_ffi() {
 /// ```jet
 /// double(21) // => 42
 /// ```
-fn double(n: Int) => Int :: n * 2
+fn double(n: Int) :> Int :: n * 2
 fn invariants(n: Int) {
     require(n > 0, "n must be positive")
     panic("unreachable")

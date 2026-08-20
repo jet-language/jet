@@ -1,0 +1,23 @@
+// D-SQL-SURFACE1=C: zero-import CSV query with typed rows. The same SQL head
+// also accepts an in-memory `[Sale]`; both doors use one Prelude query kernel.
+// DuckDB comparison: zero-import and typed rows are the same wins here; Jet
+// also rejects an unknown field at compile time instead of at query runtime.
+use core.encoding.csv as csv
+use core.files as files
+
+#Codable
+struct Sale {
+    item: String
+    qty: Int
+}
+
+fn run() ? IOError | [FieldError] {
+    scratch :: files.temp_dir("jet-analytics-query")?
+    path :: Path.from(scratch.path).join("sales.csv").to_string()
+    files.write(path, "item,qty\npen,3\nink,5\nclip,1")?
+    query :: SQL{"SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"}
+    sales :: csv.query<Sale>(path, query)?
+    total :: sales.map(s :> s.qty).sum()
+    print("rows: {sales}")
+    print("total qty: {total}")
+}

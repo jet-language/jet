@@ -10,13 +10,13 @@ struct AppConfig {
     hits: Int
 }
 
-fn handle(id: Int, config: Shared<AppConfig>) => String {
+fn handle(id: Int, config: Shared<AppConfig>) :> String {
     label :: config.name
     return "request {id} on {label}"
 }
 
 fn run() {
-    config :: shared AppConfig.{name: "jet-server", hits: 0}
+    config :: shared AppConfig{name: "jet-server", hits: 0}
     // Every spawned task captures `config` with no `^` — a `Shared<T>` is
     // meant to be handed to as many concurrent tasks as needed.
     t1 :: task handle(1, config)

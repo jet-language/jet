@@ -39,7 +39,7 @@ struct NodeQueue {
 
 // Safe public API: the `#Unsafe` block stays inside the function body. Callers
 // of `wire_self` do not need an audited region (D-PIN1 step 5 / criterion 2).
-fn wire_self(node: &SelfNode) => Pin<SelfNode> {
+fn wire_self(node: &SelfNode) :> Pin<SelfNode> {
     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
         node.self_addr = mem.address_of(node.payload)
     }
@@ -48,7 +48,7 @@ fn wire_self(node: &SelfNode) => Pin<SelfNode> {
 
 fn run() {
     // Caller storage: no allocator, no heap node, no copy of `node`.
-    node := Node.{payload: 41, hops: 0}
+    node := Node{payload: 41, hops: 0}
     pinned :: mem.pin(&node)
 
     // Editing through the pin is legal and lands in `node` itself; only moving
@@ -60,13 +60,13 @@ fn run() {
     // The queue stores the same promise. `head` is declared `Pin<Node>`, so
     // reaching it through the queue projects to a pin again (D-PIN3=A) rather
     // than to a copy of the node.
-    queue :: NodeQueue.{label: "ready", head: mem.pin(&node)}
+    queue :: NodeQueue{label: "ready", head: mem.pin(&node)}
     print("label: {(queue.label)}")
     print("payload: {(queue.head.payload)}")
     print("hops: {(queue.head.hops)}")
 
     // Self-referential construction through a safe library API (criterion 2+5).
-    self_node := SelfNode.{payload: 7, self_addr: 0}
+    self_node := SelfNode{payload: 7, self_addr: 0}
     self_pinned :: wire_self(&self_node)
     print("self_payload: {(self_pinned.payload)}")
     print("self_wired: {(self_pinned.self_addr != 0)}")

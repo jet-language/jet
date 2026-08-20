@@ -11,8 +11,8 @@ fn run() {
     entries :: fs.list_dir(dir) ?? return Err("list_dir failed")
     loop entry, entries {
         if {
-            entry.is_dir -> print("dir:  {entry.name}")
-            else -> print("file: {entry.name}")
+            entry.is_dir :> { print("dir:  {entry.name}") }
+            else :> { print("file: {entry.name}") }
         }
     }
     joined :: Path.from(dir).join("hello.txt")

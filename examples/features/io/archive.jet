@@ -3,7 +3,7 @@
 use core.archive as ar
 
 fn run() {
-    original :: [U8].{72, 101, 108, 108, 111}  // ASCII "Hello"
+    original :: [U8]{72, 101, 108, 108, 111}  // ASCII "Hello"
     // Zip round-trip: compress into a single-entry zip archive, then extract.
     zip_data :: ar.zip_compress("entry.txt", original)
     print(zip_data.len() > 0)
@@ -14,12 +14,12 @@ fn run() {
     print(ar.adler32(vector) == 152961502)
     deflated :: ar.deflate(original)
     print(ar.inflate(deflated) == original)
-    empty :: [U8].{}
-    bye :: [U8].{98, 121, 101}  // ASCII "bye"
+    empty :: [U8]{}
+    bye :: [U8]{98, 121, 101}  // ASCII "bye"
     // The streaming state keeps multiple named entries in one archive.
     writer0 :: ar.zip_open(empty)
     writer1 :: ar.zip_write(writer0, "hello.txt", original)
-    writer2 :: ar.zip_write(writer1, "bye.txt", [U8].{98, 121, 101})
+    writer2 :: ar.zip_write(writer1, "bye.txt", [U8]{98, 121, 101})
     multi_zip :: ar.zip_close(writer2)
     print(ar.zip_names_json(multi_zip) == "[\"hello.txt\",\"bye.txt\"]")
     reader :: ar.zip_open(multi_zip)

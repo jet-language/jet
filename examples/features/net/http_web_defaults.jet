@@ -15,9 +15,9 @@ struct Reading {
 
 // One typed read of the request body, one typed JSON answer. The content type
 // is set for you, and the body cap still frames the read.
-fn store_reading(req: HTTPRequest) => HTTPResponse ? HTTPError {
-    reading :: req.json<Reading>() ?? return Ok(http_server.json(400, Reading.{city: "bad body", degrees: 0}))
-    return Ok(http_server.json(201, Reading.{city: reading.city, degrees: reading.degrees + 1}))
+fn store_reading(req: HTTPRequest) :> HTTPResponse ? HTTPError {
+    reading :: req.json<Reading>() ?? return Ok(http_server.json(400, Reading{city: "bad body", degrees: 0}))
+    return Ok(http_server.json(201, Reading{city: reading.city, degrees: reading.degrees + 1}))
 }
 
 fn run() ? HTTPError | IOError | NetError | TaskFailure {
@@ -31,7 +31,7 @@ fn run() ? HTTPError | IOError | NetError | TaskFailure {
     // built, so that mistake never reaches a running server.
     policy :: http_server.cors_policy(["https://app.example"])?
     http_server.cors(mux, policy)
-    mux.post("/readings", (req: HTTPRequest) => store_reading(req))
+    mux.post("/readings", (req: HTTPRequest) :> store_reading(req))
     // Serve a whole folder under /assets. Dot-files stay hidden, and a
     // directory request serves its index.html.
     http_server.static_files(mux, "/assets", "/tmp/jet_http_public")

@@ -8,49 +8,49 @@ struct Rect {
     width: Float
     height: Float
 
-    fn new(width: Float, height: Float) => Rect { return Rect.{width: width, height: height} }
+    fn new(width: Float, height: Float) :> Rect { return Rect{width: width, height: height} }
 
-    fn area(self) => Float :: (self.width * self.height)
+    fn area(self) :> Float :: (self.width * self.height)
 
-    fn scale(self, factor: Float, clamp: Bool = false) => Rect {
+    fn scale(self, factor: Float, clamp: Bool = false) :> Rect {
         scaled_w :: (self.width * factor)
         scaled_h :: (self.height * factor)
-        if clamp -> return Rect.{width: 100.0, height: 100.0}
-        return Rect.{width: scaled_w, height: scaled_h}
+        if clamp :> return Rect{width: 100.0, height: 100.0}
+        return Rect{width: scaled_w, height: scaled_h}
     }
 }
 
 // `host` is positional-only: its name stays free to change. `timeout` and
 // `tls` are label-only, so every call says which policy it is setting.
 // `timeout seconds` splits the public label from the local name.
-fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String {
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) :> String {
     return "{host} t={seconds} tls={tls}"
 }
 
 // Prints its tag, then hands back its value — so the output shows the order
 // the supplied expressions actually ran in.
-fn note(label: String, value: Float) => Float {
+fn note(label: String, value: Float) :> Float {
     print("eval {label}")
     return value
 }
 
 // The owned call exercises a concrete defaulted slot and a variadic rest;
 // the tap calls make source-order and exactly-once evaluation visible.
-fn tap<T>(label: String, value: ^T) => T {
+fn tap<T>(label: String, value: ^T) :> T {
     print("tap {label}")
     return value
 }
 
-fn collect(first: ^Int, second: ^Int = first, rest: ...Int) => Int {
+fn collect(first: ^Int, second: ^Int = first, rest: ...Int) :> Int {
     print("rest {rest.len()}")
     return second
 }
 
 // D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
 // are part of callable identity. `apply` only accepts a labelled call.
-fn apply(action: fn(*, force: Bool) => Int) => Int :: action(force: true)
+fn apply(action: fn(*, force: Bool) :> Int) :> Int :: action(force: true)
 
-fn saver(force: Bool) => Int {
+fn saver(force: Bool) :> Int {
     print("saver {force}")
     return 7
 }
@@ -84,7 +84,7 @@ fn run() {
 
     // Owned defaulted slot plus variadic rest: the first call supplies an
     // empty spread explicitly, and the second packs two written tail values.
-    empty :: [Int].{}
+    empty :: [Int]{}
     print(collect(tap("first", 1), 1, ...empty))
     print(collect(tap("first", 1), tap("second", 2), tap("third", 3), tap("fourth", 4)))
 }

@@ -22,9 +22,9 @@ struct Reservation {
 
 impl Reservation {
     // Entry transition: a fresh booking starts life in `Pending`.
-    #Transition(_, Pending) fn book(guest: String) => Reservation :: .{guest: ~guest}
+    #Transition(_, Pending) fn book(guest: String) :> Reservation :: {guest: ~guest}
 
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) :> Reservation {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
         // value (`^self` — a move), matching the ratified mechanism: a fn takes the old
         // state and returns the next. Calling `pay` on anything but a pending
@@ -33,14 +33,14 @@ impl Reservation {
         return self
     }
 
-    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) => Reservation {
+    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) :> Reservation {
         // Checking in advances `Confirmed -> CheckedIn`.
         print("{self.guest} checked in")
         return self
     }
 
     // A plain guarded read: only legal once checked in. No state change.
-    #State(CheckedIn) fn room_key(self) => String :: "key for {self.guest}"
+    #State(CheckedIn) fn room_key(self) :> String :: "key for {self.guest}"
 }
 
 fn run() {

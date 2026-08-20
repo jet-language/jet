@@ -82,7 +82,7 @@ fn run() ? HTTPError | IOError | NetError | RangeError | TaskFailure {
     -----END CERTIFICATE-----
     """
     mux :: http_server.mux()
-    mux.get("/", (req: HTTPRequest) => Ok(http_server.response(200, "ok")))
+    mux.get("/", (req: HTTPRequest) :> Ok(http_server.response(200, "ok")))
     server :: http_server.bind("127.0.0.1:0", mux, tls: http_server.tls(cert, key))?
     addr :: server.local_addr()?
     serving :: task { server.serve()? }

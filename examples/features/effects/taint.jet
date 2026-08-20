@@ -11,17 +11,17 @@ struct Config {
 // The audited cleaning step: takes untrusted text, returns a value the rest of
 // the program may trust. A real sanitizer would reject shell metacharacters; here
 // it keeps only the part before any space, which is enough to make the point.
-#Scrub(Input) fn shell_arg(raw: #Input String) => String :: raw.split(" ").to_list()[0]
+#Scrub(Input) fn shell_arg(raw: #Input String) :> String :: raw.split(" ").to_list()[0]
 
-fn failed_decode() => String {
+fn failed_decode() :> String {
     result :: json.decode<Config>("not-json")
     if result == {
-        .Err(_) -> return "decode failed"
-        else -> return "decode unexpectedly succeeded"
+        .Err(_) :> { return "decode failed" }
+        else :> { return "decode unexpectedly succeeded" }
     }
 }
 
-fn typed_decode() => String {
+fn typed_decode() :> String {
     config :: json.decode<Config>("{{\"name\":\"Ada\"}}") ?? return "typed decode failed"
     return "typed decode: {config.name}"
 }

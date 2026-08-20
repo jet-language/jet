@@ -10,7 +10,7 @@ struct Order {
     value: Int
 }
 
-fn send_report() =[IO]=> {}
+fn send_report() :[IO]> {}
 
 @range :: Severity.@range
 
@@ -60,11 +60,11 @@ struct Widget {
     secret: Int
     level: Int(0..10)
 
-    #Inline fn show(self) => String :: ~self.label
+    #Inline fn show(self) :> String :: ~self.label
 }
 
 fn run() {
-    w :: Widget.{label: "gear", secret: 1, level: 2}
+    w :: Widget{label: "gear", secret: 1, level: 2}
     print(w.summary())
     print("planes:{@range.start}-{@range.end}/{@dimension.axes.len()}/{@states[0].name}/{@effects.values.len()}")
     print("homed:{@sendability.known}/{@movedness.known}/{@attribution.source}/{@track_origin.tracked}/{@view_provenance.mutable}")

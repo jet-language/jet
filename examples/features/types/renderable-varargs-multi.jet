@@ -6,7 +6,7 @@
 // calls `{p}` (needs `Renderable`, listed first) AND `p.shout()` (needs
 // `Loud`, listed second) on the same loop variable.
 trait Loud {
-    fn shout(self) => String
+    fn shout(self) :> String
 }
 
 struct Point {
@@ -14,19 +14,19 @@ struct Point {
     y: Int
 
     impl Display {
-        fn display(self) => String :: "({self.x}, {self.y})"
+        fn display(self) :> String :: "({self.x}, {self.y})"
     }
 
     impl Loud {
-        fn shout(self) => String :: "POINT!"
+        fn shout(self) :> String :: "POINT!"
     }
 }
 
 fn announce(parts: ...[Renderable, Loud]) {
-    loop p, parts -> print("{p} says {p.shout()}")
+    loop p, parts :> print("{p} says {p.shout()}")
 }
 
 fn run() {
-    p :: Point.{x: 3, y: 4}
+    p :: Point{x: 3, y: 4}
     announce(p)
 }

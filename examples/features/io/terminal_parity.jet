@@ -14,11 +14,11 @@ fn run() {
     choice :: io.choose("Choose a target:", ["staging", "production"]) ?? "staging"
     print("choice: {choice}")
     if io.input_secret("Secret: ") == {
-        .Ok(secret) -> { print("secret length: {secret.len()}") }
-        .Err(error) -> {
+        .Ok(secret) :> { print("secret length: {secret.len()}") }
+        .Err(error) :> {
             if error == {
-                .InvalidInput(_) -> { print("secret: non-tty") }
-                else -> { print("secret: other error") }
+                .InvalidInput(_) :> { print("secret: non-tty") }
+                else :> { print("secret: other error") }
             }
         }
     }
@@ -28,7 +28,7 @@ fn run() {
     out.write(" stream") ?? panic("stdout write failed")
     out.flush() ?? panic("stdout flush failed")
     out.write_line("") ?? panic("stdout newline failed")
-    bytes :: [U8].{114, 97, 119, 10}
+    bytes :: [U8]{114, 97, 119, 10}
     out.write_bytes(bytes) ?? panic("stdout bytes failed")
     print("stdout tty: {out.is_tty()}")
     print("stderr tty: {err_stream.is_tty()}")

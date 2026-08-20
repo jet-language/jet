@@ -3,7 +3,7 @@ use core.encoding as encoding
 use core.encoding.jsonl as jsonl
 use core.files as files
 
-fn write_catalog(path: Path) => Bool ? EncodingError | IOError {
+fn write_catalog(path: Path) :> Bool ? EncodingError | IOError {
     output :: files.create(path)?
     writer :: jsonl.writer(^output, encoding.EncodingLimits.safe())?
     writer.write(DataTree.Object(["ok": DataTree.Bool(true)]))?
@@ -20,6 +20,6 @@ fn run() ? EncodingError | IOError {
     write_catalog(path)?
     input :: files.open(path)?
     reader :: jsonl.reader(^input)?
-    loop record, reader -> print("record")
+    loop record, reader :> print("record")
     print("eof")
 }

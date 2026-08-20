@@ -13,7 +13,7 @@ struct LedgerSnap {
 impl Ledger.Rollback {
     type Snapshot = LedgerSnap
 
-    fn snapshot(self) => LedgerSnap { return LedgerSnap.{balance: self.balance} }
+    fn snapshot(self) :> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
     fn restore(&self, snap: ^LedgerSnap) { self.balance = snap.balance }
 }
@@ -22,18 +22,18 @@ enum TxnErr {
     Overdraft
 }
 
-fn transfer(from: &Ledger, to: &Ledger, amount: Int) => Int ? TxnErr {
+fn transfer(from: &Ledger, to: &Ledger, amount: Int) :> Int ? TxnErr {
     #Transact(tx) {
         from.balance -= amount
         to.balance += amount
-        if from.balance < 0 -> return Err(TxnErr.Overdraft)
+        if from.balance < 0 :> return Err(TxnErr.Overdraft)
     }
     return Ok(amount)
 }
 
 fn run() {
-    alice := Ledger.{balance: 100, name: "Alice"}
-    bob := Ledger.{balance: 0, name: "Bob"}
+    alice := Ledger{balance: 100, name: "Alice"}
+    bob := Ledger{balance: 0, name: "Bob"}
     print("=== successful transfer ===")
     r :: transfer(&alice, &bob, 40) ?? (-1)
     print(alice.balance)

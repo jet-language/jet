@@ -5,30 +5,30 @@ enum Payload {
     Count(Int)
 }
 
-fn describe(value: Int | String) => String {
+fn describe(value: Int | String) :> String {
     return if value == {
-        .Int(n) -> "n={n}"
-        .String(s) -> "s={s}"
+        .Int(n) :> "n={n}"
+        .String(s) :> "s={s}"
     }
 }
 
-fn take_number(n: Int | String) => String :: describe(n)
+fn take_number(n: Int | String) :> String :: describe(n)
 
-fn as_named(value: Int | String) => Payload {
+fn as_named(value: Int | String) :> Payload {
     return if value == {
-        .Int(n) -> .Count(n)
-        .String(s) -> .Name(s)
+        .Int(n) :> .Count(n)
+        .String(s) :> .Name(s)
     }
 }
 
-fn from_named(payload: Payload) => Int | String {
+fn from_named(payload: Payload) :> Int | String {
     if payload == {
-        .Count(n) -> { return n }
-        .Name(s) -> return s
+        .Count(n) :> { return n }
+        .Name(s) :> { return s }
     }
 }
 
-fn hold(v: Int | String) => Int | String :: ~v
+fn hold(v: Int | String) :> Int | String :: ~v
 
 #Codable
 struct Box {
@@ -41,10 +41,10 @@ fn run() {
     mixed :: hold(3)
     print(describe(mixed))
     print(describe(from_named(as_named("x"))))
-    packed :: Box.{value: 9}
+    packed :: Box{value: 9}
     boxed :: packed.value
     if boxed == {
-        .Int(n) -> { print("box={n}") }
-        .String(s) -> print("box={s}")
+        .Int(n) :> { print("box={n}") }
+        .String(s) :> { print("box={s}") }
     }
 }

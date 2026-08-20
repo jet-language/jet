@@ -16,11 +16,11 @@ struct ImportErr {
     notes: [String]
 }
 
-fn import_rows(label: String, rows: [String]) => [String] ? ImportErr {
-    good :: rows.filter((row) => row != "")
+fn import_rows(label: String, rows: [String]) :> [String] ? ImportErr {
+    good :: rows.filter((row) :> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
-        return Err(ImportErr.{
+        return Err(ImportErr{
             broken: broken,
             partial: good,
             notes: ["{label}: {broken} rows were empty"]

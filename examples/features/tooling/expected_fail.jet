@@ -1,0 +1,15 @@
+// D-TEST-XFAIL1=A: a marked test runs, stays green while failing, and turns
+// red when the known bug is fixed but the marker remains.
+fn run() { print("expected-fail demo") }
+
+#Test("known bug remains expected-fail", expected_fail: true) {
+    require(false, "known bug")
+}
+
+#Test("ordinary pass") {
+    require(true)
+}
+
+#Test("fixed bug still marked", expected_fail: true) {
+    require(true)
+}

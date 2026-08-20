@@ -11,19 +11,19 @@ struct Ticket {
 // D-MEM-COPYSEM1=A: a read-only view entering an owned return slot is copied
 // automatically through the same semantic path as `~`. `~` remains the one
 // explicit spelling when the boundary is intentional in source.
-fn implicit_domain() => String {
+fn implicit_domain() :> String {
     email := "nate@jet.dev"
     domain :: email.after("@")
     return domain
 }
 
-fn implicit_window() => [Int] {
+fn implicit_window() :> [Int] {
     values := [1, 2, 3]
     window :: values[0..1]
     return window
 }
 
-fn archive(t: ^Ticket) => String :: t.label
+fn archive(t: ^Ticket) :> String :: t.label
 
 fn run() {
     name :: "vault"
@@ -36,7 +36,7 @@ fn run() {
     print(m)
     print(implicit_domain())
     print(implicit_window()[1])
-    t :: Ticket.{id: 1, label: "root"}
+    t :: Ticket{id: 1, label: "root"}
     print(archive(~t))
     print(t.label)
 }

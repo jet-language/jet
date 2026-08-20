@@ -4,8 +4,8 @@ use core.files as fs
 fn run() {
     root :: "/tmp/jet_files_depth_demo"
     copy_root :: "/tmp/jet_files_depth_demo_copy"
-    if fs.exists(root) -> fs.remove_all(root) ?? return Err("cleanup root failed")
-    if fs.exists(copy_root) -> fs.remove_all(copy_root) ?? return Err("cleanup copy failed")
+    if fs.exists(root) :> fs.remove_all(root) ?? return Err("cleanup root failed")
+    if fs.exists(copy_root) :> fs.remove_all(copy_root) ?? return Err("cleanup copy failed")
     nested :: Path.from(root).join("a/b")
     fs.create_dir_all(nested) ?? return Err("mkdir failed")
     file :: nested.join("data.txt")
@@ -14,12 +14,12 @@ fn run() {
     print("stat: {stat.kind} {stat.size} {stat.is_file}")
     part :: fs.read_at(file, 2, 3) ?? return Err("read_at failed")
     print("read_at bytes: {part.len()}")
-    patch :: [U8].{88, 89}
+    patch :: [U8]{88, 89}
     fs.write_at(file, 3, patch) ?? return Err("write_at failed")
     fs.fsync(file) ?? return Err("fsync failed")
     text :: fs.read(file) ?? return Err("read failed")
     print(text)
-    atom :: [U8].{79, 75}
+    atom :: [U8]{79, 75}
     atomic_path :: nested.join("atomic.txt")
     fs.write_atomic(atomic_path, atom) ?? return Err("atomic write failed")
     atomic_text :: fs.read(atomic_path) ?? return Err("atomic read failed")

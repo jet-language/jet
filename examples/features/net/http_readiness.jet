@@ -9,7 +9,7 @@ fn run() ? NetError | RangeError | TaskFailure {
     server :: task {
         stream :: listener.accept(deadline: budget)?
         _request :: stream.read_text(8192, deadline: budget)?
-        response :: [U8].{
+        response :: [U8]{
             72,
             84,
             84,
@@ -75,7 +75,7 @@ fn run() ? NetError | RangeError | TaskFailure {
     client :: net.tcp_connect(address)?
     write_ready :: client.ready(NetReadyInterest.Write, deadline: budget)?
     print(net.ready_writable(write_ready))
-    request :: [U8].{
+    request :: [U8]{
         71,
         69,
         84,

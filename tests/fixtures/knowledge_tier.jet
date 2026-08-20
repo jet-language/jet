@@ -12,12 +12,12 @@ struct Reservation {
 }
 
 impl Reservation {
-    #Transition(_, Pending) fn book(guest: String) => Reservation :: .{guest: ~guest}
+    #Transition(_, Pending) fn book(guest: String) :> Reservation :: {guest: ~guest}
 
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation :: self
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) :> Reservation :: self
 }
 
-#Scrub(Input) fn clean(raw: #Input String) => String :: ~raw
+#Scrub(Input) fn clean(raw: #Input String) :> String :: ~raw
 
 @answer :: 40 + 2
 
@@ -31,25 +31,25 @@ impl Reservation {
 
 @comptime_classification :: classification_value()
 
-fn exactness_value() => Bool {
-    lossy :: Int.{9007199254740993}
-    zero :: Float.{0.0}
+fn exactness_value() :> Bool {
+    lossy :: Int{9007199254740993}
+    zero :: Float{0.0}
     return approx(lossy) > zero
 }
 
-fn unit_value() => Float {
+fn unit_value() :> Float {
     source :: Half.from_float(5.0)
     value :: Meter.from_half_rounded(source, .NearestEven, digits: 0) ?? panic("unit gate")
     return value.raw()
 }
 
-fn state_value() => String {
+fn state_value() :> String {
     reservation := Reservation.book("state")
     reservation = reservation.pay()
     return reservation.guest
 }
 
-fn classification_value() => String {
+fn classification_value() :> String {
     raw :: #Input "world"
     return clean(raw)
 }

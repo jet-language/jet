@@ -35,7 +35,7 @@ struct Box<T> {
     value: T
 
     impl Display {
-        fn display(self) => String :: "Box"
+        fn display(self) :> String :: "Box"
     }
 }
 
@@ -45,23 +45,23 @@ struct Point {
     y: Int
     level: Int(0..10)
 
-    fn describe(self) => String :: "{self.x},{self.y}"
+    fn describe(self) :> String :: "{self.x},{self.y}"
 
     impl Display {
-        fn display(self) => String :: "({self.x}, {self.y})"
+        fn display(self) :> String :: "({self.x}, {self.y})"
     }
 }
 
 fn run() {
-    p :: Point.{x: 3, y: 4, level: 2}
+    p :: Point{x: 3, y: 4, level: 2}
     print(p.compile_field_names())
     print("attribution={@attribution.source} scale={@unit_scale.kind == .Rational}")
     v :: reflect.of(p)
     print(v.type_name())
     print(v.path())
     print(v.display())
-    loop f, v.fields() -> print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
-    boxed :: Box<Int>.{value: 7}
+    loop f, v.fields() :> print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
+    boxed :: Box<Int>{value: 7}
     boxed_fields :: reflect.of(boxed).fields()
     print("generic {boxed_fields[0].name()}:{boxed_fields[0].value().type_name()}")
     n :: reflect.of(42)

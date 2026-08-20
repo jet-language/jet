@@ -25,15 +25,15 @@ use c.gtk4 as gtk4
 
 fn run() {
     @if @build.os == {
-        .Linux -> {
+        .Linux :> {
             clicks :: reactive.signal(0)
             app :: ui.gtk_backend()
             render_app :: ~app
-            ui.reactive_render(() => {
+            ui.reactive_render(() :> {
                 tree :: ui.box([
                     ui.text("Jet — native GTK4 counter"),
                     ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"),
-                    ui.button("Increment", on_click: () => {
+                    ui.button("Increment", on_click: () :> {
                         clicks.set(clicks.get() + 1)
                     })
                 ])
@@ -43,7 +43,7 @@ fn run() {
             print("native backend: gtk4")
             app.present("Jet — GTK4")
         }
-        .MacOS -> { print("native backend: not yet on macOS") }
-        .Windows -> print("native backend: not yet on Windows")
+        .MacOS :> { print("native backend: not yet on macOS") }
+        .Windows :> { print("native backend: not yet on Windows") }
     }
 }

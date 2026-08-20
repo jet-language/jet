@@ -12,24 +12,24 @@ struct Node {
     peer: Shared.Weak<Node>?
 }
 
-fn peer_label(n: Node) => String {
-    if n.peer == .None -> return "none"
+fn peer_label(n: Node) :> String {
+    if n.peer == .None :> return "none"
     if n.peer == .Val(weak) {
-        if weak.upgrade() == .None -> return "gone"
-        if weak.upgrade() == .Val(peer) -> return peer.label
+        if weak.upgrade() == .None :> return "gone"
+        if weak.upgrade() == .Val(peer) :> return peer.label
     }
     return "none"
 }
 
 // One whole-value read under one lock, in the smallest possible scope.
-fn label_of(handle: Shared<Node>) => String {
+fn label_of(handle: Shared<Node>) :> String {
     guard :: handle.guard_read()
     return peer_label(~guard.value)
 }
 
 fn run() {
-    a := shared Node.{label: "a", peer: None}
-    b := shared Node.{label: "b", peer: None}
+    a := shared Node{label: "a", peer: None}
+    b := shared Node{label: "b", peer: None}
     // Downgrade before the writes so the strong handles are not moved.
     wa := a.downgrade()
     wb := b.downgrade()
@@ -41,6 +41,6 @@ fn run() {
     print("strong:{count}")
     // Fresh weak — wa/wb were moved into the back-edges above.
     up := a.downgrade()
-    if up.upgrade() == .Val(_) -> print("upgrade-ok")
-    if up.upgrade() == .None -> print("upgrade-gone")
+    if up.upgrade() == .Val(_) :> print("upgrade-ok")
+    if up.upgrade() == .None :> print("upgrade-gone")
 }

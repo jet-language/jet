@@ -21,9 +21,9 @@ fn run() ? {
     b :: random.bytes(4)
     print("prng reproducible: {a == b}")
 
-    ikm :: [U8].{1, 2, 3, 4}
-    salt :: [U8].{5, 6}
-    info :: [U8].{7, 8}
+    ikm :: [U8]{1, 2, 3, 4}
+    salt :: [U8]{5, 6}
+    info :: [U8]{7, 8}
     rungs_agree := false
     #Unsafe("compare the typed and raw HKDF rungs") {
         raw :: expert.hkdf_sha256_raw(ikm, salt, info, 16) ?? return Err("raw hkdf")

@@ -13,13 +13,13 @@ fn damage(p: &Player, amount: Int) { p.hp -= amount }
 fn report(p: Player) { print("{p.name}: {p.hp}") }
 
 impl Player {
-    fn show(self) => Int :: self.hp
+    fn show(self) :> Int :: self.hp
 
     fn heal(&self, amount: Int) { self.hp += amount }
 }
 
 fn run() {
-    p := Player.{hp: 100, name: "Aria"}
+    p := Player{hp: 100, name: "Aria"}
     damage(&p, 30)  // call site mirrors the `&` write access
     report(p)  // plain read, no sigil
     p.heal(10)  // receiver `&self`, clean method-call syntax

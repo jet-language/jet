@@ -23,8 +23,8 @@ fn run() {
     print("depth:{services.mailbox_depth(tree, worker) ?? -1}")
     third :: services.send(&tree, worker, "three")
     if third == {
-        .Ok(_) -> { print("full:accepted") }
-        .Err(_) -> { print("full:refused") }
+        .Ok(_) :> { print("full:accepted") }
+        .Err(_) :> { print("full:refused") }
     }
 
     // Drain. The worker takes no new work and hands back what it already holds,
@@ -54,8 +54,8 @@ fn run() {
     print("restarts:{services.restarts(tree, worker) ?? -1}")
     spent :: services.fail_worker(&tree, worker)
     if spent == {
-        .Ok(_) -> { print("escalate:none") }
-        .Err(_) -> { print("escalate:parent") }
+        .Ok(_) :> { print("escalate:none") }
+        .Err(_) :> { print("escalate:parent") }
     }
     print(services.observe(tree))
     services.stop(&tree) ?? panic("stop")

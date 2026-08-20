@@ -9,33 +9,33 @@
 
 tag Input { deny: [IO] }
 
-#Scrub(Input) fn clean(raw: #Input String) => String :: ~raw
+#Scrub(Input) fn clean(raw: #Input String) :> String :: ~raw
 
 enum ReservationStage {
     Created
     Paid
 }
 
-fn exactness_value() => Bool {
-    lossy :: Int.{9007199254740993}
-    zero :: Float.{0.0}
+fn exactness_value() :> Bool {
+    lossy :: Int{9007199254740993}
+    zero :: Float{0.0}
     return approx(lossy) > zero
 }
 
-fn unit_value() => Float {
+fn unit_value() :> Float {
     value :: Meter.from_float(5.0)
     return value.raw()
 }
 
-fn state_value() => String {
+fn state_value() :> String {
     stage :: ReservationStage.Paid
     if stage == {
-        .Created -> { return "invalid" }
-        .Paid -> { return "state" }
+        .Created :> { return "invalid" }
+        .Paid :> { return "state" }
     }
 }
 
-fn classification_value() => String {
+fn classification_value() :> String {
     raw :: #Input "world"
     return clean(raw)
 }

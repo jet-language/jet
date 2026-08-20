@@ -4,9 +4,9 @@
 // trio below remains ambient.
 use core.files as files
 
-fn greet() => String {
+fn greet() :> String {
     name :: input() ?? "world"
-    if name.is_empty() -> return "hello, world"
+    if name.is_empty() :> return "hello, world"
     return "hello, {name}"
 }
 
@@ -30,7 +30,7 @@ fn run() {
     print("prelude: Path.home().join works: {home_join_ok}")
 
     temp :: "/tmp/jet-io-prelude.txt"
-    if files.exists(temp) -> files.remove(temp) ?? return Err("cleanup")
+    if files.exists(temp) :> files.remove(temp) ?? return Err("cleanup")
     write_file(Path.from(temp), "ambient") ?? return Err("write_file")
     print("prelude: file_exists: {file_exists(temp)}")
     // D-FAIL-EXIT1=A: `fn run()` is fallible by default, so its miss route

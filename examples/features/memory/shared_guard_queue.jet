@@ -8,7 +8,7 @@ struct WorkQueue {
 
 fn produce(queue: Shared<WorkQueue>, changed: Condition) {
     guard :: queue.guard_edit()
-    guard.wait(changed, value => value.jobs.len() < value.capacity) ?? panic("wait failed")
+    guard.wait(changed, value :> value.jobs.len() < value.capacity) ?? panic("wait failed")
     guard.value.jobs.push(7)
     changed.notify_all()
 }
@@ -20,7 +20,7 @@ fn consume(queue: Shared<WorkQueue>, changed: Condition) {
 }
 
 fn run() {
-    queue := shared WorkQueue.{jobs: [1], capacity: 1}
+    queue := shared WorkQueue{jobs: [1], capacity: 1}
     changed := Condition.new()
     task.group workers {
         producer :: task produce(queue, changed)

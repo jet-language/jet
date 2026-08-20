@@ -3,8 +3,8 @@ use core.crypto as crypto
 
 fn run() ? {
     recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient key")
-    plaintext :: [U8].{0x73, 0x61, 0x66, 0x65}
-    aad :: [U8].{0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74}
+    plaintext :: [U8]{0x73, 0x61, 0x66, 0x65}
+    aad :: [U8]{0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74}
     sealed :: crypto.seal([recipient.public_key()], plaintext, aad) ?? return Err("seal")
     opened :: crypto.open(recipient, sealed, aad) ?? return Err("open")
     print(opened == plaintext)

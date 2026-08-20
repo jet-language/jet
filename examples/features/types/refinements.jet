@@ -3,13 +3,13 @@
 Die :: distinct Int(1..6)
 
 // D-NOPANIC1=D: the Die interval proves this fixed-list read cannot stop.
-fn pick(faces: [String#6], roll: Die) =[!Panic]=> String :: ~faces[roll.raw() - 1]
+fn pick(faces: [String#6], roll: Die) :[!Panic]> String :: ~faces[roll.raw() - 1]
 
-fn checked(raw: Int) => Die ? String :: Ok(Die.from_int(raw)?)
+fn checked(raw: Int) :> Die ? String :: Ok(Die.from_int(raw)?)
 
 fn run() {
     roll :: Die.from_int(3)
-    faces :: [String#6].{"zero", "one", "two", "three", "four", "five"}
+    faces :: [String#6]{"zero", "one", "two", "three", "four", "five"}
     print(pick(faces, roll))
     from_runtime :: checked(4) ?? Die.from_int(1)
     print(pick(faces, from_runtime))

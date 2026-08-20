@@ -29,12 +29,12 @@ struct MemberRank {
 
 migration Profile {
     remove legacy_id
-    rename name => title
-    change score: Int => MemberRank via { n => MemberRank.{ value: n } }
+    rename name :> title
+    change score: Int :> MemberRank via { n :> MemberRank{ value: n } }
     add active: Bool = true
 }
 
 fn run() {
-    p :: Profile.{title: "Ada", id: 7, score: MemberRank.{value: 95}, active: true}
+    p :: Profile{title: "Ada", id: 7, score: MemberRank{value: 95}, active: true}
     print("profile: {p.title} #{p.id}, rank {p.score.value}, active {p.active}")
 }

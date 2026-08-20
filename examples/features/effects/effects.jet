@@ -5,12 +5,12 @@
 // Effects are erased in codegen: this program generates the same Rust with or
 // without the annotations.
 // Pure by inference: no annotation needed.
-fn square(n: Int) => Int :: n * n
+fn square(n: Int) :> Int :: n * n
 
 fn announce(label: String, n: Int) { print("{label} is {n}") }
 
 // Effects flow along calls: `run` reaches `IO` only through `announce`, and
 // `square` adds nothing (it is pure). Expert-written bound proves `{IO} ⊆ {IO}`.
-fn report(n: Int) =[IO]=> { announce("square", square(n)) }
+fn report(n: Int) :[IO]> { announce("square", square(n)) }
 
 fn run() { report(7) }

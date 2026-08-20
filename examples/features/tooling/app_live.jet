@@ -13,7 +13,7 @@ fn run() {
     print(app.live_show(expert))
     // Commit hook runs after `#Transact` succeeds — write-set invalidation into live registry.
     #Transact(tx) {
-        tx.on_commit(() => {
+        tx.on_commit(() :> {
             app.transact_invalidate("users,orders")
             print("commit:invalidate")
         })
