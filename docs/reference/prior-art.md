@@ -401,6 +401,20 @@ optimizer-friendly array semantics; avoid: empty-array type loss, glyph
 overloading, runtime rank/shape conventions.
 - Based array theory / problems / paradigms / docs index — https://mlochbaum.github.io/BQN/doc/based.html · https://mlochbaum.github.io/BQN/problems.html · https://mlochbaum.github.io/BQN/doc/paradigms.html · https://mlochbaum.github.io/BQN/doc/index.html
 
+### Agent-first languages
+
+**Zerolang** (Vercel Labs, mined 2026-08-20) — "the programming language for
+agents": checked semantic graph as canonical store, text as human projection,
+agent authoring through validated patches with hash preconditions and atomic
+revalidation, toolchain-bundled topic-scoped agent docs, live frontier-model
+evals; avoid: wrap-on-overflow release arithmetic, per-target backend holes
+shipped as structured blockers, capability theater (`World` gates stdout while
+`std.*` stays ambient), token-optimized human syntax (reverted after user
+revolt), bug workarounds encoded as agent doctrine. Report at
+`docs/research/2026-08-20-zerolang-mining.md`; cards #2104–#2108, evidence logs
+on #2062 and #1165.
+- https://github.com/vercel-labs/zerolang · https://zerolang.ai
+
 ---
 
 ## Package managers, build systems & registries

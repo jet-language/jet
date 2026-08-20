@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2104,
-    "rev": 39543,
+    "nextNum": 2109,
+    "rev": 39551,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47,7 +47,7 @@
       ]
     },
     {
-      "status": "active",
+      "status": "planned",
       "goal": "Every major language, runtime, library and tooling feature that makes Jet a daily-driver TypeScript/Swift replacement: JIT/dev loop, concurrency, derives/reflection, HTTP, stdlib, IDE tooling, reactive UI, data/compute (CPU path), and web. Excludes metaprogramming (E4), jetpack (E5), FFI/GPU backends (E6), agents/automation (E7), Canvas (E8), jetos (E9), CI/docs (E10), and bootstrapping (E11).",
       "id": "e3",
       "num": 3,
@@ -59405,6 +59405,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "fable",
+          "text": "Zerolang mine (2026-08-20, docs/research/2026-08-20-zerolang-mining.md): design evidence for this corpus. Zerolang's evals/ runs real frontier agents (Opus 4.7, Sonnet 4.6) in sandboxes against 59 tasks; scoring requires exact stdout/stderr per run AND the required tool workflow (skill load, check --json, run), with max-turn and duration budgets — workflow compliance is scored, not just output. Two adoptable ideas: (1) discrimination checks (their issue #403): a golden fixture should also reject near-miss programs, or agent pass rates inflate; (2) their metrics count turns/tool calls but not tokens — Jet should measure tokens per unit of progress (quantity d). Their strongest audience datum: a 60-run frontier benchmark (issue #104) failed 0/60, 100% on two syntax reflexes — corpus tasks must include the cold-start unfamiliar-syntax path, not only warmed agents."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Criteria scoping (2026-08-19): the executor-template rows (policy digest, launch transaction, fail-closed spawn) are out of scope for a corpus card — meet them with evidence \"n/a: corpus card, no spawn path; see appended slice criterion\". The appended row is this card's real exit bar. Plan note: \"blockedBy: none — leaf work\" is wrong for chained slices; the recorded blockedBy chain governs."
@@ -59483,7 +59488,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:29.791Z",
-      "updated": "2026-08-19T13:35:14.672Z",
+      "updated": "2026-08-20T11:28:49.500Z",
       "updatedBy": "fable",
       "tags": [],
       "parentId": null
@@ -135192,7 +135197,13 @@
       "plan": "## Outcome\nCriterion 4 closes (criteria 1-3 and 5 are already met): all thirteen ratified D-DEVR outcomes (LAW1, TWICE1, CLAIM1, STATUS1, REVIEW1, WITNESS1, PROD1, CONE1, CAUSE1, HOLE1, FIND1, SEMID1, TRY1 — every one =A; LAW1 carries the owner comment \"But allow an override flag to force rerun\") are recorded in docs/spec/syntax-decisions.md as dated ratification entries, and each outcome has a deduped implementation card on the board referencing docs/proposals/development-one-act-one-receipt.md. Pure bookkeeping + minting — no compiler changes.\n\n## Law\n- The thirteen ratified ballots on this card (Tower id c0xffwib) are the binding texts; option-A \"technical\" clauses name every amendment that must survive into the recorded entries: D-ONCE-LAW1 + D-PROVE-SEM1 + D-ECO-RECEIPT2 extensions (LAW1), D-ECO-RECEIPTSTORE1 extension with D-ARTIFACT-EXT1's closed family untouched (LAW1/CLAIM1), D-BUILDCACHE1 generalization (TWICE1), D-CLI-SURFACE1=B flat-verb amendments (FIND1/TRY1, HOLE1's open `fill` spelling), D-TIMETRAVEL1=C/D-RUN-RECORD1 named amendment with reverse-step staying Epoch 6 (CAUSE1), D-PERFBUDGET-COMPILE1=C closed-grammar extension (CONE1), D-NAME-FILES1=C untouched (SEMID1).\n- House recording convention: `**YYYY-MM-DD — D-X=A** *(card #2062)*: prose` entries in docs/spec/syntax-decisions.md (pattern at 7282-7321), appended as one slate section — the spec entry is the operative wording, ballot texts historical.\n- Board hygiene: commit plugins/tower/.tower/*.json immediately after the mint batch, before any git history operation; cite cards by durable Tower id, never bare number.\n\n## Work\n1. Re-pull each ballot's final text and outcome from the card (`tower.mjs card show '#2062'`); confirm all 13 read status=ratified outcome=A and capture LAW1's owner comment verbatim.\n2. Write the spec slate: one dated section at the end of docs/spec/syntax-decisions.md, one entry per decision in ratification order, each entry = the option-A detail + technical clauses condensed to operative wording, with every named amendment repeated explicitly and LAW1's entry recording the owner's override-flag rider (never-pay-twice MUST keep a force-rerun flag). Follow the `simple` controlled-prose register used by neighboring entries.\n3. Dedupe scan before minting: search open cards (titles + bodies) for existing owners of each outcome. Known overlaps to link INSTEAD of duplicating: c09otnjg (content-addressed Prelude/Core rlibs), c0460ur1 (run-scoped oracle cache), c0m0lmh4 (profiles/FFI/shards) — golden-wall fixes that become TWICE1 substrate; c0kbzrub (agent fix-loop convergence) — TRY1's consumer; c0cl0ccy (jet search placement drift) — FIND1's naming settlement names it; the eleven defect cards from criterion 3. Where an existing card covers part of an outcome, the new impl card links it in blockedBy/refs rather than re-owning it.\n4. Mint one implementation card per outcome (13, minus any fully covered by an existing card found in step 3), each with: title naming the decision ID; body quoting the ratified clause and pointing at docs/proposals/development-one-act-one-receipt.md (plus its Part II plane table for the wave-2 six); robust observable exit criteria drawn from the ballot's option-A code block (e.g. LAW1: warm `jet test` answers from receipts within the interpreter-tier latency budget AND a force-rerun flag recomputes; CLAIM1: `jet inspect parity` renders from tier-tagged receipts and a hand-edited ledger fails the guard; HOLE1: `jet check` prints a goal card, `jet fill` proposes only checked candidates; FIND1: signature/effect/example search each return their ballot's probe answers; TRY1: interrupted `jet try` leaves a clean tree, `--keep` re-verdicts on closure-hash drift); I4/I7/I9 gates named where the outcome adds diagnostics, user-typeable spellings (fill/find/try flat verbs), or cross-tier behavior.\n5. Sequence with blockedBy: receipt substrate first (LAW1 store + TWICE1 cache law) → renderers/consumers (CLAIM1, STATUS1, REVIEW1, WITNESS1, PROD1, CONE1) → inner-loop features that read the substrate (CAUSE1, TRY1) — while HOLE1/FIND1/SEMID1 ride the semindex and can proceed in parallel. Record the word-choice obligations inside their cards (HOLE1: hole-vs-goal rename decision point incl. E3011/E2902/D-TOOL2 text; FIND1: find-vs-search settlement + the c0cl0ccy drift).\n6. Update this card: mark criterion 4 met with the spec-section anchor and the minted card ids as evidence; log the dedupe outcome (which outcomes reused existing cards); commit the board JSON + spec change together.\n\n## Not building\n- Any implementation of the thirteen outcomes (receipts, caches, renderers, try/fill/find engines) — that is exactly what the minted cards own.\n- Re-litigating ballot content or amendment scopes; the ratified texts are final.\n- New ballots (criteria 1/5 complete; this card's decision lane is cleared 13/13).\n- Retro-editing historical decision entries; the new slate section only adds.\n\n## Proof\n- Criterion 4 evidence: (a) docs/spec/syntax-decisions.md diff showing thirteen dated D-DEVR entries incl. the LAW1 override-flag rider and every named amendment string; (b) `tower.mjs` output listing each minted/linked implementation card id with its decision ID in the title; (c) dedupe note showing the board scan and which existing cards were linked instead of duplicated; (d) board JSON committed in the same change as the spec edit.\n- No runtime behavior changes → no build/test proof beyond docs+board consistency; a grep confirms every one of the 13 decision IDs now resolves in docs/spec/syntax-decisions.md.\n\n## blockedBy\nnone — all 13 ballots ratified =A on this card as of 2026-08-19; recording and minting need no further owner input (LAW1's rider is captured from the ratification comment).",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable",
+          "text": "Zerolang mine (2026-08-20, docs/research/2026-08-20-zerolang-mining.md): external evidence for the D-DEVR-SEMID1 implementation card. Zerolang ships the semantic-edit surface as its whole product: checked patch ops revalidate before the store is written (bad edit rejected atomically, exit 1), hash preconditions reject stale edits with expected/actual, addParamTo updates every call site and reports the count, setReturnType/setConst are one-op signature edits, structural rewrite-by-example ($A + $B -> $B + $A) dry-runs by default with per-site before/after, and --replace-in-fn gives Edit-tool semantics over one function's canonical text. Live-probed loop: init/patch/run each ~20-25 ms. Jet's shipped analog is jet inspect codemod (Rename + Ast rules, expected match counts, fingerprints, undo); the SEMID1 card should cover the signature-op tier (add-param-with-default updating call sites, return-type change) and inline dry-run ergonomics."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -135250,7 +135261,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:53:20.866Z",
-      "updated": "2026-08-19T16:21:24.847Z",
+      "updated": "2026-08-20T11:28:49.001Z",
       "updatedBy": "fable"
     },
     {
@@ -137335,6 +137346,159 @@
       "created": "2026-08-20T07:25:35.748Z",
       "updated": "2026-08-20T07:25:37.420Z",
       "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0xoi09n",
+      "num": 2104,
+      "title": "Machine fix channel: did-you-mean suggestions ship no fix_edits",
+      "body": "Live probe (2026-08-20, zerolang mine): jet check --json on `left + rigt` emits E0107 with fix text \"did you mean `right`?\" but fix_edits is []. The compiler knows the exact replacement and does not give it to the machine channel, so an unattended loop (#1874) must parse prose — the failure #1877 was supposed to end. Contrast: zerolang's repair channel grades every diagnostic (fixSafety + repair id), and its own docs promise close matches its binary does not deliver; Jet delivers the suggestion but drops the edit.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "## Outcome\nEvery unambiguous did-you-mean suggestion carries a typed fix_edit in jet.report/v1.\n\n## Work\n1. Find where E0107 builds its did-you-mean fix text; attach the replacement span edit at construction (same pattern #1877 shipped).\n2. Sweep all suggestion sites (did-you-mean constructors) — each either emits a typed edit or has a one-line reason it cannot (ambiguous candidates).\n3. Snapshot: E0107 JSON fixture shows fix_edits with the replacement; UI snapshot unchanged.\n\n## Exit criteria\n- jet check --json on a one-letter identifier typo emits fix_edits with the exact replacement span.\n- Suggestion-site sweep recorded on the card: every site emits an edit or names the ambiguity.\n- Diagnostic snapshot fixtures updated; jet fix applies the edit and the recheck is clean.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/research/2026-08-20-zerolang-mining.md",
+        "#1877",
+        "#1874"
+      ],
+      "tags": [
+        "mining",
+        "zerolang"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T11:27:23.149Z",
+      "updated": "2026-08-20T11:27:23.149Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c02mdks0",
+      "num": 2105,
+      "title": "Foreign declaration and binding keywords get a false E0003",
+      "body": "Live probe (2026-08-20, zerolang mine): `fun add(left: Int, right: Int) => Int { ... }` gets E0003 \"this line computes a value but doesn't do anything with it\" — a false cause that sends an agent down a wrong repair path. Same for `var x: Int32 = 1`. #1887 fixed foreign LOOP keywords (for/while/continue/do); declaration and binding keywords still lie. External evidence this is the dominant agent failure mode: zerolang issue #104 reports a 60-run frontier-model benchmark where 0/60 passed and 100% of failures were exactly these reflexes (fn vs fun, wrong import form). An unfamiliar language survives only if the compiler teaches these per edit.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "## Outcome\nCommon foreign declaration/binding spellings at statement or top-level position produce one teaching diagnostic that names the Jet form, with a typed fix_edit where the rewrite is mechanical.\n\n## Work\n1. Extend the parser reflex table #1887 built (control.rs foreign_loop path) to declaration position: fun/def/function/func -> fn; let/var/const bindings -> := / ::; return-type ':' -> =>.\n2. What/why/fix text per I4 with registered codes; typed fix_edits where unambiguous.\n3. UI snapshots for each reflex; keep E0003 for genuinely dead expressions.\n\n## Exit criteria\n- `fun f() => Int {}`, `def f():`-style, `function f() {}`, `let x = 1`, `var x: Int = 1`, `const x = 1` each produce the teaching diagnostic naming the Jet spelling, not E0003.\n- Each new diagnostic has code, what/why/fix, and a UI snapshot (I4).\n- Genuine expression-statement E0003 cases still snapshot identically.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/research/2026-08-20-zerolang-mining.md",
+        "#1887",
+        "#1965"
+      ],
+      "tags": [
+        "mining",
+        "zerolang"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T11:27:40.862Z",
+      "updated": "2026-08-20T11:27:40.862Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ekd7px",
+      "num": 2106,
+      "title": "Grade machine fixes by safety class so loops auto-apply the safe tier",
+      "body": "Zerolang's repair plans (zero fix --plan --json) label every candidate fix with one of five safety levels: format-only, behavior-preserving, api-changing, target-changing, requires-human-review. An unattended agent auto-applies the safe tiers and escalates the rest — no judgment call per fix. Jet's jet.report/v1 has typed fix_edits and a clears count but no safety grade, so a loop cannot tell a formatting fix from a signature change without reading the diagnostic.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "## Outcome\nEach fix_edit carries a safety class; jet fix applies only the safe tier by default.\n\n## Work\n1. Add a safety field to the fix_edit construction site (values near: formatting, behavior-preserving, api-changing, needs-review). Field naming is internal report schema, not user syntax; bump jet.report schema only if required.\n2. Classify existing typed fixes at construction; default conservative.\n3. jet fix applies formatting + behavior-preserving tiers; --all opts into the rest.\n4. JSON fixtures and docs updated.\n\n## Exit criteria\n- jet check --json fix_edits include a safety class on every edit.\n- jet fix on a mixed-diagnostic file applies only safe-tier edits by default and reports the skipped tier.\n- Report-schema docs and fixtures updated; snapshot suite green.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/research/2026-08-20-zerolang-mining.md",
+        "#1874",
+        "#1877",
+        "#2104"
+      ],
+      "tags": [
+        "mining",
+        "zerolang"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T11:28:03.352Z",
+      "updated": "2026-08-20T11:28:03.352Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0d0v4v2",
+      "num": 2107,
+      "title": "Expected-fail tests: pin a known bug and fail loudly on unexpected pass",
+      "body": "Jet test has no expected-fail mechanism (rg: no xfail/expected-fail in jet-cli, jet-sema, docs/spec). Zerolang marks expected-fail tests by name (xfail:, expected fail:, [xfail]); such a test passes the command only while it fails, and an unexpected pass fails the run (unexpectedPasses). This turns every open bug into a pinned, self-expiring regression witness: the moment a fix lands, the suite demands the marker's removal. Valuable for agent burndowns — a reproduced bug becomes a tracked test instead of a prose note.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m18-devloop-testing",
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "## Outcome\nA test can declare it is expected to fail; the suite passes while it fails and fails with a named unexpected-pass when the behavior is fixed.\n\n## Owner gate\nThe spelling is user-typeable surface (marker or test-name convention), so it needs a ballot before implementation (I7). Candidates: a marker on fn test, or a name convention the runner recognizes. Prep the ballot via tower-prep before coding.\n\n## Exit criteria\n- Ratified spelling recorded in docs/spec/syntax-decisions.md with decision ID.\n- An expected-fail test that fails keeps the suite green and is reported as expected-fail, not silently skipped.\n- The same test passing turns the suite red with a diagnostic naming the test and asking for marker removal.\n- jet test --json reports expected-fail and unexpected-pass counts; example + golden per I5.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/research/2026-08-20-zerolang-mining.md"
+      ],
+      "tags": [
+        "mining",
+        "zerolang"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T11:28:18.496Z",
+      "updated": "2026-08-20T11:28:18.497Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0u3wj4w",
+      "num": 2108,
+      "title": "Topic-scoped digest slices: fetch one module of the LLM surface",
+      "body": "#1921 shipped the one-file LLM surface digest; it measures 314,656 bytes / 1,445 lines today (live probe 2026-08-20) — too big to load into one agent context, so agents grep it and lose the curated ordering. Zerolang bundles version-matched agent docs in the compiler and serves them by topic: zero skills get stdlib --topic std.time returns only that module's catalog slice. Context economy is one of the five agent-optimality quantities; per-topic retrieval is how a large surface stays usable.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m17-agent-diagnostics",
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "## Outcome\njet inspect digest serves a named slice of the same generated digest.\n\n## Work\n1. Add a topic selector to jet inspect digest (e.g. --topic core.time, --topic diagnostics, --list-topics). Flag surface only; no new user syntax.\n2. Slices come from the same registry-driven generator #1921 built — no second source of truth; byte-identity CI check extends to slices.\n3. Unknown topic fails with the nearest existing topic named.\n\n## Exit criteria\n- jet inspect digest --list-topics prints the topic inventory.\n- jet inspect digest --topic <name> emits only that slice, and the concatenation of all slices equals the full digest (CI-checked).\n- Unknown topic errors name the closest match; docs updated.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/research/2026-08-20-zerolang-mining.md",
+        "#1921"
+      ],
+      "tags": [
+        "mining",
+        "zerolang"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T11:28:32.590Z",
+      "updated": "2026-08-20T11:28:32.590Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -183684,6 +183848,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T11:28:49.500Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0xha49b",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T11:28:49.001Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0xffwib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T11:28:32.591Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0u3wj4w",
+      "note": "Topic-scoped digest slices: fetch one module of the LLM surface"
+    },
+    {
+      "at": "2026-08-20T11:28:18.497Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0d0v4v2",
+      "note": "Expected-fail tests: pin a known bug and fail loudly on unexpected pass"
+    },
+    {
+      "at": "2026-08-20T11:28:03.353Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ekd7px",
+      "note": "Grade machine fixes by safety class so loops auto-apply the safe tier"
+    },
+    {
+      "at": "2026-08-20T11:27:40.863Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c02mdks0",
+      "note": "Foreign declaration and binding keywords get a false E0003"
+    },
+    {
+      "at": "2026-08-20T11:27:23.150Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0xoi09n",
+      "note": "Machine fix channel: did-you-mean suggestions ship no fix_edits"
+    },
+    {
       "at": "2026-08-20T11:12:15.818Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -187133,55 +187346,6 @@
       "action": "decision.update",
       "ref": "D-CALLPOS1",
       "note": "marked ready"
-    },
-    {
-      "at": "2026-08-19T16:07:48.617Z",
-      "by": "Ballot2042b",
-      "action": "decision.update",
-      "ref": "D-CALLPOS1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T16:07:47.627Z",
-      "by": "PlanComputeb",
-      "action": "card.update",
-      "ref": "c06zs6dw",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:07:46.959Z",
-      "by": "PlanComputeb",
-      "action": "card.update",
-      "ref": "c0p48658",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:07:46.300Z",
-      "by": "PlanComputeb",
-      "action": "card.update",
-      "ref": "c0615ffl",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:07:45.648Z",
-      "by": "PlanComputeb",
-      "action": "card.update",
-      "ref": "c00pxltq",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:07:45.018Z",
-      "by": "PlanComputeb",
-      "action": "card.update",
-      "ref": "c0r02txw",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:07:35.923Z",
-      "by": "Ballot2042b",
-      "action": "decision.update",
-      "ref": "D-CALLPOS1",
-      "note": ""
     }
   ],
   "nextNum": 368,
