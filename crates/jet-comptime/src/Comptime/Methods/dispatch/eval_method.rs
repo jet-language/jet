@@ -2190,8 +2190,12 @@ impl<'a> Interp<'a> {
                 if method != "locale" && !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                     return Err(unsupported("Fake method on a temporary value", span));
                 }
+                // The kernel advances the generator's own state, so it needs a
+                // mutable value; `recv` is bound by the match, so take a local
+                // copy and write it back below exactly as the RNG arm does.
+                let mut fake_recv = recv.clone();
                 let value = super::super::core_calls::apply_fake_method(
-                    &mut recv,
+                    &mut fake_recv,
                     method,
                     &argv,
                     span,
@@ -2199,7 +2203,7 @@ impl<'a> Interp<'a> {
                 if method != "locale" {
                     self.write_back(
                         receiver,
-                        recv,
+                        fake_recv,
                         scope,
                     )?;
                 }

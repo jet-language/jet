@@ -113,6 +113,7 @@
             pkgs.sccache
             pkgs.clippy
             pkgs.rustc
+            pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
             pkgs.lld
@@ -161,6 +162,7 @@
             # E4-JP9: resolved-symbol native evaluator authority stop-line.
             pkgs.clippy
             pkgs.rustc
+            pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
             # D-FFI-ADA1=A: provision GNAT for C-ABI Ada binder compilation.

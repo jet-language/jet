@@ -19,7 +19,7 @@ pub(crate) fn jet_fmt_pretty(value: &str) -> String {
 
 fn pretty_fragment(value: &str, indent: usize) -> String {
     let value = value.trim();
-    let Some((open, close)) = first_structure(value) else {
+    let Some((open_at, open, close)) = first_structure(value) else {
         return value.to_string();
     };
     let Some(end) = matching_close(value, open, close) else {
@@ -28,8 +28,8 @@ fn pretty_fragment(value: &str, indent: usize) -> String {
     if !value[end + close.len_utf8()..].trim().is_empty() {
         return value.to_string();
     }
-    let prefix = value[..open].trim_end();
-    let body = &value[open + open.len_utf8()..end];
+    let prefix = value[..open_at].trim_end();
+    let body = &value[open_at + open.len_utf8()..end];
     if body.trim().is_empty() {
         return format!("{prefix} {open}{close}").trim_start().to_string();
     }
@@ -50,10 +50,13 @@ fn pretty_fragment(value: &str, indent: usize) -> String {
     out
 }
 
-fn first_structure(value: &str) -> Option<(char, char)> {
+/// Returns the byte offset of the first structural opener plus its pair. The
+/// offset is what the caller slices with, so it must come from the scan rather
+/// than being recomputed from the char.
+fn first_structure(value: &str) -> Option<(usize, char, char)> {
     let mut quoted = false;
     let mut escaped = false;
-    for ch in value.chars() {
+    for (offset, ch) in value.char_indices() {
         if quoted {
             if escaped {
                 escaped = false;
@@ -67,7 +70,7 @@ fn first_structure(value: &str) -> Option<(char, char)> {
         if ch == '"' {
             quoted = true;
         } else if let Some(close) = close_for(ch) {
-            return Some((ch, close));
+            return Some((offset, ch, close));
         }
     }
     None

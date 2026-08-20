@@ -20,6 +20,18 @@ Model and review policy follow `AGENTS.md` and the owner's current instruction.
 - Use `scripts/agent/jet-env`; it uses nix-direnv's cached environment when
   available. `full` selects browser/FFI/VM tooling.
 
+## Scoped Rust formatting proof
+
+Run this from the repository root after changing Rust files:
+
+```sh
+git diff --name-only --diff-filter=ACMRTUXB -- '*.rs' |
+  xargs -r scripts/agent/jet-env rustfmt --check --edition 2021
+```
+
+This checks only changed tracked Rust files in the pinned shell. For the full
+workspace proof, use `scripts/agent/jet-env cargo fmt --all -- --check`.
+
 ## Test strategy
 
 - **Card closure:** use the evidence named by the card's robust observable exit
