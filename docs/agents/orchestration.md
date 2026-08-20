@@ -109,32 +109,75 @@ command, marks the criterion met **only on exit 0**, and stores the command plus
 `test result:` lines as the evidence string. `--dry` runs without writing. This makes the
 lying-ledger failure mode structurally impossible: no command, no evidence row.
 
-## Milestone stream
+## The burndown loop
 
-Finish one milestone before opening another. Keep about five source-only lanes only when
-their writable paths are disjoint. Shared parser, sema, TIR, codegen, Prelude, or test seams
-get one implementation lane.
+Use `scripts/agent/lane-dispatch.mjs`. It encodes this loop, and the loop is the
+difference between a few cards a day and forty in a session.
 
-1. Select one milestone and order its unblocked cards.
-2. Dispatch bounded slices with exact paths and evidence shape. Do not dispatch mega-card
-   prompts or broad fresh reviews during implementation.
-3. Inspect each return and integrate or reject it before refilling that lane. Never build an
-   integration backlog.
-4. Advance the persistent builder once and run the smallest changed-contract proof first.
-   Source inspection never substitutes for runtime, I9 tier, snapshot, golden, or generated
-   artifact proof.
-5. If proof fails, send the exact command and decisive failure to one correction worker.
-   Do not resend the whole card or ask it to rediscover context.
-6. Record concrete integrated evidence and close the card as soon as every criterion is met
-   and no blocker contradicts it.
-7. After every milestone card is done, run one composed targeted sweep and one fresh-context
-   review of the integrated milestone diff.
-8. Reopen findings on their owning cards. Apply narrow corrections, review only the delta,
-   and rerun only affected proof targets.
+```sh
+node scripts/agent/lane-dispatch.mjs status          # running, yielded, died, headroom
+node scripts/agent/lane-dispatch.mjs brief --auto 12 # briefs straight from Tower
+node scripts/agent/lane-dispatch.mjs launch c1234 …  # detached, staggered, capped
+node scripts/agent/lane-dispatch.mjs harvest         # each unread lane's final message
+```
 
-Disposable implementation worktrees never build and never retain `target/`. Remove each
-worktree and temporary branch after integration or explicit rejection. The fixed builder
-cache is the only persistent cargo cache.
+Poll every five minutes: harvest what finished, close what is done, refill the
+freed lanes, and repair anything that broke. Never let the loop idle.
+
+### The five rules, and what each one cost before it existed
+
+1. **Parallelism is the whole game.** Run 25-30 lanes, not five. Cards are mostly
+   independent, and every lane shares one working tree, so there is no merge
+   afterwards. Serial dispatch was the single largest source of elapsed time.
+2. **Launch detached.** `(sh run.sh x &)` inside a tool call loses most of the
+   batch when the parent shell exits. Measured: 9 of 27 lanes survived and the
+   other 18 were silently absent for twenty minutes. Use `setsid nohup … </dev/null`.
+3. **Never hand-write a brief.** Generate it from the card, which already holds
+   the title, body, plan and exit criteria. Hand-write only for a defect that has
+   no card yet.
+4. **Workers type-check; they do not test.** `scripts/agent/lane-check.sh` and
+   nothing heavier. Before this rule the orchestrator became a serial repair
+   queue — nine build breaks in one session from source-only patches.
+5. **Close on implementation; batch the proof.** A card closes when its criteria
+   have concrete implementation evidence and the patch is integrated. Deferred
+   test runs, found defects and owner gates all go to one sweep ledger.
+
+### Liveness is a process question
+
+A lane that hit its timeout and a lane still thinking both leave a log with no
+completion marker, so reading logs alone reports ghosts. `run.sh` writes a
+pidfile and clears it on exit; `status` reads that. Measured once: 27 logs looked
+busy while 10 processes existed, and two thirds of the capacity sat idle behind
+the misreading. A lane with no report is not a failure — re-brief it smaller.
+
+### Things that silently waste a wave
+
+- **Stale blockers.** Check `blockedBy` against real phase before believing a
+  card is gated. On one board 21 of 31 "blocked" cards had blockers already closed.
+- **Build breaks are the orchestrator's.** Lanes share one tree, so one break
+  blocks every lane's self-check. Fix it immediately; do not wait for the lane
+  that caused it, and do not ask a worker to fix another worker's file.
+- **Large cards time out.** A card with eight or more criteria gets a
+  slice-scoped brief: make ONE criterion genuinely true end to end and leave the
+  rest untouched. `brief` adds that instruction automatically.
+
+### Verification cadence
+
+Targeted suites run once at a milestone boundary. The full suite runs once at
+epoch end. Everything deferred collects in one ledger — see
+`.claude/bdlog/EPOCH3-SWEEP.md` for the shape: a table of deferred proof, a table
+of defects found with their evidence, and a table of open owner gates. After the
+cards are closed, that ledger is worked in a single comprehensive sweep.
+
+### Session safety
+
+`scripts/agent/lane-guardian.sh` runs for the duration of a wave: a working-tree
+snapshot every three minutes into `~/.cache/jet-luna/snapshots`, and an
+available-memory floor that sheds the newest worker first. Many lanes share one
+tree, so the risk is two lanes writing one file; the snapshot interval bounds
+what that can cost. `/tmp` is RAM-backed here — a session has already died of
+OOM with scratch in tmpfs, so every script exports `TMPDIR` to disk before
+`jet-env` and caps `CARGO_BUILD_JOBS`.
 
 ## Board hygiene
 
