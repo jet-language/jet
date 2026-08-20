@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2096,
-    "rev": 39436,
+    "nextNum": 2097,
+    "rev": 39440,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133017,20 +133017,20 @@
         {
           "n": 1,
           "text": "One signal-handler mechanism owns the queue, living in the Prelude, with AOT, the Cranelift host and the interpreter ambient all marshalling to that one symbol rather than keeping a private copy",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T09:30:37.929Z"
+          "evidence": "One Prelude owner: crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs holds the only pending count, the only arming path, the only signal/SetConsoleCtrlHandler call, the one count-first registration-order dispatch rule and all six refusal texts. AOT, the Cranelift host and the interpreter ambient each keep ONLY what cannot be shared, and each reason is a type-system fact rather than a preference: the JIT keeps (code address, environment) pairs because a JIT callback is not a Rust value another tier could hold, and the interpreter keeps callable-arena indices because invoking a CtValue callable needs &mut Evaluator, which is not Send. Verified building clean at builder 1c761ea67.",
+          "at": "2026-08-20T02:39:52.772Z"
         },
         {
           "n": 2,
           "text": "The two redundant queue statics are deleted, not synchronised",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T09:30:38.439Z"
+          "evidence": "Deleted, not synchronised, and structurally so: the JetInterruptQueue TYPE itself is gone, so nothing can instantiate a second queue. Also deleted: the two public install helpers (replaced by one private install behind jet_interrupt_arm), and in jet-jit CoreHost.rs the second include, the second QUEUE static, note_interrupt, both platform mark functions and install_platform_handler across all three cfg arms. The interpreter's third queue and mark are gone the same way. Root cause this fixes was worse than duplication: because signal() REPLACES the process disposition, the second arm inside one jet binary silently disarmed the first tier's queue, so two of the three copies were DEAD and their registered handlers could never run.",
+          "at": "2026-08-20T02:39:53.292Z"
         },
         {
           "n": 3,
@@ -133047,8 +133047,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T09:30:37.393Z",
-      "updated": "2026-08-19T16:21:11.466Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T02:39:53.292Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c06zs6dw",
@@ -133983,11 +133983,11 @@
         {
           "n": 2,
           "text": "Real terminal state matrix proven: tty vs pipe, ANSI vs NO_COLOR, narrow widths; snapshots for each (I4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:18:42.381Z"
+          "evidence": "PROOF cargo test --test terminal 12/12 ok (23.4s, 2026-08-19, builder 1c761ea67). Criterion was 0 percent satisfied before, not partly: the report emitted no ANSI, read no NO_COLOR, read no tty state and read no width, so a pipe, a colour terminal, NO_COLOR and a 40-column terminal all received identical bytes - and the real example's hop lines are 85 and 90 columns, so they already soft-wrapped mid-path at 80. Four matrix fixtures now exist (tests/cli/error_report_pipe.txt, error_report_tty_ansi.txt, error_report_tty_no_color.txt, error_report_tty_narrow40.txt). One design constraint shaped it: Outcome.rs is include_str!'d verbatim into every generated program, so it may use std only - facts go in, policy lives in the one renderer, detection happens in exactly one place, so no per-tier variant can exist and the crate's existing colour ladder now calls that same detector instead of spelling NO_COLOR itself.",
+          "at": "2026-08-20T02:39:51.883Z"
         },
         {
           "n": 3,
@@ -134013,7 +134013,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-19T11:17:12.546Z",
-      "updated": "2026-08-20T01:40:58.289Z",
+      "updated": "2026-08-20T02:39:51.883Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -136831,6 +136831,30 @@
       "needsAcceptance": false,
       "created": "2026-08-20T00:10:07.160Z",
       "updated": "2026-08-20T00:10:07.161Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0hr2wez",
+      "num": 2096,
+      "title": "#Static cannot reach any constant that would emit a static",
+      "body": "Found 2026-08-19 while repairing tests/ownership.rs::const_address_taken_emits_static, whose source a glyph migration had corrupted (f28984dfe deleted the binding name outright). Repairing it exposed a real defect behind the corruption. D-CONSTMARK1=A says '#Static const gives the constant a stable address' (syntax-decisions.md:1756). The registry row is 'marker Static(@sites: [.Constant])' (Prelude/Markers.jet:101). But: (a) '#Static limit :: 10' at file scope is REFUSED with E0355 '#Static cannot attach at the File site - the registry allows #Static only at: Constant', so an ordinary file-level constant is evidently not classified as the Constant site; and (b) '#Static @limit :: 10' parses, but @limit is a comptime constant that inlines, so nothing with a stable address is emitted and the test's assertion on the emitted 'static' symbol fails. tests/marker_registry_coverage.rs:157-158 builds exactly the @value form for #Static, which is why the registry sweep never caught this. So the marker is currently unreachable for its own documented purpose. Decide and implement: either the file-level constant site IS the Constant site and the site classifier is wrong, or #Static belongs on a different registered site, or the comptime constant must stop inlining when #Static is present. Whichever, the ratified sentence must become true and one test must prove an address-taken constant emits a static.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T01:49:08.629Z",
+      "updated": "2026-08-20T01:49:08.629Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -183140,6 +183164,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T02:39:53.292Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p6kqj5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T02:39:52.773Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p6kqj5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T02:39:51.883Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0te2a80",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T01:49:08.629Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0hr2wez",
+      "note": "#Static cannot reach any constant that would emit a static"
+    },
+    {
       "at": "2026-08-20T01:40:58.289Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -186610,34 +186662,6 @@
       "action": "card.update",
       "ref": "c0x6ysg8",
       "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:13.805Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kwxkks",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:13.179Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pibmpe",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:48:12.548Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c075z2hs",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:48:11.918Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xsk2wa",
-      "note": "track,epoch,milestoneId,logEntry"
     }
   ],
   "nextNum": 368,
