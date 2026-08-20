@@ -54,6 +54,22 @@ export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
 
+# Cargo defaults to one rustc per hardware thread. This machine has 32 and the
+# Jet crates embed the whole Prelude, so an uncapped cold build peaked at 52G of
+# 61G and drove the box into swap. Roughly 2G per rustc is the observed cost.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}"
+
+# Wait until the machine can afford another heavy process.
+min_free_gb="${JET_MIN_FREE_GB:-10}"
+wait_for_memory() {
+  while :; do
+    avail=$(awk '/MemAvailable/ {print int($2/1048576)}' /proc/meminfo)
+    [ "${avail:-0}" -ge "$min_free_gb" ] && return 0
+    echo "   … ${avail}G available, waiting for ${min_free_gb}G"
+    sleep 10
+  done
+}
+
 # ── refuse to grow an already-huge cache ─────────────────────────────────────
 cap_gb="${JET_TARGET_CAP_GB:-120}"
 if [ -d target ]; then
@@ -69,8 +85,9 @@ fi
 logdir="${JET_PROOF_LOGS:-$scratch/proof-logs}"
 mkdir -p "$logdir"
 
-echo "== scratch $scratch · target cap ${cap_gb}G · -j $jobs"
+echo "== scratch $scratch · target cap ${cap_gb}G · suites -j $jobs · rustc -j $CARGO_BUILD_JOBS · min free ${min_free_gb}G"
 echo "== building test binaries once"
+wait_for_memory
 build_log="$logdir/build.log"
 if ! timeout 3000 scripts/agent/jet-env cargo test --no-run --workspace >"$build_log" 2>&1; then
   echo "BUILD FAILED — see $build_log"
@@ -91,6 +108,7 @@ wait_slot() {
   while [ "$(jobs -rp | wc -l)" -ge "$jobs" ]; do
     sleep 1
   done
+  wait_for_memory
 }
 
 for s in "${suites[@]+"${suites[@]}"}"; do

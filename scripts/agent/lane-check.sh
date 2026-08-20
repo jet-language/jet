@@ -38,6 +38,9 @@ mkdir -p "$scratch"
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
+# One rustc per hardware thread put this machine into swap on a cold build; the
+# Jet crates are large enough that eight is plenty.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
