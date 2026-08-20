@@ -313,7 +313,7 @@ mod match_scan_tests {
     fn bin_scan_reads_new_byte_widths_both_endians_and_rejects_short_input() {
         // Slice-typed rows on purpose: the widths differ, so a fixed-size array
         // element type would pin every row to the first row's length.
-        let cases: [(u32, &[u8], i64, i64); 4] = [
+        let cases: [(u8, &[u8], i64, i64); 4] = [
             (24, &[1, 2, 3], 66051, 197121),
             (40, &[1, 2, 3, 4, 5], 4328719365, 21542142465),
             (48, &[1, 2, 3, 4, 5, 6], 1108152157446, 6618611909121),
