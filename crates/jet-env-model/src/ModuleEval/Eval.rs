@@ -579,6 +579,13 @@ fn integration_key_text(key: &CtKey) -> String {
         CtKey::Str(value) => value.clone(),
         CtKey::Bool(value) => value.to_string(),
         CtKey::Char(value) => value.to_string(),
+        // D-MAP-KEY1: a composite key is value-semantic, so its text is the
+        // rendering of the value it holds. An integration key is a display
+        // string, not an identity, so deferring to jet_show keeps one
+        // rendering rule rather than a second one written here.
+        CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
+            key.to_value().jet_show()
+        }
     }
 }
 

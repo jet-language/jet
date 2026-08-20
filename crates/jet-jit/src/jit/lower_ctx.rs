@@ -4119,6 +4119,30 @@ impl LowerCtx<'_, '_> {
             match tail {
                 TStmt::ExprStmt(value) => self.lower_expr(value),
                 TStmt::Loop { label, body } => self.lower_result_loop(label, body, ty),
+                TStmt::Return(Some(value)) => {
+                    let value = self.lower_expr(value)?;
+                    self.emit_lexical_exit(Some(value), false, self.shield_depth)?;
+                    self.dead = true;
+                    Ok(value)
+                }
+                TStmt::Return(None) => {
+                    let dummy = self.dead_value(ty);
+                    self.emit_lexical_exit(None, false, self.shield_depth)?;
+                    self.dead = true;
+                    Ok(dummy)
+                }
+                TStmt::Break(label) => {
+                    let dummy = self.dead_value(ty);
+                    self.emit_loop_fallback(label.as_deref(), "break", false)?;
+                    self.dead = true;
+                    Ok(dummy)
+                }
+                TStmt::Continue(label) => {
+                    let dummy = self.dead_value(ty);
+                    self.emit_loop_fallback(label.as_deref(), "continue", true)?;
+                    self.dead = true;
+                    Ok(dummy)
+                }
                 _ => Err("jit inline loop block has unsupported result statement".to_string()),
             }
         })();
@@ -4430,25 +4454,32 @@ impl LowerCtx<'_, '_> {
     /// Return the local updated by the one pure integer reduction shape that
     /// can keep its list buffer borrowed for the whole native loop.
     fn direct_int_sum_target(var: &str, body: &[TStmt]) -> Option<String> {
-        let [TStmt::Assign {
-            place: TPlace::Local(target),
-            op: Some(BinOp::Add),
-            value,
-            ..
-        }] = body
-        else {
-            return None;
-        };
-        if target.deref || !matches!(value.ty, Type::Int) {
-            return None;
+        let mut target_name = None;
+        for stmt in body {
+            let TStmt::Assign {
+                place: TPlace::Local(target),
+                op: Some(BinOp::Add),
+                value,
+                ..
+            } = stmt
+            else {
+                if matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)) {
+                    continue;
+                }
+                return None;
+            };
+            if target.deref || !matches!(value.ty, Type::Int) {
+                return None;
+            }
+            let TExprKind::Local(rhs) = &value.kind else {
+                return None;
+            };
+            if rhs.deref || rhs.name != var || target_name.is_some() {
+                return None;
+            }
+            target_name = Some(target.rust_name());
         }
-        let TExprKind::Local(rhs) = &value.kind else {
-            return None;
-        };
-        if rhs.deref || rhs.name != var {
-            return None;
-        }
-        Some(target.rust_name())
+        target_name
     }
 
     /// Inline the resident signed-63-bit fast path. Tagged values and sums
@@ -4962,6 +4993,41 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 in_own_frame(|| -> Result<(), String> {
+                    if let TPlace::Local(local) = place {
+                        if local.is_persistent() {
+                            let rhs = self.lower_assignment_value(value, *clone_value)?;
+                            let assigned = if let Some(op) = op {
+                                let current = self.load_persistent(
+                                    local,
+                                    local
+                                        .persist_ty
+                                        .as_ref()
+                                        .ok_or("jit persistent local has no type")?,
+                                )?;
+                                self.apply_binop_to_var(
+                                    current,
+                                    *op,
+                                    rhs,
+                                    local
+                                        .persist_ty
+                                        .as_ref()
+                                        .ok_or("jit persistent local has no type")?,
+                                    *assign_line,
+                                )?
+                            } else {
+                                rhs
+                            };
+                            self.store_persistent(
+                                local,
+                                local
+                                    .persist_ty
+                                    .as_ref()
+                                    .ok_or("jit persistent local has no type")?,
+                                assigned,
+                            )?;
+                            return Ok(());
+                        }
+                    }
                     if let TPlace::Expr(place_expr) = place {
                         if let TExprKind::SharedGuardValue { guard, .. } = &place_expr.kind {
                             let guard_value = self.lower_expr(guard)?;
@@ -6066,9 +6132,10 @@ impl LowerCtx<'_, '_> {
                             ),
                             _ => val,
                         };
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                        let host_ref = self.module.declare_func_in_func(
+                            self.map_insert_host_for_key(&index.ty),
+                            self.b.func,
+                        );
                         self.b.ins().call(host_ref, &[map, key, val]);
                         self.adopt_compute_resource(val, map);
                     } else {
@@ -11288,6 +11355,51 @@ impl LowerCtx<'_, '_> {
         local.rust_name()
     }
 
+    fn persistent_key_value(&mut self, local: &TLocal) -> Result<Value, String> {
+        let key = local
+            .persist_key
+            .as_deref()
+            .ok_or("jit persistent local has no store key")?;
+        let handle = self.runtime.heap.alloc_string(key.to_string());
+        Ok(self.b.ins().iconst(types::I64, handle))
+    }
+
+    fn load_persistent(&mut self, local: &TLocal, ty: &Type) -> Result<Value, String> {
+        let key = self.persistent_key_value(local)?;
+        let host = match ty {
+            Type::Int | Type::IntN { .. } => self.host.persist_read_i64,
+            Type::Float | Type::Float32 => self.host.persist_read_f64,
+            Type::Bool => self.host.persist_read_bool,
+            Type::Char => self.host.persist_read_char,
+            Type::String => self.host.persist_read_str,
+            other => return Err(format!("jit persistent slot type unsupported: {other:?}")),
+        };
+        let value = self.call_host(host, &[key]);
+        self.emit_trap_check()?;
+        Ok(value)
+    }
+
+    fn store_persistent(
+        &mut self,
+        local: &TLocal,
+        ty: &Type,
+        value: Value,
+    ) -> Result<(), String> {
+        let key = self.persistent_key_value(local)?;
+        let host = match ty {
+            Type::Int | Type::IntN { .. } => self.host.persist_write_i64,
+            Type::Float | Type::Float32 => self.host.persist_write_f64,
+            Type::Bool => self.host.persist_write_bool,
+            Type::Char => self.host.persist_write_char,
+            Type::String => self.host.persist_write_str,
+            other => return Err(format!("jit persistent slot type unsupported: {other:?}")),
+        };
+        self.assert_host_arity(host, 2);
+        let func_ref = self.module.declare_func_in_func(host, self.b.func);
+        self.b.ins().call(func_ref, &[key, value]);
+        self.emit_trap_check()
+    }
+
     fn is_view_mut_ty(ty: &Type) -> bool {
         matches!(ty, Type::Apply { name, .. } if matches!(name.as_str(), "ViewMut" | "ComputeViewMut"))
     }
@@ -11516,6 +11628,15 @@ impl LowerCtx<'_, '_> {
     }
 
     fn load_local(&mut self, local: &TLocal) -> Result<Value, String> {
+        if local.is_persistent() {
+            return self.load_persistent(
+                local,
+                local
+                    .persist_ty
+                    .as_ref()
+                    .ok_or("jit persistent local has no type")?,
+            );
+        }
         let key = Self::local_key(local);
         let var = self
             .vars
@@ -12544,30 +12665,55 @@ impl LowerCtx<'_, '_> {
                     _ => None,
                 };
                 let handle = self.call_host(self.host.coll.map_new, &[]);
-                let insert_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_insert, self.b.func);
                 for (key, val) in entries {
-                    let key_v = match key {
+                    let (key_v, insert_id) = match key {
                         CtKey::Str(s) => {
                             let sid = self.runtime.heap.alloc_string(s.clone());
-                            self.b.ins().iconst(types::I64, sid)
+                            (
+                                self.b.ins().iconst(types::I64, sid),
+                                self.host.coll.map_insert,
+                            )
                         }
                         CtKey::Int(n) => {
-                            // Map host ABI is string-keyed; stringify ints.
+                            // Keep the established string-keyed JIT path for
+                            // scalar maps until a scalar map has a typed ABI.
                             let sid = self.runtime.heap.alloc_string(n.to_string());
-                            self.b.ins().iconst(types::I64, sid)
+                            (
+                                self.b.ins().iconst(types::I64, sid),
+                                self.host.coll.map_insert,
+                            )
                         }
                         CtKey::Bool(b) => {
                             let sid = self
                                 .runtime
                                 .heap
                                 .alloc_string(if *b { "true" } else { "false" }.to_string());
-                            self.b.ins().iconst(types::I64, sid)
+                            (
+                                self.b.ins().iconst(types::I64, sid),
+                                self.host.coll.map_insert,
+                            )
                         }
                         CtKey::Char(c) => {
                             let sid = self.runtime.heap.alloc_string(c.to_string());
-                            self.b.ins().iconst(types::I64, sid)
+                            (
+                                self.b.ins().iconst(types::I64, sid),
+                                self.host.coll.map_insert,
+                            )
+                        }
+                        CtKey::Tuple(_) | CtKey::Struct { .. } => {
+                            let value = key.to_value();
+                            // `CtKey::jet_type` is crate-private to
+                            // jet-foundation; the value carries the same type
+                            // and its accessor is public.
+                            let key_ty = value.jet_type();
+                            let key_v = self.lower_ct_value(&value, Some(&key_ty))?;
+                            (
+                                key_v,
+                                self.host.coll.map_insert_composite,
+                            )
+                        }
+                        CtKey::Enum { .. } => {
+                            return Err("jit enum map key is not resident yet".to_string());
                         }
                     };
                     let raw = self.lower_ct_value(val, value_slot)?;
@@ -12581,6 +12727,7 @@ impl LowerCtx<'_, '_> {
                         CtValue::Char(_) => self.b.ins().uextend(types::I64, raw),
                         _ => raw,
                     };
+                    let insert_ref = self.module.declare_func_in_func(insert_id, self.b.func);
                     self.b.ins().call(insert_ref, &[handle, key_v, packed]);
                 }
                 Ok(handle)
@@ -12888,6 +13035,46 @@ impl LowerCtx<'_, '_> {
     }
 
 
+    fn is_composite_map_key_type(&self, ty: &Type) -> bool {
+        if matches!(ty, Type::Tuple(_)) {
+            return true;
+        }
+        record_type_key(ty)
+            .is_some_and(|name| self.meta.struct_layout(&name).is_some())
+    }
+
+    fn map_insert_host_for_key(&self, key_ty: &Type) -> FuncId {
+        if self.is_composite_map_key_type(key_ty) {
+            self.host.coll.map_insert_composite
+        } else {
+            self.host.coll.map_insert
+        }
+    }
+
+    fn map_get_host_for_key(&self, key_ty: &Type) -> FuncId {
+        if self.is_composite_map_key_type(key_ty) {
+            self.host.coll.map_get_composite
+        } else {
+            self.host.coll.map_get
+        }
+    }
+
+    fn map_get_opt_host_for_key(&self, key_ty: &Type) -> FuncId {
+        if self.is_composite_map_key_type(key_ty) {
+            self.host.coll.map_get_opt_composite
+        } else {
+            self.host.coll.map_get_opt
+        }
+    }
+
+    fn map_remove_host_for_key(&self, key_ty: &Type) -> FuncId {
+        if self.is_composite_map_key_type(key_ty) {
+            self.host.coll.map_remove_composite
+        } else {
+            self.host.coll.map_remove
+        }
+    }
+
     fn lower_map_lit(&mut self, entries: &[(TExpr, TExpr)]) -> Result<Value, String> {
         self.lower_map_lit_pairs(entries.iter().map(|(k, v)| (k, v)))
     }
@@ -12899,7 +13086,7 @@ impl LowerCtx<'_, '_> {
     {
         let handle = self.call_host(self.host.coll.map_new, &[]);
         for (k, v) in entries {
-            if !matches!(&k.ty, Type::String) {
+            if !matches!(&k.ty, Type::String) && !self.is_composite_map_key_type(&k.ty) {
                 return Err(format!("jit map key type unsupported: {:?}", k.ty));
             }
             let key = self.lower_expr(k)?;
@@ -12920,9 +13107,10 @@ impl LowerCtx<'_, '_> {
                     ));
                 }
             };
-            let insert_ref = self
-                .module
-                .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+            let insert_ref = self.module.declare_func_in_func(
+                self.map_insert_host_for_key(&k.ty),
+                self.b.func,
+            );
             self.b.ins().call(insert_ref, &[handle, key, val]);
             self.adopt_compute_resource(val, handle);
         }
@@ -13449,6 +13637,7 @@ impl LowerCtx<'_, '_> {
     /// arm that implements it (I8: one mechanism, one fact).
     pub(crate) fn service_core_arity(module: &str, method: &str) -> Option<usize> {
         match (module, method) {
+            ("core.service", "tree" | "tree_show") => Some(1),
             ("core.services", "runtime") => Some(2),
             (
                 "core.services",
@@ -13563,7 +13752,11 @@ impl LowerCtx<'_, '_> {
         for arg in args {
             values.push(self.lower_expr(arg)?);
         }
-        let module_id = if module == "core.services" { 0 } else { 1 };
+        let module_id = if matches!(module, "core.service" | "core.services") {
+            0
+        } else {
+            1
+        };
         self.lower_service_host_call(module_id, method, values, ret_ty)
     }
 
@@ -13998,7 +14191,7 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    if module == "core.services"
+                    if matches!(module.as_str(), "core.service" | "core.services")
                         || module == "core.sync"
                         || ((module == "app" || module == "core.web")
                             && method == "sync")
@@ -18060,7 +18253,9 @@ impl LowerCtx<'_, '_> {
                             match fallback {
                                 TOrFallback::Value(e) => {
                                     let fb = self.lower_expr(e)?;
-                                    self.b.ins().jump(merge, &[fb]);
+                                    if !self.dead {
+                                        self.b.ins().jump(merge, &[fb]);
+                                    }
                                 }
                                 TOrFallback::Break => {
                                     self.emit_loop_fallback(None, "break", false)?;
@@ -18094,6 +18289,7 @@ impl LowerCtx<'_, '_> {
                             }
                             self.b.switch_to_block(merge);
                             self.b.seal_block(merge);
+                            self.dead = false;
                             let value = self.b.block_params(merge)[0];
                             self.track_compute_value(value, &expr.ty)?;
                             return Ok(value);
@@ -18123,6 +18319,12 @@ impl LowerCtx<'_, '_> {
                                 let dummy = self.b.ins().iconst(types::I64, 0);
                                 self.b.ins().jump(merge, &[dummy]);
                             }
+                            TOrFallback::Value(e) => {
+                                let fb = self.lower_expr(e)?;
+                                if !self.dead {
+                                    self.b.ins().jump(merge, &[fb]);
+                                }
+                            }
                             TOrFallback::Break => {
                                 self.emit_loop_fallback(None, "break", false)?;
                             }
@@ -18135,12 +18337,13 @@ impl LowerCtx<'_, '_> {
                             TOrFallback::ContinueLabel(name) => {
                                 self.emit_loop_fallback(Some(name), "continue", true)?;
                             }
-                            TOrFallback::Value(_) | TOrFallback::Return(_) => {
+                            TOrFallback::Return(_) => {
                                 return Err("jit or-fallback unsupported".to_string());
                             }
                         }
                         self.b.switch_to_block(merge);
                         self.b.seal_block(merge);
+                        self.dead = false;
                         let value = self.b.block_params(merge)[0];
                         self.track_compute_value(value, &expr.ty)?;
                         return Ok(value);
@@ -18197,7 +18400,9 @@ impl LowerCtx<'_, '_> {
                     match fallback {
                         TOrFallback::Value(e) => {
                             let fb = self.lower_expr(e)?;
-                            self.b.ins().jump(merge, &[fb]);
+                            if !self.dead {
+                                self.b.ins().jump(merge, &[fb]);
+                            }
                         }
                         TOrFallback::Return(None) => {
                             self.emit_lexical_exit(None, false, self.shield_depth)?;
@@ -18241,6 +18446,7 @@ impl LowerCtx<'_, '_> {
                     }
                     self.b.switch_to_block(merge);
                     self.b.seal_block(merge);
+                    self.dead = false;
                     let value = self.b.block_params(merge)[0];
                     self.track_compute_value(value, &expr.ty)?;
                     Ok(value)
@@ -18260,7 +18466,8 @@ impl LowerCtx<'_, '_> {
                         let map = self.lower_expr(base)?;
                         let key = self.lower_expr(index)?;
                         let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                        let raw = self.call_host(self.host.coll.map_get, &[map, key, line_const]);
+                        let get_host = self.map_get_host_for_key(&index.ty);
+                        let raw = self.call_host(get_host, &[map, key, line_const]);
                         self.emit_trap_check()?;
                         let val = match self.meta.clif_ty(&expr.ty) {
                             Some(types::I32) => self.b.ins().ireduce(types::I32, raw),
@@ -20997,7 +21204,8 @@ impl LowerCtx<'_, '_> {
                         ),
                         _ => val,
                     };
-                    let prev = self.call_host(self.host.coll.map_get_opt, &[recv_val, key]);
+                    let get_opt_host = self.map_get_opt_host_for_key(&args[0].ty);
+                    let prev = self.call_host(get_opt_host, &[recv_val, key]);
                     // map_get_opt returns a result-arena handle. Normalize it to
                     // the resident packed Option before it leaves this adapter.
                     let present = self.call_host(self.host.result_is_ok, &[prev]);
@@ -21006,9 +21214,10 @@ impl LowerCtx<'_, '_> {
                     let payload = self.result_payload(prev, &args[1].ty)?;
                     let some = self.pack_option_payload(payload, &args[1].ty)?;
                     let none = self.b.ins().iconst(types::I64, 0);
-                    let insert_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                    let insert_ref = self.module.declare_func_in_func(
+                        self.map_insert_host_for_key(&args[0].ty),
+                        self.b.func,
+                    );
                     self.b.ins().call(insert_ref, &[recv_val, key, val]);
                     Ok(self.b.ins().select(present, some, none))
                 })
@@ -21048,7 +21257,8 @@ impl LowerCtx<'_, '_> {
                         ),
                         _ => val,
                     };
-                    let prev = self.call_host(self.host.coll.map_get_opt, &[recv_val, key]);
+                    let get_opt_host = self.map_get_opt_host_for_key(&args[0].ty);
+                    let prev = self.call_host(get_opt_host, &[recv_val, key]);
                     // map_get_opt → result-arena Option; never compare handle to 0.
                     let occupied = self.call_host(self.host.result_is_ok, &[prev]);
                     let vac_block = self.b.create_block();
@@ -21060,9 +21270,10 @@ impl LowerCtx<'_, '_> {
                         .brif(occupied, occ_block, &[], vac_block, &[]);
                     self.b.switch_to_block(vac_block);
                     self.b.seal_block(vac_block);
-                    let insert_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                    let insert_ref = self.module.declare_func_in_func(
+                        self.map_insert_host_for_key(&args[0].ty),
+                        self.b.func,
+                    );
                     self.b.ins().call(insert_ref, &[recv_val, key, val]);
                     let tru = self.b.ins().iconst(types::I8, 1);
                     self.b.ins().jump(merge, &[tru]);
@@ -21212,7 +21423,8 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::RemoveMap => {
                 in_own_frame(|| -> Result<Value, String> {
                     let key = self.lower_expr(&args[0])?;
-                    Ok(self.call_host(self.host.coll.map_remove, &[recv_val, key]))
+                    let host = self.map_remove_host_for_key(&args[0].ty);
+                    Ok(self.call_host(host, &[recv_val, key]))
                 })
             }
             TBuiltinOp::PriorityQueueRemove { mode, line } => match mode {
@@ -21276,7 +21488,8 @@ impl LowerCtx<'_, '_> {
                         return Err("jit Map<_, IntN>.get needs typed Option lowering".to_string());
                     }
                     let key = self.lower_expr(&args[0])?;
-                    Ok(self.call_host(self.host.coll.map_get_opt, &[recv_val, key]))
+                    let host = self.map_get_opt_host_for_key(&args[0].ty);
+                    Ok(self.call_host(host, &[recv_val, key]))
                 })
             }
             TBuiltinOp::First | TBuiltinOp::Last => {
@@ -26806,6 +27019,16 @@ impl LowerCtx<'_, '_> {
         let local = place
             .as_local()
             .ok_or("jit increment/decrement non-local place")?;
+        if local.is_persistent() {
+            let old = self.load_persistent(local, ty)?;
+            let one = self.b.ins().iconst(types::I64, 1);
+            let next = match op {
+                IncDecOp::Inc => self.call_host(self.host.num.int_add, &[old, one]),
+                IncDecOp::Dec => self.call_host(self.host.num.int_sub, &[old, one]),
+            };
+            self.store_persistent(local, ty, next)?;
+            return Ok(if postfix { old } else { next });
+        }
         let key = Self::local_key(local);
         let var = self
             .vars

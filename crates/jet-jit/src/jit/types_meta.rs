@@ -1554,9 +1554,6 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
             "cause",
         ],
     ),
-    // D-MIGRATE3=A.
-    (&["MigrationStatus"], &["migrated", "from", "steps"]),
-    (&["DecodeResult"], &["value", "migration"]),
     (&["TextWidth"], &["ambiguous", "controls"]),
     // D-AUTH-TOKENPOLICY1=A — matches JetAuthClaims / JIT verify_jwt record.
     (
@@ -1588,7 +1585,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
 /// One Prelude struct's shape, resolved once from the table above.
 ///
 /// `types` is `None` while some field's type has no `core_struct_field_type`
-/// row (`DecodeResult.value` is the type argument, not a fixed type). Index
+/// row (generic payloads are the type argument, not a fixed type). Index
 /// and count stay total; the layout consumers — Debug show, clone, patch —
 /// keep failing the same way they did before rather than guessing an ABI.
 struct CoreStructShape {
@@ -1700,13 +1697,6 @@ fn core_struct_field_type_declared(type_name: &str, field: &str) -> Option<Type>
         // A reserved core GENERIC resolves these fields FROM ITS TYPE
         // ARGUMENTS (sema `core_generic_struct_field`), and a JIT field read
         // reaches this function with a bare type name, so the argument is gone.
-        // `None` means "ask the expression's own type instead", which is what
-        // the callers already do for `DecodeResult.value`.
-        "DecodeResult" => match field {
-            "value" => None,
-            "migration" => Some(Type::Named("MigrationStatus".into())),
-            _ => None,
-        },
         // `DataJoin<L, R>.left`/`.right` are `L`/`R`. The JIT stores both sides
         // as arena handles, which is what this row describes — not the payload
         // type, which only the `Type::Apply` receiver knows.

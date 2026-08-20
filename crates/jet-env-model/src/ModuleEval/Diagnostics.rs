@@ -171,7 +171,7 @@ pub(super) fn image_bad_format(word: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0976",
         format!("`{word}` isn't a disk-image format"),
-        "D-JETOS-FREEZE1: disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today".to_string(),
+        "disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today".to_string(),
         "use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix".to_string(),
         Some(span),
     )
@@ -193,7 +193,7 @@ pub(super) fn image_restated_field(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0977",
         format!("an image doesn't restate `{field}`"),
-        "D-JETOS-FREEZE1: fields inherited from `system.*` belong to frozen jetos disk-image research, not active `.Oci` images".to_string(),
+        "fields inherited from `system.*` belong to frozen jetos disk-image research, not active `.Oci` images".to_string(),
         format!("remove `{field}` from the active image; use package/env inputs instead"),
         Some(span),
     )
@@ -209,7 +209,7 @@ pub(super) fn image_from_unknown_system(image: &str, system: &str, known: &[Stri
     Diagnostic::error(
         "E0978",
         format!("the image `{image}` is built from an unknown system `{system}`"),
-        "D-JETOS-FREEZE1: `from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`".to_string(),
+        "`from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`".to_string(),
         format!("use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({hint})"),
         None,
     )
@@ -221,7 +221,7 @@ pub(super) fn fleet_unknown_field(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1244",
         format!("`{field}` isn't a field of `Fleet`"),
-        "D-JETOS-FREEZE1: fleet deployment remains frozen jetos research; only `hosts` is captured for planning".to_string(),
+        "fleet deployment remains frozen jetos research; only `hosts` is captured for planning".to_string(),
         format!("remove `{field}`; captured fleets use `hosts: {{ … }}`"),
         Some(span),
     )
@@ -232,7 +232,7 @@ pub(super) fn fleet_missing_hosts(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1245",
         "this `Fleet` has no `hosts`".to_string(),
-        "D-JETOS-FREEZE1: fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning".to_string(),
+        "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning".to_string(),
         "add `hosts: { web1: system.<name> }` if this is research capture".to_string(),
         Some(span),
     )
@@ -253,7 +253,7 @@ pub(super) fn fleet_unknown_system(
     Diagnostic::error(
         "E1242",
         format!("the fleet `{fleet}` host `{host}` names an unknown system `{system}`"),
-        "D-JETOS-FREEZE1: fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent".to_string(),
+        "fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent".to_string(),
         format!("define captured `system.{system}: {{ … }}`, or point the host at an existing captured system ({hint})"),
         None,
     )
@@ -265,7 +265,7 @@ pub(super) fn image_unknown_kind(word: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1266",
         format!("`{word}` isn't an image kind"),
-        "D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture".to_string(),
+        "D-JPK-IMAGE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture".to_string(),
         "write `kind: .Oci` for active Jetpack images".to_string(),
         Some(span),
     )

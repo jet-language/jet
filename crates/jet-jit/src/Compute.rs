@@ -30,6 +30,160 @@ mod semantics {
     include!("../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
+    #[cfg(test)]
+    mod cpu_simd_tests {
+        use super::*;
+        use std::time::{Duration, Instant};
+
+        fn detected_backend() -> JetComputeSimdBackend {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            {
+                jet_compute_simd_backend_for_features(
+                    is_x86_feature_detected!("avx2"),
+                    is_x86_feature_detected!("sse2"),
+                )
+            }
+            #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+            {
+                jet_compute_simd_backend_for_features(false, false)
+            }
+        }
+
+        fn sample_lanes(length: usize) -> (Vec<f32>, Vec<f32>) {
+            let left = (0..length)
+                .map(|index| (index % 37) as f32 * 0.03125 - 0.5)
+                .collect();
+            let right = (0..length)
+                .map(|index| (index % 29) as f32 * 0.0625 - 0.875)
+                .collect();
+            (left, right)
+        }
+
+        fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+            let mut tensor =
+                jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+            tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+            tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+            tensor.last_placement.capabilities = CPU_ORACLE_F32_CAPABILITIES
+                .iter()
+                .map(|capability| (*capability).to_string())
+                .collect();
+            jet_compute_validate_tensor(&tensor).unwrap();
+            tensor
+        }
+
+        fn measure(iterations: usize, operation: impl Fn() -> f32) -> Duration {
+            let start = Instant::now();
+            let mut total = 0.0_f32;
+            for _ in 0..iterations {
+                total += std::hint::black_box(operation());
+            }
+            std::hint::black_box(total);
+            start.elapsed()
+        }
+
+        #[test]
+        fn runtime_dispatch_prefers_avx2_then_sse2_then_scalar() {
+            assert_eq!(
+                jet_compute_simd_backend_for_features(true, true),
+                JetComputeSimdBackend::Avx2
+            );
+            assert_eq!(
+                jet_compute_simd_backend_for_features(false, true),
+                JetComputeSimdBackend::Sse2
+            );
+            assert_eq!(
+                jet_compute_simd_backend_for_features(false, false),
+                JetComputeSimdBackend::Scalar
+            );
+            assert_eq!(jet_compute_simd_backend(), detected_backend());
+        }
+
+        #[test]
+        fn simd_dot_paths_match_scalar_bit_for_bit_including_tail() {
+            let (left, right) = sample_lanes(4099);
+            let scalar = jet_compute_f32_dot_scalar(&left, &right);
+            for backend in [JetComputeSimdBackend::Sse2, JetComputeSimdBackend::Avx2] {
+                if !jet_compute_simd_backend_available(backend) {
+                    continue;
+                }
+                let actual = jet_compute_f32_dot(backend, &left, &right).unwrap();
+                assert_eq!(
+                    actual.to_bits(),
+                    scalar.to_bits(),
+                    "{} path changed ordered f32 reduction",
+                    backend.name()
+                );
+            }
+        }
+
+        #[test]
+        fn tiled_matmul_matches_f32_scalar_oracle_bit_for_bit() {
+            let left_values = (0..39)
+                .map(|index| (index * 7 % 23) as f32 - 11.0)
+                .collect::<Vec<_>>();
+            let right_values = (0..91)
+                .map(|index| (index * 5 % 19) as f32 - 9.0)
+                .collect::<Vec<_>>();
+            let mut scalar_values = Vec::with_capacity(3 * 7);
+            for row in 0..3 {
+                for column in 0..7 {
+                    let mut sum = 0.0_f32;
+                    for inner in 0..13 {
+                        sum += left_values[row * 13 + inner] * right_values[inner * 7 + column];
+                    }
+                    scalar_values.push(f64::from(sum));
+                }
+            }
+            let left = f32_tensor(vec![3, 13], left_values);
+            let right = f32_tensor(vec![13, 7], right_values);
+            let tiled = jet_compute_matmul_f32_tile(&left, &right).unwrap();
+            let tiled_values = jet_compute_tensor_values(&tiled);
+            assert_eq!(
+                scalar_values
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>(),
+                tiled_values
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        #[test]
+        fn selected_simd_path_beats_scalar_and_records_speedup() {
+            let backend = jet_compute_simd_backend();
+            if backend == JetComputeSimdBackend::Scalar {
+                eprintln!("SKIP compute_simd_speedup: no runtime SIMD feature");
+                return;
+            }
+            let (left, right) = sample_lanes(1 << 18);
+            let scalar = (0..3)
+                .map(|_| measure(4, || jet_compute_f32_dot_scalar(&left, &right)))
+                .min()
+                .unwrap();
+            let simd = (0..3)
+                .map(|_| measure(4, || jet_compute_f32_dot(backend, &left, &right).unwrap()))
+                .min()
+                .unwrap();
+            assert!(
+                simd < scalar,
+                "{} SIMD path did not beat scalar: scalar={:?}, simd={:?}",
+                backend.name(),
+                scalar,
+                simd
+            );
+            let speedup = scalar.as_secs_f64() / simd.as_secs_f64();
+            eprintln!(
+                "compute_simd_speedup backend={} scalar_ns={} simd_ns={} speedup={speedup:.2}x",
+                backend.name(),
+                scalar.as_nanos(),
+                simd.as_nanos(),
+            );
+        }
+    }
+
     pub(super) type Tensor = JetTensor;
     pub(super) type Device = JetComputeDevice;
     pub(super) type Stream = JetComputeStream;

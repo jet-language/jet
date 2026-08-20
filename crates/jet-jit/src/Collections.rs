@@ -121,6 +121,24 @@ mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
+    pub(super) fn list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
+        jet_list_sort_desc(xs);
+    }
+
+    pub(super) fn list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+    where
+        F: FnMut(&T) -> K,
+    {
+        jet_list_sort_by(xs, f);
+    }
+
+    pub(super) fn list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+    where
+        F: FnMut(&T) -> K,
+    {
+        jet_list_sort_by_desc(xs, f);
+    }
+
     // Core.rs owns the public any/all/each spellings. These adapters compose
     // the same eager Prelude kernels available in this shared collection seam;
     // they do not inspect handles or define a second traversal policy.
@@ -1464,7 +1482,7 @@ fn jet_jit_list_sort_desc(list: i64) {
             .heap
             .clone_int_list(list)
             .expect("jit list sort_desc: bad handle");
-        values.sort_by(|left, right| right.cmp(left));
+        collection_semantics::list_sort_desc(&mut values);
         for (index, value) in values.into_iter().enumerate() {
             rt.heap
                 .list_set_int(list, index as i64, value)
@@ -1488,7 +1506,7 @@ fn jet_jit_list_sort_str(list: i64) {
                 )
             })
             .collect();
-        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
         for (i, (_, id)) in pairs.into_iter().enumerate() {
             rt.heap
                 .list_set_int(list, i as i64, id)
@@ -1506,7 +1524,7 @@ fn jet_jit_list_sort_str_desc(list: i64) {
             .into_iter()
             .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
             .collect();
-        pairs.sort_by(|a, b| b.0.cmp(&a.0));
+        collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
         for (index, (_, id)) in pairs.into_iter().enumerate() {
             rt.heap
                 .list_set_int(list, index as i64, id)
@@ -1869,6 +1887,14 @@ fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
     });
 }
 
+fn jet_jit_map_insert_composite(map: i64, key: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .map_insert_composite(map, key, value)
+            .expect("jit composite map insert: bad handle or key");
+    });
+}
+
 fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let key_text = rt.heap.clone_string(key).unwrap_or_default();
@@ -1911,6 +1937,20 @@ fn jet_jit_map_get(map: i64, key: i64, line: u32) -> i64 {
     })
 }
 
+fn jet_jit_map_get_composite(map: i64, key: i64, line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.map_get_composite(map, key) {
+        Some(value) => value,
+        None => {
+            if rt.heap.map_len(map).is_none() {
+                jet_foundation::ice!(None, "jit composite map get: bad handle");
+            }
+            let key_text = jet_foundation::Outcome::jet_missing_map_key_message(None);
+            rt.set_runtime_stop("E3001", line, &key_text);
+            0
+        }
+    })
+}
+
 /// Result-arena Option handle (`result_is_ok` / `result_get_i64`), *not* the
 /// packed `0 / value + 1` carrier its sibling `jet_jit_list_get_opt` returns.
 ///
@@ -1930,6 +1970,16 @@ fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
     })
 }
 
+fn jet_jit_map_get_opt_composite(map: i64, key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit composite map get_opt: bad handle");
+        }
+        let value = rt.heap.map_get_composite(map, key);
+        option_i64(rt, value)
+    })
+}
+
 fn jet_jit_map_remove(map: i64, key: i64) -> i64 {
     let key_text = Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -1943,6 +1993,18 @@ fn jet_jit_map_remove(map: i64, key: i64) -> i64 {
         });
     }
     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+fn jet_jit_map_remove_composite(map: i64, key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit composite map remove: bad handle");
+        }
+        // Compute before the call: `option_i64` also takes `rt` mutably, so
+        // passing the removal inline borrows the runtime twice.
+        let removed = rt.heap.map_remove_composite(map, key);
+        option_i64(rt, removed)
+    })
 }
 
 fn jet_jit_map_len(map: i64) -> i64 {
@@ -3083,17 +3145,15 @@ fn jet_jit_list_sort_by_i64_keys_impl(list: i64, keys: i64, descending: bool) {
             .clone_int_list(keys)
             .expect("jit sort_by: bad keys handle");
         debug_assert_eq!(xs.len(), keys.len());
-        let mut order: Vec<usize> = (0..xs.len()).collect();
-        order.sort_by(|&a, &b| {
-            if descending {
-                keys[b].cmp(&keys[a])
-            } else {
-                keys[a].cmp(&keys[b])
-            }
-        });
-        for (dst, src) in order.into_iter().enumerate() {
+        let mut pairs: Vec<(i64, i64)> = keys.into_iter().zip(xs).collect();
+        if descending {
+            collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0);
+        } else {
+            collection_semantics::list_sort_by(&mut pairs, |pair| pair.0);
+        }
+        for (dst, (_, value)) in pairs.into_iter().enumerate() {
             rt.heap
-                .list_set_int(list, dst as i64, xs[src])
+                .list_set_int(list, dst as i64, value)
                 .expect("jit sort_by: set");
         }
     });
@@ -3123,17 +3183,15 @@ fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
             .iter()
             .map(|id| rt.heap.clone_string(*id).unwrap_or_default())
             .collect();
-        let mut order: Vec<usize> = (0..xs.len()).collect();
-        order.sort_by(|&a, &b| {
-            if descending {
-                key_strs[b].cmp(&key_strs[a])
-            } else {
-                key_strs[a].cmp(&key_strs[b])
-            }
-        });
-        for (dst, src) in order.into_iter().enumerate() {
+        let mut pairs: Vec<(String, i64)> = key_strs.into_iter().zip(xs).collect();
+        if descending {
+            collection_semantics::list_sort_by_desc(&mut pairs, |pair| pair.0.clone());
+        } else {
+            collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
+        }
+        for (dst, (_, value)) in pairs.into_iter().enumerate() {
             rt.heap
-                .list_set_int(list, dst as i64, xs[src])
+                .list_set_int(list, dst as i64, value)
                 .expect("jit sort_by_str: set");
         }
     });
@@ -5242,6 +5300,7 @@ host_fns! {
         sig_map_insert.params.push(AbiParam::new(types::I64));
         sig_map_insert.params.push(AbiParam::new(types::I64));
         sig_map_insert.params.push(AbiParam::new(types::I64));
+        let sig_map_insert_composite = sig_map_insert.clone();
         let mut sig_three_ret = sig_map_insert.clone();
         sig_three_ret.returns.push(AbiParam::new(types::I64));
         let sig_try_map_insert = sig_three_ret.clone();
@@ -5249,6 +5308,8 @@ host_fns! {
         sig_four_ret.params.push(AbiParam::new(types::I64));
         let sig_map_get = sig_get.clone();
         let sig_map_get_opt = sig_get_opt.clone();
+        let sig_map_get_composite = sig_map_get.clone();
+        let sig_map_get_opt_composite = sig_map_get_opt.clone();
         let sig_map_at = sig_get_opt.clone();
         let mut sig_print_enum = Signature::new(cc);
         sig_print_enum.params.push(AbiParam::new(types::I64));
@@ -5359,11 +5420,15 @@ host_fns! {
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
     map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
+    map_insert_composite: "jet_jit_map_insert_composite" => jet_jit_map_insert_composite: sig_map_insert_composite;
     map_try_insert: "jet_jit_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
     map_increment: "jet_jit_map_increment" => jet_jit_map_increment: sig_push;
     map_get: "jet_jit_map_get" => jet_jit_map_get: sig_map_get;
+    map_get_composite: "jet_jit_map_get_composite" => jet_jit_map_get_composite: sig_map_get_composite;
     map_get_opt: "jet_jit_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
+    map_get_opt_composite: "jet_jit_map_get_opt_composite" => jet_jit_map_get_opt_composite: sig_map_get_opt_composite;
     map_remove: "jet_jit_map_remove" => jet_jit_map_remove: sig_map_get_opt;
+    map_remove_composite: "jet_jit_map_remove_composite" => jet_jit_map_remove_composite: sig_map_get_opt_composite;
     map_len: "jet_jit_map_len" => jet_jit_map_len: sig_len;
     map_key_at: "jet_jit_map_key_at" => jet_jit_map_key_at: sig_map_at;
     map_value_at: "jet_jit_map_value_at" => jet_jit_map_value_at: sig_map_at;

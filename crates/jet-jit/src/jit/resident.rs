@@ -67,7 +67,6 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         current_line: 0,
         current_source_line: String::new(),
         source_frames: Vec::new(),
-        stack_depth: 0,
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
@@ -195,7 +194,6 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     drop(stream_consumers);
     rt.next_stream_channel = -1;
     rt.next_stream_sender = -1;
-    rt.stack_depth = 0;
     rt.source_frames.clear();
     rt.current_line = 0;
     rt.current_function.clear();
@@ -396,6 +394,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         jet_foundation::Outcome::jet_journey_reset();
         let ptr: *mut JitRuntime = runtime;
         Concurrency::set_active_runtime(Some(ptr));
+        jet_codegen::scheduler::jet_scheduler_task_completion_begin();
         let entry_app = if main_returns_result {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };
             Some(entry())
@@ -407,10 +406,8 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             entry();
             None
         };
-        // A trap, deadline, cancellation, propagated error, or explicit early
-        // return may bypass a generated lexical epilogue. Drain any surviving
-        // groups before interpreting the run outcome.
-        Concurrency::close_active_task_groups();
+        jet_codegen::scheduler::jet_scheduler_task_completion_drain();
+        jet_codegen::scheduler::jet_scheduler_task_completion_end();
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
         super::runtime_host::run_jit_atexit_handlers(runtime);

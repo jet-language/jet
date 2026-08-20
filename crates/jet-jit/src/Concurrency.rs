@@ -8,6 +8,7 @@ use jet_codegen::scheduler::{
     jet_scheduler_panic_should_unwind,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+    jet_scheduler_task_completion_register,
     jet_std_time_duration_to_millis,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
     jet_scheduler_task_group_wait, jet_scheduler_yield_now, jet_task_delay_ms_defaulted,
@@ -31,7 +32,6 @@ thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
     static RUNTIME_ACCESS_DEPTH: Cell<usize> = const { Cell::new(0) };
     static IN_JIT_TASK: Cell<bool> = const { Cell::new(false) };
-    static ACTIVE_TASK_GROUPS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
     static LOCAL_RICH_PANIC: Cell<bool> = const { Cell::new(false) };
     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static PENDING_CHILD_DEADLINE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -47,15 +47,11 @@ thread_local! {
 
 pub(crate) struct JitTaskScope {
     previous_task: bool,
-    previous_task_groups: Vec<i64>,
     previous_rich_panic: bool,
 }
 
 impl Drop for JitTaskScope {
     fn drop(&mut self) {
-        ACTIVE_TASK_GROUPS.with(|groups| {
-            *groups.borrow_mut() = std::mem::take(&mut self.previous_task_groups);
-        });
         IN_JIT_TASK.with(|task| task.set(self.previous_task));
         LOCAL_RICH_PANIC.with(|panic| panic.set(self.previous_rich_panic));
     }
@@ -67,8 +63,6 @@ pub(crate) fn enter_jit_task() -> JitTaskScope {
         task.set(true);
         previous
     });
-    let previous_task_groups =
-        ACTIVE_TASK_GROUPS.with(|groups| std::mem::take(&mut *groups.borrow_mut()));
     let previous_rich_panic = LOCAL_RICH_PANIC.with(|panic| {
         let previous = panic.get();
         panic.set(false);
@@ -76,7 +70,6 @@ pub(crate) fn enter_jit_task() -> JitTaskScope {
     });
     JitTaskScope {
         previous_task,
-        previous_task_groups,
         previous_rich_panic,
     }
 }
@@ -871,15 +864,14 @@ where
             // only touch mutex-backed channel state and indexed sender slots.
             let rt_ptr = rt_addr as *mut super::JitRuntime;
             set_active_runtime(Some(rt_ptr));
+            // Keep the runtime wired through the shared Prelude completion drain.
+            // Group callbacks are registered after this one, so reverse draining
+            // closes groups before clearing the worker's runtime pointer.
+            jet_scheduler_task_completion_register(|| set_active_runtime(None));
             clear_task_trap();
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = take_pending_shield_exit();
             let out = f();
-            // Cranelift has no unwind tables: cancellation returns through the
-            // generated frame after recording its pending status. Drain the
-            // groups created by this task before the shared scheduler publishes
-            // this task's completion.
-            close_active_task_groups();
             let child_deadline = take_pending_child_deadline();
             // A native task owns its trap until the shared join/combinator
             // result is observed; a sibling must not inherit it at its next
@@ -890,7 +882,6 @@ where
             // resident runtime would report the child as a parent panic too.
             let panic_reason = take_rich_panic_reason();
             let _panic_report = take_rich_panic_report();
-            set_active_runtime(None);
             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
             if let Some(rendered) = child_deadline {
                 jet_scheduler_propagate_deadline(rendered);
@@ -945,13 +936,18 @@ fn jet_jit_spawn4(f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
 }
 
 fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
-    with_runtime_mut(|rt| {
+    let id = with_runtime_mut(|rt| {
         let id = rt.task_groups.len() as i64;
         rt.task_groups
             .push(Some(JitTaskGroup::new(limit, bounded != 0)));
-        ACTIVE_TASK_GROUPS.with(|groups| groups.borrow_mut().push(id));
         id
-    })
+    });
+    // Prelude owns when this callback runs. This host function only marshals
+    // the opaque JIT group handle into its representation-specific close.
+    jet_scheduler_task_completion_register(move || {
+        let _ = close_task_group(id);
+    });
+    id
 }
 
 fn jet_jit_task_group_acquire(group: i64) -> i64 {
@@ -1045,23 +1041,7 @@ fn close_task_group(group: i64) -> i64 {
 }
 
 fn jet_jit_task_group_close(group: i64) -> i64 {
-    let status = close_task_group(group);
-    let index = ACTIVE_TASK_GROUPS.with(|groups| {
-        groups.borrow().iter().rposition(|active| *active == group)
-    });
-    if let Some(index) = index {
-        ACTIVE_TASK_GROUPS.with(|groups| {
-            groups.borrow_mut().remove(index);
-        });
-    }
-    status
-}
-
-pub(crate) fn close_active_task_groups() {
-    let groups = ACTIVE_TASK_GROUPS.with(|active| std::mem::take(&mut *active.borrow_mut()));
-    for group in groups.into_iter().rev() {
-        let _ = close_task_group(group);
-    }
+    close_task_group(group)
 }
 
 fn jet_jit_task_cancel(task: i64) {

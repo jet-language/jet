@@ -1,6 +1,7 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Module};
+use jet_foundation::AST::{CtFloat, CtValue};
 use jet_codegen::scheduler::{
     JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetStream, JetStreamSender,
     JetTaskControl,
@@ -301,7 +302,6 @@ pub(crate) struct JitRuntime {
     pub(crate) current_line: u32,
     pub(crate) current_source_line: String,
     pub(crate) source_frames: Vec<JitSourceFrame>,
-    pub(crate) stack_depth: usize,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
@@ -608,7 +608,6 @@ impl JitRuntime {
     }
 
     pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
-        const LIMIT: usize = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
         self.source_frames.push(JitSourceFrame {
             file: self.source_file.clone(),
             line: self.current_line,
@@ -619,8 +618,7 @@ impl JitRuntime {
         self.current_line = line;
         self.current_function = fn_name.to_string();
         self.current_source_line = src_line.to_string();
-        self.stack_depth = self.source_frames.len();
-        if self.stack_depth > LIMIT {
+        if jet_codegen::runtime_stack::jet_runtime_stack_enter() {
             let message = jet_foundation::Outcome::jet_stack_overflow_message(fn_name);
             let report = contract_kernel::jet_runtime_stop_report(
                 "E3012", file, line, fn_name, src_line, 1, 1, &message, "",
@@ -632,6 +630,7 @@ impl JitRuntime {
     }
 
     pub(crate) fn stack_leave(&mut self) {
+        jet_codegen::runtime_stack::jet_runtime_stack_leave();
         if let Some(frame) = self.source_frames.pop() {
             self.source_file = frame.file;
             self.current_line = frame.line;
@@ -642,7 +641,6 @@ impl JitRuntime {
             self.current_function.clear();
             self.current_source_line.clear();
         }
-        self.stack_depth = self.source_frames.len();
     }
 }
 
@@ -794,6 +792,138 @@ fn jet_jit_stack_enter(file: i64, line: i64, fn_name: i64, src_line: i64) -> i64
 
 fn jet_jit_stack_leave() {
     Concurrency::with_runtime_mut(JitRuntime::stack_leave);
+}
+
+fn persist_key(rt: &JitRuntime, handle: i64) -> String {
+    rt.heap.clone_string(handle).unwrap_or_default()
+}
+
+fn jet_jit_persist_read_i64(key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        match jet_foundation::Persist::shared_read_key(&key) {
+            Some(CtValue::Int(value)) => rt.heap.int_from_i64(value),
+            _ => {
+                rt.set_host_fault("persistent Int slot was missing or had the wrong shape");
+                0
+            }
+        }
+    })
+}
+
+fn jet_jit_persist_write_i64(key: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        let Some(value) = rt.heap.int_to_i64(value) else {
+            rt.set_host_fault("persistent Int slot received an invalid value");
+            return;
+        };
+        if !jet_foundation::Persist::shared_write_key(&key, &CtValue::Int(value)) {
+            rt.set_host_fault("persistent Int slot was missing");
+        }
+    });
+}
+
+fn jet_jit_persist_read_f64(key: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        match jet_foundation::Persist::shared_read_key(&key) {
+            Some(CtValue::Float(value)) => value.as_f64(),
+            _ => {
+                rt.set_host_fault("persistent Float slot was missing or had the wrong shape");
+                0.0
+            }
+        }
+    })
+}
+
+fn jet_jit_persist_write_f64(key: i64, value: f64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        if !jet_foundation::Persist::shared_write_key(
+            &key,
+            &CtValue::Float(CtFloat::f64(value)),
+        ) {
+            rt.set_host_fault("persistent Float slot was missing");
+        }
+    });
+}
+
+fn jet_jit_persist_read_bool(key: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        match jet_foundation::Persist::shared_read_key(&key) {
+            Some(CtValue::Bool(value)) => i8::from(value),
+            _ => {
+                rt.set_host_fault("persistent Bool slot was missing or had the wrong shape");
+                0
+            }
+        }
+    })
+}
+
+fn jet_jit_persist_write_bool(key: i64, value: i8) {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        if !jet_foundation::Persist::shared_write_key(
+            &key,
+            &CtValue::Bool(value != 0),
+        ) {
+            rt.set_host_fault("persistent Bool slot was missing");
+        }
+    });
+}
+
+fn jet_jit_persist_read_char(key: i64) -> i32 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        match jet_foundation::Persist::shared_read_key(&key) {
+            Some(CtValue::Char(value)) => value as i32,
+            _ => {
+                rt.set_host_fault("persistent Char slot was missing or had the wrong shape");
+                0
+            }
+        }
+    })
+}
+
+fn jet_jit_persist_write_char(key: i64, value: i32) {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        let Some(value) = char::from_u32(value as u32) else {
+            rt.set_host_fault("persistent Char slot received an invalid value");
+            return;
+        };
+        if !jet_foundation::Persist::shared_write_key(&key, &CtValue::Char(value)) {
+            rt.set_host_fault("persistent Char slot was missing");
+        }
+    });
+}
+
+fn jet_jit_persist_read_str(key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        match jet_foundation::Persist::shared_read_key(&key) {
+            Some(CtValue::Str(value)) => rt.heap.alloc_string(value),
+            _ => {
+                rt.set_host_fault("persistent String slot was missing or had the wrong shape");
+                0
+            }
+        }
+    })
+}
+
+fn jet_jit_persist_write_str(key: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let key = persist_key(rt, key);
+        let Some(value) = rt.heap.clone_string(value) else {
+            rt.set_host_fault("persistent String slot received an invalid value");
+            return;
+        };
+        if !jet_foundation::Persist::shared_write_key(&key, &CtValue::Str(value)) {
+            rt.set_host_fault("persistent String slot was missing");
+        }
+    });
 }
 
 fn jet_jit_add_i64(a: i64, b: i64, line: u32) -> i64 {
@@ -3826,6 +3956,21 @@ host_fns! {
         let mut sig_i64_i64 = Signature::new(cc);
         sig_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_persist_read_f64 = Signature::new(cc);
+        sig_persist_read_f64.params.push(AbiParam::new(types::I64));
+        sig_persist_read_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_persist_write_f64 = Signature::new(cc);
+        sig_persist_write_f64.params.push(AbiParam::new(types::I64));
+        sig_persist_write_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_persist_write_i8 = Signature::new(cc);
+        sig_persist_write_i8.params.push(AbiParam::new(types::I64));
+        sig_persist_write_i8.params.push(AbiParam::new(types::I8));
+        let mut sig_persist_read_i32 = Signature::new(cc);
+        sig_persist_read_i32.params.push(AbiParam::new(types::I64));
+        sig_persist_read_i32.returns.push(AbiParam::new(types::I32));
+        let mut sig_persist_write_i32 = Signature::new(cc);
+        sig_persist_write_i32.params.push(AbiParam::new(types::I64));
+        sig_persist_write_i32.params.push(AbiParam::new(types::I32));
         let mut sig_measurement_new = Signature::new(cc);
         sig_measurement_new.params.push(AbiParam::new(types::F64));
         sig_measurement_new.params.push(AbiParam::new(types::F64));
@@ -4003,6 +4148,16 @@ host_fns! {
     print_bool: "jet_jit_print_bool" => jet_jit_print_bool: sig_i8;
     print_char: "jet_jit_print_char" => jet_jit_print_char: sig_i32;
     print_str: "jet_jit_print_str" => jet_jit_print_str: sig_i64;
+    persist_read_i64: "jet_jit_persist_read_i64" => jet_jit_persist_read_i64: sig_str_unary_i64;
+    persist_write_i64: "jet_jit_persist_write_i64" => jet_jit_persist_write_i64: sig_i64_i64;
+    persist_read_f64: "jet_jit_persist_read_f64" => jet_jit_persist_read_f64: sig_persist_read_f64;
+    persist_write_f64: "jet_jit_persist_write_f64" => jet_jit_persist_write_f64: sig_persist_write_f64;
+    persist_read_bool: "jet_jit_persist_read_bool" => jet_jit_persist_read_bool: sig_str_unary_i8;
+    persist_write_bool: "jet_jit_persist_write_bool" => jet_jit_persist_write_bool: sig_persist_write_i8;
+    persist_read_char: "jet_jit_persist_read_char" => jet_jit_persist_read_char: sig_persist_read_i32;
+    persist_write_char: "jet_jit_persist_write_char" => jet_jit_persist_write_char: sig_persist_write_i32;
+    persist_read_str: "jet_jit_persist_read_str" => jet_jit_persist_read_str: sig_str_unary_i64;
+    persist_write_str: "jet_jit_persist_write_str" => jet_jit_persist_write_str: sig_i64_i64;
     eprint_str: "jet_jit_eprint_str" => jet_jit_eprint_str: sig_i64;
     str_begin: "jet_jit_str_begin" => jet_jit_str_begin: sig_str_begin;
     str_push_lit: "jet_jit_str_push_lit" => jet_jit_str_push_lit: sig_str_push_lit;

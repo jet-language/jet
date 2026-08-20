@@ -278,21 +278,20 @@ fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue, slot: Option<&Ty
         // f32: the record setter and `list_push_f64` follow the value's own
         // `CtFloat` width.
         CtValue::Float(_) => slot.is_none_or(|ty| matches!(ty, Type::Float)),
-        // A comptime Map literal builds the same string-keyed heap map the
-        // runtime literal path builds: `map_new`, then `map_insert(handle,
-        // string-handle, packed-value)` (lower_ctx.rs `CtValue::Map`), which is
-        // the ABI `lower_map_lit_pairs` emits. That arm stringifies
-        // `CtKey::Int`/`Bool`/`Char` while `jit_map_int_type` maps carry raw i64
-        // keys, so only `CtKey::Str` over a `Map<String, _>` is admitted — and
-        // only where a slot names that map type, since nothing else pins the key.
+        // A comptime Map literal uses the same host adapter as a runtime
+        // literal. Composite keys lower as records; scalar strings retain the
+        // established string ABI. The slot pins which key carrier is valid.
         CtValue::Map(entries) => slot.is_some_and(|ty| {
-            jit_map_string_type(ty)
-                && jit_map_resident_type(ty)
+            jit_map_resident_type(ty)
                 && match ty {
-                    Type::Map { value: value_ty, .. } => {
+                    Type::Map { key: key_ty, value: value_ty, .. } => {
                         jit_value_type(value_ty)
                             && entries.iter().all(|(key, entry)| {
-                                matches!(key, CtKey::Str(_))
+                                (if jit_map_composite_key_type(key_ty) {
+                                    matches!(key, CtKey::Tuple(_) | CtKey::Struct { .. })
+                                } else {
+                                    matches!(key, CtKey::Str(_))
+                                })
                                     && resident_safe_ct_value(entry, Some(value_ty.as_ref()))
                             })
                     }
@@ -1128,6 +1127,19 @@ pub(crate) fn jit_map_string_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String))
 }
 
+fn jit_map_composite_key_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Map { key, .. }
+            if matches!(key.as_ref(), Type::Tuple(_) | Type::Named(_))
+    )
+}
+
+fn jit_map_composite_key_expr(expr: &TExpr) -> bool {
+    matches!(&expr.ty, Type::Tuple(_))
+        || matches!((&expr.ty, &expr.kind), (Type::Named(_), TExprKind::StructLit { .. }))
+}
+
 fn jit_map_int_key_type(ty: &Type) -> bool {
     matches!(
         erase_runtime_qualifiers(ty),
@@ -1155,7 +1167,8 @@ pub(crate) fn jit_map_int_type(ty: &Type) -> bool {
 }
 
 fn jit_map_resident_type(ty: &Type) -> bool {
-    (jit_map_string_type(ty) || jit_map_int_type(ty)) && !jit_map_intn_value_type(ty)
+    (jit_map_string_type(ty) || jit_map_int_type(ty) || jit_map_composite_key_type(ty))
+        && !jit_map_intn_value_type(ty)
 }
 
 fn jit_map_intn_value_type(ty: &Type) -> bool {
@@ -2079,7 +2092,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             // whole predicate; this arm previously restated all ~60 rows by
             // hand, so a new lowered method silently stayed deopted and a
             // removed one silently over-admitted.
-            if matches!(module.as_str(), "core.services" | "core.sync")
+            if matches!(module.as_str(), "core.service" | "core.services" | "core.sync")
                 || ((module == "app" || module == "core.web") && method == "sync")
             {
                 return crate::lower_ctx::LowerCtx::service_core_arity(module, method)
@@ -2327,7 +2340,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         TExprKind::MapLit(entries) => {
             jit_map_resident_type(&expr.ty)
                 && entries.iter().all(|(k, v)| {
-                    let key_ok = if jit_map_int_type(&expr.ty) {
+                    let key_ok = if jit_map_composite_key_type(&expr.ty) {
+                        jit_map_composite_key_expr(k)
+                    } else if jit_map_int_type(&expr.ty) {
                         jit_map_int_key_type(&k.ty)
                     } else {
                         matches!(&k.ty, Type::String)
@@ -2418,7 +2433,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             ..
         } => {
             if *is_map {
-                let key_ok = if jit_map_int_type(&base.ty) {
+                let key_ok = if jit_map_composite_key_type(&base.ty) {
+                    jit_map_composite_key_expr(index)
+                } else if jit_map_int_type(&base.ty) {
                     jit_map_int_key_type(&index.ty)
                 } else {
                     jit_map_string_type(&base.ty) && matches!(&index.ty, Type::String)
@@ -3737,7 +3754,7 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Keys | TBuiltinOp::Values => {
-            jit_map_string_type(recv_ty) && args.is_empty()
+            jit_map_resident_type(recv_ty) && args.is_empty()
         }
         TBuiltinOp::Sort => {
             (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
@@ -3778,7 +3795,9 @@ fn resident_safe_builtin_op(
         TBuiltinOp::GetMap => {
             jit_map_resident_type(recv_ty)
                 && args.len() == 1
-                && (if jit_map_int_type(recv_ty) {
+                && (if jit_map_composite_key_type(recv_ty) {
+                    jit_map_composite_key_expr(&args[0])
+                } else if jit_map_int_type(recv_ty) {
                     jit_map_int_key_type(&args[0].ty)
                 } else {
                     matches!(&args[0].ty, Type::String)
@@ -3788,7 +3807,9 @@ fn resident_safe_builtin_op(
         TBuiltinOp::InsertMap | TBuiltinOp::AddNewMap => {
             jit_map_resident_type(recv_ty)
                 && args.len() == 2
-                && (if jit_map_int_type(recv_ty) {
+                && (if jit_map_composite_key_type(recv_ty) {
+                    jit_map_composite_key_expr(&args[0])
+                } else if jit_map_int_type(recv_ty) {
                     jit_map_int_key_type(&args[0].ty)
                 } else {
                     matches!(&args[0].ty, Type::String)
@@ -3798,25 +3819,31 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[1], callees)
         }
         TBuiltinOp::MapMerge => {
-            jit_map_resident_type(recv_ty)
+            (jit_map_string_type(recv_ty) || jit_map_int_type(recv_ty))
                 && args.len() == 1
-                && jit_map_resident_type(&args[0].ty)
+                && (jit_map_string_type(&args[0].ty) || jit_map_int_type(&args[0].ty))
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::MapMergeWith => {
-            jit_map_resident_type(recv_ty)
+            (jit_map_string_type(recv_ty) || jit_map_int_type(recv_ty))
                 && args.len() == 2
-                && jit_map_resident_type(&args[0].ty)
+                && (jit_map_string_type(&args[0].ty) || jit_map_int_type(&args[0].ty))
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
         TBuiltinOp::RemoveMap => {
-            jit_map_string_int_type(recv_ty)
+            (jit_map_string_int_type(recv_ty) || jit_map_composite_key_type(recv_ty))
                 && args.len() == 1
-                && matches!(&args[0].ty, Type::String)
+                && (if jit_map_composite_key_type(recv_ty) {
+                    jit_map_composite_key_expr(&args[0])
+                } else {
+                    matches!(&args[0].ty, Type::String)
+                })
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::MapCopy => jit_map_resident_type(recv_ty) && args.is_empty(),
+        TBuiltinOp::MapCopy => {
+            (jit_map_string_type(recv_ty) || jit_map_int_type(recv_ty)) && args.is_empty()
+        }
         TBuiltinOp::MapFirst | TBuiltinOp::MapToList { .. } => {
             jit_map_string_int_type(recv_ty) && args.is_empty()
         }
@@ -4811,7 +4838,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             ..
         } => {
             if *is_map {
-                let key_ok = if jit_map_int_type(&base.ty) {
+                let key_ok = if jit_map_composite_key_type(&base.ty) {
+                    jit_map_composite_key_expr(index)
+                } else if jit_map_int_type(&base.ty) {
                     jit_map_int_key_type(&index.ty)
                 } else {
                     jit_map_string_type(&base.ty) && matches!(&index.ty, Type::String)

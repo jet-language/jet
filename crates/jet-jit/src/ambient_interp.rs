@@ -21,6 +21,10 @@ mod fs_walk_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
+mod env_config_prelude {
+    include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
+}
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
@@ -50,6 +54,161 @@ mod wire {
 
 fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
+}
+
+fn env_config_error(reason: impl Into<String>) -> CtValue {
+    CtValue::failed(Box::new(CtValue::List(vec![CtValue::Struct {
+        type_name: "FieldError".to_string(),
+        fields: vec![
+            ("path".to_string(), CtValue::Str(String::new())),
+            ("reason".to_string(), CtValue::Str(reason.into())),
+        ],
+    }])))
+}
+
+fn env_config_text(value: String) -> CtValue {
+    CtValue::Enum {
+        type_name: "DataTree".to_string(),
+        variant: "Text".to_string(),
+        args: vec![(None, CtValue::Str(value))],
+    }
+}
+
+fn env_config_object(fields: Vec<(String, CtValue)>) -> CtValue {
+    CtValue::Enum {
+        type_name: "DataTree".to_string(),
+        variant: "Object".to_string(),
+        args: vec![(
+            None,
+            CtValue::Struct {
+                type_name: "JSONObject".to_string(),
+                fields,
+            },
+        )],
+    }
+}
+
+fn env_config_insert(
+    fields: &mut Vec<(String, CtValue)>,
+    segments: &[String],
+    value: String,
+) {
+    let Some(segment) = segments.first() else {
+        return;
+    };
+    if segments.len() == 1 {
+        if let Some((_, existing)) = fields
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(segment))
+        {
+            *existing = env_config_text(value);
+        } else {
+            fields.push((segment.clone(), env_config_text(value)));
+        }
+        return;
+    }
+    if let Some(index) = fields
+        .iter()
+        .position(|(name, _)| name.eq_ignore_ascii_case(segment))
+    {
+        match &mut fields[index].1 {
+            CtValue::Enum { variant, args, .. } if variant == "Object" => {
+                if let Some((
+                    _,
+                    CtValue::Struct {
+                        fields: child_fields,
+                        ..
+                    },
+                )) = args.first_mut()
+                {
+                    env_config_insert(child_fields, &segments[1..], value);
+                    return;
+                }
+            }
+            _ => {}
+        }
+        fields[index].1 = env_config_object(Vec::new());
+        if let CtValue::Enum { args, .. } = &mut fields[index].1 {
+            if let Some((
+                _,
+                CtValue::Struct {
+                    fields: child_fields,
+                    ..
+                },
+            )) = args.first_mut()
+            {
+                env_config_insert(child_fields, &segments[1..], value);
+            }
+        }
+        return;
+    }
+    let mut child = Vec::new();
+    env_config_insert(&mut child, &segments[1..], value);
+    fields.push((segment.clone(), env_config_object(child)));
+}
+
+fn ambient_env_config(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let (Some(CtValue::Str(prefix)), Some(CtValue::Str(file)), Some(CtValue::List(allow))) =
+        (args.first(), args.get(1), args.get(2))
+    else {
+        return Err(unsupported("core.sys.decode arguments", span));
+    };
+    let allow = allow
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(unsupported("core.sys.decode allowlist", span)),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if !env_config_prelude::jet_env_config_file_is_project_relative(file) {
+        return Ok(env_config_error(
+            "E2416: Dotenv.file must be project-relative",
+        ));
+    }
+    let dotenv = if file.is_empty() {
+        None
+    } else {
+        match std::fs::read_to_string(file) {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Ok(env_config_error(format!(
+                    "E2416: cannot read Dotenv.file `{file}`: {error}"
+                )))
+            }
+        }
+    };
+    let process = crate::CoreHost::jit_env_snapshot_raw()
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)));
+    let entries = match env_config_prelude::jet_env_config_entries(
+        prefix,
+        dotenv.as_deref(),
+        &allow,
+        process,
+    ) {
+        Ok(entries) => entries,
+        Err(reason) => return Ok(env_config_error(format!("E2416: {reason}"))),
+    };
+    let mut tree_fields = Vec::new();
+    let mut origins = Vec::new();
+    for entry in entries {
+        origins.push(CtValue::Struct {
+            type_name: "EnvConfigOrigin".to_string(),
+            fields: vec![
+                ("name".to_string(), CtValue::Str(entry.name)),
+                ("path".to_string(), CtValue::Str(entry.segments.join("."))),
+            ],
+        });
+        env_config_insert(&mut tree_fields, &entry.segments, entry.value);
+    }
+    Ok(CtValue::Present(Box::new(CtValue::Struct {
+        type_name: "EnvConfig".to_string(),
+        fields: vec![
+            ("tree".to_string(), env_config_object(tree_fields)),
+            ("origins".to_string(), CtValue::List(origins)),
+        ],
+    })))
 }
 
 /// Both `core.files.walk` and `core.files.walk_parallel` answer with the same
@@ -2894,6 +3053,9 @@ pub fn ambient_core_call(
             type_name: "Stderr".to_string(),
             fields: vec![],
         })),
+        // D-CONFIG-ENV1: TIR asks the ambient adapter for source material;
+        // decoding and FieldError framing remain in the shared TIR codec.
+        ("core.sys", "__env_config") => Some(ambient_env_config(&args, span)),
         // The interpreter is a marshalling adapter over the one logical
         // environment table (#2003): `core.sys` reads and writes it, and every
         // env-derived terminal fact below reads the same owner. Without these
@@ -3259,6 +3421,12 @@ pub fn ambient_core_call(
                     ("result".to_string(), CtValue::Int(suite.result)),
                 ],
             }))
+        }
+        // D-SERVICE1=D / I9: ambient is only the adapter; typed topology
+        // construction and rendering execute the same ServicesLite Prelude
+        // used by AOT and TIR.
+        ("core.service", "tree" | "tree_show") => {
+            Some(jet_codegen::Comptime::ServicesLite::apply(method, &args, span))
         }
         ("core.services", "runtime") => {
             let (Some(CtValue::Str(store)), Some(retention)) = (args.first(), args.get(1)) else {

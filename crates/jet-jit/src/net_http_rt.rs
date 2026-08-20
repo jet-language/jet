@@ -47,7 +47,7 @@ impl __jet_Encode for i64 {
     }
 }
 trait __jet_Decode: Sized {
-    fn jet_decode_traced(tree: &JetDataTree) -> Result<(Self, ()), Vec<jet_std::FieldError>>;
+    fn jet_decode(tree: &JetDataTree) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
     crate::Encoding::json_rt::render_datatree_json(&v.jet_encode(), false, 0)
@@ -59,7 +59,7 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
             error.line, error.message
         ))
     })?;
-    T::jet_decode_traced(&tree).map(|(value, _)| value)
+    T::jet_decode(&tree)
 }
 struct JetFileReader {
     inner: std::io::BufReader<std::fs::File>,
