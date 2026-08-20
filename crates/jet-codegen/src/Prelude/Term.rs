@@ -81,6 +81,48 @@ pub(crate) fn jet_term_stderr_is_terminal() -> bool {
     std::io::stderr().is_terminal()
 }
 
+/// The name of the one process-wide fact below. The CLI sets it; every mirror
+/// of this file reads it, so no tier carries a second switch to keep in step.
+pub(crate) const JET_TERM_PROGRAM_OWNS_STREAMS: &str = "JET_PROGRAM_OWNS_STREAMS";
+
+/// Does the running program own the process's stdout and stderr?
+///
+/// An AOT program always does: it writes its own streams and nothing reads them
+/// back. The two in-process tiers do not by default, because an embedder — the
+/// REPL, a notebook cell, `dev_iteration` in a golden harness — consumes the
+/// run's output from `RunOutcome` as data, so their adapters must accumulate it
+/// instead of writing it. The one-shot `jet run` / `jet dev` verbs are not
+/// embedders: they re-print that buffer verbatim and nothing else consumes it,
+/// so they hand the streams to the program and say so here.
+///
+/// Terminal detection alone could not answer this. It said "not mine" for every
+/// piped run, so the in-process tiers withheld a piped program's output until
+/// the run ENDED: a program that prints and keeps running — a server, a watch
+/// loop, anything with a `loop` — printed nothing that an AOT build of the same
+/// source printed immediately, and nothing outside the process could ever
+/// synchronise with a program while it ran.
+pub(crate) fn jet_term_program_owns_streams() -> bool {
+    *JET_TERM_PROGRAM_OWNS_STREAMS_FACT
+}
+
+/// The fact is read once: the CLI decides it before the program starts, and a
+/// run cannot change hands halfway through its own output.
+static JET_TERM_PROGRAM_OWNS_STREAMS_FACT: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| {
+        std::env::var_os(JET_TERM_PROGRAM_OWNS_STREAMS).is_some_and(|value| value == "1")
+    });
+
+/// Where a program write goes: the real stream, or the caller's buffer. Framing
+/// decisions keep asking `jet_term_*_is_terminal` — a pipe still gets no
+/// carriage-return progress frames when the program owns it.
+pub(crate) fn jet_term_stdout_is_program_stream() -> bool {
+    jet_term_stdout_is_terminal() || jet_term_program_owns_streams()
+}
+
+pub(crate) fn jet_term_stderr_is_program_stream() -> bool {
+    jet_term_stderr_is_terminal() || jet_term_program_owns_streams()
+}
+
 pub(crate) fn jet_term_write_stdout(text: &str, flush: bool) -> std::io::Result<()> {
     jet_term_write_stdout_bytes(text.as_bytes(), flush)
 }

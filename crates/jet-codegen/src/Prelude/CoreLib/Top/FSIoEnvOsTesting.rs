@@ -1024,7 +1024,16 @@ mod jet_os_interrupt {
                                     handler();
                                 }),
                             ) {
-                                super::jet_interrupt_handler_unwind(payload);
+                                // The tail is named here, not in
+                                // `Prelude/Core.rs`: this module ships only
+                                // with the Core kernel, which always ships
+                                // with `Prelude/Scheduler.rs`, so
+                                // `jet_report_caught_unwind` is in scope
+                                // exactly where this call is.
+                                super::jet_interrupt_handler_unwind(
+                                    payload,
+                                    super::jet_report_caught_unwind,
+                                );
                             }
                         });
                     }

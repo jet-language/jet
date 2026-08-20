@@ -217,6 +217,17 @@ fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         .unwrap_or(message)
 }
 
+/// Report a payload this program caught and will not re-raise: a blown deadline
+/// prints its rendered report, loose panic text republishes as a caught stop.
+///
+/// One consumer, and it is not in this part: the AOT interrupt adapter
+/// (`Prelude/CoreLib/Top/FSIoEnvOsTesting.rs`, `mod jet_os_interrupt`) passes
+/// this as the tail of `Prelude/Core.rs`'s `jet_interrupt_handler_unwind`,
+/// which owns the payloads Core declares and names none of this part's. Do not
+/// move this into Core: `JetDeadlineUnwind` is the scheduler's payload, and
+/// `jet_codegen::scheduler` (the Cranelift/interpreter host, `lib.rs`) compiles
+/// this file WITHOUT `Prelude/Core.rs`, so a Core home for either would need a
+/// second declaration in `SchedulerHost.rs` (I8).
 fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
     if let Some(deadline) = payload.downcast_ref::<JetDeadlineUnwind>() {
         eprintln!("{}", deadline.rendered);

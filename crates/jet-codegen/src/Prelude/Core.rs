@@ -710,20 +710,38 @@ where
 ///
 /// A Jet interrupt handler runs on the dispatcher thread — the count and the
 /// drain rule belong to `Prelude/CoreLib/Top/Interrupt.rs`, the thread and the
-/// `Arc<dyn Fn>` storage to this file's `jet_os_interrupt` adapter — so every
-/// control transfer a handler raises unwinds into that thread's `catch_unwind`
-/// and can never reach `jet_runtime_boundary` above. Handing those payloads to
-/// `jet_report_caught_unwind`, which only knows loose panic text, dropped both
-/// meanings a handler can carry: `process.exit` stopped ending the process (a
-/// signalled program then ran forever with its handlers already done) and a
-/// handler's stop printed no report at all.
+/// `Arc<dyn Fn>` storage to that file's sibling `jet_os_interrupt` adapter in
+/// `Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` — so every control transfer a
+/// handler raises unwinds into that thread's `catch_unwind` and can never reach
+/// `jet_runtime_boundary` above. Handing those payloads straight to the
+/// scheduler's loose-panic reporter, which knows only deadline unwinds and
+/// panic text, dropped both meanings a handler can carry: `process.exit`
+/// stopped ending the process (a signalled program then ran forever with its
+/// handlers already done) and a handler's stop printed no report at all.
 ///
 /// Two of the terminal rules differ from the entry boundary's, on purpose. An
 /// explicit exit still ends the process: that is what the program asked for,
 /// and which thread asked is not part of the request. A stop only *reports*
 /// here: the drain still owes every later handler its turn in registration
 /// order, so one failing handler must not cancel the ones registered after it.
-fn jet_interrupt_handler_unwind(payload: Box<dyn std::any::Any + Send>) {
+///
+/// `report_other` is the tail of that chain, and it is a parameter for a
+/// structural reason rather than a stylistic one. This file is embedded in
+/// EVERY generated program; the payloads outside the list above belong to parts
+/// that are not. A blown deadline is `Prelude/Scheduler.rs`'s
+/// `JetDeadlineUnwind`, reported by that part's `jet_report_caught_unwind`, and
+/// the scheduler ships only when a program reaches it
+/// (`Codegen/mod.rs::push_core_runtime`) — never for `Codegen/mod.rs::emit`,
+/// `emit_tests`, or the wasm module. So the adapter, the one place that has both
+/// parts in scope, names the tail; this file names nothing it does not own, and
+/// a program with no scheduler cannot inherit a dangling reference to one (I2).
+/// The tail is a required argument, not a leftover payload handed back to a
+/// caller that may drop it: dropping it is exactly how a handler's control
+/// transfer went unfinished before.
+fn jet_interrupt_handler_unwind(
+    payload: Box<dyn std::any::Any + Send>,
+    report_other: impl FnOnce(Box<dyn std::any::Any + Send>),
+) {
     let payload = match payload.downcast::<JetExplicitExit>() {
         Ok(exit) => jet_runtime_process_exit(exit.code, None),
         Err(payload) => payload,
@@ -735,7 +753,7 @@ fn jet_interrupt_handler_unwind(payload: Box<dyn std::any::Any + Send>) {
     match payload.downcast::<JetRenderedRuntimeStop>() {
         Ok(report) => jet_runtime_caught_stop(&report.rendered),
         Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
-        Err(payload) => jet_report_caught_unwind(payload),
+        Err(payload) => report_other(payload),
     }
 }
 

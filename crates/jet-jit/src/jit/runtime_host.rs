@@ -626,13 +626,14 @@ fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
     Concurrency::with_runtime_mut(f);
 }
 
-/// Route resident output through the terminal when the caller owns a TTY.
-/// Otherwise keep it in `JitRuntime` so the backend returns one ordered
-/// `ProgramOutput` buffer. This is an engine adapter; terminal framing stays
-/// in `Prelude/Term.rs`.
+/// Route resident output to the process's stream when the program owns it — a
+/// terminal, or a one-shot `jet run`/`jet dev` that hands its streams over.
+/// Otherwise keep it in `JitRuntime` so an embedder that reads the run's output
+/// back from `RunOutcome` gets one ordered buffer. This is an engine adapter;
+/// the ownership fact and the terminal framing stay in `Prelude/Term.rs`.
 pub(crate) fn write_jit_stdout(text: &str, flush: bool) -> Result<(), String> {
-    let terminal = crate::IO::term_prelude::jet_term_stdout_is_terminal();
-    let direct = terminal || Concurrency::active_runtime_ptr().is_none();
+    let direct = crate::IO::term_prelude::jet_term_stdout_is_program_stream()
+        || Concurrency::active_runtime_ptr().is_none();
     if direct {
         crate::IO::term_prelude::jet_term_write_stdout(text, flush)
             .map_err(|error| format!("write stdout: {error}"))?;
@@ -648,8 +649,8 @@ fn write_jit_stdout_line(text: &str, flush: bool) -> Result<(), String> {
 }
 
 pub(crate) fn write_jit_stderr(text: &str, flush: bool) -> Result<(), String> {
-    let terminal = crate::IO::term_prelude::jet_term_stderr_is_terminal();
-    let direct = terminal || Concurrency::active_runtime_ptr().is_none();
+    let direct = crate::IO::term_prelude::jet_term_stderr_is_program_stream()
+        || Concurrency::active_runtime_ptr().is_none();
     if direct {
         crate::IO::term_prelude::jet_term_write_stderr(text, flush)
             .map_err(|error| format!("write stderr: {error}"))?;
