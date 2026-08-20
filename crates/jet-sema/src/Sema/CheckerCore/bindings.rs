@@ -43,7 +43,7 @@ fn contains_taskgroup(ty: &Type) -> bool {
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             contains_taskgroup(key) || contains_taskgroup(value)
         }
-        // Function signatures have their own direct Group parameter/return
+        // Function signatures have their own direct TaskGroup parameter/return
         // checks; do not duplicate those diagnostics at the binding site.
         Type::Fn { .. } => false,
         Type::Apply { args, .. } | Type::Union(args) => args.iter().any(contains_taskgroup),
@@ -947,10 +947,10 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E1110",
-                    "`Group` cannot be stored inside another value".to_string(),
+                    "`TaskGroup` cannot be stored inside another value".to_string(),
                     "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
                         .to_string(),
-                    "pass `group: Group` directly to a helper function or method and use it there"
+                    "pass `group: TaskGroup` directly to a helper function or method and use it there"
                         .to_string(),
                     Some(b.name_span),
                 ));

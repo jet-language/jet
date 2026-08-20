@@ -1114,10 +1114,10 @@ pub(crate) fn register_struct(
         if matches!(&f.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
             diags.push(Diagnostic::error(
                 "E1110",
-                "`Group` cannot be stored in a struct field".to_string(),
+                "`TaskGroup` cannot be stored in a struct field".to_string(),
                 "a task group is a scoped spawn authority, not a value that can escape its call stack"
                     .to_string(),
-                "pass `group: Group` directly to a helper function or method instead".to_string(),
+                "pass `group: TaskGroup` directly to a helper function or method instead".to_string(),
                 Some(f.name_span),
             ));
         }

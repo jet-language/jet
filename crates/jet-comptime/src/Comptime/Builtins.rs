@@ -1078,6 +1078,27 @@ pub fn carrier_fact(outcome: &CtValue, field: &str, notes: bool) -> Option<CtVal
     }
 }
 
+fn program_info_list(
+    fields: &[(String, CtValue)],
+    method: &str,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let Some((_, value)) = fields.iter().find(|(name, _)| name == method) else {
+        return Err(unsupported(
+            &format!("ProgramInfo.{method} projection is missing"),
+            span,
+        ));
+    };
+    if matches!(value, CtValue::List(_)) {
+        Ok(value.clone())
+    } else {
+        Err(unsupported(
+            &format!("ProgramInfo.{method} projection is not a list"),
+            span,
+        ))
+    }
+}
+
 pub fn apply_method(
     recv: &CtValue,
     method: &str,
@@ -2039,17 +2060,13 @@ pub fn apply_method(
         (CtValue::Struct { type_name, fields }, "types")
             if type_name == crate::Syntax::TYPE_PROGRAM_INFO =>
         {
-            Ok(fields
-                .iter()
-                .find(|(name, _)| name == "types")
-                .map(|(_, value)| value.clone())
-                .unwrap_or_else(|| CtValue::List(Vec::new())))
+            program_info_list(fields, "types", span)
         }
         (CtValue::Struct { type_name, fields }, method)
             if type_name == crate::Syntax::TYPE_PROGRAM_INFO
                 && matches!(method, "functions" | "packages") =>
         {
-            Ok(fields.iter().find(|(name, _)| name == method).map(|(_, value)| value.clone()).unwrap_or_else(|| CtValue::List(Vec::new())))
+            program_info_list(fields, method, span)
         }
         // D-FRONTENDAPI1=A: compiler result methods are projections over the
         // immutable value returned by `core.compiler`; they never re-run or

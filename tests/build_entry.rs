@@ -1647,7 +1647,7 @@ fn run() {}
 fn emit_generated_exports_the_exact_materialized_source() {
     let root = project("emit-generated");
     let entry = root.join("main.jet");
-    let generated = "fn exported_generated() => String { return \"exported\" }";
+    let generated = "fn exported_generated() => String { return \"exported\" }\n";
     write(
         &entry,
         &format!(

@@ -23,7 +23,18 @@ pub struct ProgramSemanticFacts {
     pub name_ledger: jet_foundation::Names::NameLedger,
 }
 
-fn identity(module: &str, symbol: &str) -> String {
+/// The source-qualified identity exposed by the build reflection surface.
+///
+/// `NameLedger::semantic_identity` is the compiler's package/path key. Build
+/// rules read the loader-qualified source namespace instead, which is also the
+/// key used by sema's public effect and reachability rows.
+pub fn program_reflection_identity(
+    ledger: &jet_foundation::Names::NameLedger,
+    module: usize,
+    fallback_module: &str,
+    symbol: &str,
+) -> String {
+    let module = ledger.module_alias(module).unwrap_or(fallback_module);
     format!("{module}::{symbol}")
 }
 
@@ -2081,17 +2092,6 @@ fn ledger_module_name(
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn ledger_identity(
-    ledger: &jet_foundation::Names::NameLedger,
-    module: usize,
-    module_name: &str,
-    symbol: &str,
-) -> String {
-    ledger
-        .semantic_identity(module, symbol)
-        .unwrap_or_else(|| identity(module_name, symbol))
-}
-
 /// D-METADEPTH2: read-only, post-sema whole-program snapshot handed only to
 /// selected root `fn build`. Existing TypeInfo builders remain canonical.
 pub fn build_program_info(
@@ -2116,7 +2116,7 @@ pub fn build_program_info(
                     qualified_method_info(
                         method,
                         &module_name,
-                        &ledger_identity(
+                        &program_reflection_identity(
                             &facts.name_ledger,
                             module_idx,
                             &module_name,
@@ -2164,7 +2164,12 @@ pub fn build_program_info(
                     let mut info = qualify_info(
                         build_struct_type_info_with_states(def, &states),
                         &module_name,
-                        &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
+                        &program_reflection_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &def.name,
+                        ),
                         "struct",
                         &ledger_path(&facts.name_ledger, module_idx, &module_name, &def.name),
                     );
@@ -2182,7 +2187,7 @@ pub fn build_program_info(
                                     qualified_method_info(
                                         method,
                                         &module_name,
-                                        &ledger_identity(
+                                        &program_reflection_identity(
                                             &facts.name_ledger,
                                             module_idx,
                                             &module_name,
@@ -2220,7 +2225,12 @@ pub fn build_program_info(
                     let mut info = build_enum_type_info(
                         def,
                         &module_name,
-                        &ledger_identity(&facts.name_ledger, module_idx, &module_name, &def.name),
+                        &program_reflection_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &def.name,
+                        ),
                         &ledger_path(&facts.name_ledger, module_idx, &module_name, &def.name),
                     );
                     if let CtValue::Struct { fields, .. } = &mut info {
@@ -2313,7 +2323,12 @@ fn build_function_info(
     module: &str,
     facts: &ProgramSemanticFacts,
 ) -> CtValue {
-    let qualified = ledger_identity(&facts.name_ledger, module_idx, module, &func.name);
+    let qualified = program_reflection_identity(
+        &facts.name_ledger,
+        module_idx,
+        module,
+        &func.name,
+    );
     let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
     let declared_facts = declared_function_facts(
         &qualified,

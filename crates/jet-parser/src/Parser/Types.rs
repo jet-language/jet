@@ -51,6 +51,22 @@ impl<'a> Parser<'a> {
                 self.bump();
                 crate::AST::Measure::literal(kind, value as u64)
             }
+            TokKind::Minus
+                if kind == "length" && matches!(self.peek2().kind, TokKind::Int(_, _)) =>
+            {
+                let start = self.bump().span.start;
+                let end = match self.peek().kind {
+                    TokKind::Int(_, _) => self.bump().span.end,
+                    _ => start,
+                };
+                return Err(Diagnostic::error(
+                    "E0963",
+                    "a fixed-size list length is outside the supported range".to_string(),
+                    "the list length must fit the target's array-size representation".to_string(),
+                    "use a non-negative comptime integer within the supported range".to_string(),
+                    Some(Span::new(start, end)),
+                ));
+            }
             TokKind::Ident(name) => {
                 self.bump();
                 crate::AST::Measure::symbol(kind, name)

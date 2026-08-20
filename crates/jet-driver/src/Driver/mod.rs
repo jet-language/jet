@@ -4311,10 +4311,12 @@ pub fn program_semantic_facts(
             let crate::AST::Item::Func(func) = item else {
                 continue;
             };
-            let qualified = checked
-                .name_ledger
-                .semantic_identity(module_idx, &func.name)
-                .unwrap_or_else(|| format!("{}::{}", module.alias, func.name));
+            let qualified = crate::Comptime::program_reflection_identity(
+                &checked.name_ledger,
+                module_idx,
+                &module.alias,
+                &func.name,
+            );
             let values = checked
                 .solved
                 .get(&qualified)

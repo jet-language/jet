@@ -4198,7 +4198,6 @@ impl<'a> Checker<'a> {
             fix,
             Some(span),
         ));
-        self.flow.moved.remove(&moved_place);
         true
     }
 

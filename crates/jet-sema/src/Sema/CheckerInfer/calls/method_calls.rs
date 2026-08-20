@@ -2115,6 +2115,7 @@ impl<'a> Checker<'a> {
                                 | crate::AST::InternalTag::SharedGuardEdit
                                 | crate::AST::InternalTag::TerminalFactSet
                                 | crate::AST::InternalTag::CoreCryptoNominal
+                                | crate::AST::InternalTag::SystemClock
                         )
                     ) =>
                 {

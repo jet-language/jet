@@ -271,11 +271,11 @@ use std::collections::HashSet;
                     if matches!(&cap_ty, Type::Named(ty) if ty == Syntax::TYPE_TASKGROUP) {
                         self.diags.push(Diagnostic::error(
                             "E1110",
-                            format!("`{name}` is a `Group` and cannot escape in a lambda"),
+                            format!("`{name}` is a `TaskGroup` and cannot escape in a lambda"),
                             "a task group is a scoped spawn authority that may flow only through a direct function or method parameter"
                                 .to_string(),
                             format!(
-                                "move this work to a function or method that takes `{name}: Group` and call it directly"
+                                "move this work to a function or method that takes `{name}: TaskGroup` and call it directly"
                             ),
                             Some(lam.span),
                         ));
