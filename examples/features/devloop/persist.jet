@@ -1,18 +1,15 @@
 // D-PERSIST1 — `#Persist` dev-hot-reload state survival.
-// First plain `jet run` prints 1: `run()` increments the initial counter once.
-// During `jet dev`, edit an unrelated line and save: `run()` runs again against
-// the surviving counter, so the next print is 2. Change the counter's shape:
-// the incompatible binding resets from its new initializer. Plain `jet run`
-// always starts a fresh process, so it always prints 1.
+// A module-level binding marked `#Persist` survives a `jet dev` hot reload
+// instead of resetting (identity = module path + binding name + compatible
+// shape). Release semantics are identical with or without the marker — this
+// example documents the surface and its ordinary (non-dev) run: `#Persist` is
+// inert here, so `counter` is simply its initial value.
 //
 // Dev-tier carry-across lives in the shared runtime-heap persist store
 // (`jet_foundation::Persist`), consulted by both the interpreter and Cranelift
-// tiers on hot-swap. See tests/dev.rs::persist_example_survives_hot_reload.
+// tiers on hot-swap. See tests/dev.rs::persist_binding_survives_hot_swap_and_resets_on_shape_change.
 #Persist counter := 0
 
-fn run() {
-    counter += 1
-    print("{counter}")
-}
+fn run() { print("{counter}") }
 // --- expected output --------------------------------------------------
-// 1
+// 0

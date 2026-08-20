@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2109,
-    "rev": 39651,
+    "rev": 39652,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -134564,7 +134564,13 @@
       "plan": "## Outcome\n`examples/features/devloop/persist.jet` stops being an inert print of the initial value and teaches the real hot-reload journey — mutate state at runtime, hot-swap code, `#Persist` state survives, shape change resets — while its golden stays deterministic under plain `jet run`; the dev-tier survival claim is proven by a scripted `jet dev` test that drives this exact example file.\n\n## Law\n- D-PERSIST1 — `#Persist` module binding survives `jet dev` hot reload (identity = module path + binding name + compatible shape); release/run semantics identical with or without the marker (persist.jet:1-10; shipped by #765).\n- I5 — features ship executable examples with goldens; golden output must stay deterministic.\n- I9 — dev-tier carry-across lives in the shared `jet_foundation::Persist` store consulted by both interpreter and Cranelift tiers (persist.jet:8-10); this card must not add engine-side persist logic.\n- No decision dependencies beyond the shipped D-PERSIST1 — mechanical example/teaching work.\n\n## Work\n1. Read the shipped proof first: `tests/dev.rs::persist_binding_survives_hot_swap_and_resets_on_shape_change` — copy its session-driving mechanics (how it starts `jet dev`, swaps source, reads output) rather than inventing new harness plumbing.\n2. Rework `examples/features/devloop/persist.jet` into a journey program: `#Persist counter := 0`, and `run()` MUTATES the state before printing (e.g. `counter += 1; print(\"{counter}\")`). Under plain `jet run` this prints exactly `1` every time — deterministic golden. Under `jet dev`, each hot swap re-runs `run()` against the SURVIVING counter, so the printed number climbs — the on-the-fly-test loop made visible.\n3. Rewrite the example's comment narration to teach the journey explicitly: what you see on first run, what you see after editing an unrelated line and saving (counter keeps counting — survival), what you see after changing the binding's shape (reset), and why plain `jet run` always prints 1. Keep the `// --- expected output ---` golden block in the corpus's exact format.\n4. Add (or extend beside) a dev test in tests/dev.rs that drives THIS example file: start a scripted `jet dev` session on `examples/features/devloop/persist.jet`, observe first output `1`, apply a hot swap that touches code but not the binding shape (e.g. edit the print label), observe the next output proves the counter survived (`2`), then a shape-change swap and observe reset to `1`. Reuse the existing test's swap/reset assertions; the new value is that the teaching corpus file itself is the fixture.\n5. If the corpus harness or `jet dev` cannot target an examples/ path directly, have the test copy persist.jet into its tempdir verbatim (byte-identical fixture) so the example is still the thing proven; note which route was taken in the card log.\n6. Sweep sibling teaching surfaces that quote persist.jet's old inert output (grep docs/ and examples index for the example) and update the quoted text.\n\n## Not building\n- Equality/auto-derive teaching — probed 2026-08-19: `==` and struct auto-derive are covered by examples/features/types/auto_derive_policy/main.jet; explicitly no new work (card body).\n- Changes to the persist store, hot-swap machinery, or `#Persist` semantics (shipped by #765).\n- A separate journey doc if the reworked example + comments carry the teaching alone; a paired doc is the fallback, not the default.\n- Interactive/animated demos; goldens stay plain text.\n\n## Proof\n- Criterion 1: the reworked example shows runtime mutation + hot reload + survival — evidenced by the file diff plus the scripted dev-session test output (survival step asserts a value that can only exist if state crossed the swap).\n- Criterion 2: corpus golden harness passes on persist.jet under default `jet run` AND `jet run --release` (identical `1` — I9/release-inertness of `#Persist` proven at both tiers); the new tests/dev.rs case passes (`cargo test --test dev persist` focused run in the builder worktree); existing persist test stays green.\n- Full suite at epoch closeout.\n\n## blockedBy\nnone — D-PERSIST1 machinery and the dev-test harness both ship today; this is example + test work on existing seams.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Finding (2026-08-20): criterion 1 as written is not buildable today. A module-level `#Persist counter := 0` cannot be mutated from a function - sema reports E0111 `counter` is a const and can never change (live probe at HEAD). So a journey example that increments the persisted value does not compile, and the wave-4 lane's rewrite broke the golden suite; the inert-print example was restored to keep the corpus green. Real work needed first: a mutable module-level persist binding (or a ratified spelling for one). Then the journey example plus a scripted jet dev session can land."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -134592,8 +134598,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:19:49.171Z",
-      "updated": "2026-08-19T16:12:04.229Z",
-      "updatedBy": "PlanM18Bb"
+      "updated": "2026-08-20T14:50:32.959Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0b6kkbv",
@@ -184478,6 +184484,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T14:50:32.959Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ro98g4",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-20T14:17:00.852Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -187968,13 +187981,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c052m9c1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:12.700Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0n4n1pz",
       "note": "phase"
     }
   ],
