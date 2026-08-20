@@ -940,7 +940,7 @@ fn run() {
 
 #[test]
 fn task_all_consumes_branches_once() {
-    let valid = "\
+    let valid = r#"
 fn first() => Int {
     return 10
 }
@@ -951,7 +951,7 @@ fn run() {
     results :: (task.all { first(), second() }) ?? panic("task.all failed")
     print(results.len())
 }
-";
+"#;
     let compiled = jet::compile(valid).expect("task.all should consume its branches");
     assert!(
         compiled.lints.iter().all(|lint| lint.code != "L1101"),

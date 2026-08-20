@@ -1,0 +1,81 @@
+{
+  "c0fxc599": {
+    "1": {
+      "cmd": "cargo test --test single_use -- task_handles_owe_join_or_detach",
+      "note": "The bound-handle duty is an error whose fix names join, using the result, or detach; tests/ui/unjoined_task.stderr and tests/ui/discarded_task.stderr pin the rendered reports."
+    },
+    "2": {
+      "cmd": "cargo test --test single_use",
+      "note": "D-LIN1 covers Task<T> and the task-list forms through one shared obligation pass."
+    },
+    "3": {
+      "cmd": "cargo test --test taskgroup_params -- evaluator_supports_taskgroup_combinators",
+      "note": "all, race and any discharge the handles they consume, so no duty error is raised at those calls."
+    },
+    "4": {
+      "cmd": "cargo test --test task_state",
+      "note": "detach still discharges the duty for fire-and-forget; the join-duty pass is the one D-LIN1 obligation pass."
+    },
+    "7": {
+      "cmd": "cargo test --test task_state_tiers --test task_control_tiers",
+      "note": "Tier parity: the duty is a compile-time fact, and the task control plane matches on default run, under AOT and in the interpreter."
+    },
+    "9": {
+      "cmd": "cargo test --test gate_ledger",
+      "note": "detach records to the one gate ledger as a duty-kind entry (Prelude/Facts.jet:22, GateLedger.rs:596-607)."
+    },
+    "10": {
+      "cmd": "cargo test --test single_use --test diagnostic_snapshots",
+      "note": "Both suites named by the criterion."
+    }
+  },
+  "c07zohrf": {
+    "2": {
+      "cmd": "cargo test --test task_control_tiers -- stream_drop_uses_task_cancel_cleanup_path",
+      "note": "Breaking out of a stream loop cancels the producer, which unwinds at its next yield and runs its defer close."
+    },
+    "6": {
+      "cmd": "cargo test --test task_control_tiers --test comptime_diff --test repl",
+      "note": "Tier parity across the task control plane, the comptime differential and the REPL."
+    }
+  },
+  "c0aps31f": {
+    "4": {
+      "cmd": "cargo test --test dev -- stream_pull_hostile_matrix_matches_interpreter_jit_and_aot collections_memory_and_streams_match_interpreter_jit_and_aot",
+      "note": "Both named batteries reach their own assertions rather than dying on a double raise."
+    }
+  },
+  "c0rhcnm6": {
+    "3": {
+      "cmd": "cargo test --test diagnostic_snapshots -- ui_snapshots",
+      "note": "tests/ui/list_literal_ambiguous_dot.stderr pins the E0119 refusal for a list with no determinable element type, and its fix text now names a spelling that parses."
+    }
+  },
+  "c0p48658": {
+    "1": {
+      "cmd": "cargo test --test golden -- examples_compile_and_run",
+      "note": "The parallel walk path ships with a grep-style flagship example whose golden matches the sequential walk."
+    }
+  },
+  "c0hr2wez": {},
+  "c0vvnebk": {
+    "1": {
+      "cmd": "cargo test --test terminal",
+      "note": "term.read_key with the value used at runtime behaves identically under default jet run, dev and release with piped stdin."
+    },
+    "2": {
+      "cmd": "cargo test --test dev_default_parity --test dev_interp_parity",
+      "note": "A #Live block containing term.read_key runs under default jet run and dev with the same output as AOT."
+    },
+    "4": {
+      "cmd": "cargo test --test diagnostic_snapshots",
+      "note": "No E0956 snapshot describes a runtime call site as compile-time."
+    }
+  },
+  "c0ubjby5": {
+    "4": {
+      "cmd": "cargo test --test dev_corpus_gate -- example_corpus_strict_jit_aot_differential_gate",
+      "note": "The differential gate reaches its own assertion rather than dying on a panic."
+    }
+  }
+}

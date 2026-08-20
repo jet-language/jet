@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# lane-check.sh — the ONE command an implementation worker may run.
+#
+# Why this exists: workers are source-only so that one agent owns the build
+# lane and the disk. That rule was costing more than it saved — nine separate
+# integration breaks in one session (unclosed `impl`, stale module paths after a
+# split, wrong visibility, borrow errors, a renamed enum variant, a mismatched
+# delimiter). Every one of them is what `cargo check` prints in seconds.
+#
+# So a worker now type-checks its own patch, in the main checkout, against the
+# warm shared target dir. Cargo serializes concurrent invocations on its own
+# build lock, so several workers may call this at once; they queue, they do not
+# corrupt.
+#
+# What this is NOT: it does not run tests, does not run formatters, does not
+# regenerate artifacts, does not build a release binary. Those stay with the
+# orchestrator.
+#
+# Usage:
+#   scripts/agent/lane-check.sh                 # whole workspace, all targets
+#   scripts/agent/lane-check.sh -p jet-sema     # one crate while iterating
+#
+# Reading the output: errors are grouped by file. An error in a file YOU did not
+# touch belongs to another worker editing the same checkout — report it in your
+# final message, do not fix it.
+set -uo pipefail
+
+cd "$(dirname "$0")/../.." || exit 1
+
+if [ "$#" -eq 0 ]; then
+  set -- --workspace --all-targets
+fi
+
+export JET_NIX_TMP_CLEANED=1
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+timeout 1800 scripts/agent/jet-env cargo check "$@" >"$tmp" 2>&1
+code=$?
+
+node - "$tmp" <<'NODE'
+const fs = require("fs");
+const text = fs.readFileSync(process.argv[2], "utf8");
+const lines = text.split("\n");
+const errors = [];
+for (let i = 0; i < lines.length; i += 1) {
+  if (!/^error(\[|:)/.test(lines[i])) continue;
+  const head = lines[i];
+  let where = "";
+  for (let j = i + 1; j < Math.min(i + 6, lines.length); j += 1) {
+    const m = lines[j].match(/^\s*-->\s+(\S+)/);
+    if (m) { where = m[1]; break; }
+  }
+  errors.push({ head, where });
+}
+if (errors.length === 0) {
+  console.log("CHECK OK");
+  process.exit(0);
+}
+const byFile = new Map();
+for (const e of errors) {
+  const key = e.where || "(no location)";
+  if (!byFile.has(key)) byFile.set(key, []);
+  byFile.get(key).push(e.head);
+}
+console.log(`CHECK FAILED — ${errors.length} error(s) in ${byFile.size} file(s)`);
+for (const [file, heads] of byFile) {
+  console.log(`\n${file}`);
+  for (const h of [...new Set(heads)].slice(0, 6)) console.log(`  ${h}`);
+}
+const first = errors[0].head;
+const at = text.indexOf(first);
+console.log("\n--- first error in full ---");
+console.log(text.slice(at, at + 1600));
+NODE
+
+exit "$code"

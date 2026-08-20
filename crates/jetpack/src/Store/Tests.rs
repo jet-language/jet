@@ -2535,3 +2535,4 @@ fn store_stays_split_along_existing_phases() {
         .collect();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
 }
+}

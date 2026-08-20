@@ -41,10 +41,27 @@ Every brief includes: worktree and branch; last integrated commit; exact actual 
 behavior; writable paths; applicable invariants; greenfield deletion requirements; no board
 writes; no nested workers; ponytail + caveman + simple; and a compact return shape.
 
-Source-only workers do not run cargo, Jet, formatter, linter, generator, or devtool commands.
-They return commit hash, changed paths and lines, source evidence, blockers, and clean status.
-They never label runtime, tier, golden, snapshot, or generated-artifact criteria PASS without
-command output.
+Workers **type-check their own patch** and nothing else. The one command is
+`scripts/agent/lane-check.sh` (whole workspace, all targets, warm shared target dir;
+concurrent callers queue on cargo's own build lock). A worker's report carries that
+command's last line verbatim. A worker writing a `.jet` file also runs
+`./target/debug/jet check <file>` and `jet fmt --check <file>` on the file it wrote.
+
+Nothing else: no `cargo test`, no release build, no formatter over the tree, no generator,
+no bless or update-expect, no git or Tower write. Those stay with the orchestrator.
+
+This replaced a strict source-only rule that was costing more than it saved. In one
+session, source-only workers produced nine separate integration breaks — an unclosed
+`impl`, stale self-qualified paths after a module split, `super::` paths one level wrong,
+wrong visibility on split items, a borrow-of-moved-value, a renamed enum variant, a
+mismatched delimiter — and two `.jet` examples written in syntax that does not exist,
+which broke the golden corpus for every other lane. Every one of those is what
+`cargo check` or `jet check` prints in seconds. The orchestrator spent hours as a serial
+repair queue instead of closing cards.
+
+Workers still never label a runtime, tier, golden, snapshot, or generated-artifact
+criterion met: type-checking is not testing. They name the command that would prove it,
+runnable as written.
 
 ## Dispatching codex workers
 
@@ -65,10 +82,21 @@ codex `workspace-write` protects worktree `.git` pointers and blocks the Nix dae
 Every brief therefore restricts the worker to its assigned worktree and forbids the main
 checkout, sibling worktrees, and `plugins/tower`.
 
-Implementation workers are source-only. The persistent
-`.claude/worktrees/builder` is the sole build and test lane. The orchestrator creates source
-worktrees, integrates each result immediately, advances the builder, and runs the smallest
-proof that can reject the patch.
+Implementation workers type-check but never test. The persistent
+`.claude/worktrees/builder` is the sole test lane. The orchestrator integrates each result
+on its `CHECK OK` receipt, advances the builder, and runs the smallest proof that can
+reject the patch.
+
+**Prove in parallel, not end to end.** `scripts/agent/proof-parallel.sh [-j N] SUITE…
+[--crate NAME]…` builds every test binary once, then runs the named suites concurrently and
+prints one PASS/FAIL line each with a log path. A serial pass over fifteen suites left a
+16-core machine idle waiting on cargo's build lock; this holds that lock once.
+
+**Record evidence from the command, not from memory.** `.claude/bdlog/proofmap.json` maps
+`cardId → criterion → { cmd, note }`, and `node .claude/bdlog/prove.mjs <cardId>…` runs each
+command, marks the criterion met **only on exit 0**, and stores the command plus its real
+`test result:` lines as the evidence string. `--dry` runs without writing. This makes the
+lying-ledger failure mode structurally impossible: no command, no evidence row.
 
 ## Milestone stream
 

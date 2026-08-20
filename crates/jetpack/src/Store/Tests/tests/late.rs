@@ -297,4 +297,3 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
         };
         assert_eq!(rc, 0, "setxattr failed: {}", std::io::Error::last_os_error());
     }
-}
